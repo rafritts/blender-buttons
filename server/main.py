@@ -307,6 +307,20 @@ def get_mesh_profile(axis: str = "Z") -> str:
 
 
 @mcp.tool()
+def get_blender_status() -> str:
+    """
+    Return current Blender context: active object name/type, interaction mode
+    (OBJECT/EDIT/SCULPT), and — if in Edit Mode — selected vs total vert/edge/face counts.
+    Call this first when unsure what state Blender is in.
+    """
+    result = call_blender("get_blender_status")
+    if not result.get("success"):
+        return result.get("error", "failed")
+    import json
+    return json.dumps(result["status"], indent=2)
+
+
+@mcp.tool()
 def get_object_info() -> str:
     """
     Return detailed state of the active object: location, scale, rotation, dimensions,

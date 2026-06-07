@@ -505,9 +505,14 @@ def move_vertices(params):
     fy = params.get("y", 0.0)
     fz = params.get("z", 0.0)
     dims = obj.dimensions
-    dx = fx * dims.x
-    dy = fy * dims.y
-    dz = fz * dims.z
+    scale = obj.scale
+    sx = abs(scale.x) or 1.0
+    sy = abs(scale.y) or 1.0
+    sz = abs(scale.z) or 1.0
+    # local-space deltas (v.co is local); world delta = local * scale
+    dx = fx * dims.x / sx
+    dy = fy * dims.y / sy
+    dz = fz * dims.z / sz
     bm = bmesh.from_edit_mesh(obj.data)
     selected = [v for v in bm.verts if v.select]
     if not selected:
@@ -517,7 +522,8 @@ def move_vertices(params):
         v.co.y += dy
         v.co.z += dz
     bmesh.update_edit_mesh(obj.data)
-    return {"success": True, "verts_moved": len(selected), "delta_world": [round(dx, 5), round(dy, 5), round(dz, 5)]}
+    world_delta = [round(fx * dims.x, 5), round(fy * dims.y, 5), round(fz * dims.z, 5)]
+    return {"success": True, "verts_moved": len(selected), "delta_world": world_delta}
 
 
 def scale_vertices(params):
@@ -623,6 +629,24 @@ def get_mesh_profile(params):
     return {"success": True, "axis": axis, "rings": len(profile), "profile": profile}
 
 
+def get_blender_status(params):
+    obj = bpy.context.active_object
+    status = {
+        "mode": obj.mode if obj else "OBJECT",
+        "active_object": obj.name if obj else None,
+        "active_type": obj.type if obj else None,
+    }
+    if obj and obj.mode == 'EDIT' and obj.type == 'MESH':
+        import bmesh
+        bm = bmesh.from_edit_mesh(obj.data)
+        sel_verts = sum(1 for v in bm.verts if v.select)
+        sel_edges = sum(1 for e in bm.edges if e.select)
+        sel_faces = sum(1 for f in bm.faces if f.select)
+        status["selected"] = {"verts": sel_verts, "edges": sel_edges, "faces": sel_faces}
+        status["total"] = {"verts": len(bm.verts), "edges": len(bm.edges), "faces": len(bm.faces)}
+    return {"success": True, "status": status}
+
+
 def set_camera_position(params):
     x  = params.get("x", 5.0)
     y  = params.get("y", -5.0)
@@ -672,6 +696,7 @@ TOOLS = {
     "scale_vertices":        scale_vertices,
     "get_object_info":       get_object_info,
     "get_mesh_profile":      get_mesh_profile,
+    "get_blender_status":    get_blender_status,
 }
 
 
