@@ -472,17 +472,66 @@ def add_modifier(params):
     return {"success": True, "modifier": mod.name}
 
 
-def scale_selected(params):
-    x = params.get("x", 1.0)
-    y = params.get("y", 1.0)
-    z = params.get("z", 1.0)
+def scale_vertices(params):
+    import bmesh
     obj = bpy.context.active_object
-    if obj is None or obj.mode != 'EDIT':
+    if obj is None:
+        return {"error": "No active object"}
+    if obj.mode != 'EDIT':
         return {"error": "Must be in edit mode"}
-    window, screen, area, region = find_view3d_context()
-    with bpy.context.temp_override(window=window, screen=screen, area=area, region=region):
-        bpy.ops.transform.resize(value=(x, y, z))
-    return {"success": True}
+    sx = params.get("x", 1.0)
+    sy = params.get("y", 1.0)
+    sz = params.get("z", 1.0)
+    pivot = params.get("pivot", "SELECTION")  # SELECTION | CURSOR | ORIGIN
+    bm = bmesh.from_edit_mesh(obj.data)
+    selected = [v for v in bm.verts if v.select]
+    if not selected:
+        return {"error": "No vertices selected"}
+    if pivot == "SELECTION":
+        cx = sum(v.co.x for v in selected) / len(selected)
+        cy = sum(v.co.y for v in selected) / len(selected)
+        cz = sum(v.co.z for v in selected) / len(selected)
+    else:
+        cx = cy = cz = 0.0
+    for v in selected:
+        v.co.x = cx + (v.co.x - cx) * sx
+        v.co.y = cy + (v.co.y - cy) * sy
+        v.co.z = cz + (v.co.z - cz) * sz
+    bmesh.update_edit_mesh(obj.data)
+    return {"success": True, "verts_scaled": len(selected)}
+
+
+def get_object_info(params):
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None:
+        return {"error": "No active object"}
+    loc = obj.location
+    scale = obj.scale
+    rot = obj.rotation_euler
+    bb = obj.bound_box
+    world_bb = [obj.matrix_world @ mathutils.Vector(c) for c in bb]
+    xs = [v.x for v in world_bb]
+    ys = [v.y for v in world_bb]
+    zs = [v.z for v in world_bb]
+    info = {
+        "name": obj.name,
+        "type": obj.type,
+        "location": [round(loc.x, 4), round(loc.y, 4), round(loc.z, 4)],
+        "scale": [round(scale.x, 4), round(scale.y, 4), round(scale.z, 4)],
+        "rotation_deg": [round(math.degrees(rot.x), 2), round(math.degrees(rot.y), 2), round(math.degrees(rot.z), 2)],
+        "dimensions": [round(obj.dimensions.x, 4), round(obj.dimensions.y, 4), round(obj.dimensions.z, 4)],
+        "world_bounds": {
+            "x": [round(min(xs), 4), round(max(xs), 4)],
+            "y": [round(min(ys), 4), round(max(ys), 4)],
+            "z": [round(min(zs), 4), round(max(zs), 4)],
+        },
+    }
+    if obj.type == 'MESH':
+        info["vertex_count"] = len(obj.data.vertices)
+        info["edge_count"] = len(obj.data.edges)
+        info["face_count"] = len(obj.data.polygons)
+    return {"success": True, "info": info}
 
 
 def set_camera_position(params):
@@ -530,7 +579,8 @@ TOOLS = {
     "select_by_axis":        select_by_axis,
     "loop_cut":              loop_cut,
     "add_modifier":          add_modifier,
-    "scale_selected":        scale_selected,
+    "scale_vertices":        scale_vertices,
+    "get_object_info":       get_object_info,
 }
 
 

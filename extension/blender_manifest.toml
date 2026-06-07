@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "blender_buttons"
-version = "0.1.0"
+version = "0.2.0"
 name = "Blender Buttons"
 tagline = "MCP bridge — lets an LLM drive Blender like a human would"
 maintainer = "Ryan Fritts <anvilsnare@gmail.com>"

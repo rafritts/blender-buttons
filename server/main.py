@@ -234,14 +234,32 @@ def select_by_axis(axis: str = "Z", threshold: float = 0.0, comparison: str = "G
 
 
 @mcp.tool()
-def scale_selected(x: float = 1.0, y: float = 1.0, z: float = 1.0, label: str = "") -> str:
+def scale_vertices(x: float = 1.0, y: float = 1.0, z: float = 1.0,
+                   pivot: str = "SELECTION", label: str = "") -> str:
     """
-    Scale selected vertices/edges/faces in edit mode.
-    Must be in edit mode with geometry already selected.
-    Use select_all or select_by_axis first to set the selection.
+    Scale selected vertices in edit mode using bmesh.
+    x/y/z: scale multipliers per axis (0.5 = half, 2.0 = double)
+    pivot: SELECTION (around selection center) | ORIGIN (around object origin)
+    Must be in edit mode with vertices selected.
     """
-    result = call_blender("scale_selected", {"x": x, "y": y, "z": z}, label=label)
-    return f"ok [{result.get('op_id','')}]" if result.get("success") else result.get("error", "failed")
+    result = call_blender("scale_vertices", {"x": x, "y": y, "z": z, "pivot": pivot}, label=label)
+    if result.get("success"):
+        return f"Scaled {result['verts_scaled']} verts [{result.get('op_id','')}]"
+    return result.get("error", "failed")
+
+
+@mcp.tool()
+def get_object_info() -> str:
+    """
+    Return detailed state of the active object: location, scale, rotation, dimensions,
+    world-space bounding box, and vertex/edge/face counts. Use this before making
+    precise edits so you know actual coordinates and sizes.
+    """
+    result = call_blender("get_object_info")
+    if result.get("success"):
+        import json
+        return json.dumps(result["info"], indent=2)
+    return result.get("error", "failed")
 
 
 @mcp.tool()
