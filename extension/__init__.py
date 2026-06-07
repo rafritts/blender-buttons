@@ -646,9 +646,20 @@ class BB_PT_Panel(bpy.types.Panel):
 classes = [BB_OT_StartServer, BB_OT_StopServer, BB_PT_Panel]
 
 
+def _start_server():
+    global _server_thread, _running
+    if _running:
+        return
+    _running = True
+    _server_thread = threading.Thread(target=server_loop, daemon=True)
+    _server_thread.start()
+    bpy.app.timers.register(process_queue, persistent=True)
+
+
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
+    bpy.app.timers.register(_start_server, first_interval=0.5)
 
 
 def unregister():
