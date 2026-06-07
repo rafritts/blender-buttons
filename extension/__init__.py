@@ -423,6 +423,7 @@ def select_by_axis(params):
     axis       = params.get("axis", "Z").upper()
     factor     = params.get("factor", 0.5)
     comparison = params.get("comparison", "GREATER").upper()
+    action     = params.get("action", "SELECT").upper()  # SELECT | DESELECT
 
     obj = bpy.context.active_object
     if obj is None or obj.mode != 'EDIT':
@@ -437,7 +438,12 @@ def select_by_axis(params):
 
     for vert in bm.verts:
         val = (obj.matrix_world @ vert.co)[axis_idx]
-        vert.select = (val > threshold) if comparison == "GREATER" else (val < threshold)
+        matches = (val > threshold) if comparison == "GREATER" else (val < threshold)
+        if action == "DESELECT":
+            if matches:
+                vert.select = False
+        else:
+            vert.select = matches
 
     bm.select_flush_mode()
     bmesh.update_edit_mesh(obj.data)

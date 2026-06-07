@@ -233,16 +233,20 @@ def select_all(action: str = "SELECT") -> str:
 
 
 @mcp.tool()
-def select_by_axis(axis: str = "Z", factor: float = 0.5, comparison: str = "GREATER") -> str:
+def select_by_axis(axis: str = "Z", factor: float = 0.5, comparison: str = "GREATER",
+                   action: str = "SELECT") -> str:
     """
-    Select vertices in edit mode by position along an axis, using a relative factor.
+    Select or deselect vertices in edit mode by position along an axis.
     axis: X | Y | Z
-    factor: 0.0 = min extent of object on this axis, 1.0 = max extent.
+    factor: 0.0 = min extent, 1.0 = max extent of object on this axis.
             e.g. factor=0.8 comparison=GREATER selects the top 20% of the mesh.
     comparison: GREATER | LESS
+    action: SELECT (replace selection) | DESELECT (remove matching verts from selection)
+            Use DESELECT to select a band: select_all → deselect left → deselect right = center band.
     Returns the actual world-space threshold used.
     """
-    result = call_blender("select_by_axis", {"axis": axis, "factor": factor, "comparison": comparison})
+    result = call_blender("select_by_axis", {"axis": axis, "factor": factor,
+                                              "comparison": comparison, "action": action})
     if result.get("success"):
         return f"ok (threshold_world={result.get('threshold_world')})"
     return result.get("error", "failed")
