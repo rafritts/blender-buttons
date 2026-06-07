@@ -249,6 +249,20 @@ def select_by_axis(axis: str = "Z", factor: float = 0.5, comparison: str = "GREA
 
 
 @mcp.tool()
+def move_vertices(x: float = 0.0, y: float = 0.0, z: float = 0.0, label: str = "") -> str:
+    """
+    Translate selected vertices in edit mode using bmesh.
+    x/y/z: fraction of object dimension along that axis (0.1 = 10% of width/depth/height).
+    Negative values move in the opposite direction.
+    Must be in edit mode with vertices selected.
+    """
+    result = call_blender("move_vertices", {"x": x, "y": y, "z": z}, label=label)
+    if result.get("success"):
+        return f"Moved {result['verts_moved']} verts by {result['delta_world']} [{result.get('op_id','')}]"
+    return result.get("error", "failed")
+
+
+@mcp.tool()
 def scale_vertices(x: float = 1.0, y: float = 1.0, z: float = 1.0,
                    pivot: str = "SELECTION", label: str = "") -> str:
     """

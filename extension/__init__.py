@@ -488,6 +488,32 @@ def add_modifier(params):
     return {"success": True, "modifier": mod.name}
 
 
+def move_vertices(params):
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None:
+        return {"error": "No active object"}
+    if obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    fx = params.get("x", 0.0)
+    fy = params.get("y", 0.0)
+    fz = params.get("z", 0.0)
+    dims = obj.dimensions
+    dx = fx * dims.x
+    dy = fy * dims.y
+    dz = fz * dims.z
+    bm = bmesh.from_edit_mesh(obj.data)
+    selected = [v for v in bm.verts if v.select]
+    if not selected:
+        return {"error": "No vertices selected"}
+    for v in selected:
+        v.co.x += dx
+        v.co.y += dy
+        v.co.z += dz
+    bmesh.update_edit_mesh(obj.data)
+    return {"success": True, "verts_moved": len(selected), "delta_world": [round(dx, 5), round(dy, 5), round(dz, 5)]}
+
+
 def scale_vertices(params):
     import bmesh
     obj = bpy.context.active_object
@@ -595,6 +621,7 @@ TOOLS = {
     "select_by_axis":        select_by_axis,
     "loop_cut":              loop_cut,
     "add_modifier":          add_modifier,
+    "move_vertices":         move_vertices,
     "scale_vertices":        scale_vertices,
     "get_object_info":       get_object_info,
 }
