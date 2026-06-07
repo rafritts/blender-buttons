@@ -261,6 +261,9 @@ def set_viewport_angle(params):
 def add_primitive(params):
     ptype = params.get("type", "CUBE").upper()
     location = params.get("location", [0, 0, 0])
+    name = params.get("name")
+    if not name:
+        return {"error": "'name' is required — give the object a meaningful name (e.g. 'Blade', 'Crossguard')"}
 
     bpy.ops.object.select_all(action='DESELECT')
 
@@ -277,7 +280,25 @@ def add_primitive(params):
 
     ops[ptype](location=location)
     obj = bpy.context.active_object
+    if obj:
+        obj.name = name
+        if obj.data:
+            obj.data.name = name
     return {"success": True, "object_name": obj.name if obj else None}
+
+
+def rename_object(params):
+    old_name = params.get("old_name")
+    new_name = params.get("new_name")
+    if not old_name or not new_name:
+        return {"error": "'old_name' and 'new_name' are required"}
+    obj = bpy.data.objects.get(old_name)
+    if obj is None:
+        return {"error": f"Object '{old_name}' not found"}
+    obj.name = new_name
+    if obj.data:
+        obj.data.name = new_name
+    return {"success": True, "old_name": old_name, "new_name": obj.name}
 
 
 def select_object(params):
@@ -736,6 +757,7 @@ TOOLS = {
     "get_object_info":       get_object_info,
     "get_mesh_profile":      get_mesh_profile,
     "get_blender_status":    get_blender_status,
+    "rename_object":         rename_object,
 }
 
 

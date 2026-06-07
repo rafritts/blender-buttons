@@ -183,16 +183,31 @@ def set_viewport_angle(angle: str) -> str:
 
 
 @mcp.tool()
-def add_primitive(type: str, x: float = 0, y: float = 0, z: float = 0, label: str = "") -> str:
+def add_primitive(type: str, name: str, x: float = 0, y: float = 0, z: float = 0, label: str = "") -> str:
     """
     Add a mesh primitive to the scene.
     type: CUBE | SPHERE | CYLINDER | PLANE | CONE
+    name: REQUIRED — the object's name in Blender (e.g. "Blade", "Crossguard", "Pommel")
     x, y, z: location in world space
     label: optional name for the history log
     """
-    result = call_blender("add_primitive", {"type": type, "location": [x, y, z]}, label=label)
+    result = call_blender("add_primitive", {"type": type, "name": name, "location": [x, y, z]}, label=label)
     if result.get("success"):
         main = f"Added {type} as '{result['object_name']}' [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def rename_object(old_name: str, new_name: str) -> str:
+    """
+    Rename an object (and its mesh data) to a new name.
+    Use get_scene_tree first to find current names.
+    """
+    result = call_blender("rename_object", {"old_name": old_name, "new_name": new_name})
+    if result.get("success"):
+        main = f"Renamed '{result['old_name']}' → '{result['new_name']}'"
     else:
         main = result.get("error", "failed")
     return main + _status(result)
