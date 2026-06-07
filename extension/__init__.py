@@ -582,6 +582,47 @@ def get_object_info(params):
     return {"success": True, "info": info}
 
 
+def get_mesh_profile(params):
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.type != 'MESH':
+        return {"error": "No active mesh object"}
+    axis = params.get("axis", "Z").upper()
+    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
+    other = [(i, n) for i, n in enumerate(['X', 'Y', 'Z']) if i != axis_idx]
+
+    was_edit = obj.mode == 'EDIT'
+    if was_edit:
+        bm = bmesh.from_edit_mesh(obj.data)
+    else:
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+
+    rings = {}
+    for v in bm.verts:
+        wco = obj.matrix_world @ v.co
+        key = round(wco[axis_idx], 4)
+        if key not in rings:
+            rings[key] = {n: [] for _, n in other}
+        for i, n in other:
+            rings[key][n].append(wco[i])
+
+    if not was_edit:
+        bm.free()
+
+    profile = []
+    for pos in sorted(rings.keys()):
+        entry = {axis: round(pos, 4)}
+        for _, n in other:
+            vals = rings[pos][n]
+            lo, hi = min(vals), max(vals)
+            entry[f"{n}_range"] = [round(lo, 4), round(hi, 4)]
+            entry[f"{n}_width"] = round(hi - lo, 4)
+        profile.append(entry)
+
+    return {"success": True, "axis": axis, "rings": len(profile), "profile": profile}
+
+
 def set_camera_position(params):
     x  = params.get("x", 5.0)
     y  = params.get("y", -5.0)
@@ -630,6 +671,7 @@ TOOLS = {
     "move_vertices":         move_vertices,
     "scale_vertices":        scale_vertices,
     "get_object_info":       get_object_info,
+    "get_mesh_profile":      get_mesh_profile,
 }
 
 

@@ -282,6 +282,31 @@ def scale_vertices(x: float = 1.0, y: float = 1.0, z: float = 1.0,
 
 
 @mcp.tool()
+def get_mesh_profile(axis: str = "Z") -> str:
+    """
+    Slice the active mesh into rings along an axis and report the width/extent at each ring.
+    axis: X | Y | Z — the axis to slice along (default Z for vertical objects like blades)
+    Returns a table: position along axis, plus min/max/width on the other two axes.
+    Use this to understand actual geometry before making edits — no guessing needed.
+    """
+    result = call_blender("get_mesh_profile", {"axis": axis})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    profile = result["profile"]
+    ax = result["axis"]
+    other = [n for n in ['X', 'Y', 'Z'] if n != ax]
+    lines = [f"{'':>8}  " + "  ".join(f"{n:>22}" for n in other)]
+    for r in profile:
+        cols = []
+        for n in other:
+            lo, hi = r[f"{n}_range"]
+            w = r[f"{n}_width"]
+            cols.append(f"{lo:+.4f}→{hi:+.4f} ({w:.4f})")
+        lines.append(f"{ax}={r[ax]:+.4f}  " + "  ".join(cols))
+    return f"{len(profile)} rings along {ax}:\n" + "\n".join(lines)
+
+
+@mcp.tool()
 def get_object_info() -> str:
     """
     Return detailed state of the active object: location, scale, rotation, dimensions,
