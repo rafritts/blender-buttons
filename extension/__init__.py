@@ -461,10 +461,11 @@ def loop_cut(params):
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
 
     bm = bmesh.from_edit_mesh(obj.data)
+    mat = obj.matrix_world
 
     edges_to_cut = [
         e for e in bm.edges
-        if abs((e.verts[1].co - e.verts[0].co).normalized()[axis_idx]) > 0.7
+        if abs(((mat @ e.verts[1].co) - (mat @ e.verts[0].co)).normalized()[axis_idx]) > 0.7
     ]
 
     if not edges_to_cut:
