@@ -1,11 +1,3 @@
-bl_info = {
-    "name": "Blender Buttons",
-    "version": (0, 1, 0),
-    "blender": (4, 0, 0),
-    "description": "MCP bridge — lets an LLM drive Blender like a human would",
-    "category": "System",
-}
-
 import bpy
 import mathutils
 import socket
@@ -63,19 +55,31 @@ def get_viewport_screenshot(params):
     if area is None:
         return {"error": "No 3D viewport found"}
 
+    width = params.get("width", 960)
+    height = params.get("height", 540)
+
     scene = bpy.context.scene
     old_path = scene.render.filepath
     old_format = scene.render.image_settings.file_format
+    old_res_x = scene.render.resolution_x
+    old_res_y = scene.render.resolution_y
+    old_res_pct = scene.render.resolution_percentage
 
     tmp = os.path.join(tempfile.gettempdir(), "bb_viewport.png")
     scene.render.filepath = tmp
     scene.render.image_settings.file_format = 'PNG'
+    scene.render.resolution_x = width
+    scene.render.resolution_y = height
+    scene.render.resolution_percentage = 100
 
     with bpy.context.temp_override(window=window, screen=screen, area=area, region=region):
         bpy.ops.render.opengl(write_still=True)
 
     scene.render.filepath = old_path
     scene.render.image_settings.file_format = old_format
+    scene.render.resolution_x = old_res_x
+    scene.render.resolution_y = old_res_y
+    scene.render.resolution_percentage = old_res_pct
 
     with open(tmp, "rb") as f:
         data = base64.b64encode(f.read()).decode()

@@ -1,0 +1,13 @@
+schema_version = "1.0.0"
+
+id = "blender_buttons"
+version = "0.1.0"
+name = "Blender Buttons"
+tagline = "MCP bridge — lets an LLM drive Blender like a human would"
+maintainer = "Ryan Fritts <anvilsnare@gmail.com>"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:MIT"]
+category = "System"

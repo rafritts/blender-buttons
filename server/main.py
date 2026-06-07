@@ -34,9 +34,9 @@ def get_scene_tree() -> str:
 
 
 @mcp.tool()
-def get_viewport_screenshot() -> Image:
-    """Capture the current 3D viewport. Call this to see what Blender looks like right now."""
-    result = call_blender("get_viewport_screenshot")
+def get_viewport_screenshot(width: int = 960, height: int = 540) -> Image:
+    """Capture the current 3D viewport. width/height default to 960x540 to keep context usage low."""
+    result = call_blender("get_viewport_screenshot", {"width": width, "height": height})
     if "error" in result:
         raise RuntimeError(result["error"])
     return Image(data=base64.b64decode(result["image"]), format="png")
