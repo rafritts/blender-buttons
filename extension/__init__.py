@@ -242,6 +242,71 @@ def orbit_viewport(params):
     return {"success": True}
 
 
+def bevel(params):
+    offset = params.get("offset", 0.1)
+    segments = params.get("segments", 1)
+    affect = params.get("affect", "EDGES").upper()
+    bpy.ops.mesh.bevel(offset=offset, segments=segments, affect=affect)
+    return {"success": True}
+
+
+def extrude(params):
+    x = params.get("x", 0.0)
+    y = params.get("y", 0.0)
+    z = params.get("z", 0.0)
+    bpy.ops.mesh.extrude_region_move(
+        TRANSFORM_OT_translate={"value": (x, y, z)}
+    )
+    return {"success": True}
+
+
+def select_all(params):
+    action = params.get("action", "SELECT").upper()
+    bpy.ops.mesh.select_all(action=action)
+    return {"success": True}
+
+
+def select_by_axis(params):
+    axis = params.get("axis", "Z").upper()
+    threshold = params.get("threshold", 0.0)
+    comparison = params.get("comparison", "GREATER").upper()
+
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode with an active object"}
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
+
+    for vert in bm.verts:
+        world_co = obj.matrix_world @ vert.co
+        val = world_co[axis_idx]
+        vert.select = (val > threshold) if comparison == "GREATER" else (val < threshold)
+
+    bm.select_flush_mode()
+    bmesh.update_edit_mesh(obj.data)
+    return {"success": True}
+
+
+def add_modifier(params):
+    mod_type = params.get("type", "SUBSURF").upper()
+    name = params.get("name", mod_type.capitalize())
+    obj = bpy.context.active_object
+    if obj is None:
+        return {"error": "No active object"}
+    mod = obj.modifiers.new(name=name, type=mod_type)
+    if hasattr(mod, 'levels'):
+        mod.levels = params.get("levels", 2)
+    if hasattr(mod, 'render_levels'):
+        mod.render_levels = params.get("render_levels", params.get("levels", 2))
+    if hasattr(mod, 'width'):
+        mod.width = params.get("width", 0.1)
+    if hasattr(mod, 'segments'):
+        mod.segments = params.get("segments", 1)
+    return {"success": True, "modifier": mod.name}
+
+
 def set_camera_position(params):
     x = params.get("x", 5.0)
     y = params.get("y", -5.0)
@@ -277,6 +342,11 @@ TOOLS = {
     "zoom_to_selected": zoom_to_selected,
     "set_camera_position": set_camera_position,
     "orbit_viewport": orbit_viewport,
+    "bevel": bevel,
+    "extrude": extrude,
+    "select_all": select_all,
+    "select_by_axis": select_by_axis,
+    "add_modifier": add_modifier,
 }
 
 

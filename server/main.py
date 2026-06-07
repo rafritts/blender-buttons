@@ -167,5 +167,65 @@ def set_camera_position(x: float, y: float, z: float, target_x: float = 0.0, tar
     return "ok" if result.get("success") else result.get("error", "failed")
 
 
+@mcp.tool()
+def bevel(offset: float = 0.1, segments: int = 1, affect: str = "EDGES") -> str:
+    """
+    Bevel selected edges or vertices in edit mode.
+    offset: bevel amount in world units
+    segments: number of edge loops added (more = smoother)
+    affect: EDGES or VERTICES
+    """
+    result = call_blender("bevel", {"offset": offset, "segments": segments, "affect": affect})
+    return "ok" if result.get("success") else result.get("error", "failed")
+
+
+@mcp.tool()
+def extrude(x: float = 0.0, y: float = 0.0, z: float = 0.0) -> str:
+    """Extrude selected geometry in edit mode and move by x/y/z offset."""
+    result = call_blender("extrude", {"x": x, "y": y, "z": z})
+    return "ok" if result.get("success") else result.get("error", "failed")
+
+
+@mcp.tool()
+def select_all(action: str = "SELECT") -> str:
+    """
+    Select/deselect geometry in edit mode.
+    action: SELECT | DESELECT | INVERT
+    """
+    result = call_blender("select_all", {"action": action})
+    return "ok" if result.get("success") else result.get("error", "failed")
+
+
+@mcp.tool()
+def select_by_axis(axis: str = "Z", threshold: float = 0.0, comparison: str = "GREATER") -> str:
+    """
+    Select vertices in edit mode above or below a threshold on a given axis.
+    axis: X | Y | Z
+    threshold: world-space value to compare against
+    comparison: GREATER | LESS
+    Use this to select specific geometry like a blade tip or top face.
+    """
+    result = call_blender("select_by_axis", {"axis": axis, "threshold": threshold, "comparison": comparison})
+    return "ok" if result.get("success") else result.get("error", "failed")
+
+
+@mcp.tool()
+def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int = 2,
+                 width: float = 0.1, segments: int = 1) -> str:
+    """
+    Add a modifier to the active object.
+    type: SUBSURF | BEVEL | SOLIDIFY | MIRROR | ARRAY | SCREW
+    levels: subdivision levels (SUBSURF)
+    width: bevel width (BEVEL)
+    segments: bevel segments (BEVEL)
+    """
+    result = call_blender("add_modifier", {
+        "type": type, "name": name or type.capitalize(),
+        "levels": levels, "render_levels": render_levels,
+        "width": width, "segments": segments,
+    })
+    return result.get("modifier") if result.get("success") else result.get("error", "failed")
+
+
 if __name__ == "__main__":
     mcp.run()
