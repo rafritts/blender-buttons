@@ -119,5 +119,53 @@ def delete_object(name: str) -> str:
     return result.get("error", "failed")
 
 
+@mcp.tool()
+def frame_scene() -> str:
+    """Fit all objects in the viewport. Call this when the view is cropped or objects are out of frame."""
+    result = call_blender("frame_scene")
+    return "ok" if result.get("success") else result.get("error", "failed")
+
+
+@mcp.tool()
+def zoom_to_selected() -> str:
+    """
+    Zoom the viewport to tightly frame the currently selected object.
+    Use select_object first, then call this to zoom in for detail work.
+    """
+    result = call_blender("zoom_to_selected")
+    return "ok" if result.get("success") else result.get("error", "failed")
+
+
+@mcp.tool()
+def orbit_viewport(azimuth: float = 45.0, elevation: float = 25.0, distance: float = 8.0,
+                   target_x: float = 0.0, target_y: float = 0.0, target_z: float = 1.0) -> str:
+    """
+    Position the viewport perspective camera using orbit controls. Captures with get_viewport_screenshot — no camera border, no crop.
+    azimuth: horizontal angle in degrees (0=front, +right, -left)
+    elevation: vertical angle in degrees (0=horizontal, positive=from above)
+    distance: distance from target
+    target_x/y/z: point to orbit around (default chair center)
+    """
+    result = call_blender("orbit_viewport", {
+        "azimuth": azimuth, "elevation": elevation, "distance": distance,
+        "target_x": target_x, "target_y": target_y, "target_z": target_z,
+    })
+    return "ok" if result.get("success") else result.get("error", "failed")
+
+
+@mcp.tool()
+def set_camera_position(x: float, y: float, z: float, target_x: float = 0.0, target_y: float = 0.0, target_z: float = 0.0) -> str:
+    """
+    Move the camera to a position and aim it at a target point.
+    Then call set_viewport_angle(CAMERA) to see the composed shot.
+    target_x/y/z default to the scene origin (0, 0, 0).
+    """
+    result = call_blender("set_camera_position", {
+        "x": x, "y": y, "z": z,
+        "target_x": target_x, "target_y": target_y, "target_z": target_z,
+    })
+    return "ok" if result.get("success") else result.get("error", "failed")
+
+
 if __name__ == "__main__":
     mcp.run()

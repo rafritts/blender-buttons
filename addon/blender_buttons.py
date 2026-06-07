@@ -7,6 +7,7 @@ bl_info = {
 }
 
 import bpy
+import mathutils
 import socket
 import threading
 import json
@@ -180,6 +181,81 @@ def delete_object(params):
     return {"success": True, "deleted": deleted}
 
 
+def frame_scene(params):
+    window, screen, area, region = find_view3d_context()
+    if area is None:
+        return {"error": "No 3D viewport found"}
+    with bpy.context.temp_override(window=window, screen=screen, area=area, region=region):
+        bpy.ops.view3d.view_all(center=False)
+    return {"success": True}
+
+
+def zoom_to_selected(params):
+    window, screen, area, region = find_view3d_context()
+    if area is None:
+        return {"error": "No 3D viewport found"}
+    with bpy.context.temp_override(window=window, screen=screen, area=area, region=region):
+        bpy.ops.view3d.view_selected()
+    return {"success": True}
+
+
+def orbit_viewport(params):
+    azimuth = params.get("azimuth", 45.0)    # 0=front, positive=right, negative=left
+    elevation = params.get("elevation", 25.0) # 0=horizontal, positive=from above
+    distance = params.get("distance", 8.0)
+    tx = params.get("target_x", 0.0)
+    ty = params.get("target_y", 0.0)
+    tz = params.get("target_z", 1.0)
+
+    window, screen, area, region = find_view3d_context()
+    if area is None:
+        return {"error": "No 3D viewport found"}
+
+    r3d = None
+    for space in area.spaces:
+        if space.type == 'VIEW_3D':
+            r3d = space.region_3d
+            break
+    if r3d is None:
+        return {"error": "Could not access view"}
+
+    # Start from a known base orientation (FRONT) then apply orbit
+    with bpy.context.temp_override(window=window, screen=screen, area=area, region=region):
+        bpy.ops.view3d.view_axis(type='FRONT')
+
+    r3d.view_perspective = 'PERSP'
+    r3d.view_location = mathutils.Vector((tx, ty, tz))
+    r3d.view_distance = distance
+
+    # Azimuth: spin around world Z
+    q_az = mathutils.Quaternion((0.0, 0.0, 1.0), math.radians(azimuth))
+    r3d.view_rotation = q_az @ r3d.view_rotation
+
+    # Elevation: tilt around the view's local right axis
+    q_el = mathutils.Quaternion((1.0, 0.0, 0.0), math.radians(-elevation))
+    r3d.view_rotation = r3d.view_rotation @ q_el
+
+    return {"success": True}
+
+
+def set_camera_position(params):
+    x = params.get("x", 5.0)
+    y = params.get("y", -5.0)
+    z = params.get("z", 5.0)
+    tx = params.get("target_x", 0.0)
+    ty = params.get("target_y", 0.0)
+    tz = params.get("target_z", 0.0)
+
+    cam = next((o for o in bpy.data.objects if o.type == 'CAMERA'), None)
+    if cam is None:
+        return {"error": "No camera in scene"}
+
+    cam.location = (x, y, z)
+    direction = mathutils.Vector((tx, ty, tz)) - mathutils.Vector((x, y, z))
+    cam.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()
+    return {"success": True, "camera": cam.name}
+
+
 # --- Dispatch ---
 
 TOOLS = {
@@ -193,6 +269,10 @@ TOOLS = {
     "rotate_object": rotate_object,
     "set_mode": set_mode,
     "delete_object": delete_object,
+    "frame_scene": frame_scene,
+    "zoom_to_selected": zoom_to_selected,
+    "set_camera_position": set_camera_position,
+    "orbit_viewport": orbit_viewport,
 }
 
 
