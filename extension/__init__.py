@@ -659,7 +659,7 @@ def _start_server():
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
-    bpy.app.timers.register(_start_server, first_interval=0.5)
+    _start_server()
 
 
 def unregister():
