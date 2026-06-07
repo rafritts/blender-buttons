@@ -8,12 +8,32 @@ import os
 import tempfile
 import queue
 import math
+import hashlib
+import time
 
 PORT = 8765
 _request_queue = queue.Queue()
 _server_thread = None
 _running = False
 
+# --- History ---
+
+_history = []
+
+_NO_LOG_TOOLS = {
+    "get_scene_tree", "get_viewport_screenshot", "get_viewport_collage",
+    "get_history", "undo_steps", "undo_to",
+}
+
+def _log_operation(tool, params, label=""):
+    op_id = hashlib.md5(
+        f"{tool}{json.dumps(params, sort_keys=True)}{time.time()}".encode()
+    ).hexdigest()[:8]
+    _history.append({"id": op_id, "label": label or tool, "tool": tool, "params": params})
+    return op_id
+
+
+# --- Viewport helpers ---
 
 def find_view3d_context():
     for window in bpy.context.window_manager.windows:
@@ -24,6 +44,33 @@ def find_view3d_context():
                     if region.type == 'WINDOW':
                         return window, screen, area, region
     return None, None, None, None
+
+
+def _capture_viewport(scene, window, screen, area, region, path, width, height):
+    scene.render.filepath = path
+    scene.render.resolution_x = width
+    scene.render.resolution_y = height
+    with bpy.context.temp_override(window=window, screen=screen, area=area, region=region):
+        bpy.ops.render.opengl(write_still=True)
+
+
+def _write_png(rgba_float, path):
+    import struct, zlib
+    import numpy as np
+    h, w = rgba_float.shape[:2]
+    pixels = (np.clip(rgba_float, 0, 1) * 255).astype(np.uint8)
+
+    def chunk(tag, data):
+        c = tag + data
+        return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+
+    ihdr = chunk(b'IHDR', struct.pack('>II', w, h) + bytes([8, 6, 0, 0, 0]))
+    raw = b''.join(b'\x00' + pixels[r].tobytes() for r in range(h))
+    idat = chunk(b'IDAT', zlib.compress(raw, 6))
+    iend = chunk(b'IEND', b'')
+
+    with open(path, 'wb') as f:
+        f.write(b'\x89PNG\r\n\x1a\n' + ihdr + idat + iend)
 
 
 # --- Tools (all run on main thread) ---
@@ -66,14 +113,9 @@ def get_viewport_screenshot(params):
     old_res_pct = scene.render.resolution_percentage
 
     tmp = os.path.join(tempfile.gettempdir(), "bb_viewport.png")
-    scene.render.filepath = tmp
     scene.render.image_settings.file_format = 'PNG'
-    scene.render.resolution_x = width
-    scene.render.resolution_y = height
     scene.render.resolution_percentage = 100
-
-    with bpy.context.temp_override(window=window, screen=screen, area=area, region=region):
-        bpy.ops.render.opengl(write_still=True)
+    _capture_viewport(scene, window, screen, area, region, tmp, width, height)
 
     scene.render.filepath = old_path
     scene.render.image_settings.file_format = old_format
@@ -85,6 +127,114 @@ def get_viewport_screenshot(params):
         data = base64.b64encode(f.read()).decode()
 
     return {"image": data, "format": "png"}
+
+
+def get_viewport_collage(params):
+    import numpy as np
+
+    zoom = params.get("zoom", 1.0)
+    panel_w = max(160, int(320 * zoom))
+    panel_h = max(90,  int(180 * zoom))
+
+    window, screen, area, region = find_view3d_context()
+    if area is None:
+        return {"error": "No 3D viewport found"}
+
+    r3d = next((s.region_3d for s in area.spaces if s.type == 'VIEW_3D'), None)
+    if r3d is None:
+        return {"error": "No region_3d found"}
+
+    scene = bpy.context.scene
+    old_path   = scene.render.filepath
+    old_format = scene.render.image_settings.file_format
+    old_res_x  = scene.render.resolution_x
+    old_res_y  = scene.render.resolution_y
+    old_res_pct = scene.render.resolution_percentage
+
+    scene.render.image_settings.file_format = 'PNG'
+    scene.render.resolution_percentage = 100
+
+    # row1: FRONT RIGHT TOP  |  row2: BACK LEFT PERSP
+    views = ["FRONT", "RIGHT", "TOP", "BACK", "LEFT", "PERSP"]
+    panels = []
+
+    for label in views:
+        tmp = os.path.join(tempfile.gettempdir(), f"bb_col_{label.lower()}.png")
+
+        with bpy.context.temp_override(window=window, screen=screen, area=area, region=region):
+            if label != "PERSP":
+                bpy.ops.view3d.view_axis(type=label)
+                bpy.ops.view3d.view_all(center=False)
+            else:
+                bpy.ops.view3d.view_axis(type='FRONT')
+                bpy.ops.view3d.view_all(center=False)
+                r3d.view_perspective = 'PERSP'
+                q_az = mathutils.Quaternion((0.0, 0.0, 1.0), math.radians(-35))
+                r3d.view_rotation = q_az @ r3d.view_rotation
+                q_el = mathutils.Quaternion((1.0, 0.0, 0.0), math.radians(-20))
+                r3d.view_rotation = r3d.view_rotation @ q_el
+
+            _capture_viewport(scene, window, screen, area, region, tmp, panel_w, panel_h)
+
+        img = bpy.data.images.load(tmp, check_existing=False)
+        px = np.array(img.pixels[:], dtype=np.float32).reshape(panel_h, panel_w, 4)
+        px = np.flipud(px)
+        bpy.data.images.remove(img)
+        panels.append(px)
+
+    row1 = np.concatenate(panels[0:3], axis=1)
+    row2 = np.concatenate(panels[3:6], axis=1)
+    grid = np.concatenate([row1, row2], axis=0)
+
+    out = os.path.join(tempfile.gettempdir(), "bb_collage.png")
+    _write_png(grid, out)
+
+    scene.render.filepath = old_path
+    scene.render.image_settings.file_format = old_format
+    scene.render.resolution_x = old_res_x
+    scene.render.resolution_y = old_res_y
+    scene.render.resolution_percentage = old_res_pct
+
+    with open(out, "rb") as f:
+        data = base64.b64encode(f.read()).decode()
+
+    return {
+        "image": data,
+        "format": "png",
+        "layout": "row1: FRONT | RIGHT | TOP   row2: BACK | LEFT | PERSP",
+        "panel_size": f"{panel_w}x{panel_h}",
+    }
+
+
+def get_history(params):
+    return {"history": _history, "count": len(_history)}
+
+
+def undo_steps(params):
+    steps = max(1, min(params.get("steps", 1), len(_history)))
+    window = bpy.context.window_manager.windows[0]
+    with bpy.context.temp_override(window=window):
+        for _ in range(steps):
+            bpy.ops.ed.undo()
+    for _ in range(steps):
+        if _history:
+            _history.pop()
+    return {"success": True, "steps": steps, "history_remaining": len(_history)}
+
+
+def undo_to(params):
+    target_id = params.get("id")
+    idx = next((i for i, h in enumerate(_history) if h["id"] == target_id), None)
+    if idx is None:
+        return {"error": f"ID '{target_id}' not found in history"}
+    steps = len(_history) - idx - 1
+    if steps > 0:
+        window = bpy.context.window_manager.windows[0]
+        with bpy.context.temp_override(window=window):
+            for _ in range(steps):
+                bpy.ops.ed.undo()
+        del _history[idx + 1:]
+    return {"success": True, "steps": steps}
 
 
 def set_viewport_angle(params):
@@ -109,11 +259,11 @@ def add_primitive(params):
     bpy.ops.object.select_all(action='DESELECT')
 
     ops = {
-        "CUBE": bpy.ops.mesh.primitive_cube_add,
-        "SPHERE": bpy.ops.mesh.primitive_uv_sphere_add,
+        "CUBE":     bpy.ops.mesh.primitive_cube_add,
+        "SPHERE":   bpy.ops.mesh.primitive_uv_sphere_add,
         "CYLINDER": bpy.ops.mesh.primitive_cylinder_add,
-        "PLANE": bpy.ops.mesh.primitive_plane_add,
-        "CONE": bpy.ops.mesh.primitive_cone_add,
+        "PLANE":    bpy.ops.mesh.primitive_plane_add,
+        "CONE":     bpy.ops.mesh.primitive_cone_add,
     }
 
     if ptype not in ops:
@@ -204,9 +354,9 @@ def zoom_to_selected(params):
 
 
 def orbit_viewport(params):
-    azimuth = params.get("azimuth", 45.0)    # 0=front, positive=right, negative=left
-    elevation = params.get("elevation", 25.0) # 0=horizontal, positive=from above
-    distance = params.get("distance", 8.0)
+    azimuth  = params.get("azimuth",  45.0)
+    elevation = params.get("elevation", 25.0)
+    distance  = params.get("distance",  8.0)
     tx = params.get("target_x", 0.0)
     ty = params.get("target_y", 0.0)
     tz = params.get("target_z", 1.0)
@@ -215,15 +365,10 @@ def orbit_viewport(params):
     if area is None:
         return {"error": "No 3D viewport found"}
 
-    r3d = None
-    for space in area.spaces:
-        if space.type == 'VIEW_3D':
-            r3d = space.region_3d
-            break
+    r3d = next((s.region_3d for s in area.spaces if s.type == 'VIEW_3D'), None)
     if r3d is None:
         return {"error": "Could not access view"}
 
-    # Start from a known base orientation (FRONT) then apply orbit
     with bpy.context.temp_override(window=window, screen=screen, area=area, region=region):
         bpy.ops.view3d.view_axis(type='FRONT')
 
@@ -231,11 +376,8 @@ def orbit_viewport(params):
     r3d.view_location = mathutils.Vector((tx, ty, tz))
     r3d.view_distance = distance
 
-    # Azimuth: spin around world Z
     q_az = mathutils.Quaternion((0.0, 0.0, 1.0), math.radians(azimuth))
     r3d.view_rotation = q_az @ r3d.view_rotation
-
-    # Elevation: tilt around the view's local right axis
     q_el = mathutils.Quaternion((1.0, 0.0, 0.0), math.radians(-elevation))
     r3d.view_rotation = r3d.view_rotation @ q_el
 
@@ -243,9 +385,9 @@ def orbit_viewport(params):
 
 
 def bevel(params):
-    offset = params.get("offset", 0.1)
+    offset   = params.get("offset", 0.1)
     segments = params.get("segments", 1)
-    affect = params.get("affect", "EDGES").upper()
+    affect   = params.get("affect", "EDGES").upper()
     bpy.ops.mesh.bevel(offset=offset, segments=segments, affect=affect)
     return {"success": True}
 
@@ -254,9 +396,7 @@ def extrude(params):
     x = params.get("x", 0.0)
     y = params.get("y", 0.0)
     z = params.get("z", 0.0)
-    bpy.ops.mesh.extrude_region_move(
-        TRANSFORM_OT_translate={"value": (x, y, z)}
-    )
+    bpy.ops.mesh.extrude_region_move(TRANSFORM_OT_translate={"value": (x, y, z)})
     return {"success": True}
 
 
@@ -267,11 +407,11 @@ def select_all(params):
 
 
 def select_by_axis(params):
-    axis = params.get("axis", "Z").upper()
-    threshold = params.get("threshold", 0.0)
+    import bmesh
+    axis       = params.get("axis", "Z").upper()
+    threshold  = params.get("threshold", 0.0)
     comparison = params.get("comparison", "GREATER").upper()
 
-    import bmesh
     obj = bpy.context.active_object
     if obj is None or obj.mode != 'EDIT':
         return {"error": "Must be in edit mode with an active object"}
@@ -280,8 +420,7 @@ def select_by_axis(params):
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
 
     for vert in bm.verts:
-        world_co = obj.matrix_world @ vert.co
-        val = world_co[axis_idx]
+        val = (obj.matrix_world @ vert.co)[axis_idx]
         vert.select = (val > threshold) if comparison == "GREATER" else (val < threshold)
 
     bm.select_flush_mode()
@@ -289,10 +428,36 @@ def select_by_axis(params):
     return {"success": True}
 
 
+def loop_cut(params):
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+
+    cuts     = params.get("cuts", 1)
+    axis     = params.get("axis", "Z").upper()
+    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
+
+    bm = bmesh.from_edit_mesh(obj.data)
+
+    edges_to_cut = [
+        e for e in bm.edges
+        if abs((e.verts[1].co - e.verts[0].co).normalized()[axis_idx]) > 0.7
+    ]
+
+    if not edges_to_cut:
+        return {"error": f"No edges found running along {axis} axis"}
+
+    bmesh.ops.subdivide_edges(bm, edges=edges_to_cut, cuts=cuts, use_grid_fill=True)
+    bmesh.update_edit_mesh(obj.data)
+
+    return {"success": True, "cuts": cuts, "edges_subdivided": len(edges_to_cut)}
+
+
 def add_modifier(params):
     mod_type = params.get("type", "SUBSURF").upper()
-    name = params.get("name", mod_type.capitalize())
-    obj = bpy.context.active_object
+    name     = params.get("name", mod_type.capitalize())
+    obj      = bpy.context.active_object
     if obj is None:
         return {"error": "No active object"}
     mod = obj.modifiers.new(name=name, type=mod_type)
@@ -308,9 +473,9 @@ def add_modifier(params):
 
 
 def set_camera_position(params):
-    x = params.get("x", 5.0)
-    y = params.get("y", -5.0)
-    z = params.get("z", 5.0)
+    x  = params.get("x", 5.0)
+    y  = params.get("y", -5.0)
+    z  = params.get("z", 5.0)
     tx = params.get("target_x", 0.0)
     ty = params.get("target_y", 0.0)
     tz = params.get("target_z", 0.0)
@@ -328,36 +493,45 @@ def set_camera_position(params):
 # --- Dispatch ---
 
 TOOLS = {
-    "get_scene_tree": lambda p: get_scene_tree(),
+    "get_scene_tree":        lambda p: get_scene_tree(),
     "get_viewport_screenshot": get_viewport_screenshot,
-    "set_viewport_angle": set_viewport_angle,
-    "add_primitive": add_primitive,
-    "select_object": select_object,
-    "scale_object": scale_object,
-    "move_object": move_object,
-    "rotate_object": rotate_object,
-    "set_mode": set_mode,
-    "delete_object": delete_object,
-    "frame_scene": frame_scene,
-    "zoom_to_selected": zoom_to_selected,
-    "set_camera_position": set_camera_position,
-    "orbit_viewport": orbit_viewport,
-    "bevel": bevel,
-    "extrude": extrude,
-    "select_all": select_all,
-    "select_by_axis": select_by_axis,
-    "add_modifier": add_modifier,
+    "get_viewport_collage":  get_viewport_collage,
+    "get_history":           get_history,
+    "undo_steps":            undo_steps,
+    "undo_to":               undo_to,
+    "set_viewport_angle":    set_viewport_angle,
+    "add_primitive":         add_primitive,
+    "select_object":         select_object,
+    "scale_object":          scale_object,
+    "move_object":           move_object,
+    "rotate_object":         rotate_object,
+    "set_mode":              set_mode,
+    "delete_object":         delete_object,
+    "frame_scene":           frame_scene,
+    "zoom_to_selected":      zoom_to_selected,
+    "set_camera_position":   set_camera_position,
+    "orbit_viewport":        orbit_viewport,
+    "bevel":                 bevel,
+    "extrude":               extrude,
+    "select_all":            select_all,
+    "select_by_axis":        select_by_axis,
+    "loop_cut":              loop_cut,
+    "add_modifier":          add_modifier,
 }
 
 
 def execute_command(command):
-    tool = command.get("tool")
+    tool   = command.get("tool")
     params = command.get("params", {})
+    label  = command.get("label", "")
     fn = TOOLS.get(tool)
     if fn is None:
         return {"error": f"Unknown tool: {tool}. Available: {list(TOOLS.keys())}"}
     try:
-        return fn(params)
+        result = fn(params)
+        if tool not in _NO_LOG_TOOLS and result.get("success"):
+            result["op_id"] = _log_operation(tool, params, label)
+        return result
     except Exception as e:
         return {"error": str(e)}
 
