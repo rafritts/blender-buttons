@@ -631,20 +631,52 @@ def get_mesh_profile(params):
 
 
 def get_blender_status(params):
+    import bmesh as _bmesh
     obj = bpy.context.active_object
+
     status = {
         "mode": obj.mode if obj else "OBJECT",
         "active_object": obj.name if obj else None,
         "active_type": obj.type if obj else None,
+        "selected_objects": [o.name for o in bpy.context.selected_objects],
+        "last_action": (
+            {"id": _history[-1]["id"], "label": _history[-1]["label"], "tool": _history[-1]["tool"]}
+            if _history else None
+        ),
+        "history_depth": len(_history),
     }
+
+    if obj:
+        status["location"] = [round(v, 4) for v in obj.location]
+        status["dimensions"] = [round(v, 4) for v in obj.dimensions]
+        bb = obj.bound_box
+        world_bb = [obj.matrix_world @ mathutils.Vector(c) for c in bb]
+        status["world_z_range"] = [
+            round(min(v.z for v in world_bb), 4),
+            round(max(v.z for v in world_bb), 4),
+        ]
+
     if obj and obj.mode == 'EDIT' and obj.type == 'MESH':
-        import bmesh
-        bm = bmesh.from_edit_mesh(obj.data)
-        sel_verts = sum(1 for v in bm.verts if v.select)
-        sel_edges = sum(1 for e in bm.edges if e.select)
-        sel_faces = sum(1 for f in bm.faces if f.select)
-        status["selected"] = {"verts": sel_verts, "edges": sel_edges, "faces": sel_faces}
-        status["total"] = {"verts": len(bm.verts), "edges": len(bm.edges), "faces": len(bm.faces)}
+        bm = _bmesh.from_edit_mesh(obj.data)
+        sel_verts  = [v for v in bm.verts if v.select]
+        sel_edges  = [e for e in bm.edges if e.select]
+        sel_faces  = [f for f in bm.faces if f.select]
+        status["edit"] = {
+            "component_mode": (
+                "VERT"  if bpy.context.tool_settings.mesh_select_mode[0] else
+                "EDGE"  if bpy.context.tool_settings.mesh_select_mode[1] else
+                "FACE"
+            ),
+            "selected":  {"verts": len(sel_verts),  "edges": len(sel_edges),  "faces": len(sel_faces)},
+            "total":     {"verts": len(bm.verts),    "edges": len(bm.edges),   "faces": len(bm.faces)},
+        }
+        if sel_verts:
+            world_sel = [(obj.matrix_world @ v.co) for v in sel_verts]
+            status["edit"]["selection_z_range"] = [
+                round(min(v.z for v in world_sel), 4),
+                round(max(v.z for v in world_sel), 4),
+            ]
+
     return {"success": True, "status": status}
 
 

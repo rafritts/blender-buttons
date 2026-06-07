@@ -309,15 +309,35 @@ def get_mesh_profile(axis: str = "Z") -> str:
 @mcp.tool()
 def get_blender_status() -> str:
     """
-    Return current Blender context: active object name/type, interaction mode
-    (OBJECT/EDIT/SCULPT), and — if in Edit Mode — selected vs total vert/edge/face counts.
-    Call this first when unsure what state Blender is in.
+    Full Blender context snapshot. Call this whenever you're unsure of the current state.
+    Returns: mode, active object, all selected objects, world Z range, object dimensions,
+    last history action, and (in Edit Mode) component type, selection counts, and
+    the world Z range of the current selection.
     """
     result = call_blender("get_blender_status")
     if not result.get("success"):
         return result.get("error", "failed")
-    import json
-    return json.dumps(result["status"], indent=2)
+    s = result["status"]
+    lines = [
+        f"mode:           {s['mode']}",
+        f"active_object:  {s['active_object']} ({s['active_type']})",
+        f"selected:       {s['selected_objects']}",
+        f"location:       {s.get('location')}",
+        f"dimensions:     {s.get('dimensions')}",
+        f"world_z_range:  {s.get('world_z_range')}",
+        f"history_depth:  {s['history_depth']}",
+        f"last_action:    {s['last_action']}",
+    ]
+    if "edit" in s:
+        e = s["edit"]
+        lines += [
+            f"--- edit mode ---",
+            f"component_mode: {e['component_mode']}",
+            f"selected:       {e['selected']}",
+            f"total:          {e['total']}",
+            f"sel_z_range:    {e.get('selection_z_range', 'none')}",
+        ]
+    return "\n".join(lines)
 
 
 @mcp.tool()
