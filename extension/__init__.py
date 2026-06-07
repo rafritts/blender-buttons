@@ -385,19 +385,31 @@ def orbit_viewport(params):
 
 
 def bevel(params):
-    offset   = params.get("offset", 0.1)
+    factor   = params.get("factor", 0.05)
     segments = params.get("segments", 1)
     affect   = params.get("affect", "EDGES").upper()
+    obj = bpy.context.active_object
+    dims = obj.dimensions if obj and obj.type == 'MESH' else None
+    if dims:
+        min_dim = min(d for d in [dims.x, dims.y, dims.z] if d > 0) if any(d > 0 for d in [dims.x, dims.y, dims.z]) else 1.0
+        offset = factor * min_dim
+    else:
+        offset = factor
     bpy.ops.mesh.bevel(offset=offset, segments=segments, affect=affect)
-    return {"success": True}
+    return {"success": True, "offset_world": round(offset, 5)}
 
 
 def extrude(params):
-    x = params.get("x", 0.0)
-    y = params.get("y", 0.0)
-    z = params.get("z", 0.0)
+    fx = params.get("x", 0.0)
+    fy = params.get("y", 0.0)
+    fz = params.get("z", 0.0)
+    obj = bpy.context.active_object
+    dims = obj.dimensions if obj and obj.type == 'MESH' else None
+    x = fx * (dims.x if dims else 1.0)
+    y = fy * (dims.y if dims else 1.0)
+    z = fz * (dims.z if dims else 1.0)
     bpy.ops.mesh.extrude_region_move(TRANSFORM_OT_translate={"value": (x, y, z)})
-    return {"success": True}
+    return {"success": True, "translation_world": [round(x, 4), round(y, 4), round(z, 4)]}
 
 
 def select_all(params):
@@ -409,7 +421,7 @@ def select_all(params):
 def select_by_axis(params):
     import bmesh
     axis       = params.get("axis", "Z").upper()
-    threshold  = params.get("threshold", 0.0)
+    factor     = params.get("factor", 0.5)
     comparison = params.get("comparison", "GREATER").upper()
 
     obj = bpy.context.active_object
@@ -419,13 +431,17 @@ def select_by_axis(params):
     bm = bmesh.from_edit_mesh(obj.data)
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
 
+    world_vals = [(obj.matrix_world @ v.co)[axis_idx] for v in bm.verts]
+    v_min, v_max = min(world_vals), max(world_vals)
+    threshold = v_min + factor * (v_max - v_min)
+
     for vert in bm.verts:
         val = (obj.matrix_world @ vert.co)[axis_idx]
         vert.select = (val > threshold) if comparison == "GREATER" else (val < threshold)
 
     bm.select_flush_mode()
     bmesh.update_edit_mesh(obj.data)
-    return {"success": True}
+    return {"success": True, "threshold_world": round(threshold, 4)}
 
 
 def loop_cut(params):

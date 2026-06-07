@@ -196,21 +196,30 @@ def set_camera_position(x: float, y: float, z: float,
 
 
 @mcp.tool()
-def bevel(offset: float = 0.1, segments: int = 1, affect: str = "EDGES", label: str = "") -> str:
+def bevel(factor: float = 0.05, segments: int = 1, affect: str = "EDGES", label: str = "") -> str:
     """
     Bevel selected edges or vertices in edit mode.
-    offset: bevel amount  |  segments: edge loops added (more = smoother)
+    factor: bevel size as a fraction of the object's smallest dimension (0.05 = 5%)
+    segments: edge loops added (more = smoother curve)
     affect: EDGES | VERTICES
     """
-    result = call_blender("bevel", {"offset": offset, "segments": segments, "affect": affect}, label=label)
-    return f"ok [{result.get('op_id','')}]" if result.get("success") else result.get("error", "failed")
+    result = call_blender("bevel", {"factor": factor, "segments": segments, "affect": affect}, label=label)
+    if result.get("success"):
+        return f"ok (offset={result.get('offset_world')}) [{result.get('op_id','')}]"
+    return result.get("error", "failed")
 
 
 @mcp.tool()
 def extrude(x: float = 0.0, y: float = 0.0, z: float = 0.0, label: str = "") -> str:
-    """Extrude selected geometry in edit mode and move by x/y/z offset."""
+    """
+    Extrude selected geometry in edit mode and translate by a fraction of the object's dimensions.
+    x/y/z: fraction of object dimension along that axis (0.5 = 50% of width/depth/height).
+    Returns the actual world-space translation applied.
+    """
     result = call_blender("extrude", {"x": x, "y": y, "z": z}, label=label)
-    return f"ok [{result.get('op_id','')}]" if result.get("success") else result.get("error", "failed")
+    if result.get("success"):
+        return f"ok translation={result.get('translation_world')} [{result.get('op_id','')}]"
+    return result.get("error", "failed")
 
 
 @mcp.tool()
@@ -224,13 +233,19 @@ def select_all(action: str = "SELECT") -> str:
 
 
 @mcp.tool()
-def select_by_axis(axis: str = "Z", threshold: float = 0.0, comparison: str = "GREATER") -> str:
+def select_by_axis(axis: str = "Z", factor: float = 0.5, comparison: str = "GREATER") -> str:
     """
-    Select vertices in edit mode above or below a threshold on a given axis.
-    axis: X | Y | Z  |  comparison: GREATER | LESS
+    Select vertices in edit mode by position along an axis, using a relative factor.
+    axis: X | Y | Z
+    factor: 0.0 = min extent of object on this axis, 1.0 = max extent.
+            e.g. factor=0.8 comparison=GREATER selects the top 20% of the mesh.
+    comparison: GREATER | LESS
+    Returns the actual world-space threshold used.
     """
-    result = call_blender("select_by_axis", {"axis": axis, "threshold": threshold, "comparison": comparison})
-    return "ok" if result.get("success") else result.get("error", "failed")
+    result = call_blender("select_by_axis", {"axis": axis, "factor": factor, "comparison": comparison})
+    if result.get("success"):
+        return f"ok (threshold_world={result.get('threshold_world')})"
+    return result.get("error", "failed")
 
 
 @mcp.tool()
