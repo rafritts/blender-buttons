@@ -25,6 +25,12 @@ _NO_LOG_TOOLS = {
     "get_history", "undo_steps", "undo_to",
 }
 
+# Tools that should NOT auto-append blender_status (read-only visual/query tools)
+_NO_STATUS_TOOLS = {
+    "get_blender_status", "get_viewport_screenshot", "get_viewport_collage",
+    "get_scene_tree", "get_history",
+}
+
 def _log_operation(tool, params, label=""):
     op_id = hashlib.md5(
         f"{tool}{json.dumps(params, sort_keys=True)}{time.time()}".encode()
@@ -744,6 +750,11 @@ def execute_command(command):
         result = fn(params)
         if tool not in _NO_LOG_TOOLS and result.get("success"):
             result["op_id"] = _log_operation(tool, params, label)
+        if tool not in _NO_STATUS_TOOLS:
+            try:
+                result["blender_status"] = get_blender_status({}).get("status")
+            except Exception:
+                pass
         return result
     except Exception as e:
         return {"error": str(e)}

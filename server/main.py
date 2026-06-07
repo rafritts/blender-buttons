@@ -24,7 +24,34 @@ def call_blender(tool: str, params: dict = {}, label: str = "") -> dict:
     return json.loads(data.decode().strip())
 
 
-# --- Read-only tools (no label needed) ---
+def _status(result: dict) -> str:
+    """Format the blender_status block that every tool response now carries."""
+    s = result.get("blender_status")
+    if not s:
+        return ""
+    lines = [
+        "",
+        "── blender status ──────────────────────────────",
+        f"  mode:        {s['mode']}",
+        f"  active:      {s['active_object']} ({s['active_type']})",
+        f"  selected:    {s['selected_objects']}",
+        f"  z_range:     {s.get('world_z_range')}",
+        f"  dims:        {s.get('dimensions')}",
+        f"  last_action: {s.get('last_action')}",
+    ]
+    if "edit" in s:
+        e = s["edit"]
+        lines += [
+            f"  ── edit ──",
+            f"  component:   {e['component_mode']}",
+            f"  selected:    {e['selected']}  /  total: {e['total']}",
+            f"  sel_z:       {e.get('selection_z_range', '—')}",
+        ]
+    lines.append("────────────────────────────────────────────────")
+    return "\n".join(lines)
+
+
+# --- Read-only tools (no status appended) ---
 
 @mcp.tool()
 def get_scene_tree() -> str:
@@ -71,248 +98,12 @@ def get_history() -> str:
     return "\n".join(lines)
 
 
-# --- State-modifying tools (accept label) ---
-
-@mcp.tool()
-def set_viewport_angle(angle: str) -> str:
-    """
-    Set the viewport to a standard angle.
-    angle: FRONT | BACK | LEFT | RIGHT | TOP | BOTTOM | CAMERA
-    """
-    result = call_blender("set_viewport_angle", {"angle": angle})
-    return "ok" if result.get("success") else result.get("error", "failed")
-
-
-@mcp.tool()
-def add_primitive(type: str, x: float = 0, y: float = 0, z: float = 0, label: str = "") -> str:
-    """
-    Add a mesh primitive to the scene.
-    type: CUBE | SPHERE | CYLINDER | PLANE | CONE
-    x, y, z: location in world space
-    label: optional name for the history log
-    """
-    result = call_blender("add_primitive", {"type": type, "location": [x, y, z]}, label=label)
-    if result.get("success"):
-        return f"Added {type} as '{result['object_name']}' [{result.get('op_id','')}]"
-    return result.get("error", "failed")
-
-
-@mcp.tool()
-def select_object(name: str) -> str:
-    """Select an object by name and make it active. Use get_scene_tree first to find names."""
-    result = call_blender("select_object", {"name": name})
-    return "ok" if result.get("success") else result.get("error", "failed")
-
-
-@mcp.tool()
-def scale_object(x: float = 1.0, y: float = 1.0, z: float = 1.0, label: str = "") -> str:
-    """
-    Scale the active object. Values are multipliers (0.5 = half size, 2.0 = double).
-    label: optional name for the history log
-    """
-    result = call_blender("scale_object", {"x": x, "y": y, "z": z}, label=label)
-    return f"ok [{result.get('op_id','')}]" if result.get("success") else result.get("error", "failed")
-
-
-@mcp.tool()
-def move_object(x: float = 0.0, y: float = 0.0, z: float = 0.0, label: str = "") -> str:
-    """
-    Move the active object by a relative offset in world units.
-    label: optional name for the history log
-    """
-    result = call_blender("move_object", {"x": x, "y": y, "z": z}, label=label)
-    return f"ok [{result.get('op_id','')}]" if result.get("success") else result.get("error", "failed")
-
-
-@mcp.tool()
-def rotate_object(angle: float, axis: str = "Z", label: str = "") -> str:
-    """
-    Rotate the active object.
-    angle: degrees  |  axis: X | Y | Z
-    label: optional name for the history log
-    """
-    result = call_blender("rotate_object", {"angle": angle, "axis": axis}, label=label)
-    return f"ok [{result.get('op_id','')}]" if result.get("success") else result.get("error", "failed")
-
-
-@mcp.tool()
-def set_mode(mode: str) -> str:
-    """
-    Switch the active object's interaction mode.
-    mode: OBJECT | EDIT | SCULPT
-    """
-    result = call_blender("set_mode", {"mode": mode})
-    return "ok" if result.get("success") else result.get("error", "failed")
-
-
-@mcp.tool()
-def delete_object(name: str, label: str = "") -> str:
-    """Delete an object by name. Use get_scene_tree to find object names."""
-    result = call_blender("delete_object", {"name": name}, label=label)
-    if result.get("success"):
-        return f"Deleted '{result['deleted']}' [{result.get('op_id','')}]"
-    return result.get("error", "failed")
-
-
-@mcp.tool()
-def frame_scene() -> str:
-    """Fit all objects in the viewport."""
-    result = call_blender("frame_scene")
-    return "ok" if result.get("success") else result.get("error", "failed")
-
-
-@mcp.tool()
-def zoom_to_selected() -> str:
-    """Zoom the viewport to tightly frame the currently selected object."""
-    result = call_blender("zoom_to_selected")
-    return "ok" if result.get("success") else result.get("error", "failed")
-
-
-@mcp.tool()
-def orbit_viewport(azimuth: float = 45.0, elevation: float = 25.0, distance: float = 8.0,
-                   target_x: float = 0.0, target_y: float = 0.0, target_z: float = 1.0) -> str:
-    """
-    Position the viewport perspective camera using orbit controls.
-    azimuth: horizontal angle in degrees (0=front, +right, -left)
-    elevation: vertical angle in degrees (positive=from above)
-    distance: distance from target
-    """
-    result = call_blender("orbit_viewport", {
-        "azimuth": azimuth, "elevation": elevation, "distance": distance,
-        "target_x": target_x, "target_y": target_y, "target_z": target_z,
-    })
-    return "ok" if result.get("success") else result.get("error", "failed")
-
-
-@mcp.tool()
-def set_camera_position(x: float, y: float, z: float,
-                        target_x: float = 0.0, target_y: float = 0.0, target_z: float = 0.0) -> str:
-    """Move the scene camera to a position aimed at a target point."""
-    result = call_blender("set_camera_position", {
-        "x": x, "y": y, "z": z,
-        "target_x": target_x, "target_y": target_y, "target_z": target_z,
-    })
-    return "ok" if result.get("success") else result.get("error", "failed")
-
-
-@mcp.tool()
-def bevel(factor: float = 0.05, segments: int = 1, affect: str = "EDGES", label: str = "") -> str:
-    """
-    Bevel selected edges or vertices in edit mode.
-    factor: bevel size as a fraction of the object's smallest dimension (0.05 = 5%)
-    segments: edge loops added (more = smoother curve)
-    affect: EDGES | VERTICES
-    """
-    result = call_blender("bevel", {"factor": factor, "segments": segments, "affect": affect}, label=label)
-    if result.get("success"):
-        return f"ok (offset={result.get('offset_world')}) [{result.get('op_id','')}]"
-    return result.get("error", "failed")
-
-
-@mcp.tool()
-def extrude(x: float = 0.0, y: float = 0.0, z: float = 0.0, label: str = "") -> str:
-    """
-    Extrude selected geometry in edit mode and translate by a fraction of the object's dimensions.
-    x/y/z: fraction of object dimension along that axis (0.5 = 50% of width/depth/height).
-    Returns the actual world-space translation applied.
-    """
-    result = call_blender("extrude", {"x": x, "y": y, "z": z}, label=label)
-    if result.get("success"):
-        return f"ok translation={result.get('translation_world')} [{result.get('op_id','')}]"
-    return result.get("error", "failed")
-
-
-@mcp.tool()
-def select_all(action: str = "SELECT") -> str:
-    """
-    Select/deselect geometry in edit mode.
-    action: SELECT | DESELECT | INVERT
-    """
-    result = call_blender("select_all", {"action": action})
-    return "ok" if result.get("success") else result.get("error", "failed")
-
-
-@mcp.tool()
-def select_by_axis(axis: str = "Z", factor: float = 0.5, comparison: str = "GREATER",
-                   action: str = "SELECT") -> str:
-    """
-    Select or deselect vertices in edit mode by position along an axis.
-    axis: X | Y | Z
-    factor: 0.0 = min extent, 1.0 = max extent of object on this axis.
-            e.g. factor=0.8 comparison=GREATER selects the top 20% of the mesh.
-    comparison: GREATER | LESS
-    action: SELECT (replace selection) | DESELECT (remove matching verts from selection)
-            Use DESELECT to select a band: select_all → deselect left → deselect right = center band.
-    Returns the actual world-space threshold used.
-    """
-    result = call_blender("select_by_axis", {"axis": axis, "factor": factor,
-                                              "comparison": comparison, "action": action})
-    if result.get("success"):
-        return f"ok (threshold_world={result.get('threshold_world')})"
-    return result.get("error", "failed")
-
-
-@mcp.tool()
-def move_vertices(x: float = 0.0, y: float = 0.0, z: float = 0.0, label: str = "") -> str:
-    """
-    Translate selected vertices in edit mode using bmesh.
-    x/y/z: fraction of object dimension along that axis (0.1 = 10% of width/depth/height).
-    Negative values move in the opposite direction.
-    Must be in edit mode with vertices selected.
-    """
-    result = call_blender("move_vertices", {"x": x, "y": y, "z": z}, label=label)
-    if result.get("success"):
-        return f"Moved {result['verts_moved']} verts by {result['delta_world']} [{result.get('op_id','')}]"
-    return result.get("error", "failed")
-
-
-@mcp.tool()
-def scale_vertices(x: float = 1.0, y: float = 1.0, z: float = 1.0,
-                   pivot: str = "SELECTION", label: str = "") -> str:
-    """
-    Scale selected vertices in edit mode using bmesh.
-    x/y/z: scale multipliers per axis (0.5 = half, 2.0 = double)
-    pivot: SELECTION (around selection center) | ORIGIN (around object origin)
-    Must be in edit mode with vertices selected.
-    """
-    result = call_blender("scale_vertices", {"x": x, "y": y, "z": z, "pivot": pivot}, label=label)
-    if result.get("success"):
-        return f"Scaled {result['verts_scaled']} verts [{result.get('op_id','')}]"
-    return result.get("error", "failed")
-
-
-@mcp.tool()
-def get_mesh_profile(axis: str = "Z") -> str:
-    """
-    Slice the active mesh into rings along an axis and report the width/extent at each ring.
-    axis: X | Y | Z — the axis to slice along (default Z for vertical objects like blades)
-    Returns a table: position along axis, plus min/max/width on the other two axes.
-    Use this to understand actual geometry before making edits — no guessing needed.
-    """
-    result = call_blender("get_mesh_profile", {"axis": axis})
-    if not result.get("success"):
-        return result.get("error", "failed")
-    profile = result["profile"]
-    ax = result["axis"]
-    other = [n for n in ['X', 'Y', 'Z'] if n != ax]
-    lines = [f"{'':>8}  " + "  ".join(f"{n:>22}" for n in other)]
-    for r in profile:
-        cols = []
-        for n in other:
-            lo, hi = r[f"{n}_range"]
-            w = r[f"{n}_width"]
-            cols.append(f"{lo:+.4f}→{hi:+.4f} ({w:.4f})")
-        lines.append(f"{ax}={r[ax]:+.4f}  " + "  ".join(cols))
-    return f"{len(profile)} rings along {ax}:\n" + "\n".join(lines)
-
-
 @mcp.tool()
 def get_blender_status() -> str:
     """
-    Full Blender context snapshot. Call this whenever you're unsure of the current state.
-    Returns: mode, active object, all selected objects, world Z range, object dimensions,
-    last history action, and (in Edit Mode) component type, selection counts, and
-    the world Z range of the current selection.
+    Full Blender context snapshot. Returns mode, active + selected objects, dimensions,
+    world Z range, last history action, and (in Edit Mode) component type, selection counts,
+    and selection Z range. This is also automatically appended to every other tool's output.
     """
     result = call_blender("get_blender_status")
     if not result.get("success"):
@@ -341,6 +132,31 @@ def get_blender_status() -> str:
 
 
 @mcp.tool()
+def get_mesh_profile(axis: str = "Z") -> str:
+    """
+    Slice the active mesh into rings along an axis and report the width/extent at each ring.
+    axis: X | Y | Z — the axis to slice along (default Z for vertical objects like blades)
+    Returns a table: position along axis, plus min/max/width on the other two axes.
+    Use this to understand actual geometry before making edits — no guessing needed.
+    """
+    result = call_blender("get_mesh_profile", {"axis": axis})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    profile = result["profile"]
+    ax = result["axis"]
+    other = [n for n in ['X', 'Y', 'Z'] if n != ax]
+    lines = [f"{'':>8}  " + "  ".join(f"{n:>22}" for n in other)]
+    for r in profile:
+        cols = []
+        for n in other:
+            lo, hi = r[f"{n}_range"]
+            w = r[f"{n}_width"]
+            cols.append(f"{lo:+.4f}→{hi:+.4f} ({w:.4f})")
+        lines.append(f"{ax}={r[ax]:+.4f}  " + "  ".join(cols))
+    return f"{len(profile)} rings along {ax}:\n" + "\n".join(lines) + _status(result)
+
+
+@mcp.tool()
 def get_object_info() -> str:
     """
     Return detailed state of the active object: location, scale, rotation, dimensions,
@@ -349,9 +165,243 @@ def get_object_info() -> str:
     """
     result = call_blender("get_object_info")
     if result.get("success"):
-        import json
-        return json.dumps(result["info"], indent=2)
+        return json.dumps(result["info"], indent=2) + _status(result)
     return result.get("error", "failed")
+
+
+# --- State-modifying tools ---
+
+@mcp.tool()
+def set_viewport_angle(angle: str) -> str:
+    """
+    Set the viewport to a standard angle.
+    angle: FRONT | BACK | LEFT | RIGHT | TOP | BOTTOM | CAMERA
+    """
+    result = call_blender("set_viewport_angle", {"angle": angle})
+    main = "ok" if result.get("success") else result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def add_primitive(type: str, x: float = 0, y: float = 0, z: float = 0, label: str = "") -> str:
+    """
+    Add a mesh primitive to the scene.
+    type: CUBE | SPHERE | CYLINDER | PLANE | CONE
+    x, y, z: location in world space
+    label: optional name for the history log
+    """
+    result = call_blender("add_primitive", {"type": type, "location": [x, y, z]}, label=label)
+    if result.get("success"):
+        main = f"Added {type} as '{result['object_name']}' [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def select_object(name: str) -> str:
+    """Select an object by name and make it active. Use get_scene_tree first to find names."""
+    result = call_blender("select_object", {"name": name})
+    main = "ok" if result.get("success") else result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def scale_object(x: float = 1.0, y: float = 1.0, z: float = 1.0, label: str = "") -> str:
+    """
+    Scale the active object. Values are multipliers (0.5 = half size, 2.0 = double).
+    label: optional name for the history log
+    """
+    result = call_blender("scale_object", {"x": x, "y": y, "z": z}, label=label)
+    main = f"ok [{result.get('op_id','')}]" if result.get("success") else result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def move_object(x: float = 0.0, y: float = 0.0, z: float = 0.0, label: str = "") -> str:
+    """
+    Move the active object by a relative offset in world units.
+    label: optional name for the history log
+    """
+    result = call_blender("move_object", {"x": x, "y": y, "z": z}, label=label)
+    main = f"ok [{result.get('op_id','')}]" if result.get("success") else result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def rotate_object(angle: float, axis: str = "Z", label: str = "") -> str:
+    """
+    Rotate the active object.
+    angle: degrees  |  axis: X | Y | Z
+    label: optional name for the history log
+    """
+    result = call_blender("rotate_object", {"angle": angle, "axis": axis}, label=label)
+    main = f"ok [{result.get('op_id','')}]" if result.get("success") else result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def set_mode(mode: str) -> str:
+    """
+    Switch the active object's interaction mode.
+    mode: OBJECT | EDIT | SCULPT
+    """
+    result = call_blender("set_mode", {"mode": mode})
+    main = "ok" if result.get("success") else result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def delete_object(name: str, label: str = "") -> str:
+    """Delete an object by name. Use get_scene_tree to find object names."""
+    result = call_blender("delete_object", {"name": name}, label=label)
+    if result.get("success"):
+        main = f"Deleted '{result['deleted']}' [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def frame_scene() -> str:
+    """Fit all objects in the viewport."""
+    result = call_blender("frame_scene")
+    main = "ok" if result.get("success") else result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def zoom_to_selected() -> str:
+    """Zoom the viewport to tightly frame the currently selected object."""
+    result = call_blender("zoom_to_selected")
+    main = "ok" if result.get("success") else result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def orbit_viewport(azimuth: float = 45.0, elevation: float = 25.0, distance: float = 8.0,
+                   target_x: float = 0.0, target_y: float = 0.0, target_z: float = 1.0) -> str:
+    """
+    Position the viewport perspective camera using orbit controls.
+    azimuth: horizontal angle in degrees (0=front, +right, -left)
+    elevation: vertical angle in degrees (positive=from above)
+    distance: distance from target
+    """
+    result = call_blender("orbit_viewport", {
+        "azimuth": azimuth, "elevation": elevation, "distance": distance,
+        "target_x": target_x, "target_y": target_y, "target_z": target_z,
+    })
+    main = "ok" if result.get("success") else result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def set_camera_position(x: float, y: float, z: float,
+                        target_x: float = 0.0, target_y: float = 0.0, target_z: float = 0.0) -> str:
+    """Move the scene camera to a position aimed at a target point."""
+    result = call_blender("set_camera_position", {
+        "x": x, "y": y, "z": z,
+        "target_x": target_x, "target_y": target_y, "target_z": target_z,
+    })
+    main = "ok" if result.get("success") else result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def bevel(factor: float = 0.05, segments: int = 1, affect: str = "EDGES", label: str = "") -> str:
+    """
+    Bevel selected edges or vertices in edit mode.
+    factor: bevel size as a fraction of the object's smallest dimension (0.05 = 5%)
+    segments: edge loops added (more = smoother curve)
+    affect: EDGES | VERTICES
+    """
+    result = call_blender("bevel", {"factor": factor, "segments": segments, "affect": affect}, label=label)
+    if result.get("success"):
+        main = f"ok (offset={result.get('offset_world')}) [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def extrude(x: float = 0.0, y: float = 0.0, z: float = 0.0, label: str = "") -> str:
+    """
+    Extrude selected geometry in edit mode and translate by a fraction of the object's dimensions.
+    x/y/z: fraction of object dimension along that axis (0.5 = 50% of width/depth/height).
+    Returns the actual world-space translation applied.
+    """
+    result = call_blender("extrude", {"x": x, "y": y, "z": z}, label=label)
+    if result.get("success"):
+        main = f"ok translation={result.get('translation_world')} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def select_all(action: str = "SELECT") -> str:
+    """
+    Select/deselect geometry in edit mode.
+    action: SELECT | DESELECT | INVERT
+    """
+    result = call_blender("select_all", {"action": action})
+    main = "ok" if result.get("success") else result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def select_by_axis(axis: str = "Z", factor: float = 0.5, comparison: str = "GREATER",
+                   action: str = "SELECT") -> str:
+    """
+    Select or deselect vertices in edit mode by position along an axis.
+    axis: X | Y | Z
+    factor: 0.0 = min extent, 1.0 = max extent of object on this axis.
+            e.g. factor=0.8 comparison=GREATER selects the top 20% of the mesh.
+    comparison: GREATER | LESS
+    action: SELECT (replace selection) | DESELECT (remove matching verts from selection)
+            Use DESELECT to select a band: select_all → deselect left → deselect right = center band.
+    Returns the actual world-space threshold used.
+    """
+    result = call_blender("select_by_axis", {"axis": axis, "factor": factor,
+                                              "comparison": comparison, "action": action})
+    if result.get("success"):
+        main = f"ok (threshold_world={result.get('threshold_world')})"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def move_vertices(x: float = 0.0, y: float = 0.0, z: float = 0.0, label: str = "") -> str:
+    """
+    Translate selected vertices in edit mode using bmesh.
+    x/y/z: fraction of object dimension along that axis (0.1 = 10% of width/depth/height).
+    Negative values move in the opposite direction.
+    Must be in edit mode with vertices selected.
+    """
+    result = call_blender("move_vertices", {"x": x, "y": y, "z": z}, label=label)
+    if result.get("success"):
+        main = f"Moved {result['verts_moved']} verts by {result['delta_world']} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def scale_vertices(x: float = 1.0, y: float = 1.0, z: float = 1.0,
+                   pivot: str = "SELECTION", label: str = "") -> str:
+    """
+    Scale selected vertices in edit mode using bmesh.
+    x/y/z: scale multipliers per axis (0.5 = half, 2.0 = double)
+    pivot: SELECTION (around selection center) | ORIGIN (around object origin)
+    Must be in edit mode with vertices selected.
+    """
+    result = call_blender("scale_vertices", {"x": x, "y": y, "z": z, "pivot": pivot}, label=label)
+    if result.get("success"):
+        main = f"Scaled {result['verts_scaled']} verts [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
 
 
 @mcp.tool()
@@ -364,8 +414,10 @@ def loop_cut(axis: str = "Z", cuts: int = 1, label: str = "") -> str:
     """
     result = call_blender("loop_cut", {"axis": axis, "cuts": cuts}, label=label)
     if result.get("success"):
-        return f"Cut {result['edges_subdivided']} edges x{result['cuts']} [{result.get('op_id','')}]"
-    return result.get("error", "failed")
+        main = f"Cut {result['edges_subdivided']} edges x{result['cuts']} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
 
 
 @mcp.tool()
@@ -382,8 +434,10 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
         "width": width, "segments": segments,
     }, label=label)
     if result.get("success"):
-        return f"{result['modifier']} [{result.get('op_id','')}]"
-    return result.get("error", "failed")
+        main = f"{result['modifier']} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
 
 
 @mcp.tool()
@@ -394,8 +448,10 @@ def undo(steps: int = 1) -> str:
     """
     result = call_blender("undo_steps", {"steps": steps})
     if result.get("success"):
-        return f"Undid {result['steps']} step(s). History remaining: {result['history_remaining']}"
-    return result.get("error", "failed")
+        main = f"Undid {result['steps']} step(s). History remaining: {result['history_remaining']}"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
 
 
 @mcp.tool()
@@ -406,8 +462,10 @@ def undo_to(id: str) -> str:
     """
     result = call_blender("undo_to", {"id": id})
     if result.get("success"):
-        return f"Undid {result['steps']} step(s) to reach [{id}]"
-    return result.get("error", "failed")
+        main = f"Undid {result['steps']} step(s) to reach [{id}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
 
 
 if __name__ == "__main__":
