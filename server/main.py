@@ -234,6 +234,17 @@ def select_by_axis(axis: str = "Z", threshold: float = 0.0, comparison: str = "G
 
 
 @mcp.tool()
+def scale_selected(x: float = 1.0, y: float = 1.0, z: float = 1.0, label: str = "") -> str:
+    """
+    Scale selected vertices/edges/faces in edit mode.
+    Must be in edit mode with geometry already selected.
+    Use select_all or select_by_axis first to set the selection.
+    """
+    result = call_blender("scale_selected", {"x": x, "y": y, "z": z}, label=label)
+    return f"ok [{result.get('op_id','')}]" if result.get("success") else result.get("error", "failed")
+
+
+@mcp.tool()
 def loop_cut(axis: str = "Z", cuts: int = 1, label: str = "") -> str:
     """
     Add edge loop cuts perpendicular to the given axis using bmesh.

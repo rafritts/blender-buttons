@@ -472,6 +472,19 @@ def add_modifier(params):
     return {"success": True, "modifier": mod.name}
 
 
+def scale_selected(params):
+    x = params.get("x", 1.0)
+    y = params.get("y", 1.0)
+    z = params.get("z", 1.0)
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    window, screen, area, region = find_view3d_context()
+    with bpy.context.temp_override(window=window, screen=screen, area=area, region=region):
+        bpy.ops.transform.resize(value=(x, y, z))
+    return {"success": True}
+
+
 def set_camera_position(params):
     x  = params.get("x", 5.0)
     y  = params.get("y", -5.0)
@@ -517,6 +530,7 @@ TOOLS = {
     "select_by_axis":        select_by_axis,
     "loop_cut":              loop_cut,
     "add_modifier":          add_modifier,
+    "scale_selected":        scale_selected,
 }
 
 
