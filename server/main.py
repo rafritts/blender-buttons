@@ -456,6 +456,127 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
 
 
 @mcp.tool()
+def set_component_mode(mode: str) -> str:
+    """
+    Switch the mesh select component mode in Edit Mode.
+    mode: VERT | EDGE | FACE
+    Must be in Edit Mode. Call this before selection operations that depend on component type.
+    """
+    result = call_blender("set_component_mode", {"mode": mode})
+    main = f"component mode → {mode}" if result.get("success") else result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def grow_selection(direction: str = "GROW", steps: int = 1) -> str:
+    """
+    Expand or contract the current selection by one topology step per step.
+    direction: GROW (add adjacent elements) | SHRINK (remove boundary elements)
+    steps: number of times to grow/shrink (default 1)
+    Must be in Edit Mode with something selected.
+    """
+    result = call_blender("grow_selection", {"direction": direction, "steps": steps})
+    main = f"{direction} x{steps}" if result.get("success") else result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def select_between(axis: str = "Z", lo: float = 0.0, hi: float = 1.0,
+                   action: str = "SELECT") -> str:
+    """
+    Select (or deselect) vertices whose world-space position on an axis falls between lo and hi.
+    axis: X | Y | Z
+    lo, hi: factors from 0.0 (min extent) to 1.0 (max extent) — same scale as select_by_axis.
+            e.g. lo=0.4, hi=0.6 selects the middle 20% of the mesh along the axis.
+    action: SELECT | DESELECT
+    Returns the actual world-space thresholds and total selected vert count.
+    Replaces the verbose select_all → deselect_below → deselect_above band pattern.
+    """
+    result = call_blender("select_between", {"axis": axis, "lo": lo, "hi": hi, "action": action})
+    if result.get("success"):
+        main = (f"ok  {axis}:[{result['lo_world']} → {result['hi_world']}]"
+                f"  selected={result['selected_count']}")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def get_current_selection() -> str:
+    """
+    Describe the current vertex selection in Edit Mode.
+    Returns: selected vert count, world-space centroid, world-space bounding box.
+    Use this to understand where your selection actually is before moving or scaling it.
+    Must be in Edit Mode.
+    """
+    result = call_blender("get_current_selection")
+    if not result.get("success"):
+        return result.get("error", "failed")
+    if result["selected_count"] == 0:
+        return "No vertices selected." + _status(result)
+    lines = [
+        f"selected_verts: {result['selected_count']}",
+        f"centroid_world: {result['centroid_world']}",
+        f"bbox_world:",
+        f"  x: {result['bbox_world']['x']}",
+        f"  y: {result['bbox_world']['y']}",
+        f"  z: {result['bbox_world']['z']}",
+    ]
+    return "\n".join(lines) + _status(result)
+
+
+@mcp.tool()
+def duplicate_object(name: str, new_name: str = "") -> str:
+    """
+    Duplicate an object in place. The duplicate becomes the active object.
+    name: object to duplicate (must exist in the scene)
+    new_name: name for the duplicate — if omitted, Blender appends .001
+    Returns both the original and duplicate names.
+    Must be in Object Mode.
+    """
+    result = call_blender("duplicate_object", {"name": name, "new_name": new_name})
+    if result.get("success"):
+        main = f"Duplicated '{result['original']}' → '{result['duplicate']}'"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def join_objects(names: list) -> str:
+    """
+    Join multiple objects into one. The first name in the list becomes the surviving object.
+    names: list of object names to join (minimum 2)
+    All objects must be the same type (MESH). The result keeps the first object's name.
+    Must be in Object Mode.
+    """
+    result = call_blender("join_objects", {"names": names})
+    if result.get("success"):
+        main = f"Joined {result['joined']} → '{result['result_object']}'"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def apply_modifiers(name: str = "") -> str:
+    """
+    Apply all modifiers on an object, collapsing them into the base mesh.
+    name: object name — if omitted, applies to the active object.
+    Required before export, boolean operations, or manual mesh editing on a modified object.
+    Must be in Object Mode.
+    """
+    result = call_blender("apply_modifiers", {"name": name})
+    if result.get("success"):
+        applied = result.get("applied", [])
+        main = (f"Applied {len(applied)} modifier(s) on '{result['object']}': {applied}"
+                if applied else f"No modifiers on '{result['object']}'")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def undo(steps: int = 1) -> str:
     """
     Undo the last N operations. Updates history log to match.

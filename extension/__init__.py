@@ -657,6 +657,166 @@ def get_mesh_profile(params):
     return {"success": True, "axis": axis, "rings": len(profile), "profile": profile}
 
 
+def set_component_mode(params):
+    mode = params.get("mode", "VERT").upper()
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    mode_map = {
+        'VERT': (True, False, False),
+        'EDGE': (False, True, False),
+        'FACE': (False, False, True),
+    }
+    if mode not in mode_map:
+        return {"error": f"Invalid mode '{mode}'. Use VERT, EDGE, or FACE"}
+    bpy.context.tool_settings.mesh_select_mode = mode_map[mode]
+    return {"success": True, "component_mode": mode}
+
+
+def grow_selection(params):
+    direction = params.get("direction", "GROW").upper()
+    steps = params.get("steps", 1)
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    op = bpy.ops.mesh.select_more if direction == "GROW" else bpy.ops.mesh.select_less
+    for _ in range(max(1, steps)):
+        op()
+    return {"success": True, "direction": direction, "steps": steps}
+
+
+def select_between(params):
+    import bmesh
+    axis       = params.get("axis", "Z").upper()
+    lo         = params.get("lo", 0.0)
+    hi         = params.get("hi", 1.0)
+    action     = params.get("action", "SELECT").upper()
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode with an active object"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
+    world_vals = [(obj.matrix_world @ v.co)[axis_idx] for v in bm.verts]
+    v_min, v_max = min(world_vals), max(world_vals)
+    lo_thresh = v_min + lo * (v_max - v_min)
+    hi_thresh = v_min + hi * (v_max - v_min)
+    count = 0
+    for vert in bm.verts:
+        val = (obj.matrix_world @ vert.co)[axis_idx]
+        in_range = lo_thresh <= val <= hi_thresh
+        if action == "DESELECT":
+            if in_range:
+                vert.select = False
+        else:
+            vert.select = in_range
+        if vert.select:
+            count += 1
+    bm.select_flush_mode()
+    bmesh.update_edit_mesh(obj.data)
+    return {
+        "success": True,
+        "lo_world": round(lo_thresh, 4),
+        "hi_world": round(hi_thresh, 4),
+        "selected_count": count,
+    }
+
+
+def get_current_selection(params):
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    sel = [v for v in bm.verts if v.select]
+    if not sel:
+        return {"success": True, "selected_count": 0, "centroid_world": None, "bbox_world": None}
+    world_pos = [obj.matrix_world @ v.co for v in sel]
+    xs = [p.x for p in world_pos]
+    ys = [p.y for p in world_pos]
+    zs = [p.z for p in world_pos]
+    n = len(sel)
+    return {
+        "success": True,
+        "selected_count": n,
+        "centroid_world": [round(sum(xs)/n, 4), round(sum(ys)/n, 4), round(sum(zs)/n, 4)],
+        "bbox_world": {
+            "x": [round(min(xs), 4), round(max(xs), 4)],
+            "y": [round(min(ys), 4), round(max(ys), 4)],
+            "z": [round(min(zs), 4), round(max(zs), 4)],
+        },
+    }
+
+
+def duplicate_object(params):
+    name     = params.get("name")
+    new_name = params.get("new_name")
+    if name:
+        obj = bpy.data.objects.get(name)
+        if obj is None:
+            return {"error": f"Object '{name}' not found"}
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+    active = bpy.context.active_object
+    if active is None:
+        return {"error": "No active object to duplicate"}
+    original = active.name
+    bpy.ops.object.duplicate(linked=False)
+    dup = bpy.context.active_object
+    if new_name and dup:
+        dup.name = new_name
+        if dup.data:
+            dup.data.name = new_name
+    return {"success": True, "original": original, "duplicate": dup.name if dup else None}
+
+
+def join_objects(params):
+    names = params.get("names", [])
+    if len(names) < 2:
+        return {"error": "'names' must list at least 2 objects"}
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.select_all(action='DESELECT')
+    first = None
+    for name in names:
+        obj = bpy.data.objects.get(name)
+        if obj is None:
+            return {"error": f"Object '{name}' not found"}
+        obj.select_set(True)
+        if first is None:
+            first = obj
+    bpy.context.view_layer.objects.active = first
+    bpy.ops.object.join()
+    result = bpy.context.active_object
+    return {"success": True, "result_object": result.name if result else None, "joined": names}
+
+
+def apply_modifiers(params):
+    name = params.get("name")
+    if name:
+        obj = bpy.data.objects.get(name)
+        if obj is None:
+            return {"error": f"Object '{name}' not found"}
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+    else:
+        obj = bpy.context.active_object
+    if obj is None:
+        return {"error": "No active object"}
+    if obj.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    mod_names = [m.name for m in obj.modifiers]
+    if not mod_names:
+        return {"success": True, "applied": [], "object": obj.name}
+    applied = []
+    for mod_name in mod_names:
+        if any(m.name == mod_name for m in obj.modifiers):
+            bpy.ops.object.modifier_apply(modifier=mod_name)
+            applied.append(mod_name)
+    return {"success": True, "applied": applied, "object": obj.name}
+
+
 def get_blender_status(params):
     import bmesh as _bmesh
     obj = bpy.context.active_object
@@ -758,6 +918,13 @@ TOOLS = {
     "get_mesh_profile":      get_mesh_profile,
     "get_blender_status":    get_blender_status,
     "rename_object":         rename_object,
+    "set_component_mode":    set_component_mode,
+    "grow_selection":        grow_selection,
+    "select_between":        select_between,
+    "get_current_selection": get_current_selection,
+    "duplicate_object":      duplicate_object,
+    "join_objects":          join_objects,
+    "apply_modifiers":       apply_modifiers,
 }
 
 
