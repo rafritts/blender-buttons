@@ -58,6 +58,7 @@ Every state-modifying tool appends a `── blender status ──` block to its
   selected:    [<names>]
   z_range:     [min_z, max_z]  ← world space bounding box Z extent
   dims:        [x, y, z]       ← world space dimensions
+  rot_deg:     [rx, ry, rz]    ← Euler rotation in degrees
   last_action: {id, label, tool}
   ── edit ──                   ← only present in Edit Mode
   component:   VERT | EDGE | FACE
@@ -84,8 +85,8 @@ Read-only / image tools (`get_blender_status`, `get_viewport_screenshot`, `get_v
 
 | Tool | Description |
 |------|-------------|
-| `get_viewport_screenshot(width=960, height=540)` | Returns `Image`. Captures the 3D viewport as-is. |
-| `get_viewport_collage(zoom=1.0)` | Returns `Image`. 6-panel grid: FRONT \| RIGHT \| TOP (row 1), BACK \| LEFT \| PERSP (row 2). |
+| `get_viewport_screenshot(width=960, height=540)` | Returns `Image`. Captures the 3D viewport as-is. A "+Z up" label is baked into the bottom-left corner. |
+| `get_viewport_collage(target="ALL", zoom=1.0)` | Returns `[Image, text]`. 6-panel grid: FRONT \| RIGHT \| TOP (row 1), BACK \| LEFT \| PERSP (row 2). Each panel auto-frames on `target` (`ALL` / `SELECTED` / object name) AND is baked with a corner label naming the visible plane (e.g. `FRONT X-Z plane (+Y into screen)`). Text line reports the framed bbox. |
 | `set_viewport_angle(angle)` | `FRONT \| BACK \| LEFT \| RIGHT \| TOP \| BOTTOM \| CAMERA` |
 | `orbit_viewport(azimuth, elevation, distance, target_x, target_y, target_z)` | Position the viewport perspective camera by orbit angles. Prefer this over `set_viewport_angle(CAMERA)` — it avoids the camera border crop. azimuth=0 is front, positive = right. |
 | `frame_scene()` | Fit all objects in the viewport |
@@ -95,13 +96,19 @@ Read-only / image tools (`get_blender_status`, `get_viewport_screenshot`, `get_v
 
 | Tool | Description |
 |------|-------------|
-| `add_primitive(type, name, x, y, z, label)` | Add a mesh primitive. `name` is **required** — Blender's default names ("Cube", "Cylinder") are blocked. type: `CUBE \| SPHERE \| CYLINDER \| PLANE \| CONE` |
+| `add_cube(name, size, x, y, z, rot_x, rot_y, rot_z)` | Add a cube. `size` = edge length (default 2). |
+| `add_plane(name, size, x, y, z, rot_x, rot_y, rot_z)` | Add a single-quad plane. |
+| `add_cylinder(name, vertices, radius, depth, cap_fill, x, y, z, rot_x, rot_y, rot_z)` | Cylinder aligned to Z. `vertices` = circumference resolution. `cap_fill`: `NOTHING \| NGON \| TRIFAN`. |
+| `add_sphere(name, segments, rings, radius, x, y, z, rot_x, rot_y, rot_z)` | UV sphere. `segments`/`rings` control resolution. |
+| `add_cone(name, vertices, radius1, radius2, depth, cap_fill, x, y, z, rot_x, rot_y, rot_z)` | Cone or truncated cone. `radius1`=base, `radius2`=top (0 = point). |
 | `select_object(name)` | Select by name and make active |
 | `rename_object(old_name, new_name)` | Rename object and its mesh data block |
 | `delete_object(name, label)` | Delete by name |
 | `move_object(x, y, z, label)` | Relative offset in world units |
 | `rotate_object(angle, axis, label)` | Degrees, axis: `X \| Y \| Z` |
 | `scale_object(x, y, z, label)` | Multipliers (1.0 = no change, 2.0 = double) |
+| `snap_to(target, side, source_side, offset, label)` | Align active object's bbox face to a face of `target`. `side`: which face of target (`X_MIN`…`Z_MAX`). `source_side`: opposite face by default (`AUTO`), or explicit / `CENTER`. `offset` shifts along the same axis after alignment. Use for stacking and flush placement — no coordinate arithmetic. |
+| `snap_to_grid(size, axes, label)` | Round the active object's origin to multiples of `size` on the chosen axes (e.g. `"XZ"`). Touches only the pivot — dims/rotation/geometry untouched. Opt-in per call. |
 | `duplicate_object(name, new_name)` | Duplicate in place. `new_name` optional — if omitted Blender appends `.001`. Duplicate becomes the active object. |
 | `join_objects(names)` | Join a list of objects into one. First name in the list is the surviving object. Minimum 2 names. |
 | `apply_modifiers(name)` | Apply all modifiers on the named object (or active object if omitted), collapsing them into the base mesh. Required before export or boolean operations. |
@@ -112,17 +119,39 @@ Read-only / image tools (`get_blender_status`, `get_viewport_screenshot`, `get_v
 
 Must be in Edit Mode (`set_mode("EDIT")`) before calling these.
 
+**Prefer ring-based addressing for shaping work.** LLMs are bad at picking the right world-space coordinate for "the second ring from the top." Address the mesh by topology (ring index) instead, using the macros below. Drop down to raw vertex ops only when you need something the macros don't cover.
+
+#### Ring macros (preferred)
+
+A "ring" is a set of vertices that share the same world-space coordinate on the given axis. After `loop_cut(Z, cuts=3)` on a cube, the blade has 5 rings along Z (index 0 = bottom, 4 = top). Operate on rings by index, not by coordinate.
+
+| Tool | Description |
+|------|-------------|
+| `loop_cut(axis, cuts, label)` | Subdivide edges running along the given axis. Uses world-space edge direction, so works correctly on scaled/tapered objects. |
+| `get_rings(axis)` | List all rings of the active mesh along an axis: index, world-space position, vert count. Call this to know what indices are available. |
+| `select_ring(axis, index, action)` | Select all vertices belonging to a ring. `index` accepts negatives (-1 = last). `action`: `SELECT` (replace) \| `ADD` \| `DESELECT`. |
+| `taper_end(axis, end, label)` | Collapse the extreme ring on an axis to a point. `end`: `MAX` \| `MIN`. Faster than select_ring + scale_vertices(x=0,y=0). |
+| `taper_section(axis, from_ring, to_ring, x_start, x_end, y_start, y_end, label)` | Linearly interpolate scale across a span of rings. Each ring scales around its own centroid in the two non-axis directions. Use for tapers, bulges, pinches. |
+
+#### Selection & topology
+
 | Tool | Description |
 |------|-------------|
 | `set_mode(mode)` | `OBJECT \| EDIT \| SCULPT` |
 | `set_component_mode(mode)` | Switch mesh select component type: `VERT \| EDGE \| FACE`. Call before selection operations that depend on component type. |
 | `select_all(action)` | `SELECT \| DESELECT \| INVERT` |
-| `select_by_axis(axis, factor, comparison, action)` | Select/deselect verts by world-space position. `factor` maps 0.0→min extent, 1.0→max extent. `comparison`: `GREATER \| LESS`. `action`: `SELECT \| DESELECT`. Returns the actual world-space threshold used. |
-| `select_between(axis, lo, hi, action)` | Select verts whose position on `axis` falls between `lo` and `hi` (both 0.0–1.0 factors). Replaces the verbose `select_all → DESELECT below → DESELECT above` band pattern. Returns world-space thresholds and selected vert count. |
 | `grow_selection(direction, steps)` | Expand or contract the current selection by topology adjacency. `direction`: `GROW \| SHRINK`. `steps`: number of iterations (default 1). |
 | `get_current_selection()` | Returns vert count, world-space centroid, and world-space bounding box of the current selection. Use before moving/scaling to verify what's actually selected. |
-| `loop_cut(axis, cuts, label)` | Subdivide edges running along the given axis. Uses world-space edge direction, so works correctly on scaled/tapered objects. |
-| `move_vertices(x, y, z, label)` | Move selected verts. x/y/z are fractions of the object's world-space dimension on that axis. Handles object scale correctly. |
+
+#### Raw vertex ops (escape hatch)
+
+Use when ring macros don't fit — non-axis-aligned topology, arbitrary band selections, fine manual nudging.
+
+| Tool | Description |
+|------|-------------|
+| `select_by_axis(axis, factor, comparison, action)` | Select/deselect verts by world-space position. `factor` maps 0.0→min extent, 1.0→max extent. |
+| `select_between(axis, lo, hi, action)` | Select verts whose position on `axis` falls between `lo` and `hi` (both 0.0–1.0 factors). |
+| `move_vertices(x, y, z, label)` | Move selected verts. x/y/z are fractions of the object's world-space dimension on that axis. |
 | `scale_vertices(x, y, z, pivot, label)` | Scale selected verts. `pivot`: `SELECTION` (around centroid) \| `ORIGIN` (around object origin at local 0,0,0). |
 | `extrude(x, y, z, label)` | Extrude and translate. x/y/z are fractions of object dimension. |
 | `bevel(factor, segments, affect, label)` | `affect`: `EDGES \| VERTICES`. `factor` is a fraction of the object's smallest dimension. |
@@ -135,22 +164,54 @@ Must be in Edit Mode (`set_mode("EDIT")`) before calling these.
 | `undo(steps=1)` | Undo last N operations, syncs the history log |
 | `undo_to(id)` | Undo everything after the named operation ID |
 
-History is reset when Blender restarts. The history log tracks only operations that went through this MCP server — Blender's internal undo stack may have additional entries (mode switches, etc.), which can cause `undo(N)` to overshoot. Use `get_blender_status` after undoing to verify the active object and mode.
+History is reset when Blender restarts. Each successful mutating tool pushes a checkpoint onto Blender's native undo stack (including bmesh operations like `loop_cut`, `taper_section`, `taper_end`, `move_vertices`, `scale_vertices` — these used to fall outside the undo stack), so `undo` / `undo_to` revert them cleanly. Use `get_blender_status` after undoing to verify the active object and mode.
 
 ## Key patterns
 
-**Band selection** — select a ring of vertices at a specific height:
+**Ring-based shaping** — preferred path for axis-aligned editing:
 ```
-# preferred: single call
+# 1. Add edge loops along Z (5 rings result: index 0..4)
+loop_cut(axis=Z, cuts=3)
+
+# 2. See what's there
+get_rings(axis=Z)
+# → 5 rings along Z:  [0] pos=-1.00 verts=4   [1] pos=-0.50 verts=4  ...
+
+# 3. Collapse the top ring to a point — single call
+taper_end(axis=Z, end=MAX)
+
+# 4. Linear taper across rings 2..4
+taper_section(axis=Z, from_ring=2, to_ring=4, x_end=0.4, y_end=0.4)
+
+# 5. Address one specific ring manually
+select_ring(axis=Z, index=-2)              # second from top
+scale_vertices(x=0.85, y=0.85)
+```
+
+**Band selection (raw)** — when ring indexing doesn't fit:
+```
 select_between(axis=Z, lo=0.49, hi=0.51)
 scale_vertices(x=0.5, y=0.5, pivot=SELECTION)
-
-# equivalent verbose form (still works):
-select_all(SELECT)
-select_by_axis(Z, factor=0.49, comparison=LESS,    action=DESELECT)
-select_by_axis(Z, factor=0.51, comparison=GREATER, action=DESELECT)
-scale_vertices(x=0.5, y=0.5, pivot=SELECTION)
 ```
+
+**Stacking objects with `snap_to`** — never compute coordinates by hand:
+```
+add_cube(name="Crossguard", z=1.42); scale_object(x=0.32, y=0.045, z=0.045)
+add_cylinder(name="Grip", radius=0.028, depth=0.2)
+snap_to(target="Crossguard", side="Z_MAX")            # grip-bottom flush with crossguard-top
+add_cylinder(name="Pommel", radius=0.06, depth=0.04, rot_x=90)
+snap_to(target="Grip", side="Z_MAX", offset=-0.04)    # pommel sinks 0.04 into grip
+```
+`snap_to` aligns one bbox face to another and only translates along that axis — other axes are preserved. Use `offset` for overlap or gap.
+
+**Grid layout with `snap_to_grid`** — round positions to clean numbers:
+```
+add_cube(name="WallA", x=2.13, y=0.0, z=0.5)
+snap_to_grid(size=0.5, axes="XY")                     # WallA snaps to nearest 0.5 multiple in X/Y
+```
+Useful for modular builds (walls, blocks, gridded layouts). Skip it for organic shapes.
+
+**`taper_end` reports neighbors** — the result includes nearby mesh objects and their distance to the collapsed point. If you collapsed the wrong end, the report will surface that ("collapsed at z=1.4, nearby: Crossguard@0.02u") before you commit further work.
 
 **Vertex move units** — `move_vertices` takes fractions of the object's world dimensions, not absolute units. `z=0.1` moves 10% of the object's total height. The returned `delta_world` is the actual world-space translation applied.
 
@@ -158,9 +219,9 @@ scale_vertices(x=0.5, y=0.5, pivot=SELECTION)
 
 **Screenshots** — `get_viewport_screenshot` captures whatever the viewport is showing right now. Call `orbit_viewport` or `set_viewport_angle` first to frame the shot you want. Do not use `set_viewport_angle(CAMERA)` for inspection — it shows the camera border crop and the camera object wireframe.
 
-**Object names** — `add_primitive` requires a `name` argument and sets it immediately on the object and its mesh data. Blender may append `.001` if the name already exists; the actual name assigned is returned. Use `get_scene_tree` to verify.
+**Object names** — every `add_*` primitive tool requires a `name` argument and sets it immediately on the object and its mesh data. Blender may append `.001` if the name already exists; the actual name assigned is returned. Use `get_scene_tree` to verify.
 
-**Edit mode context errors** — some Object Mode operators fail if called while in Edit Mode. Always call `set_mode("OBJECT")` before `delete_object`, `add_primitive`, or `select_object`.
+**Edit mode context errors** — some Object Mode operators fail if called while in Edit Mode. Always call `set_mode("OBJECT")` before `delete_object`, `add_cube`/`add_cylinder`/etc., or `select_object`.
 
 ## File layout
 

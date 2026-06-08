@@ -37,6 +37,7 @@ def _status(result: dict) -> str:
         f"  selected:    {s['selected_objects']}",
         f"  z_range:     {s.get('world_z_range')}",
         f"  dims:        {s.get('dimensions')}",
+        f"  rot_deg:     {s.get('rotation_deg')}",
         f"  last_action: {s.get('last_action')}",
     ]
     if "edit" in s:
@@ -70,17 +71,24 @@ def get_viewport_screenshot(width: int = 960, height: int = 540) -> Image:
 
 
 @mcp.tool()
-def get_viewport_collage(zoom: float = 1.0) -> Image:
+def get_viewport_collage(target: str = "ALL", zoom: float = 1.0) -> list:
     """
     Capture 6 views in one image: FRONT | RIGHT | TOP (row 1), BACK | LEFT | PERSP (row 2).
-    zoom: scale factor for panel resolution. Base is 320x180 per panel (960x360 total).
-          zoom=2 gives 640x360 per panel. Use higher zoom for detail inspection.
-    Does not affect or replace get_viewport_screenshot.
+    Each panel auto-frames on the target so the subject fills the view.
+
+    target: ALL (all mesh objects, default) | SELECTED (currently selected mesh objects) | <object name>
+    zoom: panel resolution scale. Base 320x180 per panel; zoom=2 → 640x360 per panel.
+
+    Returns the image plus a text line with the framed world-space bbox.
+    Selection state is preserved across the call.
     """
-    result = call_blender("get_viewport_collage", {"zoom": zoom})
+    result = call_blender("get_viewport_collage", {"target": target, "zoom": zoom})
     if "error" in result:
         raise RuntimeError(result["error"])
-    return Image(data=base64.b64decode(result["image"]), format="png")
+    img = Image(data=base64.b64decode(result["image"]), format="png")
+    summary = (f"target={result['target']}  objects={result['target_objects']}  "
+               f"bbox={result['framed_bbox']}")
+    return [img, summary]
 
 
 @mcp.tool()
@@ -115,6 +123,7 @@ def get_blender_status() -> str:
         f"selected:       {s['selected_objects']}",
         f"location:       {s.get('location')}",
         f"dimensions:     {s.get('dimensions')}",
+        f"rotation_deg:   {s.get('rotation_deg')}",
         f"world_z_range:  {s.get('world_z_range')}",
         f"history_depth:  {s['history_depth']}",
         f"last_action:    {s['last_action']}",
@@ -182,21 +191,101 @@ def set_viewport_angle(angle: str) -> str:
     return main + _status(result)
 
 
-@mcp.tool()
-def add_primitive(type: str, name: str, x: float = 0, y: float = 0, z: float = 0, label: str = "") -> str:
-    """
-    Add a mesh primitive to the scene.
-    type: CUBE | SPHERE | CYLINDER | PLANE | CONE
-    name: REQUIRED — the object's name in Blender (e.g. "Blade", "Crossguard", "Pommel")
-    x, y, z: location in world space
-    label: optional name for the history log
-    """
-    result = call_blender("add_primitive", {"type": type, "name": name, "location": [x, y, z]}, label=label)
+def _add_result(ptype: str, result: dict) -> str:
     if result.get("success"):
-        main = f"Added {type} as '{result['object_name']}' [{result.get('op_id','')}]"
-    else:
-        main = result.get("error", "failed")
-    return main + _status(result)
+        dims = result.get("dimensions")
+        return f"Added {ptype} as '{result['object_name']}' dims={dims} [{result.get('op_id','')}]"
+    return result.get("error", "failed")
+
+
+@mcp.tool()
+def add_cube(name: str, size: float = 2.0,
+             x: float = 0, y: float = 0, z: float = 0,
+             rot_x: float = 0, rot_y: float = 0, rot_z: float = 0,
+             label: str = "") -> str:
+    """
+    Add a cube mesh. The cube's edge length equals `size` (default 2.0).
+    name: REQUIRED — object name.
+    x/y/z: world-space location.  rot_x/y/z: rotation in degrees.
+    """
+    result = call_blender("add_primitive", {
+        "type": "CUBE", "name": name, "location": [x, y, z],
+        "rotation_deg": [rot_x, rot_y, rot_z], "size": size,
+    }, label=label)
+    return _add_result("CUBE", result) + _status(result)
+
+
+@mcp.tool()
+def add_plane(name: str, size: float = 2.0,
+              x: float = 0, y: float = 0, z: float = 0,
+              rot_x: float = 0, rot_y: float = 0, rot_z: float = 0,
+              label: str = "") -> str:
+    """
+    Add a plane mesh (single quad). Edge length = `size`.
+    """
+    result = call_blender("add_primitive", {
+        "type": "PLANE", "name": name, "location": [x, y, z],
+        "rotation_deg": [rot_x, rot_y, rot_z], "size": size,
+    }, label=label)
+    return _add_result("PLANE", result) + _status(result)
+
+
+@mcp.tool()
+def add_cylinder(name: str, vertices: int = 32, radius: float = 1.0, depth: float = 2.0,
+                 cap_fill: str = "NGON",
+                 x: float = 0, y: float = 0, z: float = 0,
+                 rot_x: float = 0, rot_y: float = 0, rot_z: float = 0,
+                 label: str = "") -> str:
+    """
+    Add a cylinder mesh aligned to Z.
+    vertices: edges around the circumference (more = smoother)
+    radius: circumference radius        depth: total Z height
+    cap_fill: NOTHING | NGON | TRIFAN — how the caps are filled
+    """
+    result = call_blender("add_primitive", {
+        "type": "CYLINDER", "name": name, "location": [x, y, z],
+        "rotation_deg": [rot_x, rot_y, rot_z],
+        "vertices": vertices, "radius": radius, "depth": depth, "cap_fill": cap_fill,
+    }, label=label)
+    return _add_result("CYLINDER", result) + _status(result)
+
+
+@mcp.tool()
+def add_sphere(name: str, segments: int = 32, rings: int = 16, radius: float = 1.0,
+               x: float = 0, y: float = 0, z: float = 0,
+               rot_x: float = 0, rot_y: float = 0, rot_z: float = 0,
+               label: str = "") -> str:
+    """
+    Add a UV sphere mesh.
+    segments: longitudinal divisions (around Z)
+    rings: latitudinal divisions
+    """
+    result = call_blender("add_primitive", {
+        "type": "SPHERE", "name": name, "location": [x, y, z],
+        "rotation_deg": [rot_x, rot_y, rot_z],
+        "segments": segments, "rings": rings, "radius": radius,
+    }, label=label)
+    return _add_result("SPHERE", result) + _status(result)
+
+
+@mcp.tool()
+def add_cone(name: str, vertices: int = 32, radius1: float = 1.0, radius2: float = 0.0,
+             depth: float = 2.0, cap_fill: str = "NGON",
+             x: float = 0, y: float = 0, z: float = 0,
+             rot_x: float = 0, rot_y: float = 0, rot_z: float = 0,
+             label: str = "") -> str:
+    """
+    Add a cone or truncated cone mesh aligned to Z.
+    radius1: base (bottom) radius     radius2: top radius (0 = sharp point)
+    cap_fill: NOTHING | NGON | TRIFAN
+    """
+    result = call_blender("add_primitive", {
+        "type": "CONE", "name": name, "location": [x, y, z],
+        "rotation_deg": [rot_x, rot_y, rot_z],
+        "vertices": vertices, "radius1": radius1, "radius2": radius2,
+        "depth": depth, "cap_fill": cap_fill,
+    }, label=label)
+    return _add_result("CONE", result) + _status(result)
 
 
 @mcp.tool()
@@ -252,6 +341,57 @@ def rotate_object(angle: float, axis: str = "Z", label: str = "") -> str:
     """
     result = call_blender("rotate_object", {"angle": angle, "axis": axis}, label=label)
     main = f"ok [{result.get('op_id','')}]" if result.get("success") else result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def snap_to(target: str, side: str = "Z_MAX", source_side: str = "AUTO",
+            offset: float = 0.0, label: str = "") -> str:
+    """
+    Translate the active object so one of its bbox faces aligns with a face of `target`.
+
+    side:        which face of TARGET to snap to.  X_MIN | X_MAX | Y_MIN | Y_MAX | Z_MIN | Z_MAX
+    source_side: which face of ACTIVE to align there.
+                 AUTO (default) = the opposite face on the same axis (so they touch flush).
+                 CENTER = align active's center to target's chosen face.
+                 explicit X_MIN..Z_MAX must be on the same axis as `side`.
+    offset:      world-units along the side axis, applied AFTER alignment.
+                 +ve = move active further in the +axis direction (more overlap when snapping to MAX-side).
+
+    Examples:
+      snap_to(target="Crossguard", side="Z_MAX")                          # grip bottom flush with crossguard top
+      snap_to(target="Grip", side="Z_MAX", offset=-0.04)                  # pommel sinks 0.04 into grip
+      snap_to(target="Wall", side="X_MAX", source_side="X_MAX")           # both right-faces align (flush, not next-to)
+    """
+    params = {"target": target, "side": side, "source_side": source_side, "offset": offset}
+    result = call_blender("snap_to", params, label=label)
+    if result.get("success"):
+        main = (f"snap_to {target}.{side}: delta={result['delta']} "
+                f"({result['source_side']}→{result['target_coord']})  [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def snap_to_grid(size: float = 0.1, axes: str = "XYZ", label: str = "") -> str:
+    """
+    Round the active object's location to multiples of `size` on the chosen axes.
+
+    size: grid spacing in world units (e.g., 0.05, 0.1, 0.25, 1.0)
+    axes: any of "X", "Y", "Z", or combinations like "XZ" — only these axes are snapped.
+
+    Snaps the ORIGIN/pivot — does not change dims, rotation, or geometry.
+    Pairs naturally with snap_to: free-place, snap-to-grid for alignment, snap-to for stacking.
+    """
+    params = {"size": size, "axes": axes}
+    result = call_blender("snap_to_grid", params, label=label)
+    if result.get("success"):
+        moves = result.get("snapped", [])
+        moved_summary = ", ".join(f"{m['axis']}:{m['from']}→{m['to']}" for m in moves if abs(m.get('moved', 0)) > 1e-9) or "no change"
+        main = f"snap_to_grid {size} on {axes}: {moved_summary}  [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
     return main + _status(result)
 
 
@@ -414,6 +554,103 @@ def scale_vertices(x: float = 1.0, y: float = 1.0, z: float = 1.0,
     result = call_blender("scale_vertices", {"x": x, "y": y, "z": z, "pivot": pivot}, label=label)
     if result.get("success"):
         main = f"Scaled {result['verts_scaled']} verts [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def get_rings(axis: str = "Z") -> str:
+    """
+    List the edge-loop rings of the active mesh along an axis.
+
+    A ring is a set of vertices that share the same world-space coordinate on the axis.
+    Rings are returned sorted by position ascending; index 0 = lowest, last = highest.
+    Use the index with select_ring / taper_end / taper_section to address geometry by topology,
+    not by world coordinates.
+
+    Must be in edit mode.
+    """
+    result = call_blender("get_rings", {"axis": axis})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    rings = result["rings"]
+    lines = [f"{result['ring_count']} rings along {axis}:"]
+    for r in rings:
+        lines.append(f"  [{r['index']:>2}]  pos={r['position_world']:+.4f}  verts={r['verts']}")
+    return "\n".join(lines) + _status(result)
+
+
+@mcp.tool()
+def select_ring(axis: str = "Z", index: int = 0, action: str = "SELECT") -> str:
+    """
+    Select the vertices belonging to a specific ring along an axis.
+
+    index: 0 = first (lowest on axis), -1 = last (highest). Negative indices wrap.
+    action: SELECT (replace current selection) | ADD (add to selection) | DESELECT (remove)
+
+    Call get_rings first to see the available indices. Must be in edit mode.
+    """
+    result = call_blender("select_ring", {"axis": axis, "index": index, "action": action})
+    if result.get("success"):
+        main = (f"ring {result['ring_index']}/{result['ring_count']-1}  "
+                f"pos={result['position_world']:+.4f}  verts={result['verts_in_ring']}")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def taper_end(axis: str = "Z", end: str = "MAX", label: str = "") -> str:
+    """
+    Collapse the extreme ring on an axis to a single point (or thin edge).
+
+    end: MAX (highest ring on axis) | MIN (lowest ring on axis)
+
+    The verts at that ring all snap to the ring's centroid in the two non-axis dimensions.
+    Result: a tapered tip. Faster than select_ring + scale_vertices(x=0,y=0).
+    Must be in edit mode.
+    """
+    result = call_blender("taper_end", {"axis": axis, "end": end}, label=label)
+    if result.get("success"):
+        main = (f"tapered ring {result['ring_index']}/{result['ring_count']-1} "
+                f"({result['end']} of {result['axis']})  "
+                f"collapsed {result['collapsed_verts']} verts at world={result.get('collapsed_world')}")
+        nearby = result.get("nearby_objects") or []
+        if nearby:
+            nearby_str = ", ".join(f"{n['name']}@{n['dist']}u" for n in nearby)
+            main += f"\n  nearby: {nearby_str}"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def taper_section(axis: str = "Z", from_ring: int = 0, to_ring: int = -1,
+                  x_start: float = 1.0, x_end: float = 1.0,
+                  y_start: float = 1.0, y_end: float = 1.0, label: str = "") -> str:
+    """
+    Linearly interpolate scale across a span of rings — sculpts taper, bulge, or pinch.
+
+    Each ring in [from_ring, to_ring] is scaled around its own centroid in the two non-axis
+    directions. The scale at the from_ring is (x_start, y_start); at the to_ring it is
+    (x_end, y_end); intermediate rings interpolate linearly.
+
+    Negative indices are allowed (Python-style, so -1 = last ring).
+
+    Examples:
+      taper_section(Z, from_ring=0, to_ring=-1, x_end=0.5, y_end=0.5)  → linear taper to 50% at top
+      taper_section(Z, from_ring=2, to_ring=4, x_start=1, x_end=0)     → collapse rings 2..4 to a Y-edge
+
+    Must be in edit mode.
+    """
+    result = call_blender("taper_section", {
+        "axis": axis, "from_ring": from_ring, "to_ring": to_ring,
+        "x_start": x_start, "x_end": x_end, "y_start": y_start, "y_end": y_end,
+    }, label=label)
+    if result.get("success"):
+        main = (f"tapered rings {result['from_ring']}..{result['to_ring']} of {result['ring_count']} "
+                f"({result['verts_affected']} verts)")
     else:
         main = result.get("error", "failed")
     return main + _status(result)

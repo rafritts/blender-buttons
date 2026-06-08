@@ -10,6 +10,7 @@ import queue
 import math
 import hashlib
 import time
+import blf
 
 PORT = 8765
 _request_queue = queue.Queue()
@@ -37,6 +38,73 @@ def _log_operation(tool, params, label=""):
     ).hexdigest()[:8]
     _history.append({"id": op_id, "label": label or tool, "tool": tool, "params": params})
     return op_id
+
+
+def _push_undo(label):
+    """Push an explicit undo checkpoint. Needed after bmesh mutations since they
+    bypass Blender's operator-driven undo system."""
+    try:
+        bpy.ops.ed.undo_push(message=str(label)[:64])
+    except Exception:
+        pass
+
+
+def _world_bbox(obj):
+    """World-space bounding box: (xmin, ymin, zmin, xmax, ymax, zmax)."""
+    bb = [obj.matrix_world @ mathutils.Vector(c) for c in obj.bound_box]
+    xs = [v.x for v in bb]; ys = [v.y for v in bb]; zs = [v.z for v in bb]
+    return min(xs), min(ys), min(zs), max(xs), max(ys), max(zs)
+
+
+def _world_center(obj):
+    """World-space bbox center of an object."""
+    xmin, ymin, zmin, xmax, ymax, zmax = _world_bbox(obj)
+    return ((xmin + xmax) * 0.5, (ymin + ymax) * 0.5, (zmin + zmax) * 0.5)
+
+
+def _nearby_objects(world_pos, exclude_names=(), max_count=3):
+    """Return up to max_count nearest mesh objects to world_pos, sorted by distance."""
+    px, py, pz = world_pos
+    cands = []
+    for o in bpy.context.scene.objects:
+        if o.name in exclude_names or o.type != 'MESH':
+            continue
+        cx, cy, cz = _world_center(o)
+        d = math.sqrt((cx - px) ** 2 + (cy - py) ** 2 + (cz - pz) ** 2)
+        cands.append((d, o.name, (cx, cy, cz)))
+    cands.sort()
+    return [
+        {"name": n, "center": [round(c[0], 3), round(c[1], 3), round(c[2], 3)], "dist": round(d, 4)}
+        for d, n, c in cands[:max_count]
+    ]
+
+
+# --- Screenshot overlay (blf-based axis label) ---
+
+_screenshot_overlay_text = ""
+
+def _draw_screenshot_overlay():
+    text = _screenshot_overlay_text
+    if not text:
+        return
+    try:
+        font_id = 0
+        blf.size(font_id, 18)
+        blf.color(font_id, 1.0, 0.95, 0.3, 1.0)
+        blf.position(font_id, 8, 8, 0)
+        blf.draw(font_id, text)
+    except Exception:
+        pass
+
+
+PANEL_AXIS_LABELS = {
+    "FRONT": "FRONT  X-Z plane  (+Y into screen)",
+    "RIGHT": "RIGHT  Y-Z plane  (+X into screen)",
+    "TOP":   "TOP    X-Y plane  (+Z into screen)",
+    "BACK":  "BACK   X-Z plane  (-Y into screen)",
+    "LEFT":  "LEFT   Y-Z plane  (-X into screen)",
+    "PERSP": "PERSP  3D view",
+}
 
 
 # --- Viewport helpers ---
@@ -121,7 +189,17 @@ def get_viewport_screenshot(params):
     tmp = os.path.join(tempfile.gettempdir(), "bb_viewport.png")
     scene.render.image_settings.file_format = 'PNG'
     scene.render.resolution_percentage = 100
-    _capture_viewport(scene, window, screen, area, region, tmp, width, height)
+
+    global _screenshot_overlay_text
+    _screenshot_overlay_text = "+Z up   (Blender world)"
+    overlay_handle = bpy.types.SpaceView3D.draw_handler_add(
+        _draw_screenshot_overlay, (), 'WINDOW', 'POST_PIXEL'
+    )
+    try:
+        _capture_viewport(scene, window, screen, area, region, tmp, width, height)
+    finally:
+        bpy.types.SpaceView3D.draw_handler_remove(overlay_handle, 'WINDOW')
+        _screenshot_overlay_text = ""
 
     scene.render.filepath = old_path
     scene.render.image_settings.file_format = old_format
@@ -138,6 +216,7 @@ def get_viewport_screenshot(params):
 def get_viewport_collage(params):
     import numpy as np
 
+    target = params.get("target", "ALL")
     zoom = params.get("zoom", 1.0)
     panel_w = max(160, int(320 * zoom))
     panel_h = max(90,  int(180 * zoom))
@@ -150,6 +229,45 @@ def get_viewport_collage(params):
     if r3d is None:
         return {"error": "No region_3d found"}
 
+    # Resolve target objects to frame on
+    target_up = target.upper() if isinstance(target, str) else "ALL"
+    if target_up == "ALL":
+        target_objs = [o for o in bpy.context.scene.objects if o.type == 'MESH']
+    elif target_up == "SELECTED":
+        target_objs = [o for o in bpy.context.selected_objects if o.type == 'MESH']
+    else:
+        obj = bpy.data.objects.get(target)
+        target_objs = [obj] if obj else []
+
+    if not target_objs:
+        return {"error": f"No mesh objects to frame for target='{target}'"}
+
+    bbox_pts = []
+    for o in target_objs:
+        for c in o.bound_box:
+            bbox_pts.append(o.matrix_world @ mathutils.Vector(c))
+    xs = [p.x for p in bbox_pts]
+    ys = [p.y for p in bbox_pts]
+    zs = [p.z for p in bbox_pts]
+    framed_bbox = {
+        "x": [round(min(xs), 4), round(max(xs), 4)],
+        "y": [round(min(ys), 4), round(max(ys), 4)],
+        "z": [round(min(zs), 4), round(max(zs), 4)],
+    }
+
+    # Save state so framing changes don't leak to user's session
+    active = bpy.context.view_layer.objects.active
+    was_edit = active is not None and active.mode == 'EDIT'
+    if was_edit:
+        bpy.ops.object.mode_set(mode='OBJECT')
+    saved_active = bpy.context.view_layer.objects.active
+    saved_selected = list(bpy.context.selected_objects)
+
+    bpy.ops.object.select_all(action='DESELECT')
+    for o in target_objs:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = target_objs[0]
+
     scene = bpy.context.scene
     old_path   = scene.render.filepath
     old_format = scene.render.image_settings.file_format
@@ -160,33 +278,41 @@ def get_viewport_collage(params):
     scene.render.image_settings.file_format = 'PNG'
     scene.render.resolution_percentage = 100
 
-    # row1: FRONT RIGHT TOP  |  row2: BACK LEFT PERSP
     views = ["FRONT", "RIGHT", "TOP", "BACK", "LEFT", "PERSP"]
     panels = []
 
-    for label in views:
-        tmp = os.path.join(tempfile.gettempdir(), f"bb_col_{label.lower()}.png")
+    global _screenshot_overlay_text
+    overlay_handle = bpy.types.SpaceView3D.draw_handler_add(
+        _draw_screenshot_overlay, (), 'WINDOW', 'POST_PIXEL'
+    )
+    try:
+        for label in views:
+            tmp = os.path.join(tempfile.gettempdir(), f"bb_col_{label.lower()}.png")
+            _screenshot_overlay_text = PANEL_AXIS_LABELS.get(label, label)
 
-        with bpy.context.temp_override(window=window, screen=screen, area=area, region=region):
-            if label != "PERSP":
-                bpy.ops.view3d.view_axis(type=label)
-                bpy.ops.view3d.view_all(center=False)
-            else:
-                bpy.ops.view3d.view_axis(type='FRONT')
-                bpy.ops.view3d.view_all(center=False)
-                r3d.view_perspective = 'PERSP'
-                q_az = mathutils.Quaternion((0.0, 0.0, 1.0), math.radians(-35))
-                r3d.view_rotation = q_az @ r3d.view_rotation
-                q_el = mathutils.Quaternion((1.0, 0.0, 0.0), math.radians(-20))
-                r3d.view_rotation = r3d.view_rotation @ q_el
+            with bpy.context.temp_override(window=window, screen=screen, area=area, region=region):
+                if label != "PERSP":
+                    bpy.ops.view3d.view_axis(type=label)
+                    bpy.ops.view3d.view_selected(use_all_regions=False)
+                else:
+                    bpy.ops.view3d.view_axis(type='FRONT')
+                    bpy.ops.view3d.view_selected(use_all_regions=False)
+                    r3d.view_perspective = 'PERSP'
+                    q_az = mathutils.Quaternion((0.0, 0.0, 1.0), math.radians(-35))
+                    r3d.view_rotation = q_az @ r3d.view_rotation
+                    q_el = mathutils.Quaternion((1.0, 0.0, 0.0), math.radians(-20))
+                    r3d.view_rotation = r3d.view_rotation @ q_el
 
-            _capture_viewport(scene, window, screen, area, region, tmp, panel_w, panel_h)
+                _capture_viewport(scene, window, screen, area, region, tmp, panel_w, panel_h)
 
-        img = bpy.data.images.load(tmp, check_existing=False)
-        px = np.array(img.pixels[:], dtype=np.float32).reshape(panel_h, panel_w, 4)
-        px = np.flipud(px)
-        bpy.data.images.remove(img)
-        panels.append(px)
+            img = bpy.data.images.load(tmp, check_existing=False)
+            px = np.array(img.pixels[:], dtype=np.float32).reshape(panel_h, panel_w, 4)
+            px = np.flipud(px)
+            bpy.data.images.remove(img)
+            panels.append(px)
+    finally:
+        bpy.types.SpaceView3D.draw_handler_remove(overlay_handle, 'WINDOW')
+        _screenshot_overlay_text = ""
 
     row1 = np.concatenate(panels[0:3], axis=1)
     row2 = np.concatenate(panels[3:6], axis=1)
@@ -194,6 +320,18 @@ def get_viewport_collage(params):
 
     out = os.path.join(tempfile.gettempdir(), "bb_collage.png")
     _write_png(grid, out)
+
+    # Restore selection + mode
+    bpy.ops.object.select_all(action='DESELECT')
+    for o in saved_selected:
+        try:
+            o.select_set(True)
+        except Exception:
+            pass
+    if saved_active:
+        bpy.context.view_layer.objects.active = saved_active
+    if was_edit and saved_active:
+        bpy.ops.object.mode_set(mode='EDIT')
 
     scene.render.filepath = old_path
     scene.render.image_settings.file_format = old_format
@@ -209,6 +347,9 @@ def get_viewport_collage(params):
         "format": "png",
         "layout": "row1: FRONT | RIGHT | TOP   row2: BACK | LEFT | PERSP",
         "panel_size": f"{panel_w}x{panel_h}",
+        "target": target,
+        "target_objects": [o.name for o in target_objs],
+        "framed_bbox": framed_bbox,
     }
 
 
@@ -260,31 +401,56 @@ def set_viewport_angle(params):
 
 def add_primitive(params):
     ptype = params.get("type", "CUBE").upper()
-    location = params.get("location", [0, 0, 0])
     name = params.get("name")
     if not name:
         return {"error": "'name' is required — give the object a meaningful name (e.g. 'Blade', 'Crossguard')"}
 
+    location = params.get("location", [0, 0, 0])
+    rotation_deg = params.get("rotation_deg", [0.0, 0.0, 0.0])
+    rotation_rad = tuple(math.radians(a) for a in rotation_deg)
+
     bpy.ops.object.select_all(action='DESELECT')
 
-    ops = {
-        "CUBE":     bpy.ops.mesh.primitive_cube_add,
-        "SPHERE":   bpy.ops.mesh.primitive_uv_sphere_add,
-        "CYLINDER": bpy.ops.mesh.primitive_cylinder_add,
-        "PLANE":    bpy.ops.mesh.primitive_plane_add,
-        "CONE":     bpy.ops.mesh.primitive_cone_add,
-    }
+    common = {"location": tuple(location), "rotation": rotation_rad}
 
-    if ptype not in ops:
-        return {"error": f"Unknown primitive: {ptype}. Valid: {list(ops.keys())}"}
+    if ptype == "CUBE":
+        bpy.ops.mesh.primitive_cube_add(size=params.get("size", 2.0), **common)
+    elif ptype == "PLANE":
+        bpy.ops.mesh.primitive_plane_add(size=params.get("size", 2.0), **common)
+    elif ptype == "CYLINDER":
+        bpy.ops.mesh.primitive_cylinder_add(
+            vertices=params.get("vertices", 32),
+            radius=params.get("radius", 1.0),
+            depth=params.get("depth", 2.0),
+            end_fill_type=params.get("cap_fill", "NGON").upper(),
+            **common,
+        )
+    elif ptype == "SPHERE":
+        bpy.ops.mesh.primitive_uv_sphere_add(
+            segments=params.get("segments", 32),
+            ring_count=params.get("rings", 16),
+            radius=params.get("radius", 1.0),
+            **common,
+        )
+    elif ptype == "CONE":
+        bpy.ops.mesh.primitive_cone_add(
+            vertices=params.get("vertices", 32),
+            radius1=params.get("radius1", 1.0),
+            radius2=params.get("radius2", 0.0),
+            depth=params.get("depth", 2.0),
+            end_fill_type=params.get("cap_fill", "NGON").upper(),
+            **common,
+        )
+    else:
+        return {"error": f"Unknown primitive: {ptype}. Valid: CUBE, PLANE, CYLINDER, SPHERE, CONE"}
 
-    ops[ptype](location=location)
     obj = bpy.context.active_object
     if obj:
         obj.name = name
         if obj.data:
             obj.data.name = name
-    return {"success": True, "object_name": obj.name if obj else None}
+    return {"success": True, "object_name": obj.name if obj else None,
+            "dimensions": [round(v, 4) for v in obj.dimensions] if obj else None}
 
 
 def rename_object(params):
@@ -337,6 +503,93 @@ def rotate_object(params):
     axis = params.get("axis", "Z").upper()
     bpy.ops.transform.rotate(value=math.radians(angle), orient_axis=axis)
     return {"success": True}
+
+
+def snap_to(params):
+    """Move the active object so one of its bbox faces aligns with a face of a target object."""
+    target_name = params.get("target")
+    side = params.get("side", "Z_MAX").upper()
+    source_side = params.get("source_side", "AUTO").upper()
+    offset = params.get("offset", 0.0)
+
+    obj = bpy.context.active_object
+    if obj is None:
+        return {"error": "No active object"}
+    if not target_name:
+        return {"error": "'target' is required"}
+    target = bpy.data.objects.get(target_name)
+    if target is None:
+        return {"error": f"Target '{target_name}' not found"}
+    if target == obj:
+        return {"error": "Cannot snap object to itself"}
+
+    side_map = {
+        "X_MIN": (0, "min"), "X_MAX": (0, "max"),
+        "Y_MIN": (1, "min"), "Y_MAX": (1, "max"),
+        "Z_MIN": (2, "min"), "Z_MAX": (2, "max"),
+    }
+    if side not in side_map:
+        return {"error": f"Invalid side '{side}'. Use X_MIN|X_MAX|Y_MIN|Y_MAX|Z_MIN|Z_MAX"}
+    axis_idx, target_which = side_map[side]
+
+    if source_side == "AUTO":
+        source_which = "max" if target_which == "min" else "min"
+    elif source_side == "CENTER":
+        source_which = "center"
+    elif source_side in side_map:
+        ax2, which2 = side_map[source_side]
+        if ax2 != axis_idx:
+            return {"error": f"source_side '{source_side}' must be on the same axis as side '{side}'"}
+        source_which = which2
+    else:
+        return {"error": f"Invalid source_side '{source_side}'"}
+
+    def _coord(o, ax, which):
+        xmin, ymin, zmin, xmax, ymax, zmax = _world_bbox(o)
+        lo = (xmin, ymin, zmin)[ax]
+        hi = (xmax, ymax, zmax)[ax]
+        if which == "min": return lo
+        if which == "max": return hi
+        return 0.5 * (lo + hi)
+
+    target_coord = _coord(target, axis_idx, target_which)
+    source_coord = _coord(obj, axis_idx, source_which)
+    delta = target_coord - source_coord + offset
+    obj.location[axis_idx] += delta
+
+    return {
+        "success": True,
+        "target": target_name,
+        "axis": "XYZ"[axis_idx],
+        "target_side": side,
+        "source_side": source_which,
+        "target_coord": round(target_coord, 5),
+        "source_coord_before": round(source_coord, 5),
+        "source_coord_after": round(source_coord + delta, 5),
+        "delta": round(delta, 5),
+    }
+
+
+def snap_to_grid(params):
+    """Round the active object's location to multiples of `size` on the chosen axes."""
+    obj = bpy.context.active_object
+    if obj is None:
+        return {"error": "No active object"}
+    size = params.get("size", 0.1)
+    axes = params.get("axes", "XYZ").upper()
+    if size <= 0:
+        return {"error": "size must be > 0"}
+
+    snapped = []
+    for i, ax in enumerate(("X", "Y", "Z")):
+        if ax in axes:
+            old = obj.location[i]
+            new = round(old / size) * size
+            obj.location[i] = new
+            snapped.append({"axis": ax, "from": round(old, 5), "to": round(new, 5), "moved": round(new - old, 5)})
+
+    return {"success": True, "grid_size": size, "axes": axes, "snapped": snapped,
+            "location_after": [round(v, 5) for v in obj.location]}
 
 
 def set_mode(params):
@@ -500,6 +753,7 @@ def loop_cut(params):
 
     bmesh.ops.subdivide_edges(bm, edges=edges_to_cut, cuts=cuts, use_grid_fill=True)
     bmesh.update_edit_mesh(obj.data)
+    _push_undo(f"loop_cut {axis} x{cuts}")
 
     return {"success": True, "cuts": cuts, "edges_subdivided": len(edges_to_cut)}
 
@@ -550,6 +804,7 @@ def move_vertices(params):
         v.co.y += dy
         v.co.z += dz
     bmesh.update_edit_mesh(obj.data)
+    _push_undo("move_vertices")
     world_delta = [round(fx * dims.x, 5), round(fy * dims.y, 5), round(fz * dims.z, 5)]
     return {"success": True, "verts_moved": len(selected), "delta_world": world_delta}
 
@@ -580,6 +835,7 @@ def scale_vertices(params):
         v.co.y = cy + (v.co.y - cy) * sy
         v.co.z = cz + (v.co.z - cz) * sz
     bmesh.update_edit_mesh(obj.data)
+    _push_undo("scale_vertices")
     return {"success": True, "verts_scaled": len(selected)}
 
 
@@ -683,6 +939,179 @@ def grow_selection(params):
     for _ in range(max(1, steps)):
         op()
     return {"success": True, "direction": direction, "steps": steps}
+
+
+def _compute_rings(obj, axis_idx, decimals=4):
+    """Group mesh vertices into rings by world-space coordinate on the given axis.
+    Returns (bmesh, [(position_world, [vert_indices]), ...]) sorted by position ascending."""
+    import bmesh
+    bm = bmesh.from_edit_mesh(obj.data)
+    mat = obj.matrix_world
+    buckets = {}
+    for i, v in enumerate(bm.verts):
+        coord = (mat @ v.co)[axis_idx]
+        key = round(coord, decimals)
+        buckets.setdefault(key, []).append(i)
+    sorted_keys = sorted(buckets.keys())
+    return bm, [(k, buckets[k]) for k in sorted_keys]
+
+
+def get_rings(params):
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    axis = params.get("axis", "Z").upper()
+    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
+    _, rings = _compute_rings(obj, axis_idx)
+    return {
+        "success": True,
+        "axis": axis,
+        "ring_count": len(rings),
+        "rings": [
+            {"index": i, "position_world": round(pos, 4), "verts": len(verts)}
+            for i, (pos, verts) in enumerate(rings)
+        ],
+    }
+
+
+def select_ring(params):
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    axis = params.get("axis", "Z").upper()
+    index = params.get("index", 0)
+    action = params.get("action", "SELECT").upper()
+    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
+    bm, rings = _compute_rings(obj, axis_idx)
+    if not rings:
+        return {"error": "No rings found"}
+    n = len(rings)
+    if index < 0:
+        index = n + index
+    if index < 0 or index >= n:
+        return {"error": f"Ring index {index} out of range [0, {n-1}]"}
+    pos, vert_indices = rings[index]
+    target = set(vert_indices)
+    for i, v in enumerate(bm.verts):
+        match = i in target
+        if action == "DESELECT":
+            if match:
+                v.select = False
+        elif action == "ADD":
+            if match:
+                v.select = True
+        else:
+            v.select = match
+    bm.select_flush_mode()
+    bmesh.update_edit_mesh(obj.data)
+    return {
+        "success": True,
+        "ring_index": index,
+        "ring_count": n,
+        "position_world": round(pos, 4),
+        "verts_in_ring": len(vert_indices),
+    }
+
+
+def taper_end(params):
+    """Collapse the extreme ring on an axis to a point in the two non-axis directions."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    axis = params.get("axis", "Z").upper()
+    end = params.get("end", "MAX").upper()
+    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
+    bm, rings = _compute_rings(obj, axis_idx)
+    if not rings:
+        return {"error": "No rings found"}
+    ring_idx = len(rings) - 1 if end == "MAX" else 0
+    pos, vert_indices = rings[ring_idx]
+    verts = [bm.verts[i] for i in vert_indices]
+    other_idxs = [i for i in range(3) if i != axis_idx]
+    centroid = [0.0, 0.0, 0.0]
+    for v in verts:
+        centroid[0] += v.co.x; centroid[1] += v.co.y; centroid[2] += v.co.z
+    centroid = [c / len(verts) for c in centroid]
+    for v in verts:
+        for ax in other_idxs:
+            v.co[ax] = centroid[ax]
+    bmesh.update_edit_mesh(obj.data)
+    _push_undo(f"taper_end {axis} {end}")
+
+    world_centroid = obj.matrix_world @ mathutils.Vector(centroid)
+    nearby = _nearby_objects(
+        (world_centroid.x, world_centroid.y, world_centroid.z),
+        exclude_names={obj.name},
+        max_count=2,
+    )
+    return {
+        "success": True,
+        "axis": axis,
+        "end": end,
+        "ring_index": ring_idx,
+        "ring_count": len(rings),
+        "collapsed_verts": len(verts),
+        "position_world": round(pos, 4),
+        "collapsed_world": [round(world_centroid.x, 4), round(world_centroid.y, 4), round(world_centroid.z, 4)],
+        "nearby_objects": nearby,
+    }
+
+
+def taper_section(params):
+    """Linearly interpolate scale across a span of rings on the two non-axis directions."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    axis = params.get("axis", "Z").upper()
+    from_idx = params.get("from_ring", 0)
+    to_idx = params.get("to_ring", -1)
+    x_start = params.get("x_start", 1.0)
+    x_end = params.get("x_end", 1.0)
+    y_start = params.get("y_start", 1.0)
+    y_end = params.get("y_end", 1.0)
+    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
+    bm, rings = _compute_rings(obj, axis_idx)
+    n = len(rings)
+    if n == 0:
+        return {"error": "No rings found"}
+    if from_idx < 0: from_idx = n + from_idx
+    if to_idx < 0: to_idx = n + to_idx
+    if from_idx > to_idx:
+        from_idx, to_idx = to_idx, from_idx
+    if from_idx < 0 or to_idx >= n:
+        return {"error": f"Ring range [{from_idx}, {to_idx}] out of [0, {n-1}]"}
+    other_idxs = [i for i in range(3) if i != axis_idx]
+    span = max(1, to_idx - from_idx)
+    affected = 0
+    for ring_i in range(from_idx, to_idx + 1):
+        _, vert_indices = rings[ring_i]
+        t = (ring_i - from_idx) / span
+        sx = x_start + t * (x_end - x_start)
+        sy = y_start + t * (y_end - y_start)
+        verts = [bm.verts[i] for i in vert_indices]
+        centroid = [0.0, 0.0, 0.0]
+        for v in verts:
+            centroid[0] += v.co.x; centroid[1] += v.co.y; centroid[2] += v.co.z
+        centroid = [c / len(verts) for c in centroid]
+        scales = {other_idxs[0]: sx, other_idxs[1]: sy} if len(other_idxs) == 2 else {}
+        for v in verts:
+            for ax, sc in scales.items():
+                v.co[ax] = centroid[ax] + (v.co[ax] - centroid[ax]) * sc
+        affected += len(verts)
+    bmesh.update_edit_mesh(obj.data)
+    _push_undo(f"taper_section {axis} {from_idx}..{to_idx}")
+    return {
+        "success": True,
+        "axis": axis,
+        "from_ring": from_idx,
+        "to_ring": to_idx,
+        "ring_count": n,
+        "rings_scaled": to_idx - from_idx + 1,
+        "verts_affected": affected,
+    }
 
 
 def select_between(params):
@@ -836,6 +1265,7 @@ def get_blender_status(params):
     if obj:
         status["location"] = [round(v, 4) for v in obj.location]
         status["dimensions"] = [round(v, 4) for v in obj.dimensions]
+        status["rotation_deg"] = [round(math.degrees(v), 2) for v in obj.rotation_euler]
         bb = obj.bound_box
         world_bb = [obj.matrix_world @ mathutils.Vector(c) for c in bb]
         status["world_z_range"] = [
@@ -900,6 +1330,8 @@ TOOLS = {
     "scale_object":          scale_object,
     "move_object":           move_object,
     "rotate_object":         rotate_object,
+    "snap_to":               snap_to,
+    "snap_to_grid":          snap_to_grid,
     "set_mode":              set_mode,
     "delete_object":         delete_object,
     "frame_scene":           frame_scene,
@@ -922,6 +1354,10 @@ TOOLS = {
     "grow_selection":        grow_selection,
     "select_between":        select_between,
     "get_current_selection": get_current_selection,
+    "get_rings":             get_rings,
+    "select_ring":           select_ring,
+    "taper_end":             taper_end,
+    "taper_section":         taper_section,
     "duplicate_object":      duplicate_object,
     "join_objects":          join_objects,
     "apply_modifiers":       apply_modifiers,
