@@ -226,6 +226,42 @@ def scale_vertices(params):
     return {"success": True, "verts_scaled": len(selected)}
 
 
+def random_select(params):
+    """Randomly thin out the current selection.
+
+    Keeps a `fraction` of the currently-selected verts; deselects the rest.
+    Use to turn a uniform ring/loop into a sparse pattern — e.g., the
+    "pick random verts on the icing boundary to pull down as drips" step.
+
+    fraction: 0.0–1.0. Fraction of selected verts to keep. Default 0.2.
+    seed:     RNG seed for reproducibility. Default 0.
+    """
+    import bmesh
+    import random as _random
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    fraction = float(params.get("fraction", 0.2))
+    if not 0.0 < fraction <= 1.0:
+        return {"error": "'fraction' must be in (0, 1]"}
+    seed = int(params.get("seed", 0))
+    rng = _random.Random(seed)
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    selected = [v for v in bm.verts if v.select]
+    if not selected:
+        return {"error": "No vertices selected"}
+    keep_count = max(1, int(round(len(selected) * fraction)))
+    keep = set(rng.sample(range(len(selected)), keep_count))
+    for i, v in enumerate(selected):
+        if i not in keep:
+            v.select = False
+    bm.select_flush_mode()
+    bmesh.update_edit_mesh(obj.data)
+    push_undo(f"random_select {fraction}")
+    return {"success": True, "kept": keep_count, "from": len(selected), "seed": seed}
+
+
 def jitter_vertices(params):
     """Randomly displace selected vertices — the easy path to organic, lumpy geometry.
 
@@ -367,4 +403,5 @@ TOOLS = {
     "delete_geometry":    delete_geometry,
     "separate_selection": separate_selection,
     "jitter_vertices":    jitter_vertices,
+    "random_select":      random_select,
 }

@@ -800,6 +800,22 @@ def scale_vertices(x: float = 1.0, y: float = 1.0, z: float = 1.0,
 
 
 @mcp.tool()
+def random_select(fraction: float = 0.2, seed: int = 0, label: str = "") -> str:
+    """
+    Randomly thin the current edit-mode selection: keep `fraction` of selected verts,
+    deselect the rest. Use to turn a uniform ring/loop into a sparse pattern
+    (e.g., pick a handful of boundary verts on the icing to pull down as drip points).
+    fraction: 0..1. seed: RNG seed for reproducibility.
+    """
+    result = call_blender("random_select", {"fraction": fraction, "seed": seed}, label=label)
+    if result.get("success"):
+        main = f"kept {result['kept']}/{result['from']} verts (seed={result['seed']})"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def jitter_vertices(amount: float = 0.005, axis: str = "NORMAL", seed: int = 0,
                     only_positive: bool = False, label: str = "") -> str:
     """
