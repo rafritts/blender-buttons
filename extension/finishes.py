@@ -174,6 +174,90 @@ def add_modifier(params):
     return {"success": True, "modifier": mod.name}
 
 
+_MODIFIER_PROPS = {
+    "levels":        ("levels",       float),  # SUBSURF
+    "render_levels": ("render_levels", int),
+    "width":         ("width",        float),  # BEVEL / SOLIDIFY
+    "segments":      ("segments",     int),
+    "thickness":     ("thickness",    float),  # SOLIDIFY
+    "offset":        ("offset",       float),  # SHRINKWRAP / SOLIDIFY
+    "angle_limit":   ("angle_limit",  "radians"),  # BEVEL (degrees in → radians)
+    "count":         ("count",        int),    # ARRAY
+    "wrap_method":   ("wrap_method",  str),    # SHRINKWRAP
+    "use_clamp":     ("use_clamp_overlap", bool),
+}
+
+
+def modify_modifier(params):
+    """Tweak properties on an existing modifier without rebuilding it.
+
+    target:        object name (required).
+    modifier_name: modifier name on that object (required — get it from add_modifier's return).
+    target_object: SHRINKWRAP / ARRAY object-offset target (re-point at a different object).
+
+    Plus any of these keyword props (only ones that apply to the modifier type take effect):
+      levels, render_levels, width, segments, thickness, offset,
+      angle_limit (degrees), count, wrap_method, use_clamp.
+
+    Returns which props were actually applied vs. skipped (didn't exist on this modifier type).
+    """
+    target = params.get("target")
+    if not target:
+        return {"error": "'target' (object name) is required"}
+    obj = bpy.data.objects.get(target)
+    if obj is None:
+        return {"error": f"Object '{target}' not found"}
+    mod_name = params.get("modifier_name")
+    if not mod_name:
+        return {"error": "'modifier_name' is required"}
+    mod = obj.modifiers.get(mod_name)
+    if mod is None:
+        return {"error": f"Modifier '{mod_name}' not found on '{target}'. "
+                          f"Available: {[m.name for m in obj.modifiers]}"}
+
+    applied = []
+    skipped = []
+
+    target_object = params.get("target_object")
+    if target_object is not None:
+        if hasattr(mod, "target"):
+            tgt = bpy.data.objects.get(target_object)
+            if tgt is None:
+                return {"error": f"target_object '{target_object}' not found"}
+            mod.target = tgt
+            applied.append(f"target={target_object}")
+        else:
+            skipped.append("target_object")
+
+    for key, (attr, coerce) in _MODIFIER_PROPS.items():
+        if key not in params:
+            continue
+        val = params[key]
+        if not hasattr(mod, attr):
+            skipped.append(key)
+            continue
+        if coerce == "radians":
+            setattr(mod, attr, math.radians(float(val)))
+        elif coerce is bool:
+            setattr(mod, attr, bool(val))
+        elif coerce is int:
+            setattr(mod, attr, int(val))
+        elif coerce is float:
+            setattr(mod, attr, float(val))
+        else:
+            setattr(mod, attr, val)
+        applied.append(f"{key}={val}")
+
+    return {
+        "success": True,
+        "target": target,
+        "modifier": mod.name,
+        "type": mod.type,
+        "applied": applied,
+        "skipped": skipped,
+    }
+
+
 def apply_modifiers(params):
     name = params.get("name")
     if name:
@@ -204,5 +288,6 @@ TOOLS = {
     "smooth_edges":    smooth_edges,
     "round_corners":   round_corners,
     "add_modifier":    add_modifier,
+    "modify_modifier": modify_modifier,
     "apply_modifiers": apply_modifiers,
 }

@@ -204,8 +204,88 @@ def set_camera_dof(params):
     }
 
 
+def modify_light(params):
+    """Tweak an existing light's energy/color/size/position without rebuilding it.
+
+    name:     required — light object name.
+    energy:   optional new energy (watts for POINT/SPOT/AREA, irradiance for SUN).
+    color:    optional [r, g, b].
+    size:     optional soft-shadow radius / AREA quad side / SPOT radius.
+    spot_angle: SPOT only, in degrees.
+    x, y, z:  optional new world position. Each axis independent — omitted axes stay.
+    target:   optional object name to aim at (re-aims the light's -Z axis at target center).
+    """
+    name = params.get("name")
+    if not name:
+        return {"error": "'name' is required"}
+    obj = bpy.data.objects.get(name)
+    if obj is None or obj.type != 'LIGHT':
+        return {"error": f"Light '{name}' not found"}
+    light_data = obj.data
+
+    applied = []
+
+    energy = params.get("energy")
+    if energy is not None:
+        light_data.energy = float(energy)
+        applied.append(f"energy={energy}")
+
+    color = params.get("color")
+    if color is not None:
+        if len(color) != 3:
+            return {"error": "'color' must be a 3-element RGB list"}
+        light_data.color = tuple(color)
+        applied.append(f"color={list(color)}")
+
+    size = params.get("size")
+    if size is not None:
+        if hasattr(light_data, "shadow_soft_size"):
+            light_data.shadow_soft_size = float(size)
+        if light_data.type == 'AREA':
+            light_data.size = float(size)
+        applied.append(f"size={size}")
+
+    spot_angle = params.get("spot_angle")
+    if spot_angle is not None and light_data.type == 'SPOT' and hasattr(light_data, "spot_size"):
+        import math as _math
+        light_data.spot_size = _math.radians(float(spot_angle))
+        applied.append(f"spot_angle={spot_angle}")
+
+    moved = False
+    cur = list(obj.location)
+    for i, key in enumerate(("x", "y", "z")):
+        if key in params:
+            cur[i] = float(params[key])
+            moved = True
+    if moved:
+        obj.location = tuple(cur)
+        applied.append(f"location={cur}")
+
+    target = params.get("target")
+    if target:
+        tgt = bpy.data.objects.get(target)
+        if tgt is None:
+            return {"error": f"target '{target}' not found"}
+        from .common import world_center
+        tx, ty, tz = world_center(tgt)
+        direction = mathutils.Vector((tx, ty, tz)) - mathutils.Vector(obj.location)
+        obj.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()
+        applied.append(f"aimed→{target}")
+
+    bpy.context.view_layer.update()
+    return {
+        "success": True,
+        "light": obj.name,
+        "type": light_data.type,
+        "energy": light_data.energy,
+        "color": list(light_data.color),
+        "applied": applied,
+    }
+
+
 TOOLS = {
     "add_light":            add_light,
+    "modify_light":         modify_light,
     "set_world_background": set_world_background,
     "set_camera_dof":       set_camera_dof,
 }

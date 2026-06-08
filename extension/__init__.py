@@ -9,12 +9,12 @@ module whose name matches the tool family:
   queries.py      describe / distance_between / gap_between / is_aligned
   relational.py   match_dimension / mirror_across / distribute_evenly / array_at_corners / array_along
   groups.py       group / parts_in / ungroup
-  finishes.py     smooth_edges / round_corners / add_modifier / apply_modifiers
+  finishes.py     smooth_edges / round_corners / add_modifier / modify_modifier / apply_modifiers
   editmode.py     bevel / extrude / loop_cut / select_* / grow_selection / move/scale_vertices /
                   delete_geometry / separate_selection
   rings.py        get_rings / select_ring(s) / scale_rings / taper_end / taper_section
   shading.py      shade_smooth / shade_flat / set_material (Principled BSDF)
-  lighting.py     add_light / set_world_background / set_camera_dof
+  lighting.py     add_light / modify_light / set_world_background / set_camera_dof
   viewport.py     screenshot / collage / view angle / shading mode / framing / orbit / camera positioning
   history.py      get_history / undo_steps / undo_to
   designs.py      save_design / open_design / list_designs

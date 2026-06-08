@@ -1138,6 +1138,45 @@ def join_objects(names: list) -> str:
 
 
 @mcp.tool()
+def modify_modifier(target: str, modifier_name: str,
+                    levels: int = None, render_levels: int = None,
+                    width: float = None, segments: int = None,
+                    thickness: float = None, offset: float = None,
+                    angle_limit: float = None, count: int = None,
+                    wrap_method: str = "", target_object: str = "",
+                    label: str = "") -> str:
+    """
+    Tweak properties on an existing modifier without rebuilding it.
+    Use this to dial in shrinkwrap offset, bevel width, subsurf levels, etc.
+
+    target: object name. modifier_name: name of the modifier on that object.
+    Each numeric param is optional — pass only the ones you want to change.
+    angle_limit is in degrees (BEVEL). target_object re-points SHRINKWRAP/ARRAY to a different object.
+    wrap_method (SHRINKWRAP): NEAREST_SURFACEPOINT | PROJECT | NEAREST_VERTEX | TARGET_PROJECT.
+    """
+    params = {"target": target, "modifier_name": modifier_name}
+    for key, val in (("levels", levels), ("render_levels", render_levels),
+                     ("width", width), ("segments", segments),
+                     ("thickness", thickness), ("offset", offset),
+                     ("angle_limit", angle_limit), ("count", count)):
+        if val is not None:
+            params[key] = val
+    if wrap_method:
+        params["wrap_method"] = wrap_method
+    if target_object:
+        params["target_object"] = target_object
+    result = call_blender("modify_modifier", params, label=label)
+    if result.get("success"):
+        applied = result.get("applied", [])
+        skipped = result.get("skipped", [])
+        tail = f" (skipped: {skipped})" if skipped else ""
+        main = f"{result['modifier']} ({result['type']}): {applied}{tail} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def apply_modifiers(name: str = "") -> str:
     """
     Apply all modifiers on an object, collapsing them into the base mesh.
@@ -1587,6 +1626,31 @@ def add_light(name: str, type: str = "POINT",
     if result.get("success"):
         main = (f"Added {result['type']} light '{result['object_name']}' at "
                 f"{result['location']} energy={result['energy']} [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def modify_light(name: str, energy: float = None, color: list = None,
+                 size: float = None, spot_angle: float = None,
+                 x: float = None, y: float = None, z: float = None,
+                 target: str = "", label: str = "") -> str:
+    """
+    Tweak an existing light without rebuilding it. Dial energy/color/size live.
+    All params optional except `name`. x/y/z move the light; target re-aims it.
+    """
+    params = {"name": name}
+    for key, val in (("energy", energy), ("color", color), ("size", size),
+                     ("spot_angle", spot_angle), ("x", x), ("y", y), ("z", z)):
+        if val is not None:
+            params[key] = val
+    if target:
+        params["target"] = target
+    result = call_blender("modify_light", params, label=label)
+    if result.get("success"):
+        main = (f"{result['light']} ({result['type']}): {result['applied']} "
+                f"now energy={result['energy']} color={result['color']} [{result.get('op_id','')}]")
     else:
         main = result.get("error", "failed")
     return main + _status(result)
