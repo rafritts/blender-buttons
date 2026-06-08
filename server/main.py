@@ -224,6 +224,22 @@ def set_viewport_angle(angle: str) -> str:
     return main + _status(result)
 
 
+@mcp.tool()
+def set_viewport_shading(mode: str = "MATERIAL") -> str:
+    """
+    Switch the 3D viewport shading mode.
+    mode: WIREFRAME | SOLID | MATERIAL | RENDERED
+      - SOLID: matcap default (no materials visible)
+      - MATERIAL: previews materials with built-in studio lighting (fast)
+      - RENDERED: full Eevee/Cycles preview using your scene lights + world
+    Required before get_viewport_screenshot if you want to see materials/lighting —
+    the screenshot tool captures whatever shading mode is currently active.
+    """
+    result = call_blender("set_viewport_shading", {"mode": mode})
+    main = f"shading → {mode}" if result.get("success") else result.get("error", "failed")
+    return main + _status(result)
+
+
 def _add_result(ptype: str, result: dict) -> str:
     if result.get("success"):
         dims = result.get("dimensions")
@@ -366,6 +382,74 @@ def add_cone(name: str, radius_bottom: float, height: float, radius_top: float =
         "rotation_deg": [rot_x, rot_y, rot_z],
     }, label=label)
     return _add_result("CONE", result) + _status(result)
+
+
+@mcp.tool()
+def add_torus(name: str, major_radius: float, minor_radius: float,
+              on: dict = None,
+              major_segments: int = 48, minor_segments: int = 12,
+              rot_x: float = 0, rot_y: float = 0, rot_z: float = 0,
+              label: str = "") -> str:
+    """
+    Add a torus (donut/ring) aligned to Z. The hole faces along +Z.
+
+    major_radius: center-of-tube radius (distance from origin to tube center).
+    minor_radius: tube thickness radius. Outer diameter = (major+minor)*2.
+    major_segments: ring resolution.   minor_segments: tube cross-section resolution.
+    on: placement spec — see PLACEMENT DSL.
+
+    Use cases: knocker rings, washers, handles, hoops, donuts.
+    To stand a ring vertically (hole facing forward), pass rot_x=90.
+    """
+    result = call_blender("add_torus", {
+        "name": name, "major_radius": major_radius, "minor_radius": minor_radius,
+        "on": on, "major_segments": major_segments, "minor_segments": minor_segments,
+        "rotation_deg": [rot_x, rot_y, rot_z],
+    }, label=label)
+    return _add_result("TORUS", result) + _status(result)
+
+
+@mcp.tool()
+def add_icosphere(name: str, radius: float,
+                  on: dict = None, subdivisions: int = 2,
+                  rot_x: float = 0, rot_y: float = 0, rot_z: float = 0,
+                  label: str = "") -> str:
+    """
+    Add an icosphere of exact radius in meters.
+    Icosphere topology (uniform triangles) deforms more cleanly under subdiv and
+    sculpt than a UV sphere — prefer it when you'll add Subsurf or push verts around.
+
+    subdivisions: 1 (20 faces) | 2 (80) | 3 (320) | 4 (1280) | 5 (5120). Default 2.
+    on: placement spec — see PLACEMENT DSL.
+    """
+    result = call_blender("add_icosphere", {
+        "name": name, "radius": radius,
+        "on": on, "subdivisions": subdivisions,
+        "rotation_deg": [rot_x, rot_y, rot_z],
+    }, label=label)
+    return _add_result("ICOSPHERE", result) + _status(result)
+
+
+@mcp.tool()
+def add_circle(name: str, radius: float,
+               on: dict = None, vertices: int = 32, fill_type: str = "NOTHING",
+               rot_x: float = 0, rot_y: float = 0, rot_z: float = 0,
+               label: str = "") -> str:
+    """
+    Add a flat circle in the XY plane. Useful as a 2D profile (extrude later) or
+    a thin disc.
+
+    radius:    in meters.
+    vertices:  edge count around the circumference.
+    fill_type: NOTHING (open ring, vertices only) | NGON (filled disc) | TRIFAN.
+    on: placement spec — see PLACEMENT DSL.
+    """
+    result = call_blender("add_circle", {
+        "name": name, "radius": radius,
+        "on": on, "vertices": vertices, "fill_type": fill_type,
+        "rotation_deg": [rot_x, rot_y, rot_z],
+    }, label=label)
+    return _add_result("CIRCLE", result) + _status(result)
 
 
 @mcp.tool()
@@ -557,10 +641,17 @@ def set_mode(mode: str) -> str:
 
 @mcp.tool()
 def delete_object(name: str, label: str = "") -> str:
-    """Delete an object by name. Use get_scene_tree to find object names."""
+    """Delete an object OR a group by name. If `name` is a group, every part inside
+    (recursively, through nested sub-groups) is deleted and the empty group is removed.
+    Use get_scene_tree to see object/group names."""
     result = call_blender("delete_object", {"name": name}, label=label)
     if result.get("success"):
-        main = f"Deleted '{result['deleted']}' [{result.get('op_id','')}]"
+        if "deleted_group" in result:
+            members = result["deleted_members"]
+            main = (f"Deleted group '{result['deleted_group']}' and {len(members)} part(s) "
+                    f"[{result.get('op_id','')}]")
+        else:
+            main = f"Deleted '{result['deleted']}' [{result.get('op_id','')}]"
     else:
         main = result.get("error", "failed")
     return main + _status(result)
@@ -703,6 +794,43 @@ def scale_vertices(x: float = 1.0, y: float = 1.0, z: float = 1.0,
     result = call_blender("scale_vertices", {"x": x, "y": y, "z": z, "pivot": pivot}, label=label)
     if result.get("success"):
         main = f"Scaled {result['verts_scaled']} verts [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def delete_geometry(mode: str = "VERT", label: str = "") -> str:
+    """
+    Delete the current selection in edit mode.
+    mode: VERT | EDGE | FACE | ONLY_FACE | EDGE_FACE
+      - VERT       — delete selected verts (and faces/edges touching them)
+      - FACE       — delete selected faces (and the edges/verts only used by them)
+      - ONLY_FACE  — delete just the faces, leaving an open hole bounded by their edges
+      - EDGE_FACE  — delete edges + faces, leave verts
+    Must be in edit mode. Pairs with select_by_axis/select_between for "carve away half".
+    """
+    result = call_blender("delete_geometry", {"mode": mode}, label=label)
+    if result.get("success"):
+        main = f"deleted ({mode}) [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def separate_selection(new_name: str = "", label: str = "") -> str:
+    """
+    Split the current edit-mode selection out as a new object (the 'P → Selection' shortcut).
+    new_name: optional name for the new object. If omitted, Blender appends '.001'.
+    Returns the new object's name. The original stays in edit mode; the new object is in object mode.
+    """
+    params = {}
+    if new_name:
+        params["new_name"] = new_name
+    result = call_blender("separate_selection", params, label=label)
+    if result.get("success"):
+        main = f"separated '{result['source']}' → '{result['new_object']}' [{result.get('op_id','')}]"
     else:
         main = result.get("error", "failed")
     return main + _status(result)
@@ -876,17 +1004,29 @@ def loop_cut(axis: str = "Z", cuts: int = 1, label: str = "") -> str:
 
 @mcp.tool()
 def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int = 2,
-                 width: float = 0.1, segments: int = 1, label: str = "") -> str:
+                 width: float = 0.1, segments: int = 1,
+                 target: str = "", offset: float = None,
+                 wrap_method: str = "NEAREST_SURFACEPOINT", label: str = "") -> str:
     """
     Add a modifier to the active object.
-    type: SUBSURF | BEVEL | SOLIDIFY | MIRROR | ARRAY | SCREW
+    type: SUBSURF | BEVEL | SOLIDIFY | MIRROR | ARRAY | SCREW | SHRINKWRAP
     levels: subdivision levels (SUBSURF)  |  width/segments: bevel params
+    target: required for SHRINKWRAP — the object to wrap onto.
+    offset: SHRINKWRAP only — surface offset in meters (skin distance).
+    wrap_method: SHRINKWRAP only —
+                 NEAREST_SURFACEPOINT (default) | PROJECT | NEAREST_VERTEX | TARGET_PROJECT.
     """
-    result = call_blender("add_modifier", {
+    params = {
         "type": type, "name": name or type.capitalize(),
         "levels": levels, "render_levels": render_levels,
         "width": width, "segments": segments,
-    }, label=label)
+        "wrap_method": wrap_method,
+    }
+    if target:
+        params["target"] = target
+    if offset is not None:
+        params["offset"] = offset
+    result = call_blender("add_modifier", params, label=label)
     if result.get("success"):
         main = f"{result['modifier']} [{result.get('op_id','')}]"
     else:
@@ -1235,6 +1375,26 @@ def group(name: str, parts: list, label: str = "") -> str:
 
 
 @mcp.tool()
+def add_to_group(name: str, parts: list, label: str = "") -> str:
+    """Add objects (or members of another group) to an existing group.
+
+    Use this as the design grows so the group always represents the whole thing.
+    Example: after adding a knocker_ring to a chest, call
+    add_to_group("chest", ["knocker_plate", "knocker_ring"]) — then
+    delete_object("chest") or nudge("chest", ...) acts on every part, not just the originals.
+
+    name:  existing group name (create with `group` first).
+    parts: list of object names or other group names (groups expand to their members).
+    """
+    result = call_blender("add_to_group", {"name": name, "parts": parts}, label=label)
+    if result.get("success"):
+        return (f"group '{name}' now contains {len(result['members'])} parts "
+                f"(added: {result['newly_added']}) [{result.get('op_id','')}]"
+                + _status(result))
+    return result.get("error", "failed")
+
+
+@mcp.tool()
 def parts_in(name: str) -> str:
     """List the parts inside a named group."""
     result = call_blender("parts_in", {"name": name})
@@ -1311,6 +1471,187 @@ def smooth_edges(targets: str = "", width: float = 0.002, segments: int = 2,
         return (f"smoothed: {result['smoothed']} (width={width}m, segs={segments}, "
                 f"angle<{angle_limit}°) [{result.get('op_id','')}]" + _status(result))
     return result.get("error", "failed")
+
+
+@mcp.tool()
+def shade_smooth(targets: str = "", auto_smooth_angle: float = 30.0, label: str = "") -> str:
+    """
+    Toggle smooth shading on objects (the right-click "Shade Smooth" step from the donut tutorial).
+    Edges sharper than auto_smooth_angle degrees stay faceted so corners read crisp.
+
+    targets: object name, group name, comma-separated list, or empty (active object).
+    """
+    t = [s.strip() for s in targets.split(",")] if targets else None
+    if t and len(t) == 1:
+        t = t[0]
+    result = call_blender("shade_smooth", {
+        "targets": t, "auto_smooth_angle": auto_smooth_angle,
+    }, label=label)
+    if result.get("success"):
+        main = f"shade_smooth: {result['smoothed']} (angle<{auto_smooth_angle}°) [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def shade_flat(targets: str = "", label: str = "") -> str:
+    """
+    Restore faceted (flat) shading on objects.
+    targets: object name, group name, comma-separated list, or empty (active object).
+    """
+    t = [s.strip() for s in targets.split(",")] if targets else None
+    if t and len(t) == 1:
+        t = t[0]
+    result = call_blender("shade_flat", {"targets": t}, label=label)
+    if result.get("success"):
+        main = f"shade_flat: {result['flattened']} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def set_material(target: str,
+                 base_color: list = None,
+                 metallic: float = None,
+                 roughness: float = None,
+                 ior: float = None,
+                 alpha: float = None,
+                 emission_color: list = None,
+                 emission_strength: float = None,
+                 material_name: str = "",
+                 label: str = "") -> str:
+    """
+    Create or update a Principled BSDF material and assign it to `target` (slot 0).
+    Covers ~80% of real materials: color, metallic, roughness, IOR, alpha, emission.
+
+    target:        REQUIRED — object to receive the material.
+    base_color:    [r, g, b] or [r, g, b, a], floats 0..1.
+    metallic:      0..1 (0 = dielectric, 1 = metal).
+    roughness:     0..1 (0 = mirror, 1 = chalk).
+    ior:           index of refraction. Glass ≈ 1.5, water ≈ 1.33. Default 1.45.
+    alpha:         0..1. Values < 1 enable BLEND transparency.
+    emission_color / emission_strength: glow color and intensity.
+    material_name: name for the material; defaults to "<target>_mat". Reused if exists.
+
+    Examples:
+      set_material("donut", base_color=[0.8, 0.55, 0.35], roughness=0.6)   # dough
+      set_material("icing", base_color=[1.0, 0.85, 0.92], roughness=0.3)   # pink frosting
+      set_material("sprinkle_1", base_color=[1, 0.1, 0.1], roughness=0.4)
+    """
+    params = {"target": target}
+    if material_name:        params["material_name"] = material_name
+    if base_color is not None:        params["base_color"] = base_color
+    if metallic is not None:          params["metallic"] = metallic
+    if roughness is not None:         params["roughness"] = roughness
+    if ior is not None:               params["ior"] = ior
+    if alpha is not None:             params["alpha"] = alpha
+    if emission_color is not None:    params["emission_color"] = emission_color
+    if emission_strength is not None: params["emission_strength"] = emission_strength
+    result = call_blender("set_material", params, label=label)
+    if result.get("success"):
+        main = (f"material '{result['material']}' on '{result['target']}': "
+                f"{result['applied']} [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def add_light(name: str, type: str = "POINT",
+              x: float = 0.0, y: float = 0.0, z: float = 5.0,
+              energy: float = None, color: list = None, size: float = 0.25,
+              target: str = "", spot_angle: float = 45.0,
+              label: str = "") -> str:
+    """
+    Add a light to the scene.
+
+    name:    REQUIRED — unique object name.
+    type:    POINT | SUN | SPOT | AREA  (default POINT)
+    x, y, z: world position (meters). Default (0, 0, 5).
+    energy:  light strength. Defaults: 1000 for POINT/SPOT/AREA (watts), 5 for SUN.
+    color:   [r, g, b] floats 0..1. Default warm white [1, 0.95, 0.9].
+    size:    soft-shadow radius / AREA quad side / SPOT radius. Default 0.25 m.
+    target:  optional object name to aim the light at (its -Z axis points at the target).
+    spot_angle: cone angle in degrees for SPOT lights. Default 45.
+
+    Example: add_light("key", type="AREA", x=3, y=-3, z=4, size=2.0, energy=500, target="donut")
+    """
+    params = {"name": name, "type": type, "x": x, "y": y, "z": z, "size": size,
+              "spot_angle": spot_angle}
+    if energy is not None: params["energy"] = energy
+    if color is not None:  params["color"] = color
+    if target:             params["target"] = target
+    result = call_blender("add_light", params, label=label)
+    if result.get("success"):
+        main = (f"Added {result['type']} light '{result['object_name']}' at "
+                f"{result['location']} energy={result['energy']} [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def set_world_background(color: list = None, strength: float = None,
+                         hdri: str = "", label: str = "") -> str:
+    """
+    Set the world background. Either a solid color (cheap ambient) or an HDRI image
+    (image-based lighting — gives free realistic environment light + reflections).
+
+    color:    [r, g, b] solid color, floats 0..1. Ignored if `hdri` is set.
+    strength: light intensity from the background. Default 1.0.
+    hdri:     path to an HDRI/EXR file. Connected as an Environment Texture.
+
+    Examples:
+      set_world_background(color=[0.05, 0.05, 0.08], strength=0.3)         # dim blue room
+      set_world_background(hdri="~/hdris/studio.exr", strength=1.0)        # studio lighting
+    """
+    params = {}
+    if color is not None:    params["color"] = color
+    if strength is not None: params["strength"] = strength
+    if hdri:                 params["hdri"] = hdri
+    result = call_blender("set_world_background", params, label=label)
+    if result.get("success"):
+        if result["mode"] == "hdri":
+            main = f"world: hdri={result['hdri']} strength={result['strength']}"
+        elif result["mode"] == "color":
+            main = f"world: color={result['color']} strength={result['strength']}"
+        else:
+            main = f"world: unchanged (strength={result['strength']})"
+        main += f" [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def set_camera_dof(focus_distance: float = None, aperture: float = None,
+                   focus_object: str = "", camera: str = "", label: str = "") -> str:
+    """
+    Enable depth of field on the scene camera (the blurry-background look).
+
+    focus_distance: meters from camera to focal plane. Ignored if focus_object is set.
+    focus_object:   object to focus on (auto-tracks its distance).
+    aperture:       f-stop. Lower = shallower DoF. 1.4 (very shallow) | 2.8 (portrait) | 8 (deep).
+    camera:         camera object name. Empty = scene camera.
+
+    Example: set_camera_dof(focus_object="donut", aperture=2.8)
+    """
+    params = {}
+    if focus_distance is not None: params["focus_distance"] = focus_distance
+    if aperture is not None:       params["aperture"] = aperture
+    if focus_object:               params["focus_object"] = focus_object
+    if camera:                     params["camera"] = camera
+    result = call_blender("set_camera_dof", params, label=label)
+    if result.get("success"):
+        main = (f"DoF on '{result['camera']}': "
+                f"focus_object={result['focus_object']} "
+                f"focus_distance={result['focus_distance']} "
+                f"f/{result['aperture_fstop']} [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
 
 
 @mcp.tool()
