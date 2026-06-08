@@ -800,6 +800,30 @@ def scale_vertices(x: float = 1.0, y: float = 1.0, z: float = 1.0,
 
 
 @mcp.tool()
+def jitter_vertices(amount: float = 0.005, axis: str = "NORMAL", seed: int = 0,
+                    only_positive: bool = False, label: str = "") -> str:
+    """
+    Randomly displace selected vertices in edit mode — organic lumpy geometry in one call.
+    amount: max displacement in meters (default 5mm).
+    axis: NORMAL (puffs along each vert's normal — best for organic dough) | X | Y | Z | XYZ.
+    seed: RNG seed for reproducibility.
+    only_positive: if true, only displace outward (default both directions).
+
+    Tutorial uses: jitter donut with axis=NORMAL for lumpy dough; jitter icing's bottom ring
+    with axis=Z + only_positive (negative amount) for drippy edges.
+    """
+    result = call_blender("jitter_vertices", {
+        "amount": amount, "axis": axis, "seed": seed, "only_positive": only_positive,
+    }, label=label)
+    if result.get("success"):
+        main = (f"Jittered {result['verts_jittered']} verts along {result['axis']} "
+                f"±{result['amount']}m (seed={result['seed']}) [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def delete_geometry(mode: str = "VERT", label: str = "") -> str:
     """
     Delete the current selection in edit mode.
@@ -1387,6 +1411,44 @@ def array_along(prototype: str, count: int, between: list, axis: str = "X",
         return (f"placed {count} copies on {axis} (spacing {result['spacing']} m): "
                 f"{result['placed']} [{result.get('op_id','')}]" + _status(result))
     return result.get("error", "failed")
+
+
+@mcp.tool()
+def scatter_on_surface(target: str, source: str, count: int = 100,
+                       scale_min: float = 0.8, scale_max: float = 1.2,
+                       align_normal: bool = True, rotate_z: bool = True,
+                       parent_to_target: bool = True, seed: int = 0,
+                       name_prefix: str = "", label: str = "") -> str:
+    """
+    Scatter `count` copies of `source` randomly across `target`'s surface.
+    The donut-tutorial sprinkles step.
+
+    target / source: existing mesh object names (required).
+    count: number of instances (capped at 5000).
+    scale_min/max: per-instance scale jitter range.
+    align_normal: rotate each copy's +Z to match the surface normal at its location.
+    rotate_z: also apply random spin around that normal.
+    parent_to_target: parent every instance to target so they move/animate with it.
+    seed: RNG seed for reproducibility.
+    name_prefix: name prefix for generated objects (default "<source>_inst").
+
+    All instances share `source`'s mesh data — cheap memory-wise. Target's
+    modifiers are evaluated, so sprinkles land on the visible (post-subsurf) surface.
+    """
+    result = call_blender("scatter_on_surface", {
+        "target": target, "source": source, "count": count,
+        "scale_min": scale_min, "scale_max": scale_max,
+        "align_normal": align_normal, "rotate_z": rotate_z,
+        "parent_to_target": parent_to_target, "seed": seed,
+        "name_prefix": name_prefix,
+    }, label=label)
+    if result.get("success"):
+        main = (f"scattered {result['scattered']} copies of '{result['source']}' "
+                f"onto '{result['target']}' (mesh '{result['source_mesh']}') "
+                f"[{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
 
 
 # --- Groups ---

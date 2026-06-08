@@ -226,6 +226,76 @@ def scale_vertices(params):
     return {"success": True, "verts_scaled": len(selected)}
 
 
+def jitter_vertices(params):
+    """Randomly displace selected vertices — the easy path to organic, lumpy geometry.
+
+    amount:    max displacement in meters (default 0.005 = 5mm). Each vertex is offset
+               by a uniform random value in [-amount, +amount] along the chosen axis.
+    axis:      NORMAL (along each vert's normal — best for organic puffing) |
+               X | Y | Z (along world axis) | XYZ (independent random on all 3 axes).
+               Default NORMAL.
+    seed:      RNG seed for reproducibility. Default 0.
+    only_positive: if true, displacement is in [0, amount] (only outward). Default false.
+
+    Use cases:
+      - donut tutorial: jitter all the donut's verts along NORMAL for lumpy dough
+      - icing drips: jitter the icing's bottom ring along Z (negative) for drippy edges
+    """
+    import bmesh
+    import random as _random
+    import mathutils as _mu
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+
+    amount = float(params.get("amount", 0.005))
+    axis = (params.get("axis") or "NORMAL").upper()
+    seed = int(params.get("seed", 0))
+    only_positive = bool(params.get("only_positive", False))
+
+    rng = _random.Random(seed)
+    bm = bmesh.from_edit_mesh(obj.data)
+    selected = [v for v in bm.verts if v.select]
+    if not selected:
+        return {"error": "No vertices selected"}
+
+    # Convert world-space amount into local space (account for object scale).
+    scale = obj.scale
+    inv_scale = _mu.Vector((
+        amount / (abs(scale.x) or 1.0),
+        amount / (abs(scale.y) or 1.0),
+        amount / (abs(scale.z) or 1.0),
+    ))
+
+    def _rand():
+        return rng.uniform(0.0, 1.0) if only_positive else rng.uniform(-1.0, 1.0)
+
+    if axis == "NORMAL":
+        for v in selected:
+            n = v.normal
+            if n.length == 0:
+                continue
+            d = _rand()
+            v.co += n * (d * amount)
+    elif axis in ("X", "Y", "Z"):
+        idx = {"X": 0, "Y": 1, "Z": 2}[axis]
+        for v in selected:
+            d = _rand()
+            v.co[idx] += d * inv_scale[idx]
+    elif axis == "XYZ":
+        for v in selected:
+            v.co.x += _rand() * inv_scale.x
+            v.co.y += _rand() * inv_scale.y
+            v.co.z += _rand() * inv_scale.z
+    else:
+        return {"error": f"Invalid axis '{axis}'. Use NORMAL | X | Y | Z | XYZ"}
+
+    bmesh.update_edit_mesh(obj.data)
+    push_undo(f"jitter_vertices {axis} ±{amount}")
+    return {"success": True, "verts_jittered": len(selected),
+            "amount": amount, "axis": axis, "seed": seed}
+
+
 _DELETE_TYPES = {"VERT", "EDGE", "FACE", "ONLY_FACE", "EDGE_FACE"}
 
 
@@ -296,4 +366,5 @@ TOOLS = {
     "scale_vertices":     scale_vertices,
     "delete_geometry":    delete_geometry,
     "separate_selection": separate_selection,
+    "jitter_vertices":    jitter_vertices,
 }

@@ -23,6 +23,7 @@ from . import (
     queries,
     relational,
     rings,
+    scatter,
     shading,
     state,
     status,
@@ -47,6 +48,7 @@ _TOOL_MODULES = (
     rings,
     shading,
     lighting,
+    scatter,
     designs,
 )
 
