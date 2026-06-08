@@ -3,19 +3,16 @@
 A live attempt at the Blender Guru donut tutorial via the MCP server.
 Each entry: what the tutorial calls for, the closest tool we have, and what's missing.
 
-## 1. Organic deformation — PARTIALLY IMPLEMENTED via `jitter_vertices`
+## 1. Organic deformation — IMPLEMENTED
 
-`jitter_vertices(amount, axis=NORMAL|X|Y|Z|XYZ, seed, only_positive)` in
-`extension/editmode.py` and the MCP wrapper in `server/main.py:jitter_vertices`.
-Random per-vertex displacement with a seed for reproducibility. Covers the
-donut-tutorial "lumpy dough" use case (jitter along NORMAL) and the "drippy
-icing edge" use case (select boundary ring, jitter along Z).
+Two complementary tools:
 
-**Still missing:** true proportional editing — push a single vertex with a smooth
-falloff that pulls neighbors. `bpy.ops.transform.translate(..., use_proportional_edit=True)`
-needs operator context; or implement falloff ourselves (smooth/sphere/root/sharp/linear curves)
-on top of `move_vertices`. Useful for sculpting larger shapes (squish one side of the donut
-to make it not perfectly circular). Not built yet.
+- `jitter_vertices(amount, axis=NORMAL|X|Y|Z|XYZ, seed, only_positive)` —
+  random per-vertex displacement. Covers "lumpy dough".
+- `proportional_move(x, y, z, radius, falloff=SMOOTH|LINEAR|SPHERE|SHARP|ROOT|CONSTANT)` —
+  move selected verts with a falloff that drags nearby verts along. The
+  donut-tutorial proportional-editing equivalent — gives bulbous icing drips
+  when applied to sparse boundary handles.
 
 ## 2. Sculpt-mode brushes
 

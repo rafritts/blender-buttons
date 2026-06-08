@@ -800,6 +800,33 @@ def scale_vertices(x: float = 1.0, y: float = 1.0, z: float = 1.0,
 
 
 @mcp.tool()
+def proportional_move(x: float = 0.0, y: float = 0.0, z: float = 0.0,
+                      radius: float = 0.01, falloff: str = "SMOOTH",
+                      label: str = "") -> str:
+    """
+    Move selected verts with a falloff — drags nearby verts along (proportional editing).
+    Selected verts move full amount; verts at radius edge don't move at all.
+
+    x/y/z: translation as a fraction of object dims (same as move_vertices).
+    radius: falloff radius in meters (default 1cm).
+    falloff: SMOOTH (default — rounded shape) | LINEAR | SPHERE | SHARP | ROOT | CONSTANT.
+
+    For icing drips: select sparse boundary verts, proportional_move(z=-0.5, radius=0.005)
+    gives bulbous rounded drops instead of triangular spikes.
+    """
+    result = call_blender("proportional_move", {
+        "x": x, "y": y, "z": z, "radius": radius, "falloff": falloff,
+    }, label=label)
+    if result.get("success"):
+        main = (f"pulled {result['handles']} handles, dragged {result['affected']} verts "
+                f"r={result['radius']}m {result['falloff']} delta_world={result['delta_world']} "
+                f"[{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def random_select(fraction: float = 0.2, seed: int = 0, label: str = "") -> str:
     """
     Randomly thin the current edit-mode selection: keep `fraction` of selected verts,
@@ -1214,6 +1241,40 @@ def modify_modifier(target: str, modifier_name: str,
     else:
         main = result.get("error", "failed")
     return main + _status(result)
+
+
+@mcp.tool()
+def remove_modifier(target: str, modifier_name: str, label: str = "") -> str:
+    """
+    Remove a modifier from an object by name. Pass modifier_name='ALL' to clear them all.
+    Use list_modifiers first to see what's on the object.
+    """
+    result = call_blender("remove_modifier",
+                          {"target": target, "modifier_name": modifier_name}, label=label)
+    if result.get("success"):
+        main = f"removed {result['removed']} from '{result['target']}' [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def list_modifiers(target: str) -> str:
+    """
+    List the modifier stack on an object (top → bottom = evaluation order).
+    Each entry shows type, name, and the relevant numeric props.
+    """
+    result = call_blender("list_modifiers", {"target": target})
+    if not result.get("success"):
+        return result.get("error", "failed") + _status(result)
+    mods = result["modifiers"]
+    if not mods:
+        return f"'{result['target']}': no modifiers" + _status(result)
+    lines = [f"'{result['target']}' modifier stack ({len(mods)}):"]
+    for i, m in enumerate(mods):
+        extras = " ".join(f"{k}={v}" for k, v in m.items() if k not in ("name", "type"))
+        lines.append(f"  {i}. {m['type']:12} '{m['name']}'  {extras}")
+    return "\n".join(lines) + _status(result)
 
 
 @mcp.tool()

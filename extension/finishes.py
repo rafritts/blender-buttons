@@ -258,6 +258,60 @@ def modify_modifier(params):
     }
 
 
+def remove_modifier(params):
+    """Remove a modifier from an object by name. Use list_modifiers to see what's on it.
+
+    target:        object name (required).
+    modifier_name: modifier name (required). Use 'ALL' to clear every modifier.
+    """
+    target = params.get("target")
+    if not target:
+        return {"error": "'target' is required"}
+    obj = bpy.data.objects.get(target)
+    if obj is None:
+        return {"error": f"Object '{target}' not found"}
+    mod_name = params.get("modifier_name")
+    if not mod_name:
+        return {"error": "'modifier_name' is required (or 'ALL')"}
+    if mod_name.upper() == "ALL":
+        removed = [m.name for m in obj.modifiers]
+        for m in list(obj.modifiers):
+            obj.modifiers.remove(m)
+        return {"success": True, "target": target, "removed": removed}
+    mod = obj.modifiers.get(mod_name)
+    if mod is None:
+        return {"error": f"Modifier '{mod_name}' not found on '{target}'. "
+                          f"Available: {[m.name for m in obj.modifiers]}"}
+    obj.modifiers.remove(mod)
+    return {"success": True, "target": target, "removed": [mod_name]}
+
+
+def list_modifiers(params):
+    """List the modifier stack on an object, in evaluation order (top → bottom).
+
+    target: object name (required).
+    """
+    target = params.get("target")
+    if not target:
+        return {"error": "'target' is required"}
+    obj = bpy.data.objects.get(target)
+    if obj is None:
+        return {"error": f"Object '{target}' not found"}
+    stack = []
+    for m in obj.modifiers:
+        entry = {"name": m.name, "type": m.type}
+        for attr in ("levels", "render_levels", "width", "segments", "thickness",
+                     "offset", "count"):
+            if hasattr(m, attr):
+                entry[attr] = getattr(m, attr)
+        if hasattr(m, "target") and m.target is not None:
+            entry["target"] = m.target.name
+        if hasattr(m, "wrap_method"):
+            entry["wrap_method"] = m.wrap_method
+        stack.append(entry)
+    return {"success": True, "target": target, "modifiers": stack}
+
+
 def apply_modifiers(params):
     name = params.get("name")
     if name:
@@ -289,5 +343,7 @@ TOOLS = {
     "round_corners":   round_corners,
     "add_modifier":    add_modifier,
     "modify_modifier": modify_modifier,
+    "remove_modifier": remove_modifier,
+    "list_modifiers":  list_modifiers,
     "apply_modifiers": apply_modifiers,
 }

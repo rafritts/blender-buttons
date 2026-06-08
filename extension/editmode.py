@@ -226,6 +226,106 @@ def scale_vertices(params):
     return {"success": True, "verts_scaled": len(selected)}
 
 
+_FALLOFFS = {"SMOOTH", "LINEAR", "SPHERE", "SHARP", "ROOT", "CONSTANT"}
+
+
+def proportional_move(params):
+    """Move selected verts with a falloff — drags nearby verts along with the pull.
+
+    This is the donut-tutorial proportional-editing equivalent: each selected vert
+    acts as a "handle" that pulls every vert within `radius` along with the
+    translation, weighted by distance. Selected verts move the full amount; verts
+    at exactly the radius edge don't move at all.
+
+    x, y, z: translation as a fraction of the object's dimensions (same units as
+             move_vertices).
+    radius:  falloff radius in meters. Default 0.01 (1cm).
+    falloff: SMOOTH (default — smoothstep, soft round shape) | LINEAR | SPHERE |
+             SHARP (sharp at edge) | ROOT | CONSTANT (no falloff — full move within radius).
+
+    Use case: icing drips. Select a sparse set of boundary verts, then
+    proportional_move(z=-0.5, radius=0.005, falloff=SMOOTH) — each pulled vert
+    drags its neighbors down with it, making round bulbous drips instead of
+    triangular spikes.
+    """
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+
+    fx = float(params.get("x", 0.0))
+    fy = float(params.get("y", 0.0))
+    fz = float(params.get("z", 0.0))
+    radius = float(params.get("radius", 0.01))
+    if radius <= 0:
+        return {"error": "'radius' must be > 0"}
+    falloff = (params.get("falloff") or "SMOOTH").upper()
+    if falloff not in _FALLOFFS:
+        return {"error": f"Invalid falloff '{falloff}'. Use {sorted(_FALLOFFS)}"}
+
+    dims = obj.dimensions
+    scale = obj.scale
+    sx = abs(scale.x) or 1.0
+    sy = abs(scale.y) or 1.0
+    sz = abs(scale.z) or 1.0
+    # Local-space deltas (mirrors move_vertices).
+    dx = fx * dims.x / sx
+    dy = fy * dims.y / sy
+    dz = fz * dims.z / sz
+    # Radius is in world meters; convert to local space (approx — pick the
+    # smallest scale so we err on the side of a larger local radius).
+    inv_scale_min = 1.0 / min(sx, sy, sz)
+    radius_local = radius * inv_scale_min
+    r2 = radius_local * radius_local
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    handles = [v for v in bm.verts if v.select]
+    if not handles:
+        return {"error": "No vertices selected"}
+    handle_cos = [v.co.copy() for v in handles]
+
+    affected = 0
+    for v in bm.verts:
+        # Find nearest handle — squared distance keeps the hot loop sqrt-free.
+        best2 = r2
+        for h in handle_cos:
+            d2 = (v.co - h).length_squared
+            if d2 < best2:
+                best2 = d2
+        if best2 >= r2:
+            continue
+        d = best2 ** 0.5
+        t = d / radius_local  # 0 at handle, 1 at radius edge
+        if falloff == "SMOOTH":
+            w = 1.0 - t * t * (3.0 - 2.0 * t)
+        elif falloff == "LINEAR":
+            w = 1.0 - t
+        elif falloff == "SPHERE":
+            inner = 1.0 - t * t
+            w = inner ** 0.5 if inner > 0 else 0.0
+        elif falloff == "SHARP":
+            w = (1.0 - t) ** 2
+        elif falloff == "ROOT":
+            w = 1.0 - t ** 0.5
+        else:  # CONSTANT
+            w = 1.0
+        v.co.x += dx * w
+        v.co.y += dy * w
+        v.co.z += dz * w
+        affected += 1
+
+    bmesh.update_edit_mesh(obj.data)
+    push_undo(f"proportional_move r={radius} {falloff}")
+    return {
+        "success": True,
+        "handles": len(handles),
+        "affected": affected,
+        "radius": radius,
+        "falloff": falloff,
+        "delta_world": [round(fx * dims.x, 5), round(fy * dims.y, 5), round(fz * dims.z, 5)],
+    }
+
+
 def random_select(params):
     """Randomly thin out the current selection.
 
@@ -404,4 +504,5 @@ TOOLS = {
     "separate_selection": separate_selection,
     "jitter_vertices":    jitter_vertices,
     "random_select":      random_select,
+    "proportional_move":  proportional_move,
 }
