@@ -102,6 +102,9 @@ Read-only / image tools (`get_blender_status`, `get_viewport_screenshot`, `get_v
 | `move_object(x, y, z, label)` | Relative offset in world units |
 | `rotate_object(angle, axis, label)` | Degrees, axis: `X \| Y \| Z` |
 | `scale_object(x, y, z, label)` | Multipliers (1.0 = no change, 2.0 = double) |
+| `duplicate_object(name, new_name)` | Duplicate in place. `new_name` optional — if omitted Blender appends `.001`. Duplicate becomes the active object. |
+| `join_objects(names)` | Join a list of objects into one. First name in the list is the surviving object. Minimum 2 names. |
+| `apply_modifiers(name)` | Apply all modifiers on the named object (or active object if omitted), collapsing them into the base mesh. Required before export or boolean operations. |
 | `set_camera_position(x, y, z, target_x, target_y, target_z)` | Move the scene camera |
 | `add_modifier(type, name, levels, width, segments, label)` | type: `SUBSURF \| BEVEL \| SOLIDIFY \| MIRROR \| ARRAY \| SCREW` |
 
@@ -112,8 +115,12 @@ Must be in Edit Mode (`set_mode("EDIT")`) before calling these.
 | Tool | Description |
 |------|-------------|
 | `set_mode(mode)` | `OBJECT \| EDIT \| SCULPT` |
+| `set_component_mode(mode)` | Switch mesh select component type: `VERT \| EDGE \| FACE`. Call before selection operations that depend on component type. |
 | `select_all(action)` | `SELECT \| DESELECT \| INVERT` |
 | `select_by_axis(axis, factor, comparison, action)` | Select/deselect verts by world-space position. `factor` maps 0.0→min extent, 1.0→max extent. `comparison`: `GREATER \| LESS`. `action`: `SELECT \| DESELECT`. Returns the actual world-space threshold used. |
+| `select_between(axis, lo, hi, action)` | Select verts whose position on `axis` falls between `lo` and `hi` (both 0.0–1.0 factors). Replaces the verbose `select_all → DESELECT below → DESELECT above` band pattern. Returns world-space thresholds and selected vert count. |
+| `grow_selection(direction, steps)` | Expand or contract the current selection by topology adjacency. `direction`: `GROW \| SHRINK`. `steps`: number of iterations (default 1). |
+| `get_current_selection()` | Returns vert count, world-space centroid, and world-space bounding box of the current selection. Use before moving/scaling to verify what's actually selected. |
 | `loop_cut(axis, cuts, label)` | Subdivide edges running along the given axis. Uses world-space edge direction, so works correctly on scaled/tapered objects. |
 | `move_vertices(x, y, z, label)` | Move selected verts. x/y/z are fractions of the object's world-space dimension on that axis. Handles object scale correctly. |
 | `scale_vertices(x, y, z, pivot, label)` | Scale selected verts. `pivot`: `SELECTION` (around centroid) \| `ORIGIN` (around object origin at local 0,0,0). |
@@ -134,10 +141,14 @@ History is reset when Blender restarts. The history log tracks only operations t
 
 **Band selection** — select a ring of vertices at a specific height:
 ```
+# preferred: single call
+select_between(axis=Z, lo=0.49, hi=0.51)
+scale_vertices(x=0.5, y=0.5, pivot=SELECTION)
+
+# equivalent verbose form (still works):
 select_all(SELECT)
-select_by_axis(Z, factor=0.49, comparison=LESS,    action=DESELECT)  # drop below
-select_by_axis(Z, factor=0.51, comparison=GREATER, action=DESELECT)  # drop above
-# now only the ring at Z=50% is selected
+select_by_axis(Z, factor=0.49, comparison=LESS,    action=DESELECT)
+select_by_axis(Z, factor=0.51, comparison=GREATER, action=DESELECT)
 scale_vertices(x=0.5, y=0.5, pivot=SELECTION)
 ```
 
