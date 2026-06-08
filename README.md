@@ -56,8 +56,8 @@ Every state-modifying tool appends a `── blender status ──` block to its
   mode:        OBJECT | EDIT | SCULPT
   active:      <object name> (<type>)
   selected:    [<names>]
-  z_range:     [min_z, max_z]  ← world space bounding box Z extent
-  dims:        [x, y, z]       ← world space dimensions
+  dims:        [x, y, z]       ← world bbox dimensions (rotation-aware)
+  bounds:      x=[..]  y=[..]  z=[..]   ← full world bbox
   rot_deg:     [rx, ry, rz]    ← Euler rotation in degrees
   last_action: {id, label, tool}
   ── edit ──                   ← only present in Edit Mode
@@ -75,10 +75,11 @@ Read-only / image tools (`get_blender_status`, `get_viewport_screenshot`, `get_v
 
 | Tool | Description |
 |------|-------------|
+| `describe(name)` | Relational sentence about an object — what it rests on, what it's flush with, dimensions. **Prefer this over `get_object_info` for normal workflows.** |
 | `get_scene_tree()` | All objects in the scene as an ASCII tree, with active/selected markers |
 | `get_blender_status()` | Full context snapshot: mode, active object, dims, Z range, edit-mode selection counts |
-| `get_object_info()` | Active object: location, scale, rotation, world bounding box, vert/edge/face counts |
-| `get_mesh_profile(axis="Z")` | Slice the active mesh into rings along an axis; reports min/max/width at each ring. Use before editing to know actual geometry. |
+| `get_object_info(name="")` | Coordinate dump (location, scale, rotation, world bounding box, vert/edge/face counts). Use when you actually need the raw numbers. |
+| `get_mesh_profile(axis="Z")` | Slice the active mesh into rings along an axis; reports min/max/width at each ring. |
 | `get_history()` | Full operation log with IDs. Use with `undo_to`. |
 
 ### Viewport
@@ -92,28 +93,109 @@ Read-only / image tools (`get_blender_status`, `get_viewport_screenshot`, `get_v
 | `frame_scene()` | Fit all objects in the viewport |
 | `zoom_to_selected()` | Zoom viewport to the active object |
 
+## Design principle: dimensions over coordinates
+
+LLMs (and humans) are bad at carrying world-coordinate values across operations. So the API is built around **dimensions** (lengths, sizes) and **relational placement** (snap, on top of, between, at corners of). Raw `(x, y, z)` placement is available as a last resort but is never the default path.
+
+The hierarchy:
+
+1. **Dimensions** — `add_box(width=0.04, depth=0.04, height=0.45)`. The natural vocabulary.
+2. **Relational placement** — `on={"at_corner": {"of": "seat", "corner": "front_left"}, "on_floor": True}`. The server computes the coordinate; you never see it.
+3. **Relational verbs** — `array_at_corners`, `mirror_across`, `distribute_evenly`, `match_dimension`. One call replaces what would otherwise be a chain of coordinate math.
+4. **Coordinates** — available via `nudge`, `snap_to_grid`, `raise_to`, and the edit-mode tools, but documented as the ripcord. Reach for them only when no relational framing fits.
+
+Axis convention: **+X right, +Y back, +Z up**. "Front" of an object = its −Y side.
+
 ### Object operations (Object Mode)
+
+#### Dimensional primitives — the way to create geometry
+
+Every `add_*` takes exact world-space dimensions in meters plus an optional `on` placement spec. After creation, the object's scale is `[1, 1, 1]` so bevel and other width-based modifiers behave uniformly.
 
 | Tool | Description |
 |------|-------------|
-| `add_cube(name, size, x, y, z, rot_x, rot_y, rot_z)` | Add a cube. `size` = edge length (default 2). |
-| `add_plane(name, size, x, y, z, rot_x, rot_y, rot_z)` | Add a single-quad plane. |
-| `add_cylinder(name, vertices, radius, depth, cap_fill, x, y, z, rot_x, rot_y, rot_z)` | Cylinder aligned to Z. `vertices` = circumference resolution. `cap_fill`: `NOTHING \| NGON \| TRIFAN`. |
-| `add_sphere(name, segments, rings, radius, x, y, z, rot_x, rot_y, rot_z)` | UV sphere. `segments`/`rings` control resolution. |
-| `add_cone(name, vertices, radius1, radius2, depth, cap_fill, x, y, z, rot_x, rot_y, rot_z)` | Cone or truncated cone. `radius1`=base, `radius2`=top (0 = point). |
-| `select_object(name)` | Select by name and make active |
-| `rename_object(old_name, new_name)` | Rename object and its mesh data block |
-| `delete_object(name, label)` | Delete by name |
-| `move_object(x, y, z, label)` | Relative offset in world units |
-| `rotate_object(angle, axis, label)` | Degrees, axis: `X \| Y \| Z` |
-| `scale_object(x, y, z, label)` | Multipliers (1.0 = no change, 2.0 = double) |
-| `snap_to(target, side, source_side, offset, label)` | Align active object's bbox face to a face of `target`. `side`: which face of target (`X_MIN`…`Z_MAX`). `source_side`: opposite face by default (`AUTO`), or explicit / `CENTER`. `offset` shifts along the same axis after alignment. Use for stacking and flush placement — no coordinate arithmetic. |
-| `snap_to_grid(size, axes, label)` | Round the active object's origin to multiples of `size` on the chosen axes (e.g. `"XZ"`). Touches only the pivot — dims/rotation/geometry untouched. Opt-in per call. |
-| `duplicate_object(name, new_name)` | Duplicate in place. `new_name` optional — if omitted Blender appends `.001`. Duplicate becomes the active object. |
-| `join_objects(names)` | Join a list of objects into one. First name in the list is the surviving object. Minimum 2 names. |
-| `apply_modifiers(name)` | Apply all modifiers on the named object (or active object if omitted), collapsing them into the base mesh. Required before export or boolean operations. |
-| `set_camera_position(x, y, z, target_x, target_y, target_z)` | Move the scene camera |
-| `add_modifier(type, name, levels, width, segments, label)` | type: `SUBSURF \| BEVEL \| SOLIDIFY \| MIRROR \| ARRAY \| SCREW` |
+| `add_box(name, width, depth, height, on=None, rot_x, rot_y, rot_z)` | Rectangular box of exact W × D × H meters. |
+| `add_plane(name, width, depth, on=None, rot_x, rot_y, rot_z)` | Single-quad plane of exact W × D meters. |
+| `add_cylinder(name, radius, height, on=None, vertices=32, cap_fill="NGON", rot_x, rot_y, rot_z)` | Cylinder aligned to Z. |
+| `add_sphere(name, radius, on=None, segments=32, rings=16, rot_x, rot_y, rot_z)` | UV sphere of exact radius. |
+| `add_cone(name, radius_bottom, height, radius_top=0.0, on=None, vertices=32, cap_fill="NGON", rot_x, rot_y, rot_z)` | Cone or truncated cone. |
+
+#### Placement DSL — the `on=` parameter
+
+A dict combining one or more constraint keys:
+
+| Key | Meaning |
+|-----|---------|
+| `{"on": "name"}` | New rests on top of target, centered XY |
+| `{"under": "name"}` | New rests below target, centered XY |
+| `{"between": ["a", "b"]}` | New is centered on midpoint of two object centers |
+| `{"centered_on": "name"}` | Match XYZ centers |
+| `{"at_corner": {"of": "name", "corner": "front_left"\|"front_right"\|"back_left"\|"back_right"}}` | Bottom-corner of new aligns with bottom-corner of target |
+| `{"left_of": "name"}` / `right_of` / `in_front_of` / `behind` | Flush against the named side; remaining axes centered on target |
+| `{"on_floor": True}` | Bottom of new = Z 0 (overrides Z from above keys) |
+| `{"raise_to": 0.45}` | Bottom of new = Z 0.45 (literal Z value — ripcord) |
+| `{"gap": 0.02}` | Spacing modifier for on/under/left_of/etc. (positive = farther apart; negative = overlap) |
+
+Combine freely: `on={"at_corner": {"of": "seat", "corner": "front_left"}, "on_floor": True}`.
+
+#### Relational queries — read scene state without coords
+
+| Tool | Description |
+|------|-------------|
+| `describe(name)` | Relational sentence: what the object rests on, what it's flush with, its dimensions. Prefer over `get_object_info` for normal workflows. |
+| `distance_between(a, b, axis="ANY")` | Center-to-center distance. `axis`: ANY \| X \| Y \| Z. |
+| `gap_between(a, b)` | Empty space between bounding boxes per axis; negative = overlap. |
+| `is_aligned(a, b, side="TOP", tolerance=0.001)` | True/False for face or center alignment. `side`: TOP \| BOTTOM \| LEFT \| RIGHT \| FRONT \| BACK \| CENTER_X \| CENTER_Y \| CENTER_Z. |
+| `get_object_info(name="")` | Coordinate dump (location, scale, rotation, bbox). Use only when you actually need the underlying numbers. |
+| `get_scene_tree()` | ASCII tree of objects and groups. |
+
+#### Relational verbs — common multi-object operations
+
+| Tool | Description |
+|------|-------------|
+| `match_dimension(target, reference, axis="Z")` | Resize `target` so its size on `axis` equals `reference`'s size. |
+| `mirror_across(targets, plane="X", suffix="_mirror")` | Duplicate parts and mirror copies across a world axis plane through origin. |
+| `distribute_evenly(targets, between=[a, b], axis="X")` | Position parts evenly between two anchors. |
+| `array_at_corners(prototype, of, standing_on_floor=True, keep_original=False, name_prefix="")` | Duplicate prototype to all 4 corners of target's footprint. Names: `<prefix>_front_left` etc. |
+| `array_along(prototype, count, between=[a, b], axis="X", keep_original=False, name_prefix="")` | Duplicate prototype N times, evenly spaced between two anchors. Names: `<prefix>_1`..`_N`. |
+
+#### Transforms
+
+| Tool | Description |
+|------|-------------|
+| `nudge(targets="", right, left, up, down, back, forward)` | Relative offset in semantic directions (meters). Empty `targets` = active object. |
+| `resize(targets="", width, depth, height)` | Absolute resize (any axis omitted preserves current size). Scale is baked after. |
+| `rotate_object(angle, axis="Z", targets="")` | Rotate by degrees around axis. |
+| `apply_transform(targets="", scale=True, rotation=False, location=False)` | Bake transforms into mesh data. |
+| `snap_to(target, side, source_side="AUTO", offset=0.0)` | Move the active object so one of its bbox faces aligns with `target`'s named face. Lower-level than the placement DSL but still relational. |
+| `snap_to_grid(size, axes="XYZ")` | Round the active object's origin to grid multiples. |
+
+#### Groups (Blender collections)
+
+| Tool | Description |
+|------|-------------|
+| `group(name, parts=[...])` | Create or extend a named group. Any tool that accepts `targets` can take the group name. |
+| `parts_in(name)` | List objects in a group. |
+| `ungroup(name)` | Remove a group; objects move back to scene root (NOT deleted). |
+
+#### Finishes
+
+| Tool | Description |
+|------|-------------|
+| `smooth_edges(targets="", width=0.002, segments=2, angle_limit=30.0)` | Round off sharp edges. Bundles BEVEL (angle-limited so coplanar edges are ignored) + shade_smooth + auto_smooth + apply. Use as the standard "make it look less blocky" verb. |
+| `add_modifier(type, name, levels, width, segments, limit_method="ANGLE", angle_limit=30.0)` | Lower-level modifier add. For BEVEL, `limit_method` and `angle_limit` are now exposed. |
+| `apply_modifiers(name)` | Apply all modifiers on the named object (or active). |
+
+#### Basics
+
+| Tool | Description |
+|------|-------------|
+| `select_object(name)` | Select by name and make active. |
+| `rename_object(old_name, new_name)` | Rename object and mesh data block. |
+| `delete_object(name)` | Delete by name. |
+| `duplicate_object(name, new_name="")` | Duplicate in place. |
+| `join_objects(names=[...])` | Join into one object (minimum 2 names). |
+| `set_camera_position(x, y, z, target_x, target_y, target_z)` | Move the scene camera. |
 
 ### Edit Mode operations
 
@@ -130,7 +212,9 @@ A "ring" is a set of vertices that share the same world-space coordinate on the 
 | `loop_cut(axis, cuts, label)` | Subdivide edges running along the given axis. Uses world-space edge direction, so works correctly on scaled/tapered objects. |
 | `get_rings(axis)` | List all rings of the active mesh along an axis: index, world-space position, vert count. Call this to know what indices are available. |
 | `select_ring(axis, index, action)` | Select all vertices belonging to a ring. `index` accepts negatives (-1 = last). `action`: `SELECT` (replace) \| `ADD` \| `DESELECT`. |
-| `taper_end(axis, end, label)` | Collapse the extreme ring on an axis to a point. `end`: `MAX` \| `MIN`. Faster than select_ring + scale_vertices(x=0,y=0). |
+| `select_rings(axis, indices, action)` | Select the union of multiple rings at once. `indices` is a list (negatives allowed). Replaces the verbose `select_ring` + `ADD` + `ADD` pattern for repeating detail. |
+| `scale_rings(axis, indices, x, y, label)` | Scale each named ring around **its own centroid** in the two non-axis directions. Correct tool for bulge/pinch detail — avoids the pivot pitfalls of `scale_vertices` on multi-ring selections. |
+| `taper_end(axis, end, scale, label)` | Scale the extreme ring on an axis toward its own centroid. `scale=0` (default) collapses to a point; `scale=0.5` leaves a partial taper. |
 | `taper_section(axis, from_ring, to_ring, x_start, x_end, y_start, y_end, label)` | Linearly interpolate scale across a span of rings. Each ring scales around its own centroid in the two non-axis directions. Use for tapers, bulges, pinches. |
 
 #### Selection & topology
@@ -194,22 +278,61 @@ select_between(axis=Z, lo=0.49, hi=0.51)
 scale_vertices(x=0.5, y=0.5, pivot=SELECTION)
 ```
 
-**Stacking objects with `snap_to`** — never compute coordinates by hand:
+**Build a Mission chair — dimensions and relational verbs end-to-end:**
 ```
-add_cube(name="Crossguard", z=1.42); scale_object(x=0.32, y=0.045, z=0.045)
-add_cylinder(name="Grip", radius=0.028, depth=0.2)
-snap_to(target="Crossguard", side="Z_MAX")            # grip-bottom flush with crossguard-top
-add_cylinder(name="Pommel", radius=0.06, depth=0.04, rot_x=90)
-snap_to(target="Grip", side="Z_MAX", offset=-0.04)    # pommel sinks 0.04 into grip
+# 1. Seat (creates at origin — first piece needs an anchor)
+add_box("seat", width=0.44, depth=0.40, height=0.03,
+        on={"raise_to": 0.45})                                   # seat top at 0.48m
+
+# 2. Four legs at the corners of the seat, standing on the floor
+add_box("leg_proto", width=0.04, depth=0.04, height=0.45)
+array_at_corners("leg_proto", of="seat", standing_on_floor=True,
+                 name_prefix="leg")                              # → leg_front_left, leg_front_right, leg_back_left, leg_back_right
+
+# 3. Back rails between the two back legs
+add_box("back_rail_top", width=0.36, depth=0.04, height=0.05,
+        on={"between": ["leg_back_left", "leg_back_right"], "raise_to": 0.90})
+add_box("back_rail_bottom", width=0.36, depth=0.04, height=0.04,
+        on={"between": ["leg_back_left", "leg_back_right"], "raise_to": 0.495})
+
+# 4. Five slats evenly between the two rails along X
+add_box("slat_proto", width=0.04, depth=0.015, height=0.365,
+        on={"between": ["back_rail_top", "back_rail_bottom"]})
+array_along("slat_proto", count=5,
+            between=["leg_back_left", "leg_back_right"], axis="X",
+            name_prefix="slat")
+
+# 5. Stretchers across the bottom
+add_box("stretcher_front", width=0.36, depth=0.025, height=0.04,
+        on={"between": ["leg_front_left", "leg_front_right"], "raise_to": 0.08})
+add_box("stretcher_back", width=0.36, depth=0.025, height=0.04,
+        on={"between": ["leg_back_left", "leg_back_right"], "raise_to": 0.08})
+
+# 6. Group and finish
+group("chair", parts=["seat", "leg_front_left", "leg_front_right",
+                       "leg_back_left", "leg_back_right",
+                       "back_rail_top", "back_rail_bottom",
+                       "slat_1", "slat_2", "slat_3", "slat_4", "slat_5",
+                       "stretcher_front", "stretcher_back"])
+smooth_edges("chair", width=0.003)                               # rounds every edge in one call
 ```
-`snap_to` aligns one bbox face to another and only translates along that axis — other axes are preserved. Use `offset` for overlap or gap.
+Zero raw `(x, y, z)` placements. Every position is expressed relative to existing parts.
+
+**Lower-level snap with `snap_to`** — when the placement DSL doesn't fit:
+```
+add_box("Crossguard", width=0.32, depth=0.045, height=0.045, on={"raise_to": 1.4})
+add_cylinder("Grip", radius=0.028, height=0.2)
+snap_to(target="Crossguard", side="Z_MAX")                       # grip-bottom flush with crossguard-top
+add_cylinder("Pommel", radius=0.06, height=0.04, rot_x=90)
+snap_to(target="Grip", side="Z_MAX", offset=-0.04)               # pommel sinks 0.04 into grip
+```
 
 **Grid layout with `snap_to_grid`** — round positions to clean numbers:
 ```
-add_cube(name="WallA", x=2.13, y=0.0, z=0.5)
-snap_to_grid(size=0.5, axes="XY")                     # WallA snaps to nearest 0.5 multiple in X/Y
+add_box("WallA", width=0.5, depth=0.1, height=1.0, on={"raise_to": 0.0})
+nudge("WallA", right=2.13)                                       # rough placement
+snap_to_grid(size=0.5, axes="XY")                                # snap WallA to nearest 0.5m
 ```
-Useful for modular builds (walls, blocks, gridded layouts). Skip it for organic shapes.
 
 **`taper_end` reports neighbors** — the result includes nearby mesh objects and their distance to the collapsed point. If you collapsed the wrong end, the report will surface that ("collapsed at z=1.4, nearby: Crossguard@0.02u") before you commit further work.
 
@@ -221,7 +344,7 @@ Useful for modular builds (walls, blocks, gridded layouts). Skip it for organic 
 
 **Object names** — every `add_*` primitive tool requires a `name` argument and sets it immediately on the object and its mesh data. Blender may append `.001` if the name already exists; the actual name assigned is returned. Use `get_scene_tree` to verify.
 
-**Edit mode context errors** — some Object Mode operators fail if called while in Edit Mode. Always call `set_mode("OBJECT")` before `delete_object`, `add_cube`/`add_cylinder`/etc., or `select_object`.
+**Edit mode context errors** — some Object Mode operators fail if called while in Edit Mode. Always call `set_mode("OBJECT")` before `delete_object`, `add_box`/`add_cylinder`/etc., or `select_object`.
 
 ## File layout
 

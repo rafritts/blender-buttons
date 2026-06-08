@@ -11,16 +11,23 @@ mcp = FastMCP("blender-buttons")
 
 def call_blender(tool: str, params: dict = {}, label: str = "") -> dict:
     payload = json.dumps({"tool": tool, "params": params, "label": label}) + "\n"
-    with socket.create_connection((ADDON_HOST, ADDON_PORT), timeout=30) as sock:
-        sock.sendall(payload.encode())
-        data = b""
-        while True:
-            chunk = sock.recv(4096)
-            if not chunk:
-                break
-            data += chunk
-            if b"\n" in data:
-                break
+    try:
+        with socket.create_connection((ADDON_HOST, ADDON_PORT), timeout=30) as sock:
+            sock.sendall(payload.encode())
+            data = b""
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+                if b"\n" in data:
+                    break
+    except (ConnectionRefusedError, socket.timeout, OSError) as e:
+        return {"error": (
+            f"Cannot reach Blender extension on {ADDON_HOST}:{ADDON_PORT} ({type(e).__name__}). "
+            "Open Blender, enable the 'Blender Buttons' extension, and click 'Start Server' "
+            "in the Scene properties panel."
+        )}
     return json.loads(data.decode().strip())
 
 
@@ -29,14 +36,15 @@ def _status(result: dict) -> str:
     s = result.get("blender_status")
     if not s:
         return ""
+    wb = s.get("world_bounds") or {}
     lines = [
         "",
         "── blender status ──────────────────────────────",
         f"  mode:        {s['mode']}",
         f"  active:      {s['active_object']} ({s['active_type']})",
         f"  selected:    {s['selected_objects']}",
-        f"  z_range:     {s.get('world_z_range')}",
-        f"  dims:        {s.get('dimensions')}",
+        f"  dims:        {s.get('dimensions')}     (world bbox, rotation-aware)",
+        f"  bounds:      x={wb.get('x')}  y={wb.get('y')}  z={wb.get('z')}",
         f"  rot_deg:     {s.get('rotation_deg')}",
         f"  last_action: {s.get('last_action')}",
     ]
@@ -122,9 +130,9 @@ def get_blender_status() -> str:
         f"active_object:  {s['active_object']} ({s['active_type']})",
         f"selected:       {s['selected_objects']}",
         f"location:       {s.get('location')}",
-        f"dimensions:     {s.get('dimensions')}",
+        f"dimensions:     {s.get('dimensions')}     (world bbox)",
         f"rotation_deg:   {s.get('rotation_deg')}",
-        f"world_z_range:  {s.get('world_z_range')}",
+        f"world_bounds:   {s.get('world_bounds')}",
         f"history_depth:  {s['history_depth']}",
         f"last_action:    {s['last_action']}",
     ]
@@ -166,16 +174,41 @@ def get_mesh_profile(axis: str = "Z") -> str:
 
 
 @mcp.tool()
-def get_object_info() -> str:
+def get_object_info(name: str = "") -> str:
     """
-    Return detailed state of the active object: location, scale, rotation, dimensions,
-    world-space bounding box, and vertex/edge/face counts. Use this before making
-    precise edits so you know actual coordinates and sizes.
+    Detailed state dump of an object: location, scale, rotation, dimensions, world bbox,
+    and vertex/edge/face counts.
+
+    Prefer `describe(name)` for normal workflows — it returns a relational sentence
+    instead of raw coordinates. Use this when you specifically need the underlying
+    coordinate/scale/rotation values (debugging, math).
+
+    name: target object. If omitted, falls back to the active object.
     """
-    result = call_blender("get_object_info")
+    params = {"name": name} if name else {}
+    result = call_blender("get_object_info", params)
     if result.get("success"):
         return json.dumps(result["info"], indent=2) + _status(result)
     return result.get("error", "failed")
+
+
+@mcp.tool()
+def describe(name: str) -> str:
+    """
+    Describe an object in RELATIONAL terms — what it rests on, what it's flush with,
+    and its dimensions. No raw world coordinates.
+
+    Prefer this over get_object_info for normal workflows. Coords appear in get_object_info
+    when you really need them; describe() is the everyday tool because relational
+    descriptions are what you actually reason in.
+
+    Example output:
+        "leg_front_left: standing on floor; flush left of seat; size 0.04 × 0.04 × 0.45 m (W×D×H)"
+    """
+    result = call_blender("describe", {"name": name})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    return result["description"] + _status(result)
 
 
 # --- State-modifying tools ---
@@ -194,96 +227,143 @@ def set_viewport_angle(angle: str) -> str:
 def _add_result(ptype: str, result: dict) -> str:
     if result.get("success"):
         dims = result.get("dimensions")
-        return f"Added {ptype} as '{result['object_name']}' dims={dims} [{result.get('op_id','')}]"
+        bounds = result.get("world_bounds", {})
+        bounds_str = (f" at x={bounds.get('x')} y={bounds.get('y')} z={bounds.get('z')}"
+                      if bounds else "")
+        return f"Added {ptype} as '{result['object_name']}' dims={dims}{bounds_str} [{result.get('op_id','')}]"
     return result.get("error", "failed")
 
 
+# ─── PLACEMENT DSL ─────────────────────────────────────────────────────────────
+#
+# Every dimensional primitive (add_box / add_cylinder / add_sphere / add_cone /
+# add_plane) takes an optional `on` parameter that describes WHERE the new object
+# goes RELATIVE TO existing objects — instead of you computing world coordinates.
+# This is the primary placement vocabulary. Use it.
+#
+# `on` is a dict that may combine several keys (combinations are useful):
+#
+#   Whole-object placements (set all 3 axes):
+#     {"on":          "name"}          → resting on top of, centered XY
+#     {"under":       "name"}          → resting underneath, centered XY
+#     {"between":     ["a", "b"]}      → centered on midpoint of two
+#     {"centered_on": "name"}          → match XYZ centers
+#     {"at_corner":   {"of": "name", "corner": "front_left"|"front_right"|"back_left"|"back_right"}}
+#                                      → bottom-corner of new = bottom-corner of target
+#
+#   Adjacency (1-axis flush + center the other 2):
+#     {"left_of":     "name"}          → flush against target's −X side
+#     {"right_of":    "name"}          → flush against target's +X side
+#     {"in_front_of": "name"}          → flush against target's −Y side
+#     {"behind":      "name"}          → flush against target's +Y side
+#
+#   Z overrides (applied last; win conflicts with the above):
+#     {"on_floor":  true}              → bottom of new = Z 0
+#     {"raise_to":  0.45}              → bottom of new = Z 0.45  (literal Z — ripcord)
+#
+#   Modifier:
+#     {"gap": 0.01}                    → spacing for on/under/left_of/etc.
+#
+# Examples:
+#   on={"at_corner": {"of": "seat", "corner": "front_left"}, "on_floor": True}
+#   on={"between": ["leg_back_left", "leg_back_right"], "raise_to": 0.50}
+#   on={"right_of": "leg_front_left", "gap": 0.36, "on_floor": True}
+#
+# Axis convention: +X = right, +Y = back, +Z = up. Front of an object is its −Y side.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 @mcp.tool()
-def add_cube(name: str, size: float = 2.0,
-             x: float = 0, y: float = 0, z: float = 0,
-             rot_x: float = 0, rot_y: float = 0, rot_z: float = 0,
-             label: str = "") -> str:
+def add_box(name: str, width: float, depth: float, height: float,
+            on: dict = None,
+            rot_x: float = 0, rot_y: float = 0, rot_z: float = 0,
+            label: str = "") -> str:
     """
-    Add a cube mesh. The cube's edge length equals `size` (default 2.0).
-    name: REQUIRED — object name.
-    x/y/z: world-space location.  rot_x/y/z: rotation in degrees.
+    Add a rectangular box of exact world-space dimensions (W × D × H, in meters).
+    The object's scale will be [1,1,1] after creation, so bevel / smooth_edges
+    produce uniform results without any extra apply-scale step.
+
+    name:   REQUIRED — object name (must be unique).
+    width:  X extent in meters.   depth: Y extent.   height: Z extent.
+    on:     placement spec — see PLACEMENT DSL at the top of this file.
+            If omitted, the box is created at world origin.
+    rot_x/y/z: optional rotation in degrees (applied after placement).
     """
-    result = call_blender("add_primitive", {
-        "type": "CUBE", "name": name, "location": [x, y, z],
-        "rotation_deg": [rot_x, rot_y, rot_z], "size": size,
+    result = call_blender("add_box", {
+        "name": name, "width": width, "depth": depth, "height": height,
+        "on": on, "rotation_deg": [rot_x, rot_y, rot_z],
     }, label=label)
-    return _add_result("CUBE", result) + _status(result)
+    return _add_result("BOX", result) + _status(result)
 
 
 @mcp.tool()
-def add_plane(name: str, size: float = 2.0,
-              x: float = 0, y: float = 0, z: float = 0,
+def add_plane(name: str, width: float, depth: float,
+              on: dict = None,
               rot_x: float = 0, rot_y: float = 0, rot_z: float = 0,
               label: str = "") -> str:
     """
-    Add a plane mesh (single quad). Edge length = `size`.
+    Add a flat plane (single quad) of exact W × D dimensions in meters.
+    on: placement spec — see PLACEMENT DSL.
     """
-    result = call_blender("add_primitive", {
-        "type": "PLANE", "name": name, "location": [x, y, z],
-        "rotation_deg": [rot_x, rot_y, rot_z], "size": size,
+    result = call_blender("add_plane", {
+        "name": name, "width": width, "depth": depth,
+        "on": on, "rotation_deg": [rot_x, rot_y, rot_z],
     }, label=label)
     return _add_result("PLANE", result) + _status(result)
 
 
 @mcp.tool()
-def add_cylinder(name: str, vertices: int = 32, radius: float = 1.0, depth: float = 2.0,
-                 cap_fill: str = "NGON",
-                 x: float = 0, y: float = 0, z: float = 0,
+def add_cylinder(name: str, radius: float, height: float,
+                 on: dict = None, vertices: int = 32, cap_fill: str = "NGON",
                  rot_x: float = 0, rot_y: float = 0, rot_z: float = 0,
                  label: str = "") -> str:
     """
-    Add a cylinder mesh aligned to Z.
-    vertices: edges around the circumference (more = smoother)
-    radius: circumference radius        depth: total Z height
-    cap_fill: NOTHING | NGON | TRIFAN — how the caps are filled
+    Add a cylinder aligned to Z. Exact radius and height in meters.
+    vertices: edge count around the circumference (more = smoother).
+    cap_fill: NGON | TRIFAN | NOTHING.
+    on: placement spec — see PLACEMENT DSL.
     """
-    result = call_blender("add_primitive", {
-        "type": "CYLINDER", "name": name, "location": [x, y, z],
+    result = call_blender("add_cylinder", {
+        "name": name, "radius": radius, "height": height,
+        "on": on, "vertices": vertices, "cap_fill": cap_fill,
         "rotation_deg": [rot_x, rot_y, rot_z],
-        "vertices": vertices, "radius": radius, "depth": depth, "cap_fill": cap_fill,
     }, label=label)
     return _add_result("CYLINDER", result) + _status(result)
 
 
 @mcp.tool()
-def add_sphere(name: str, segments: int = 32, rings: int = 16, radius: float = 1.0,
-               x: float = 0, y: float = 0, z: float = 0,
+def add_sphere(name: str, radius: float,
+               on: dict = None, segments: int = 32, rings: int = 16,
                rot_x: float = 0, rot_y: float = 0, rot_z: float = 0,
                label: str = "") -> str:
     """
-    Add a UV sphere mesh.
-    segments: longitudinal divisions (around Z)
-    rings: latitudinal divisions
+    Add a UV sphere of exact radius in meters.
+    segments / rings: longitudinal / latitudinal divisions.
+    on: placement spec — see PLACEMENT DSL.
     """
-    result = call_blender("add_primitive", {
-        "type": "SPHERE", "name": name, "location": [x, y, z],
+    result = call_blender("add_sphere", {
+        "name": name, "radius": radius,
+        "on": on, "segments": segments, "rings": rings,
         "rotation_deg": [rot_x, rot_y, rot_z],
-        "segments": segments, "rings": rings, "radius": radius,
     }, label=label)
     return _add_result("SPHERE", result) + _status(result)
 
 
 @mcp.tool()
-def add_cone(name: str, vertices: int = 32, radius1: float = 1.0, radius2: float = 0.0,
-             depth: float = 2.0, cap_fill: str = "NGON",
-             x: float = 0, y: float = 0, z: float = 0,
+def add_cone(name: str, radius_bottom: float, height: float, radius_top: float = 0.0,
+             on: dict = None, vertices: int = 32, cap_fill: str = "NGON",
              rot_x: float = 0, rot_y: float = 0, rot_z: float = 0,
              label: str = "") -> str:
     """
-    Add a cone or truncated cone mesh aligned to Z.
-    radius1: base (bottom) radius     radius2: top radius (0 = sharp point)
-    cap_fill: NOTHING | NGON | TRIFAN
+    Add a cone (or truncated cone) aligned to Z.
+    radius_bottom: base radius in meters.   radius_top: top radius (0 = sharp point).
+    height: total Z extent in meters.
+    on: placement spec — see PLACEMENT DSL.
     """
-    result = call_blender("add_primitive", {
-        "type": "CONE", "name": name, "location": [x, y, z],
+    result = call_blender("add_cone", {
+        "name": name, "radius_bottom": radius_bottom, "radius_top": radius_top,
+        "height": height, "on": on, "vertices": vertices, "cap_fill": cap_fill,
         "rotation_deg": [rot_x, rot_y, rot_z],
-        "vertices": vertices, "radius1": radius1, "radius2": radius2,
-        "depth": depth, "cap_fill": cap_fill,
     }, label=label)
     return _add_result("CONE", result) + _status(result)
 
@@ -311,36 +391,105 @@ def select_object(name: str) -> str:
 
 
 @mcp.tool()
-def scale_object(x: float = 1.0, y: float = 1.0, z: float = 1.0, label: str = "") -> str:
+def nudge(targets: str = "", right: float = 0.0, left: float = 0.0,
+          up: float = 0.0, down: float = 0.0,
+          back: float = 0.0, forward: float = 0.0, label: str = "") -> str:
     """
-    Scale the active object. Values are multipliers (0.5 = half size, 2.0 = double).
-    label: optional name for the history log
+    Move objects by a relative offset, in SEMANTIC directions instead of XYZ.
+    right/left → ±X, back/forward → ±Y, up/down → ±Z. All in meters.
+
+    Prefer placement spec (`on=` on add_*) for FIRST placement. Use nudge for fine
+    adjustments after the fact (e.g. "shift this 1cm to the right to align with X").
+
+    targets: single object name, a group name, or comma-separated list. Empty = active object.
+    Example: nudge("seat", up=0.02) — raise the seat 2cm.
     """
-    result = call_blender("scale_object", {"x": x, "y": y, "z": z}, label=label)
-    main = f"ok [{result.get('op_id','')}]" if result.get("success") else result.get("error", "failed")
+    t = [s.strip() for s in targets.split(",")] if targets else None
+    if t and len(t) == 1:
+        t = t[0]
+    result = call_blender("nudge", {
+        "targets": t,
+        "right": right, "left": left, "up": up, "down": down, "back": back, "forward": forward,
+    }, label=label)
+    if result.get("success"):
+        main = f"nudged {result['moved']} by {result['delta']} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
     return main + _status(result)
 
 
 @mcp.tool()
-def move_object(x: float = 0.0, y: float = 0.0, z: float = 0.0, label: str = "") -> str:
+def resize(targets: str = "", width: float = None, depth: float = None, height: float = None,
+           label: str = "") -> str:
     """
-    Move the active object by a relative offset in world units.
-    label: optional name for the history log
+    Resize objects to ABSOLUTE world-space dimensions (meters). Each axis is optional;
+    omitted axes preserve their current size. Scale is baked after resize so modifiers
+    (bevel etc.) behave uniformly.
+
+    Prefer creating primitives at the right size up front (add_box etc.) — this is for
+    after-the-fact corrections ("make the seat 5cm taller").
+
+    targets: single object name, group name, or comma-separated list. Empty = active object.
+    Example: resize("seat", height=0.04) — make the seat 4cm thick.
     """
-    result = call_blender("move_object", {"x": x, "y": y, "z": z}, label=label)
-    main = f"ok [{result.get('op_id','')}]" if result.get("success") else result.get("error", "failed")
+    t = [s.strip() for s in targets.split(",")] if targets else None
+    if t and len(t) == 1:
+        t = t[0]
+    params = {"targets": t}
+    if width is not None:  params["width"] = width
+    if depth is not None:  params["depth"] = depth
+    if height is not None: params["height"] = height
+    result = call_blender("resize", params, label=label)
+    if result.get("success"):
+        main = f"resized: {result['resized']} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
     return main + _status(result)
 
 
 @mcp.tool()
-def rotate_object(angle: float, axis: str = "Z", label: str = "") -> str:
+def apply_transform(targets: str = "", scale: bool = True,
+                    rotation: bool = False, location: bool = False, label: str = "") -> str:
     """
-    Rotate the active object.
-    angle: degrees  |  axis: X | Y | Z
-    label: optional name for the history log
+    Bake an object's transform into its mesh data. After applying scale, obj.scale = [1,1,1]
+    and bevels/modifiers behave uniformly. Apply rotation to clear rotation_euler. Apply
+    location only if you really want the origin pinned at world (0,0,0) — usually unwanted.
+
+    Primitives created with add_box etc. already have scale baked, so you rarely need this.
+    Reach for it after `resize` if you bypass the built-in bake, or to fix imported objects.
+
+    targets: single object name, group name, or comma-separated list. Empty = active object.
     """
-    result = call_blender("rotate_object", {"angle": angle, "axis": axis}, label=label)
-    main = f"ok [{result.get('op_id','')}]" if result.get("success") else result.get("error", "failed")
+    t = [s.strip() for s in targets.split(",")] if targets else None
+    if t and len(t) == 1:
+        t = t[0]
+    result = call_blender("apply_transform", {
+        "targets": t, "scale": scale, "rotation": rotation, "location": location,
+    }, label=label)
+    if result.get("success"):
+        flags = [k for k in ("scale", "rotation", "location") if result.get(k)]
+        main = f"applied {flags} on {result['applied_to']} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def rotate_object(angle: float, axis: str = "Z", targets: str = "", label: str = "") -> str:
+    """
+    Rotate objects by `angle` degrees around `axis` (X | Y | Z).
+    targets: single object name, group name, or comma-separated list. Empty = active object.
+    """
+    t = [s.strip() for s in targets.split(",")] if targets else None
+    if t and len(t) == 1:
+        t = t[0]
+    result = call_blender("rotate_object", {
+        "angle": angle, "axis": axis, "targets": t,
+    }, label=label)
+    if result.get("success"):
+        main = f"rotated {result['rotated']} by {angle}° on {axis} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
     return main + _status(result)
 
 
@@ -601,21 +750,74 @@ def select_ring(axis: str = "Z", index: int = 0, action: str = "SELECT") -> str:
 
 
 @mcp.tool()
-def taper_end(axis: str = "Z", end: str = "MAX", label: str = "") -> str:
+def select_rings(axis: str = "Z", indices: list = [], action: str = "SELECT") -> str:
     """
-    Collapse the extreme ring on an axis to a single point (or thin edge).
+    Select the union of vertices belonging to MULTIPLE rings along an axis in one call.
 
-    end: MAX (highest ring on axis) | MIN (lowest ring on axis)
+    indices: list of ring indices (negatives wrap, so -1 = last).
+             e.g. [2, 4, 6] for three alternating rings.
+    action:  SELECT (replace) | ADD | DESELECT
 
-    The verts at that ring all snap to the ring's centroid in the two non-axis dimensions.
-    Result: a tapered tip. Faster than select_ring + scale_vertices(x=0,y=0).
+    Replaces the verbose select_ring + ADD + ADD pattern when shaping repeated detail
+    (alternating bulge/pinch on a grip wrap, fluting along a column).
+    Pair with scale_rings to scale each selected ring around its own centroid.
+    """
+    result = call_blender("select_rings", {"axis": axis, "indices": indices, "action": action})
+    if result.get("success"):
+        main = f"selected rings {result['rings_selected']} of {result['ring_count']}  verts={result['verts_total']}"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def scale_rings(axis: str = "Z", indices: list = [], x: float = 1.0, y: float = 1.0,
+                label: str = "") -> str:
+    """
+    Scale each named ring around ITS OWN centroid in the two non-axis directions.
+
+    indices: list of ring indices (negatives wrap, -1 = last)
+    x, y:    scale multipliers on the two non-axis directions
+
+    This is the correct tool for bulge/pinch detail on cylinders, repeating fluting, or any
+    per-ring shaping. scale_vertices with pivot=SELECTION collapses all selected verts to
+    one centroid (wrong for non-contiguous rings); pivot=ORIGIN only works when the object
+    origin happens to lie on the cylinder axis. scale_rings always does the right thing.
+
+    Example — alternating pinches on a grip:
+      scale_rings(axis="Z", indices=[2, 4, 6], x=0.85, y=0.85)
+    """
+    result = call_blender("scale_rings", {
+        "axis": axis, "indices": indices, "x": x, "y": y,
+    }, label=label)
+    if result.get("success"):
+        main = (f"scaled rings {result['rings_scaled']} by (x={x}, y={y})  "
+                f"{result['verts_affected']} verts  [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def taper_end(axis: str = "Z", end: str = "MAX", scale: float = 0.0, label: str = "") -> str:
+    """
+    Scale the extreme ring on an axis toward its own centroid in the two non-axis directions.
+
+    end:   MAX (highest ring on axis) | MIN (lowest ring on axis)
+    scale: 0.0 (default) collapses the ring fully to a point — same as before.
+           0.5 leaves the ring at half its original spread (partial taper / chamfer).
+           1.0 is a no-op.
+
+    Use scale=0 for a sword tip; scale=0.4 for "narrow this end a bit" without committing
+    to a single point. Faster than the two-ring taper_section equivalent.
     Must be in edit mode.
     """
-    result = call_blender("taper_end", {"axis": axis, "end": end}, label=label)
+    result = call_blender("taper_end", {"axis": axis, "end": end, "scale": scale}, label=label)
     if result.get("success"):
-        main = (f"tapered ring {result['ring_index']}/{result['ring_count']-1} "
+        verb = "collapsed" if scale == 0.0 else f"scaled→{scale}"
+        main = (f"{verb} ring {result['ring_index']}/{result['ring_count']-1} "
                 f"({result['end']} of {result['axis']})  "
-                f"collapsed {result['collapsed_verts']} verts at world={result.get('collapsed_world')}")
+                f"{result['collapsed_verts']} verts at world={result.get('collapsed_world')}")
         nearby = result.get("nearby_objects") or []
         if nearby:
             nearby_str = ", ".join(f"{n['name']}@{n['dist']}u" for n in nearby)
@@ -839,6 +1041,276 @@ def undo_to(id: str) -> str:
     else:
         main = result.get("error", "failed")
     return main + _status(result)
+
+
+# --- Relational queries ---
+
+@mcp.tool()
+def distance_between(a: str, b: str, axis: str = "ANY") -> str:
+    """
+    Centre-to-centre distance between two objects, in meters.
+    axis: ANY (3D Euclidean) | X | Y | Z (single-axis distance).
+
+    Use this when you'd otherwise be tempted to fetch coords of both and subtract —
+    let the server do the math so you don't carry numbers in your head.
+    """
+    result = call_blender("distance_between", {"a": a, "b": b, "axis": axis})
+    if result.get("success"):
+        return f"{a} ↔ {b} ({result['axis']}): {result['distance']} m" + _status(result)
+    return result.get("error", "failed")
+
+
+@mcp.tool()
+def gap_between(a: str, b: str) -> str:
+    """
+    Smallest empty distance between two objects' bounding boxes, per axis.
+    Negative = overlap. Useful for "are these touching?" and "how much room is left?"
+    """
+    result = call_blender("gap_between", {"a": a, "b": b})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    touching = result.get("touching_on_axes") or []
+    touching_str = f" — touching on {touching}" if touching else ""
+    main = (f"gap {a} ↔ {b}: x={result['gap_x']}  y={result['gap_y']}  z={result['gap_z']}"
+            f"{touching_str}")
+    return main + _status(result)
+
+
+@mcp.tool()
+def is_aligned(a: str, b: str, side: str = "TOP", tolerance: float = 0.001) -> str:
+    """
+    Check whether two objects share an aligned side / center.
+    side: TOP | BOTTOM | LEFT | RIGHT | FRONT | BACK | CENTER_X | CENTER_Y | CENTER_Z
+
+    Use this instead of fetching world-bounds for two objects and comparing.
+    """
+    result = call_blender("is_aligned", {"a": a, "b": b, "side": side, "tolerance": tolerance})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    verdict = "ALIGNED" if result["aligned"] else "NOT aligned"
+    return f"{a} vs {b} on {side}: {verdict} (diff={result['difference']})" + _status(result)
+
+
+# --- Relational verbs ---
+
+@mcp.tool()
+def match_dimension(target: str, reference: str, axis: str = "Z", label: str = "") -> str:
+    """
+    Resize `target` so its extent on `axis` equals `reference`'s extent on that axis.
+    Bakes scale after resizing.
+
+    Example: match_dimension("slat_3", "slat_1", axis="Z") — make slat 3 the same height as slat 1.
+    """
+    result = call_blender("match_dimension", {
+        "target": target, "reference": reference, "axis": axis,
+    }, label=label)
+    if result.get("success"):
+        return (f"{target}.{axis} → {result['new_size']} m (factor {result['factor_applied']}) "
+                f"[{result.get('op_id','')}]" + _status(result))
+    return result.get("error", "failed")
+
+
+@mcp.tool()
+def mirror_across(targets: str, plane: str = "X", suffix: str = "_mirror",
+                  label: str = "") -> str:
+    """
+    Duplicate parts and mirror the copies across a world axis plane through origin.
+    plane: 'X' mirrors across the YZ plane (flips +X ↔ −X); 'Y' and 'Z' analogous.
+
+    The copies are independent objects (no live constraint). Useful for symmetric construction:
+    build the left side, then mirror_across('X') to get the right side.
+
+    targets: single object name, group name, or comma-separated list.
+    Example: mirror_across("leg_front_left,leg_back_left", plane="X", suffix="_right")
+    """
+    t = [s.strip() for s in targets.split(",")] if targets else None
+    if t and len(t) == 1:
+        t = t[0]
+    result = call_blender("mirror_across", {
+        "targets": t, "plane": plane, "suffix": suffix,
+    }, label=label)
+    if result.get("success"):
+        return (f"mirrored across {plane}: {result['mirrored_to']} "
+                f"[{result.get('op_id','')}]" + _status(result))
+    return result.get("error", "failed")
+
+
+@mcp.tool()
+def distribute_evenly(targets: str, between: list, axis: str = "X", label: str = "") -> str:
+    """
+    Position parts so their centers are evenly spaced strictly between two anchor objects' centers.
+    Anchor positions themselves are NOT occupied.
+
+    targets: comma-separated object names OR a group name.
+    between: ["object_a", "object_b"] — the two anchors.
+    axis: X | Y | Z — which axis to distribute along.
+
+    Example: distribute_evenly("slat_1,slat_2,slat_3,slat_4,slat_5",
+                              between=["leg_back_left", "leg_back_right"], axis="X")
+             → 5 slats evenly spaced between the two back legs along X.
+    """
+    t = [s.strip() for s in targets.split(",")] if targets else None
+    if t and len(t) == 1:
+        t = t[0]
+    result = call_blender("distribute_evenly", {
+        "targets": t, "between": between, "axis": axis,
+    }, label=label)
+    if result.get("success"):
+        names = [p["name"] for p in result["placed"]]
+        return (f"distributed {len(names)} parts on {axis} (spacing {result['spacing']} m): "
+                f"{names} [{result.get('op_id','')}]" + _status(result))
+    return result.get("error", "failed")
+
+
+@mcp.tool()
+def array_at_corners(prototype: str, of: str, standing_on_floor: bool = True,
+                     keep_original: bool = False, name_prefix: str = "",
+                     label: str = "") -> str:
+    """
+    Duplicate a prototype object to all 4 corners of a target's footprint.
+    The 4 copies are named "<prefix>_front_left", "<prefix>_front_right", etc.
+    Prefix defaults to the prototype name.
+
+    standing_on_floor: if True, copies sit at Z=0 regardless of where prototype was.
+    keep_original: if False (default), the prototype is deleted after copying.
+
+    Example: array_at_corners("leg", of="seat") — put four legs at the seat's corners.
+    """
+    result = call_blender("array_at_corners", {
+        "prototype": prototype, "of": of,
+        "standing_on_floor": standing_on_floor,
+        "keep_original": keep_original,
+        "name_prefix": name_prefix or prototype,
+    }, label=label)
+    if result.get("success"):
+        return (f"placed at corners of {of}: {result['placed']} "
+                f"[{result.get('op_id','')}]" + _status(result))
+    return result.get("error", "failed")
+
+
+@mcp.tool()
+def array_along(prototype: str, count: int, between: list, axis: str = "X",
+                keep_original: bool = False, name_prefix: str = "",
+                label: str = "") -> str:
+    """
+    Duplicate a prototype N times, spacing copies evenly between two anchor centers.
+    Like distribute_evenly but also creates the copies. Copies are named "<prefix>_1"..."_N".
+
+    Example: array_along("slat", count=5,
+                         between=["back_rail_bottom", "back_rail_top"], axis="Z")
+             → 5 evenly spaced copies of "slat" between the two rails.
+    """
+    result = call_blender("array_along", {
+        "prototype": prototype, "count": count, "between": between, "axis": axis,
+        "keep_original": keep_original, "name_prefix": name_prefix or prototype,
+    }, label=label)
+    if result.get("success"):
+        return (f"placed {count} copies on {axis} (spacing {result['spacing']} m): "
+                f"{result['placed']} [{result.get('op_id','')}]" + _status(result))
+    return result.get("error", "failed")
+
+
+# --- Groups ---
+
+@mcp.tool()
+def group(name: str, parts: list, label: str = "") -> str:
+    """
+    Create (or extend) a named group containing the given parts.
+    A group is a Blender collection — any tool that accepts `targets` can take the
+    group name and act on all members.
+
+    name: group name (unique).
+    parts: list of object names to include.
+
+    Example: group("chair", ["seat", "leg_front_left", "leg_front_right",
+                              "leg_back_left", "leg_back_right", ...])
+             then smooth_edges("chair") finishes every part in one call.
+    """
+    result = call_blender("group", {"name": name, "parts": parts}, label=label)
+    if result.get("success"):
+        return (f"group '{name}' now contains {len(result['members'])} parts "
+                f"(added: {result['newly_added']}) [{result.get('op_id','')}]"
+                + _status(result))
+    return result.get("error", "failed")
+
+
+@mcp.tool()
+def parts_in(name: str) -> str:
+    """List the parts inside a named group."""
+    result = call_blender("parts_in", {"name": name})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    return f"group '{name}': {result['parts']}" + _status(result)
+
+
+@mcp.tool()
+def ungroup(name: str, label: str = "") -> str:
+    """Remove a group. Its objects move back to the scene root; they are NOT deleted."""
+    result = call_blender("ungroup", {"name": name}, label=label)
+    if result.get("success"):
+        return (f"removed group '{name}'; freed {result['members_freed']} "
+                f"[{result.get('op_id','')}]" + _status(result))
+    return result.get("error", "failed")
+
+
+# --- Bundled finishes ---
+
+@mcp.tool()
+def round_corners(target: str, corners: list, radius: float = 0.02,
+                  segments: int = 6, label: str = "") -> str:
+    """
+    Round specific vertical corners of an object with a given world-space radius.
+
+    Where `smooth_edges` does a small uniform bevel over every edge of an object,
+    `round_corners` rounds ONLY the named corners — and by a real radius (e.g. 2cm),
+    not the 1-3mm refinement that smooth_edges produces.
+
+    target:   object name.
+    corners:  list of "front_left" | "front_right" | "back_left" | "back_right".
+              Each identifies a vertical edge at that XY corner of the bounding box.
+    radius:   the rounding radius in meters. Default 0.02 (2cm — typical seat-front round).
+    segments: smoothness of the curve. Default 6 (looks like a hand-routed roundover).
+
+    Example: round_corners("seat", corners=["front_left", "front_right"], radius=0.025)
+             → rounds just the two front corners of the seat by 25mm.
+
+    Works on already-smoothed meshes: the corner matcher tolerates the small bevels
+    left behind by smooth_edges. Re-applies shade_smooth so the new curve reads smooth.
+    """
+    result = call_blender("round_corners", {
+        "target": target, "corners": corners, "radius": radius, "segments": segments,
+    }, label=label)
+    if result.get("success"):
+        return (f"rounded {result['edges_beveled']} corner edge(s) of '{target}' "
+                f"({corners}) by {radius}m [{result.get('op_id','')}]" + _status(result))
+    return result.get("error", "failed")
+
+
+@mcp.tool()
+def smooth_edges(targets: str = "", width: float = 0.002, segments: int = 2,
+                 angle_limit: float = 30.0, label: str = "") -> str:
+    """
+    Round off sharp edges on objects so they don't look blocky.
+    Bundles BEVEL (with angle-limit so only sharp edges are beveled, not coplanar ones)
+    + shade_smooth + auto_smooth + apply, in one call.
+
+    targets: object name, group name, or comma-separated list. Empty = active object.
+    width: bevel offset in meters (default 2mm — small, refined edge).
+    segments: more = smoother curve (2 is a good default for furniture; 3+ for hero objects).
+    angle_limit: only edges sharper than this (degrees) get beveled. Default 30°.
+
+    Example: smooth_edges("chair", width=0.003) — round every edge in the chair group.
+    """
+    t = [s.strip() for s in targets.split(",")] if targets else None
+    if t and len(t) == 1:
+        t = t[0]
+    result = call_blender("smooth_edges", {
+        "targets": t, "width": width, "segments": segments, "angle_limit": angle_limit,
+    }, label=label)
+    if result.get("success"):
+        return (f"smoothed: {result['smoothed']} (width={width}m, segs={segments}, "
+                f"angle<{angle_limit}°) [{result.get('op_id','')}]" + _status(result))
+    return result.get("error", "failed")
 
 
 if __name__ == "__main__":

@@ -79,6 +79,217 @@ def _nearby_objects(world_pos, exclude_names=(), max_count=3):
     ]
 
 
+# --- Object / group resolution ---
+
+def _resolve_targets(targets):
+    """Resolve a target spec into a list of bpy mesh objects.
+
+    targets: str (single object or collection name), list[str], or None (→ active object).
+    Collection names expand to all mesh objects inside (recursively).
+    Returns (objects, error). On error, objects is None.
+    """
+    if targets is None:
+        obj = bpy.context.active_object
+        if obj is None:
+            return None, "No active object and no targets specified"
+        return [obj], None
+
+    if isinstance(targets, str):
+        targets = [targets]
+
+    if not isinstance(targets, list) or not targets:
+        return None, "'targets' must be a non-empty string or list of strings"
+
+    objs = []
+    seen = set()
+    for name in targets:
+        obj = bpy.data.objects.get(name)
+        coll = bpy.data.collections.get(name)
+        if obj is None and coll is None:
+            return None, f"Target '{name}' not found (no object or collection by that name)"
+        if obj is not None and obj.name not in seen:
+            objs.append(obj)
+            seen.add(obj.name)
+        if coll is not None:
+            for o in coll.all_objects:
+                if o.type == 'MESH' and o.name not in seen:
+                    objs.append(o)
+                    seen.add(o.name)
+    return objs, None
+
+
+def _activate(obj):
+    """Make obj the sole selected + active object."""
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.select_all(action='DESELECT')
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+
+
+def _apply_scale(obj):
+    """Bake object scale into mesh data so obj.scale becomes [1,1,1].
+    Required for bevel and other width-based modifiers to behave uniformly."""
+    _activate(obj)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+
+
+# --- Placement DSL ---
+#
+# A placement spec is a dict combining one or more of these constraints. The
+# resolver computes the world-space CENTER for a new object whose local bounds
+# extend ±(w/2, d/2, h/2) from its origin.
+#
+# Axis convention: +X right, +Y back (away from front view), +Z up.
+# So "front" = -Y, "back" = +Y, "left" = -X, "right" = +X.
+#
+# Whole-object placements (set all three axes):
+#   {"on": "name"}            — rests on top of target, centered XY
+#   {"under": "name"}         — rests under target, centered XY
+#   {"centered_on": "name"}   — match XYZ centers of target
+#   {"between": ["a", "b"]}   — centered on midpoint of two object centers
+#   {"at_corner": {"of": "name", "corner": "front_left"|"front_right"|"back_left"|"back_right"}}
+#                             — bottom-{corner} of new aligns with bottom-{corner} of target
+#
+# Adjacency placements (set 1 axis + center the other 2 on target):
+#   {"left_of": "name"}       — flush to target's -X side, Y/Z centered on target
+#   {"right_of": "name"}      — flush to target's +X side
+#   {"in_front_of": "name"}   — flush to target's -Y side
+#   {"behind": "name"}        — flush to target's +Y side
+#
+# Z overrides (always applied last, win conflicts):
+#   {"on_floor": True}        — Z_MIN of new = 0
+#   {"raise_to": value}       — Z_MIN of new = value
+#
+# Modifiers:
+#   {"gap": 0.02}             — spacing for on/under/left_of/right_of/in_front_of/behind
+#                               (positive = farther apart; negative = overlap)
+
+def _resolve_placement(spec, dims):
+    """Compute world-space center (cx, cy, cz) for a new object with given dims.
+    spec is None or a dict (see vocabulary above). dims is (w, d, h)."""
+    w, d, h = dims
+    cx, cy, cz = 0.0, 0.0, 0.0
+
+    if not spec:
+        return (cx, cy, cz)
+
+    if not isinstance(spec, dict):
+        raise ValueError(f"Placement spec must be a dict, got {type(spec).__name__}")
+
+    gap = spec.get("gap", 0.0)
+
+    def bbox(name):
+        o = bpy.data.objects.get(name)
+        if o is None:
+            raise ValueError(f"Placement target '{name}' not found")
+        return _world_bbox(o)
+
+    def center(name):
+        xmin, ymin, zmin, xmax, ymax, zmax = bbox(name)
+        return ((xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2)
+
+    # Whole-object placements
+    if "on" in spec:
+        xmin, ymin, zmin, xmax, ymax, zmax = bbox(spec["on"])
+        cx = (xmin + xmax) / 2
+        cy = (ymin + ymax) / 2
+        cz = zmax + h / 2 + gap
+    elif "under" in spec:
+        xmin, ymin, zmin, xmax, ymax, zmax = bbox(spec["under"])
+        cx = (xmin + xmax) / 2
+        cy = (ymin + ymax) / 2
+        cz = zmin - h / 2 - gap
+    elif "between" in spec:
+        names = spec["between"]
+        if not (isinstance(names, list) and len(names) == 2):
+            raise ValueError("'between' requires a list of exactly 2 object names")
+        c1, c2 = center(names[0]), center(names[1])
+        cx = (c1[0] + c2[0]) / 2
+        cy = (c1[1] + c2[1]) / 2
+        cz = (c1[2] + c2[2]) / 2
+    elif "centered_on" in spec:
+        cx, cy, cz = center(spec["centered_on"])
+    elif "at_corner" in spec:
+        ac = spec["at_corner"]
+        if not isinstance(ac, dict) or "of" not in ac:
+            raise ValueError("'at_corner' must be {'of': name, 'corner': 'front_left'|...}")
+        corner = ac.get("corner", "front_left")
+        xmin, ymin, zmin, xmax, ymax, zmax = bbox(ac["of"])
+        parts = corner.lower().split("_")
+        if "front" in parts:
+            cy = ymin + d / 2
+        elif "back" in parts:
+            cy = ymax - d / 2
+        else:
+            cy = (ymin + ymax) / 2
+        if "left" in parts:
+            cx = xmin + w / 2
+        elif "right" in parts:
+            cx = xmax - w / 2
+        else:
+            cx = (xmin + xmax) / 2
+        cz = zmin + h / 2
+
+    # Adjacency placements (override the above if present)
+    if "left_of" in spec:
+        xmin, ymin, zmin, xmax, ymax, zmax = bbox(spec["left_of"])
+        cx = xmin - w / 2 - gap
+        cy = (ymin + ymax) / 2
+        cz = (zmin + zmax) / 2
+    elif "right_of" in spec:
+        xmin, ymin, zmin, xmax, ymax, zmax = bbox(spec["right_of"])
+        cx = xmax + w / 2 + gap
+        cy = (ymin + ymax) / 2
+        cz = (zmin + zmax) / 2
+    elif "in_front_of" in spec:
+        xmin, ymin, zmin, xmax, ymax, zmax = bbox(spec["in_front_of"])
+        cx = (xmin + xmax) / 2
+        cy = ymin - d / 2 - gap
+        cz = (zmin + zmax) / 2
+    elif "behind" in spec:
+        xmin, ymin, zmin, xmax, ymax, zmax = bbox(spec["behind"])
+        cx = (xmin + xmax) / 2
+        cy = ymax + d / 2 + gap
+        cz = (zmin + zmax) / 2
+
+    # Z overrides (last word)
+    if spec.get("on_floor"):
+        cz = h / 2
+    if "raise_to" in spec:
+        cz = spec["raise_to"] + h / 2
+
+    return (cx, cy, cz)
+
+
+def _describe_placement(obj):
+    """Describe an object's position in relational terms — no raw coordinates.
+    Walks the scene to find the nearest meaningful anchor (floor, another object's face)."""
+    xmin, ymin, zmin, xmax, ymax, zmax = _world_bbox(obj)
+    w, d, h = xmax - xmin, ymax - ymin, zmax - zmin
+
+    parts = []
+    if abs(zmin) < 1e-4:
+        parts.append("standing on floor")
+    elif zmin > 0:
+        # Look for an object whose top is near this object's bottom
+        for o in bpy.context.scene.objects:
+            if o == obj or o.type != 'MESH':
+                continue
+            o_xmin, o_ymin, o_zmin, o_xmax, o_ymax, o_zmax = _world_bbox(o)
+            if abs(zmin - o_zmax) < 1e-3 and o_xmin <= (xmin + xmax) / 2 <= o_xmax:
+                parts.append(f"resting on '{o.name}'")
+                break
+        else:
+            parts.append(f"floating {round(zmin, 3)}m above floor")
+
+    parts.append(f"size {round(w, 3)}×{round(d, 3)}×{round(h, 3)}m (W×D×H)")
+    return "; ".join(parts)
+
+
+# --- Screenshot overlay (blf-based axis label) ---
+
+
 # --- Screenshot overlay (blf-based axis label) ---
 
 _screenshot_overlay_text = ""
@@ -399,58 +610,164 @@ def set_viewport_angle(params):
     return {"success": True, "angle": angle}
 
 
-def add_primitive(params):
-    ptype = params.get("type", "CUBE").upper()
-    name = params.get("name")
+def _build_primitive(name, ptype, target_dims, on, rotation_deg, extra=None):
+    """Shared body for dimensional primitives. Creates the mesh at origin with
+    canonical size, resizes to target_dims, applies scale (so obj.scale = [1,1,1]
+    and modifiers see uniform scale), resolves placement, moves, and rotates.
+
+    target_dims: (w, d, h) world-space bounding-box dims after resize.
+    on: placement spec (None for origin).
+    extra: dict of primitive-specific params (vertices, segments, cap_fill, etc.).
+    """
     if not name:
-        return {"error": "'name' is required — give the object a meaningful name (e.g. 'Blade', 'Crossguard')"}
+        return {"error": "'name' is required — give the object a meaningful name"}
+    if bpy.data.objects.get(name) is not None:
+        return {"error": f"Object '{name}' already exists — choose a different name or delete the old one first"}
 
-    location = params.get("location", [0, 0, 0])
-    rotation_deg = params.get("rotation_deg", [0.0, 0.0, 0.0])
-    rotation_rad = tuple(math.radians(a) for a in rotation_deg)
+    extra = extra or {}
+    rotation_rad = tuple(math.radians(a) for a in (rotation_deg or [0, 0, 0]))
 
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
     bpy.ops.object.select_all(action='DESELECT')
 
-    common = {"location": tuple(location), "rotation": rotation_rad}
-
-    if ptype == "CUBE":
-        bpy.ops.mesh.primitive_cube_add(size=params.get("size", 2.0), **common)
+    # Create at origin with unit-ish defaults; we'll resize after.
+    if ptype == "BOX":
+        bpy.ops.mesh.primitive_cube_add(size=1.0, location=(0, 0, 0))
     elif ptype == "PLANE":
-        bpy.ops.mesh.primitive_plane_add(size=params.get("size", 2.0), **common)
+        bpy.ops.mesh.primitive_plane_add(size=1.0, location=(0, 0, 0))
     elif ptype == "CYLINDER":
         bpy.ops.mesh.primitive_cylinder_add(
-            vertices=params.get("vertices", 32),
-            radius=params.get("radius", 1.0),
-            depth=params.get("depth", 2.0),
-            end_fill_type=params.get("cap_fill", "NGON").upper(),
-            **common,
+            vertices=extra.get("vertices", 32),
+            radius=0.5, depth=1.0,
+            end_fill_type=extra.get("cap_fill", "NGON").upper(),
+            location=(0, 0, 0),
         )
     elif ptype == "SPHERE":
         bpy.ops.mesh.primitive_uv_sphere_add(
-            segments=params.get("segments", 32),
-            ring_count=params.get("rings", 16),
-            radius=params.get("radius", 1.0),
-            **common,
+            segments=extra.get("segments", 32),
+            ring_count=extra.get("rings", 16),
+            radius=0.5,
+            location=(0, 0, 0),
         )
     elif ptype == "CONE":
+        # Cone has two radii. We pass both as half-fractions of the wider dim
+        # and rely on the resize step to bring it to spec.
+        r1 = extra.get("radius1_norm", 0.5)
+        r2 = extra.get("radius2_norm", 0.0)
         bpy.ops.mesh.primitive_cone_add(
-            vertices=params.get("vertices", 32),
-            radius1=params.get("radius1", 1.0),
-            radius2=params.get("radius2", 0.0),
-            depth=params.get("depth", 2.0),
-            end_fill_type=params.get("cap_fill", "NGON").upper(),
-            **common,
+            vertices=extra.get("vertices", 32),
+            radius1=r1, radius2=r2, depth=1.0,
+            end_fill_type=extra.get("cap_fill", "NGON").upper(),
+            location=(0, 0, 0),
         )
     else:
-        return {"error": f"Unknown primitive: {ptype}. Valid: CUBE, PLANE, CYLINDER, SPHERE, CONE"}
+        return {"error": f"Unknown primitive: {ptype}"}
 
     obj = bpy.context.active_object
-    if obj:
-        obj.name = name
-        if obj.data:
-            obj.data.name = name
-    return {"success": True, "object_name": obj.name if obj else None,
-            "dimensions": [round(v, 4) for v in obj.dimensions] if obj else None}
+    obj.name = name
+    if obj.data:
+        obj.data.name = name
+
+    # Resize to target dims. For PLANE, h is irrelevant (single quad).
+    w, d, h = target_dims
+    if ptype == "PLANE":
+        obj.scale = (max(w, 1e-6), max(d, 1e-6), 1.0)
+    else:
+        obj.scale = (max(w, 1e-6), max(d, 1e-6), max(h, 1e-6))
+    bpy.context.view_layer.update()
+
+    # Bake scale so obj.scale = [1,1,1] and bbox dims are correct world dims.
+    _activate(obj)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+
+    # Resolve placement, then move. The current bbox center is the origin (0,0,0).
+    try:
+        cx, cy, cz = _resolve_placement(on, target_dims)
+    except ValueError as e:
+        # Roll back the created object so a bad placement doesn't leave debris.
+        bpy.data.objects.remove(obj, do_unlink=True)
+        return {"error": str(e)}
+    obj.location = (cx, cy, cz)
+    obj.rotation_euler = rotation_rad
+    bpy.context.view_layer.update()
+
+    xmin, ymin, zmin, xmax, ymax, zmax = _world_bbox(obj)
+    return {
+        "success": True,
+        "object_name": obj.name,
+        "dimensions": [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)],
+        "world_bounds": {
+            "x": [round(xmin, 4), round(xmax, 4)],
+            "y": [round(ymin, 4), round(ymax, 4)],
+            "z": [round(zmin, 4), round(zmax, 4)],
+        },
+    }
+
+
+def add_box(params):
+    return _build_primitive(
+        name=params.get("name"),
+        ptype="BOX",
+        target_dims=(params.get("width", 1.0), params.get("depth", 1.0), params.get("height", 1.0)),
+        on=params.get("on"),
+        rotation_deg=params.get("rotation_deg", [0, 0, 0]),
+    )
+
+
+def add_plane(params):
+    return _build_primitive(
+        name=params.get("name"),
+        ptype="PLANE",
+        target_dims=(params.get("width", 1.0), params.get("depth", 1.0), 0.0),
+        on=params.get("on"),
+        rotation_deg=params.get("rotation_deg", [0, 0, 0]),
+    )
+
+
+def add_cylinder(params):
+    radius = params.get("radius", 0.5)
+    return _build_primitive(
+        name=params.get("name"),
+        ptype="CYLINDER",
+        target_dims=(radius * 2, radius * 2, params.get("height", 1.0)),
+        on=params.get("on"),
+        rotation_deg=params.get("rotation_deg", [0, 0, 0]),
+        extra={"vertices": params.get("vertices", 32), "cap_fill": params.get("cap_fill", "NGON")},
+    )
+
+
+def add_sphere(params):
+    radius = params.get("radius", 0.5)
+    return _build_primitive(
+        name=params.get("name"),
+        ptype="SPHERE",
+        target_dims=(radius * 2, radius * 2, radius * 2),
+        on=params.get("on"),
+        rotation_deg=params.get("rotation_deg", [0, 0, 0]),
+        extra={"segments": params.get("segments", 32), "rings": params.get("rings", 16)},
+    )
+
+
+def add_cone(params):
+    r_bottom = params.get("radius_bottom", 0.5)
+    r_top = params.get("radius_top", 0.0)
+    height = params.get("height", 1.0)
+    r_max = max(r_bottom, r_top, 1e-6)
+    # Normalize radii to the unit primitive (max radius = 0.5), then resize.
+    return _build_primitive(
+        name=params.get("name"),
+        ptype="CONE",
+        target_dims=(r_max * 2, r_max * 2, height),
+        on=params.get("on"),
+        rotation_deg=params.get("rotation_deg", [0, 0, 0]),
+        extra={
+            "vertices": params.get("vertices", 32),
+            "cap_fill": params.get("cap_fill", "NGON"),
+            "radius1_norm": (r_bottom / r_max) * 0.5,
+            "radius2_norm": (r_top / r_max) * 0.5,
+        },
+    )
 
 
 def rename_object(params):
@@ -482,27 +799,672 @@ def select_object(params):
     return {"success": True, "selected": name}
 
 
-def scale_object(params):
-    x = params.get("x", 1.0)
-    y = params.get("y", 1.0)
-    z = params.get("z", 1.0)
-    bpy.ops.transform.resize(value=(x, y, z))
-    return {"success": True}
+def nudge(params):
+    """Move objects by a relative offset in semantic directions.
+    right/left → ±X, back/forward → ±Y, up/down → ±Z. Negative values flip direction."""
+    targets = params.get("targets")
+    objs, err = _resolve_targets(targets)
+    if err:
+        return {"error": err}
+
+    dx = params.get("right", 0.0) - params.get("left", 0.0)
+    dy = params.get("back", 0.0) - params.get("forward", 0.0)
+    dz = params.get("up", 0.0) - params.get("down", 0.0)
+
+    for o in objs:
+        o.location.x += dx
+        o.location.y += dy
+        o.location.z += dz
+    bpy.context.view_layer.update()
+    return {"success": True, "moved": [o.name for o in objs],
+            "delta": [round(dx, 5), round(dy, 5), round(dz, 5)]}
 
 
-def move_object(params):
-    x = params.get("x", 0.0)
-    y = params.get("y", 0.0)
-    z = params.get("z", 0.0)
-    bpy.ops.transform.translate(value=(x, y, z))
-    return {"success": True}
+def resize(params):
+    """Resize objects to absolute world-space dimensions (width × depth × height).
+    Each dim is optional; omitted dims preserve current size."""
+    targets = params.get("targets")
+    objs, err = _resolve_targets(targets)
+    if err:
+        return {"error": err}
+
+    w = params.get("width")
+    d = params.get("depth")
+    h = params.get("height")
+    if w is None and d is None and h is None:
+        return {"error": "resize requires at least one of width, depth, height"}
+
+    results = []
+    for o in objs:
+        xmin, ymin, zmin, xmax, ymax, zmax = _world_bbox(o)
+        cur_w, cur_d, cur_h = xmax - xmin, ymax - ymin, zmax - zmin
+        sx = (w / cur_w) if (w is not None and cur_w > 1e-9) else 1.0
+        sy = (d / cur_d) if (d is not None and cur_d > 1e-9) else 1.0
+        sz = (h / cur_h) if (h is not None and cur_h > 1e-9) else 1.0
+        o.scale.x *= sx
+        o.scale.y *= sy
+        o.scale.z *= sz
+        bpy.context.view_layer.update()
+        # Bake so future modifiers see uniform scale.
+        _activate(o)
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        xmin, ymin, zmin, xmax, ymax, zmax = _world_bbox(o)
+        results.append({"name": o.name, "dims": [round(xmax - xmin, 4),
+                                                  round(ymax - ymin, 4),
+                                                  round(zmax - zmin, 4)]})
+    return {"success": True, "resized": results}
+
+
+def apply_transform(params):
+    """Bake object transforms into mesh data. After applying scale, obj.scale
+    becomes [1,1,1] and modifiers (especially bevel) behave uniformly. Apply
+    rotation to clear rotation_euler. Apply location to move the object's
+    origin to the world origin (rare; usually undesirable)."""
+    targets = params.get("targets")
+    objs, err = _resolve_targets(targets)
+    if err:
+        return {"error": err}
+    do_scale = params.get("scale", True)
+    do_rotation = params.get("rotation", False)
+    do_location = params.get("location", False)
+
+    for o in objs:
+        _activate(o)
+        bpy.ops.object.transform_apply(
+            location=do_location, rotation=do_rotation, scale=do_scale
+        )
+    return {"success": True,
+            "applied_to": [o.name for o in objs],
+            "scale": do_scale, "rotation": do_rotation, "location": do_location}
 
 
 def rotate_object(params):
+    """Rotate one or more objects by an angle around an axis."""
+    targets = params.get("targets")
     angle = params.get("angle", 0.0)
     axis = params.get("axis", "Z").upper()
-    bpy.ops.transform.rotate(value=math.radians(angle), orient_axis=axis)
-    return {"success": True}
+    objs, err = _resolve_targets(targets)
+    if err:
+        return {"error": err}
+
+    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
+    rad = math.radians(angle)
+    for o in objs:
+        o.rotation_euler[axis_idx] += rad
+    bpy.context.view_layer.update()
+    return {"success": True, "rotated": [o.name for o in objs],
+            "angle_deg": angle, "axis": axis}
+
+
+# --- Relational queries (no coordinate leakage) ---
+
+def describe(params):
+    """Describe an object in relational terms — what it rests on, what it's beside,
+    and its dimensions. No raw world coordinates in the output."""
+    name = params.get("name")
+    if not name:
+        return {"error": "'name' is required"}
+    obj = bpy.data.objects.get(name)
+    if obj is None:
+        return {"error": f"Object '{name}' not found"}
+
+    xmin, ymin, zmin, xmax, ymax, zmax = _world_bbox(obj)
+    w, d, h = xmax - xmin, ymax - ymin, zmax - zmin
+
+    relations = []
+    # Floor?
+    if abs(zmin) < 1e-3:
+        relations.append("standing on floor")
+
+    # Resting on / under another object?
+    for o in bpy.context.scene.objects:
+        if o == obj or o.type != 'MESH':
+            continue
+        o_xmin, o_ymin, o_zmin, o_xmax, o_ymax, o_zmax = _world_bbox(o)
+        # X/Y overlap test
+        xy_overlap = (xmin < o_xmax and xmax > o_xmin and ymin < o_ymax and ymax > o_ymin)
+        if xy_overlap and abs(zmin - o_zmax) < 1e-3:
+            relations.append(f"resting on '{o.name}'")
+        elif xy_overlap and abs(zmax - o_zmin) < 1e-3:
+            relations.append(f"directly under '{o.name}'")
+        # Side-flush
+        z_overlap = (zmin < o_zmax and zmax > o_zmin)
+        y_overlap = (ymin < o_ymax and ymax > o_ymin)
+        x_overlap = (xmin < o_xmax and xmax > o_xmin)
+        if z_overlap and y_overlap:
+            if abs(xmax - o_xmin) < 1e-3:
+                relations.append(f"flush left of '{o.name}'")
+            elif abs(xmin - o_xmax) < 1e-3:
+                relations.append(f"flush right of '{o.name}'")
+        if z_overlap and x_overlap:
+            if abs(ymax - o_ymin) < 1e-3:
+                relations.append(f"flush in front of '{o.name}'")
+            elif abs(ymin - o_ymax) < 1e-3:
+                relations.append(f"flush behind '{o.name}'")
+
+    if not relations:
+        relations.append(f"freestanding (origin {round(zmin, 3)}m above floor)")
+
+    dim_str = f"size {round(w, 3)} × {round(d, 3)} × {round(h, 3)} m (W×D×H)"
+    sentence = f"{name}: {'; '.join(relations)}; {dim_str}"
+
+    return {
+        "success": True,
+        "name": name,
+        "description": sentence,
+        "relations": relations,
+        "dimensions": {"width": round(w, 4), "depth": round(d, 4), "height": round(h, 4)},
+    }
+
+
+def distance_between(params):
+    """Centre-to-centre distance between two objects. Optionally restricted to one axis."""
+    a_name = params.get("a")
+    b_name = params.get("b")
+    axis = params.get("axis", "ANY").upper()
+    a = bpy.data.objects.get(a_name) if a_name else None
+    b = bpy.data.objects.get(b_name) if b_name else None
+    if a is None or b is None:
+        return {"error": f"Both 'a' and 'b' must be existing object names (a={a_name}, b={b_name})"}
+
+    ca = _world_center(a)
+    cb = _world_center(b)
+    dx, dy, dz = cb[0] - ca[0], cb[1] - ca[1], cb[2] - ca[2]
+
+    if axis == "X":
+        dist = abs(dx)
+    elif axis == "Y":
+        dist = abs(dy)
+    elif axis == "Z":
+        dist = abs(dz)
+    else:
+        dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+
+    return {"success": True, "a": a_name, "b": b_name, "axis": axis, "distance": round(dist, 5)}
+
+
+def gap_between(params):
+    """Smallest empty distance between two objects' bounding boxes on each axis.
+    Negative gap = overlap. Useful for checking 'are these touching?' or 'how far apart?'"""
+    a_name = params.get("a")
+    b_name = params.get("b")
+    a = bpy.data.objects.get(a_name) if a_name else None
+    b = bpy.data.objects.get(b_name) if b_name else None
+    if a is None or b is None:
+        return {"error": f"Both 'a' and 'b' must be existing object names"}
+
+    ax = _world_bbox(a)
+    bx = _world_bbox(b)
+    gx = max(bx[0] - ax[3], ax[0] - bx[3])
+    gy = max(bx[1] - ax[4], ax[1] - bx[4])
+    gz = max(bx[2] - ax[5], ax[2] - bx[5])
+
+    touching_axes = [n for n, g in zip("XYZ", (gx, gy, gz)) if abs(g) < 1e-4]
+    return {"success": True, "a": a_name, "b": b_name,
+            "gap_x": round(gx, 5), "gap_y": round(gy, 5), "gap_z": round(gz, 5),
+            "touching_on_axes": touching_axes}
+
+
+def is_aligned(params):
+    """Check if two objects share an aligned face or center on the given side.
+    side: TOP|BOTTOM|LEFT|RIGHT|FRONT|BACK|CENTER_X|CENTER_Y|CENTER_Z"""
+    a_name = params.get("a")
+    b_name = params.get("b")
+    side = params.get("side", "TOP").upper()
+    tolerance = params.get("tolerance", 1e-3)
+    a = bpy.data.objects.get(a_name) if a_name else None
+    b = bpy.data.objects.get(b_name) if b_name else None
+    if a is None or b is None:
+        return {"error": f"Both 'a' and 'b' must be existing object names"}
+
+    a_xmin, a_ymin, a_zmin, a_xmax, a_ymax, a_zmax = _world_bbox(a)
+    b_xmin, b_ymin, b_zmin, b_xmax, b_ymax, b_zmax = _world_bbox(b)
+
+    sides = {
+        "TOP":      (a_zmax, b_zmax),
+        "BOTTOM":   (a_zmin, b_zmin),
+        "LEFT":     (a_xmin, b_xmin),
+        "RIGHT":    (a_xmax, b_xmax),
+        "FRONT":    (a_ymin, b_ymin),
+        "BACK":     (a_ymax, b_ymax),
+        "CENTER_X": ((a_xmin + a_xmax) / 2, (b_xmin + b_xmax) / 2),
+        "CENTER_Y": ((a_ymin + a_ymax) / 2, (b_ymin + b_ymax) / 2),
+        "CENTER_Z": ((a_zmin + a_zmax) / 2, (b_zmin + b_zmax) / 2),
+    }
+    if side not in sides:
+        return {"error": f"Invalid side '{side}'. Use {list(sides.keys())}"}
+    va, vb = sides[side]
+    return {"success": True, "a": a_name, "b": b_name, "side": side,
+            "aligned": abs(va - vb) < tolerance, "difference": round(va - vb, 5)}
+
+
+# --- Relational verbs (operate on named parts; never expose coords) ---
+
+def match_dimension(params):
+    """Resize 'target' so its size on the named axis equals 'reference's size on the same axis."""
+    target_name = params.get("target")
+    reference_name = params.get("reference")
+    axis = params.get("axis", "Z").upper()
+    target = bpy.data.objects.get(target_name) if target_name else None
+    reference = bpy.data.objects.get(reference_name) if reference_name else None
+    if target is None or reference is None:
+        return {"error": f"Both 'target' and 'reference' must be existing object names"}
+
+    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
+    t_bb = _world_bbox(target)
+    r_bb = _world_bbox(reference)
+    t_size = (t_bb[3], t_bb[4], t_bb[5])[axis_idx] - (t_bb[0], t_bb[1], t_bb[2])[axis_idx]
+    r_size = (r_bb[3], r_bb[4], r_bb[5])[axis_idx] - (r_bb[0], r_bb[1], r_bb[2])[axis_idx]
+    if t_size < 1e-9:
+        return {"error": f"Target '{target_name}' has zero extent on {axis}"}
+    factor = r_size / t_size
+    scale = [1.0, 1.0, 1.0]
+    scale[axis_idx] = factor
+    target.scale.x *= scale[0]
+    target.scale.y *= scale[1]
+    target.scale.z *= scale[2]
+    bpy.context.view_layer.update()
+    _activate(target)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    return {"success": True, "target": target_name, "axis": axis,
+            "new_size": round(r_size, 5), "factor_applied": round(factor, 5)}
+
+
+def mirror_across(params):
+    """Duplicate parts and mirror the copies across a world axis plane.
+    plane: 'X' (mirror across YZ plane through origin), 'Y', or 'Z'.
+    Returns names of the new mirrored objects.
+    The mirror is via duplicate + flip scale + apply; no constraints, fully independent objects."""
+    targets = params.get("targets")
+    plane = params.get("plane", "X").upper()
+    suffix = params.get("suffix", "_mirror")
+    objs, err = _resolve_targets(targets)
+    if err:
+        return {"error": err}
+
+    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(plane, 0)
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    new_names = []
+    for o in objs:
+        _activate(o)
+        bpy.ops.object.duplicate(linked=False)
+        dup = bpy.context.active_object
+        dup_name = o.name + suffix
+        if bpy.data.objects.get(dup_name) is None:
+            dup.name = dup_name
+            if dup.data:
+                dup.data.name = dup_name
+        # Flip the chosen axis: scale = -1, location = -location
+        s = list(dup.scale)
+        s[axis_idx] *= -1
+        dup.scale = s
+        loc = list(dup.location)
+        loc[axis_idx] *= -1
+        dup.location = loc
+        bpy.context.view_layer.update()
+        # Apply scale so winding/normals are correct
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        new_names.append(dup.name)
+
+    return {"success": True, "mirrored_from": [o.name for o in objs],
+            "mirrored_to": new_names, "plane": plane}
+
+
+def distribute_evenly(params):
+    """Position parts so their centers are evenly spaced between two anchor objects' centers.
+    The first and last anchor positions are NOT occupied; only the in-between slots get parts.
+    e.g. 5 slats between rail_top and rail_bottom on Z → 5 evenly spaced positions strictly
+    between the two rail centers."""
+    targets = params.get("targets")
+    between = params.get("between")
+    axis = params.get("axis", "X").upper()
+    objs, err = _resolve_targets(targets)
+    if err:
+        return {"error": err}
+    if not (isinstance(between, list) and len(between) == 2):
+        return {"error": "'between' must be a list of 2 object names"}
+    a = bpy.data.objects.get(between[0])
+    b = bpy.data.objects.get(between[1])
+    if a is None or b is None:
+        return {"error": f"Anchor objects not found: {between}"}
+
+    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 0)
+    ca = _world_center(a)[axis_idx]
+    cb = _world_center(b)[axis_idx]
+    lo, hi = min(ca, cb), max(ca, cb)
+    n = len(objs)
+    # Evenly spaced strictly between: positions at lo + step*(i+1) where step = (hi-lo)/(n+1)
+    step = (hi - lo) / (n + 1)
+    placed = []
+    for i, o in enumerate(objs):
+        target_pos = lo + step * (i + 1)
+        cur_center = _world_center(o)[axis_idx]
+        delta = target_pos - cur_center
+        loc = list(o.location)
+        loc[axis_idx] += delta
+        o.location = loc
+        placed.append({"name": o.name, "axis_pos": round(target_pos, 5)})
+    bpy.context.view_layer.update()
+    return {"success": True, "axis": axis, "count": n, "spacing": round(step, 5),
+            "placed": placed}
+
+
+def array_at_corners(params):
+    """Duplicate a prototype object 4 times, placing each copy at a corner of a target object's
+    footprint. Each copy is named with the corner suffix.
+    The original prototype is removed unless keep_original=True.
+    z_anchor: 'bottom' (default, copies sit on floor if standing_on_floor=True) or 'match' (copies
+    align z to target).
+    standing_on_floor: if True, copies' z_min = 0 regardless of target z."""
+    prototype = params.get("prototype")
+    of = params.get("of")
+    standing_on_floor = params.get("standing_on_floor", True)
+    keep_original = params.get("keep_original", False)
+    name_prefix = params.get("name_prefix", prototype)
+
+    proto = bpy.data.objects.get(prototype) if prototype else None
+    target = bpy.data.objects.get(of) if of else None
+    if proto is None:
+        return {"error": f"Prototype '{prototype}' not found"}
+    if target is None:
+        return {"error": f"Target 'of'={of} not found"}
+
+    t_xmin, t_ymin, t_zmin, t_xmax, t_ymax, t_zmax = _world_bbox(target)
+    p_xmin, p_ymin, p_zmin, p_xmax, p_ymax, p_zmax = _world_bbox(proto)
+    p_w = p_xmax - p_xmin
+    p_d = p_ymax - p_ymin
+    p_h = p_zmax - p_zmin
+
+    corners = [
+        ("front_left",  t_xmin + p_w / 2, t_ymin + p_d / 2),
+        ("front_right", t_xmax - p_w / 2, t_ymin + p_d / 2),
+        ("back_left",   t_xmin + p_w / 2, t_ymax - p_d / 2),
+        ("back_right",  t_xmax - p_w / 2, t_ymax - p_d / 2),
+    ]
+
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    placed = []
+    for corner_name, cx, cy in corners:
+        _activate(proto)
+        bpy.ops.object.duplicate(linked=False)
+        dup = bpy.context.active_object
+        new_name = f"{name_prefix}_{corner_name}"
+        if bpy.data.objects.get(new_name) is None:
+            dup.name = new_name
+            if dup.data:
+                dup.data.name = new_name
+        cz = (p_h / 2) if standing_on_floor else _world_center(proto)[2]
+        dup.location = (cx, cy, cz)
+        placed.append(dup.name)
+
+    bpy.context.view_layer.update()
+    if not keep_original:
+        bpy.data.objects.remove(proto, do_unlink=True)
+
+    return {"success": True, "placed": placed, "of": of, "removed_prototype": not keep_original}
+
+
+def array_along(params):
+    """Duplicate a prototype N times, spacing copies evenly between two anchor objects' centers.
+    Like distribute_evenly but creates the copies for you. The prototype itself is removed unless
+    keep_original=True. The N copies occupy positions strictly between the anchors."""
+    prototype = params.get("prototype")
+    count = params.get("count", 3)
+    between = params.get("between")
+    axis = params.get("axis", "X").upper()
+    keep_original = params.get("keep_original", False)
+    name_prefix = params.get("name_prefix", prototype)
+
+    proto = bpy.data.objects.get(prototype) if prototype else None
+    if proto is None:
+        return {"error": f"Prototype '{prototype}' not found"}
+    if not (isinstance(between, list) and len(between) == 2):
+        return {"error": "'between' must be a list of 2 object names"}
+    a = bpy.data.objects.get(between[0])
+    b = bpy.data.objects.get(between[1])
+    if a is None or b is None:
+        return {"error": f"Anchor objects not found: {between}"}
+    if count < 1:
+        return {"error": "count must be >= 1"}
+
+    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 0)
+    ca = _world_center(a)[axis_idx]
+    cb = _world_center(b)[axis_idx]
+    lo, hi = min(ca, cb), max(ca, cb)
+    step = (hi - lo) / (count + 1)
+
+    proto_center = _world_center(proto)
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    placed = []
+    for i in range(count):
+        target_pos = lo + step * (i + 1)
+        _activate(proto)
+        bpy.ops.object.duplicate(linked=False)
+        dup = bpy.context.active_object
+        new_name = f"{name_prefix}_{i + 1}"
+        if bpy.data.objects.get(new_name) is None:
+            dup.name = new_name
+            if dup.data:
+                dup.data.name = new_name
+        loc = list(dup.location)
+        cur = _world_center(dup)[axis_idx]
+        loc[axis_idx] += target_pos - cur
+        dup.location = loc
+        placed.append(dup.name)
+
+    bpy.context.view_layer.update()
+    if not keep_original:
+        bpy.data.objects.remove(proto, do_unlink=True)
+
+    return {"success": True, "axis": axis, "count": count, "spacing": round(step, 5),
+            "placed": placed, "removed_prototype": not keep_original}
+
+
+# --- Groups (Blender collections) ---
+
+def group(params):
+    """Create a named collection containing the given parts (and any existing children).
+    Operations that accept 'targets' can be given a group name to act on all members."""
+    name = params.get("name")
+    parts = params.get("parts", [])
+    if not name:
+        return {"error": "'name' is required"}
+    if not isinstance(parts, list) or not parts:
+        return {"error": "'parts' must be a non-empty list of object names"}
+
+    coll = bpy.data.collections.get(name)
+    if coll is None:
+        coll = bpy.data.collections.new(name)
+        bpy.context.scene.collection.children.link(coll)
+
+    added = []
+    for p in parts:
+        obj = bpy.data.objects.get(p)
+        if obj is None:
+            return {"error": f"Object '{p}' not found"}
+        # Link to group collection if not already there
+        if obj.name not in coll.objects:
+            coll.objects.link(obj)
+            added.append(p)
+        # Unlink from scene root if present (so it lives only in the group)
+        if obj.name in bpy.context.scene.collection.objects:
+            try:
+                bpy.context.scene.collection.objects.unlink(obj)
+            except Exception:
+                pass
+    return {"success": True, "group": name, "members": [o.name for o in coll.objects],
+            "newly_added": added}
+
+
+def parts_in(params):
+    """List the parts inside a named group (collection)."""
+    name = params.get("name")
+    if not name:
+        return {"error": "'name' is required"}
+    coll = bpy.data.collections.get(name)
+    if coll is None:
+        return {"error": f"Group '{name}' not found"}
+    return {"success": True, "group": name, "parts": [o.name for o in coll.all_objects]}
+
+
+def ungroup(params):
+    """Remove a group (collection) — its objects move back to the scene root, they are NOT deleted."""
+    name = params.get("name")
+    if not name:
+        return {"error": "'name' is required"}
+    coll = bpy.data.collections.get(name)
+    if coll is None:
+        return {"error": f"Group '{name}' not found"}
+    members = [o.name for o in coll.all_objects]
+    for o in list(coll.objects):
+        if o.name not in bpy.context.scene.collection.objects:
+            bpy.context.scene.collection.objects.link(o)
+        coll.objects.unlink(o)
+    bpy.data.collections.remove(coll)
+    return {"success": True, "removed_group": name, "members_freed": members}
+
+
+# --- Bundled finishes ---
+
+def smooth_edges(params):
+    """Round off the sharp edges of one or more objects.
+    Adds a BEVEL modifier with angle-limit (only sharp edges get beveled, not coplanar ones),
+    then shade_smooth + auto_smooth so the rounded edges read as smooth, not faceted.
+    width: bevel offset in world units (default 2mm). segments: more = smoother curve.
+    angle_limit: edges sharper than this (degrees) get beveled. Default 30°."""
+    targets = params.get("targets")
+    width = params.get("width", 0.002)
+    segments = params.get("segments", 2)
+    angle_limit_deg = params.get("angle_limit", 30.0)
+    objs, err = _resolve_targets(targets)
+    if err:
+        return {"error": err}
+
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    processed = []
+    for o in objs:
+        if o.type != 'MESH':
+            continue
+        _activate(o)
+        # If object has non-uniform scale, bake it first so the bevel width is consistent.
+        if any(abs(s - 1.0) > 1e-4 for s in o.scale):
+            bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+
+        # Remove any existing Smooth_Bevel so calls are idempotent
+        for m in list(o.modifiers):
+            if m.name == "Smooth_Bevel":
+                o.modifiers.remove(m)
+
+        mod = o.modifiers.new(name="Smooth_Bevel", type='BEVEL')
+        mod.width = width
+        mod.segments = segments
+        mod.limit_method = 'ANGLE'
+        mod.angle_limit = math.radians(angle_limit_deg)
+        mod.miter_outer = 'MITER_ARC'
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+        bpy.ops.object.shade_smooth()
+        # Enable auto-smooth (Blender 4.x: use_auto_smooth lives on mesh)
+        if hasattr(o.data, "use_auto_smooth"):
+            o.data.use_auto_smooth = True
+            o.data.auto_smooth_angle = math.radians(angle_limit_deg)
+        processed.append(o.name)
+
+    return {"success": True, "smoothed": processed, "width": width,
+            "segments": segments, "angle_limit": angle_limit_deg}
+
+
+def round_corners(params):
+    """Round specific vertical corner edges of an object by a real-world radius.
+
+    target:   object name.
+    corners:  list of "front_left" | "front_right" | "back_left" | "back_right".
+              Each name identifies a vertical edge at that XY corner of the bbox.
+    radius:   bevel offset in meters (the rounding radius). Default 0.02 (2cm).
+    segments: number of segments in the round; more = smoother curve. Default 6.
+
+    Works on already-beveled meshes: each "corner" is matched within a tolerance of
+    radius/4 in XY, so smooth_edges'd geometry still finds the right edges.
+    After beveling, shade_smooth is re-applied so the curve reads as smooth."""
+    import bmesh
+    target = params.get("target")
+    corners = params.get("corners", [])
+    radius = params.get("radius", 0.02)
+    segments = params.get("segments", 6)
+
+    obj = bpy.data.objects.get(target) if target else None
+    if obj is None:
+        return {"error": f"Object '{target}' not found"}
+    if obj.type != 'MESH':
+        return {"error": f"'{target}' is not a mesh"}
+    if not corners:
+        return {"error": "'corners' must be a non-empty list (front_left|front_right|back_left|back_right)"}
+
+    _activate(obj)
+    xmin, ymin, zmin, xmax, ymax, zmax = _world_bbox(obj)
+
+    corner_map = {
+        "front_left":  (xmin, ymin),
+        "front_right": (xmax, ymin),
+        "back_left":   (xmin, ymax),
+        "back_right":  (xmax, ymax),
+    }
+    bad = [c for c in corners if c not in corner_map]
+    if bad:
+        return {"error": f"Unknown corner(s) {bad}. Valid: {list(corner_map.keys())}"}
+
+    if bpy.context.mode != 'EDIT':
+        bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_mode(type='EDGE')
+    bpy.ops.mesh.select_all(action='DESELECT')
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    mat = obj.matrix_world
+    tol = max(radius * 0.5, 1e-3)
+
+    selected = 0
+    for edge in bm.edges:
+        v0 = mat @ edge.verts[0].co
+        v1 = mat @ edge.verts[1].co
+        # Vertical edge: same X and Y, differing Z
+        if abs(v0.x - v1.x) > 1e-4 or abs(v0.y - v1.y) > 1e-4:
+            continue
+        if abs(v0.z - v1.z) < 1e-4:
+            continue
+        ex, ey = v0.x, v0.y
+        for cname in corners:
+            tx, ty = corner_map[cname]
+            if abs(ex - tx) < tol and abs(ey - ty) < tol:
+                edge.select = True
+                selected += 1
+                break
+
+    bm.select_flush_mode()
+    bmesh.update_edit_mesh(obj.data)
+
+    if selected == 0:
+        bpy.ops.object.mode_set(mode='OBJECT')
+        return {"error": f"No vertical corner edges found near {corners}. "
+                          f"Object may need loop_cut along Z first if it's a single-segment box."}
+
+    bpy.ops.mesh.bevel(offset=radius, segments=segments, affect='EDGES')
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.shade_smooth()
+    if hasattr(obj.data, "use_auto_smooth"):
+        obj.data.use_auto_smooth = True
+        # 60° works well for rounded-corner geometry alongside flat faces
+        obj.data.auto_smooth_angle = math.radians(60)
+
+    _push_undo(f"round_corners {target} {corners} r={radius}")
+    return {"success": True, "target": target, "corners": corners,
+            "radius": radius, "segments": segments, "edges_beveled": selected}
 
 
 def snap_to(params):
@@ -773,6 +1735,12 @@ def add_modifier(params):
         mod.width = params.get("width", 0.1)
     if hasattr(mod, 'segments'):
         mod.segments = params.get("segments", 1)
+    if mod_type == "BEVEL":
+        limit = params.get("limit_method", "ANGLE").upper()
+        if hasattr(mod, 'limit_method'):
+            mod.limit_method = limit
+        if hasattr(mod, 'angle_limit'):
+            mod.angle_limit = math.radians(params.get("angle_limit", 30.0))
     return {"success": True, "modifier": mod.name}
 
 
@@ -841,9 +1809,16 @@ def scale_vertices(params):
 
 def get_object_info(params):
     import bmesh
-    obj = bpy.context.active_object
+    bpy.context.view_layer.update()
+    name = params.get("name") if params else None
+    if name:
+        obj = bpy.data.objects.get(name)
+        if obj is None:
+            return {"error": f"Object '{name}' not found"}
+    else:
+        obj = bpy.context.active_object
     if obj is None:
-        return {"error": "No active object"}
+        return {"error": "No active object and no 'name' specified"}
     loc = obj.location
     scale = obj.scale
     rot = obj.rotation_euler
@@ -858,7 +1833,7 @@ def get_object_info(params):
         "location": [round(loc.x, 4), round(loc.y, 4), round(loc.z, 4)],
         "scale": [round(scale.x, 4), round(scale.y, 4), round(scale.z, 4)],
         "rotation_deg": [round(math.degrees(rot.x), 2), round(math.degrees(rot.y), 2), round(math.degrees(rot.z), 2)],
-        "dimensions": [round(obj.dimensions.x, 4), round(obj.dimensions.y, 4), round(obj.dimensions.z, 4)],
+        "dimensions": [round(max(xs) - min(xs), 4), round(max(ys) - min(ys), 4), round(max(zs) - min(zs), 4)],
         "world_bounds": {
             "x": [round(min(xs), 4), round(max(xs), 4)],
             "y": [round(min(ys), 4), round(max(ys), 4)],
@@ -1014,14 +1989,119 @@ def select_ring(params):
     }
 
 
+def select_rings(params):
+    """Select the union of vertices belonging to multiple rings along an axis. One call
+    replaces the verbose select_ring + ADD + ADD + ... pattern when shaping repeated detail
+    (alternating bulge/pinch, etc)."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    axis = params.get("axis", "Z").upper()
+    indices = params.get("indices", [])
+    action = params.get("action", "SELECT").upper()
+    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
+    bm, rings = _compute_rings(obj, axis_idx)
+    n = len(rings)
+    if not rings:
+        return {"error": "No rings found"}
+    if not indices:
+        return {"error": "'indices' must be a non-empty list of ring indices"}
+
+    resolved = []
+    target_verts = set()
+    for i in indices:
+        ri = n + i if i < 0 else i
+        if ri < 0 or ri >= n:
+            return {"error": f"Ring index {i} out of range [-{n}, {n-1}]"}
+        resolved.append(ri)
+        for v_idx in rings[ri][1]:
+            target_verts.add(v_idx)
+
+    for i, v in enumerate(bm.verts):
+        match = i in target_verts
+        if action == "DESELECT":
+            if match:
+                v.select = False
+        elif action == "ADD":
+            if match:
+                v.select = True
+        else:
+            v.select = match
+
+    bm.select_flush_mode()
+    bmesh.update_edit_mesh(obj.data)
+    return {
+        "success": True,
+        "axis": axis,
+        "rings_selected": resolved,
+        "ring_count": n,
+        "verts_total": len(target_verts),
+    }
+
+
+def scale_rings(params):
+    """Scale each named ring around ITS OWN centroid in the two non-axis directions.
+    The correct tool for bulge/pinch detail on cylinders or any axis-aligned mesh —
+    scale_vertices with pivot=SELECTION collapses everything to one centroid;
+    pivot=ORIGIN only works for symmetric primitives centered on origin."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    axis = params.get("axis", "Z").upper()
+    indices = params.get("indices", [])
+    sx = params.get("x", 1.0)
+    sy = params.get("y", 1.0)
+    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
+    bm, rings = _compute_rings(obj, axis_idx)
+    n = len(rings)
+    if not rings:
+        return {"error": "No rings found"}
+    if not indices:
+        return {"error": "'indices' must be a non-empty list of ring indices"}
+
+    other_idxs = [i for i in range(3) if i != axis_idx]
+    scaled = []
+    affected = 0
+    for i in indices:
+        ri = n + i if i < 0 else i
+        if ri < 0 or ri >= n:
+            return {"error": f"Ring index {i} out of range [-{n}, {n-1}]"}
+        scaled.append(ri)
+        _, vert_indices = rings[ri]
+        verts = [bm.verts[vi] for vi in vert_indices]
+        centroid = [0.0, 0.0, 0.0]
+        for v in verts:
+            centroid[0] += v.co.x; centroid[1] += v.co.y; centroid[2] += v.co.z
+        centroid = [c / len(verts) for c in centroid]
+        scales = {other_idxs[0]: sx, other_idxs[1]: sy}
+        for v in verts:
+            for ax, sc in scales.items():
+                v.co[ax] = centroid[ax] + (v.co[ax] - centroid[ax]) * sc
+        affected += len(verts)
+
+    bmesh.update_edit_mesh(obj.data)
+    _push_undo(f"scale_rings {axis} {indices} x={sx} y={sy}")
+    return {
+        "success": True,
+        "axis": axis,
+        "rings_scaled": scaled,
+        "verts_affected": affected,
+    }
+
+
 def taper_end(params):
-    """Collapse the extreme ring on an axis to a point in the two non-axis directions."""
+    """Scale the extreme ring on an axis toward its own centroid in the two non-axis directions.
+    scale=0 (default) fully collapses to a point. scale=0.5 leaves the ring at half its original
+    spread (partial taper). scale=1 is a no-op."""
     import bmesh
     obj = bpy.context.active_object
     if obj is None or obj.mode != 'EDIT':
         return {"error": "Must be in edit mode"}
     axis = params.get("axis", "Z").upper()
     end = params.get("end", "MAX").upper()
+    scale = max(0.0, min(1.0, params.get("scale", 0.0)))
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
     bm, rings = _compute_rings(obj, axis_idx)
     if not rings:
@@ -1036,9 +2116,9 @@ def taper_end(params):
     centroid = [c / len(verts) for c in centroid]
     for v in verts:
         for ax in other_idxs:
-            v.co[ax] = centroid[ax]
+            v.co[ax] = centroid[ax] + (v.co[ax] - centroid[ax]) * scale
     bmesh.update_edit_mesh(obj.data)
-    _push_undo(f"taper_end {axis} {end}")
+    _push_undo(f"taper_end {axis} {end} scale={scale}")
 
     world_centroid = obj.matrix_world @ mathutils.Vector(centroid)
     nearby = _nearby_objects(
@@ -1050,6 +2130,7 @@ def taper_end(params):
         "success": True,
         "axis": axis,
         "end": end,
+        "scale": scale,
         "ring_index": ring_idx,
         "ring_count": len(rings),
         "collapsed_verts": len(verts),
@@ -1248,6 +2329,10 @@ def apply_modifiers(params):
 
 def get_blender_status(params):
     import bmesh as _bmesh
+    # Force depsgraph evaluation so matrix_world / bound_box reflect any location, rotation,
+    # or scale changes from the just-finished tool. Without this, status reads return
+    # the pre-mutation state and the appended status block lies.
+    bpy.context.view_layer.update()
     obj = bpy.context.active_object
 
     status = {
@@ -1264,14 +2349,17 @@ def get_blender_status(params):
 
     if obj:
         status["location"] = [round(v, 4) for v in obj.location]
-        status["dimensions"] = [round(v, 4) for v in obj.dimensions]
         status["rotation_deg"] = [round(math.degrees(v), 2) for v in obj.rotation_euler]
-        bb = obj.bound_box
-        world_bb = [obj.matrix_world @ mathutils.Vector(c) for c in bb]
-        status["world_z_range"] = [
-            round(min(v.z for v in world_bb), 4),
-            round(max(v.z for v in world_bb), 4),
-        ]
+        # World-space bbox dims (rotation-aware). obj.dimensions is local-bbox × scale and
+        # ignores rotation — wrong for any rotated object.
+        xmin, ymin, zmin, xmax, ymax, zmax = _world_bbox(obj)
+        status["dimensions"] = [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)]
+        status["world_bounds"] = {
+            "x": [round(xmin, 4), round(xmax, 4)],
+            "y": [round(ymin, 4), round(ymax, 4)],
+            "z": [round(zmin, 4), round(zmax, 4)],
+        }
+        status["world_z_range"] = status["world_bounds"]["z"]
 
     if obj and obj.mode == 'EDIT' and obj.type == 'MESH':
         bm = _bmesh.from_edit_mesh(obj.data)
@@ -1318,6 +2406,7 @@ def set_camera_position(params):
 # --- Dispatch ---
 
 TOOLS = {
+    # Read-only / viewport
     "get_scene_tree":        lambda p: get_scene_tree(),
     "get_viewport_screenshot": get_viewport_screenshot,
     "get_viewport_collage":  get_viewport_collage,
@@ -1325,42 +2414,80 @@ TOOLS = {
     "undo_steps":            undo_steps,
     "undo_to":               undo_to,
     "set_viewport_angle":    set_viewport_angle,
-    "add_primitive":         add_primitive,
-    "select_object":         select_object,
-    "scale_object":          scale_object,
-    "move_object":           move_object,
-    "rotate_object":         rotate_object,
-    "snap_to":               snap_to,
-    "snap_to_grid":          snap_to_grid,
-    "set_mode":              set_mode,
-    "delete_object":         delete_object,
     "frame_scene":           frame_scene,
     "zoom_to_selected":      zoom_to_selected,
     "set_camera_position":   set_camera_position,
     "orbit_viewport":        orbit_viewport,
-    "bevel":                 bevel,
-    "extrude":               extrude,
-    "select_all":            select_all,
-    "select_by_axis":        select_by_axis,
-    "loop_cut":              loop_cut,
-    "add_modifier":          add_modifier,
-    "move_vertices":         move_vertices,
-    "scale_vertices":        scale_vertices,
+    "get_blender_status":    get_blender_status,
     "get_object_info":       get_object_info,
     "get_mesh_profile":      get_mesh_profile,
-    "get_blender_status":    get_blender_status,
-    "rename_object":         rename_object,
-    "set_component_mode":    set_component_mode,
-    "grow_selection":        grow_selection,
-    "select_between":        select_between,
     "get_current_selection": get_current_selection,
-    "get_rings":             get_rings,
-    "select_ring":           select_ring,
-    "taper_end":             taper_end,
-    "taper_section":         taper_section,
+
+    # Dimensional primitives (the primary way to create geometry)
+    "add_box":               add_box,
+    "add_plane":             add_plane,
+    "add_cylinder":          add_cylinder,
+    "add_sphere":            add_sphere,
+    "add_cone":              add_cone,
+
+    # Object basics
+    "select_object":         select_object,
+    "delete_object":         delete_object,
+    "rename_object":         rename_object,
     "duplicate_object":      duplicate_object,
     "join_objects":          join_objects,
+    "set_mode":              set_mode,
+
+    # Transforms (relational + semantic)
+    "nudge":                 nudge,
+    "resize":                resize,
+    "rotate_object":         rotate_object,
+    "apply_transform":       apply_transform,
+    "snap_to":               snap_to,
+    "snap_to_grid":          snap_to_grid,
+
+    # Relational queries
+    "describe":              describe,
+    "distance_between":      distance_between,
+    "gap_between":           gap_between,
+    "is_aligned":            is_aligned,
+
+    # Relational verbs
+    "match_dimension":       match_dimension,
+    "mirror_across":         mirror_across,
+    "distribute_evenly":     distribute_evenly,
+    "array_at_corners":      array_at_corners,
+    "array_along":           array_along,
+
+    # Groups
+    "group":                 group,
+    "parts_in":              parts_in,
+    "ungroup":               ungroup,
+
+    # Finishes
+    "smooth_edges":          smooth_edges,
+    "round_corners":         round_corners,
+    "add_modifier":          add_modifier,
     "apply_modifiers":       apply_modifiers,
+
+    # --- Ripcord / edit-mode (prefer the relational verbs above; reach for these
+    # only when nothing higher-level fits) ---
+    "bevel":                 bevel,
+    "extrude":               extrude,
+    "loop_cut":              loop_cut,
+    "set_component_mode":    set_component_mode,
+    "select_all":            select_all,
+    "select_by_axis":        select_by_axis,
+    "select_between":        select_between,
+    "grow_selection":        grow_selection,
+    "move_vertices":         move_vertices,
+    "scale_vertices":        scale_vertices,
+    "get_rings":             get_rings,
+    "select_ring":           select_ring,
+    "select_rings":          select_rings,
+    "scale_rings":           scale_rings,
+    "taper_end":             taper_end,
+    "taper_section":         taper_section,
 }
 
 
