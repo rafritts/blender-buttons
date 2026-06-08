@@ -2385,6 +2385,44 @@ def get_blender_status(params):
     return {"success": True, "status": status}
 
 
+DESIGNS_DIR = os.path.expanduser("~/blender-designs")
+
+
+def _designs_dir():
+    os.makedirs(DESIGNS_DIR, exist_ok=True)
+    return DESIGNS_DIR
+
+
+def save_design(params):
+    name = params.get("name", "").strip()
+    if not name:
+        return {"error": "name is required"}
+    if not name.endswith(".blend"):
+        name += ".blend"
+    path = os.path.join(_designs_dir(), name)
+    bpy.ops.wm.save_as_mainfile(filepath=path, copy=True)
+    return {"saved": path}
+
+
+def open_design(params):
+    name = params.get("name", "").strip()
+    if not name:
+        return {"error": "name is required"}
+    if not name.endswith(".blend"):
+        name += ".blend"
+    path = os.path.join(_designs_dir(), name)
+    if not os.path.isfile(path):
+        return {"error": f"no design at {path}"}
+    bpy.ops.wm.open_mainfile(filepath=path)
+    return {"opened": path}
+
+
+def list_designs(params):
+    d = _designs_dir()
+    files = sorted(f for f in os.listdir(d) if f.endswith(".blend"))
+    return {"dir": d, "designs": files}
+
+
 def set_camera_position(params):
     x  = params.get("x", 5.0)
     y  = params.get("y", -5.0)
@@ -2417,6 +2455,9 @@ TOOLS = {
     "frame_scene":           frame_scene,
     "zoom_to_selected":      zoom_to_selected,
     "set_camera_position":   set_camera_position,
+    "save_design":           save_design,
+    "open_design":           open_design,
+    "list_designs":          list_designs,
     "orbit_viewport":        orbit_viewport,
     "get_blender_status":    get_blender_status,
     "get_object_info":       get_object_info,

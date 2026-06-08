@@ -197,6 +197,16 @@ Combine freely: `on={"at_corner": {"of": "seat", "corner": "front_left"}, "on_fl
 | `join_objects(names=[...])` | Join into one object (minimum 2 names). |
 | `set_camera_position(x, y, z, target_x, target_y, target_z)` | Move the scene camera. |
 
+#### Persistence
+
+Designs are saved as native `.blend` files in `~/blender-designs/`.
+
+| Tool | Description |
+|------|-------------|
+| `save_design(name)` | Save the current scene to `~/blender-designs/<name>.blend`. |
+| `open_design(name)` | Replace the current scene with a saved design. |
+| `list_designs()` | List saved designs. |
+
 ### Edit Mode operations
 
 Must be in Edit Mode (`set_mode("EDIT")`) before calling these.
