@@ -129,11 +129,15 @@ def loop_cut(params):
     if not edges_to_cut:
         return {"error": f"No edges found running along {axis} axis"}
 
-    bmesh.ops.subdivide_edges(bm, edges=edges_to_cut, cuts=cuts, use_grid_fill=True)
+    geom = bmesh.ops.subdivide_edges(bm, edges=edges_to_cut, cuts=cuts, use_grid_fill=True)
     bmesh.update_edit_mesh(obj.data)
     push_undo(f"loop_cut {axis} x{cuts}")
 
-    return {"success": True, "cuts": cuts, "edges_subdivided": len(edges_to_cut)}
+    # World-space positions of the new loops along the cut axis (midpoints of subdivided edges).
+    new_verts = [g for g in geom["geom_inner"] if isinstance(g, bmesh.types.BMVert)]
+    positions = sorted(set(round((mat @ v.co)[axis_idx], 4) for v in new_verts))
+    return {"success": True, "cuts": cuts, "edges_subdivided": len(edges_to_cut),
+            "loop_positions": positions}
 
 
 def set_component_mode(params):

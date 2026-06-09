@@ -4,14 +4,15 @@ import bpy
 
 
 def group(params):
-    """Create a named collection containing the given parts (and any existing children).
-    Operations that accept 'targets' can be given a group name to act on all members."""
+    """Create a named collection containing the given parts.
+    Parts may be object names or other group names — groups become nested
+    sub-collections. Operations that accept 'targets' get all members recursively."""
     name = params.get("name")
     parts = params.get("parts", [])
     if not name:
         return {"error": "'name' is required"}
     if not isinstance(parts, list) or not parts:
-        return {"error": "'parts' must be a non-empty list of object names"}
+        return {"error": "'parts' must be a non-empty list of object or group names"}
 
     coll = bpy.data.collections.get(name)
     if coll is None:
@@ -20,18 +21,29 @@ def group(params):
 
     added = []
     for p in parts:
+        if p == name:
+            return {"error": f"Cannot nest group '{name}' inside itself"}
         obj = bpy.data.objects.get(p)
-        if obj is None:
-            return {"error": f"Object '{p}' not found"}
-        if obj.name not in coll.objects:
+        sub = bpy.data.collections.get(p)
+        if obj is None and sub is None:
+            return {"error": f"'{p}' is neither an object nor a group"}
+        if obj is not None and obj.name not in coll.objects:
             coll.objects.link(obj)
             added.append(p)
-        if obj.name in bpy.context.scene.collection.objects:
+            if obj.name in bpy.context.scene.collection.objects:
+                try:
+                    bpy.context.scene.collection.objects.unlink(obj)
+                except Exception:
+                    pass
+        if sub is not None and sub.name not in {c.name for c in coll.children}:
             try:
-                bpy.context.scene.collection.objects.unlink(obj)
+                bpy.context.scene.collection.children.unlink(sub)
             except Exception:
                 pass
-    return {"success": True, "group": name, "members": [o.name for o in coll.objects],
+            coll.children.link(sub)
+            added.append(p)
+    return {"success": True, "group": name,
+            "members": [o.name for o in coll.all_objects],
             "newly_added": added}
 
 

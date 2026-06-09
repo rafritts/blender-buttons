@@ -98,14 +98,16 @@ def set_material(params):
     emission_color: [r, g, b] glow color.
     emission_strength: glow intensity (watts/m²-ish).
     """
+    from .common import resolve_targets
     target = params.get("target")
     if not target:
-        return {"error": "'target' (object name) is required"}
-    obj = bpy.data.objects.get(target)
-    if obj is None:
-        return {"error": f"Object '{target}' not found"}
-    if obj.type != 'MESH':
-        return {"error": f"'{target}' is not a mesh"}
+        return {"error": "'target' (object or group name) is required"}
+    objs, err = resolve_targets(target)
+    if err:
+        return {"error": err}
+    meshes = [o for o in objs if o.type == 'MESH']
+    if not meshes:
+        return {"error": f"'{target}' contains no mesh objects"}
 
     mat_name = params.get("material_name") or f"{target}_mat"
     mat = bpy.data.materials.get(mat_name) or bpy.data.materials.new(mat_name)
@@ -146,14 +148,16 @@ def set_material(params):
     if es is not None and _set_input(bsdf, "Emission Strength", float(es)):
         applied.append(f"emission_strength={es}")
 
-    if obj.data.materials:
-        obj.data.materials[0] = mat
-    else:
-        obj.data.materials.append(mat)
+    for obj in meshes:
+        if obj.data.materials:
+            obj.data.materials[0] = mat
+        else:
+            obj.data.materials.append(mat)
 
     return {
         "success": True,
-        "target": obj.name,
+        "target": target,
+        "assigned_to": [o.name for o in meshes],
         "material": mat.name,
         "applied": applied,
     }

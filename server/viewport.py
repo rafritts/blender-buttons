@@ -8,7 +8,7 @@ def get_viewport_screenshot(width: int = 960, height: int = 540,
                             hide_overlays: bool = False,
                             format: str = "PNG",
                             quality: int = 85,
-                            compression: int = 15) -> Image:
+                            compression: int = 15) -> list:
     """Capture the current 3D viewport. width/height default to 960x540 to keep context usage low.
     hide_overlays: turn off selection outlines, gizmos, axis overlay etc. for clean hero shots.
 
@@ -18,13 +18,20 @@ def get_viewport_screenshot(width: int = 960, height: int = 540,
                  fine for viewport diagnostics; 40-50 if you really need small.
     compression: 0-100, PNG only (Blender's scale; higher = smaller file, more CPU).
                  Default 15 matches Blender's default. Ignored for JPEG.
+
+    Returns [image, metadata] where metadata includes the active shading mode so you know
+    whether materials are visible (MATERIAL/RENDERED) or hidden (SOLID/WIREFRAME).
     """
     result = call_blender("get_viewport_screenshot",
                           {"width": width, "height": height, "hide_overlays": hide_overlays,
                            "format": format, "quality": quality, "compression": compression})
     if "error" in result:
         raise RuntimeError(result["error"])
-    return Image(data=base64.b64decode(result["image"]), format=result.get("format", "png"))
+    img = Image(data=base64.b64decode(result["image"]), format=result.get("format", "png"))
+    shading = result.get("shading", "UNKNOWN")
+    size_kb = result.get("bytes", 0) // 1024
+    meta = f"shading={shading}  {width}x{height}  {size_kb}KB"
+    return [img, meta]
 
 
 @mcp.tool()

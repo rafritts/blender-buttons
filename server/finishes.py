@@ -103,7 +103,9 @@ def set_material(target: str,
     Create or update a Principled BSDF material and assign it to `target` (slot 0).
     Covers ~80% of real materials: color, metallic, roughness, IOR, alpha, emission.
 
-    target:        REQUIRED — object to receive the material.
+    target:        REQUIRED — object OR group name. Group expands to every
+                   mesh inside (recursively), so one call materialises a whole
+                   sub-assembly with a single shared material.
     base_color:    [r, g, b] or [r, g, b, a], floats 0..1.
     metallic:      0..1 (0 = dielectric, 1 = metal).
     roughness:     0..1 (0 = mirror, 1 = chalk).

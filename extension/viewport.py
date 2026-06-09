@@ -127,6 +127,7 @@ def get_viewport_screenshot(params):
     scene.render.resolution_percentage = 100
 
     space = next((s for s in area.spaces if s.type == 'VIEW_3D'), None)
+    shading_mode = space.shading.type if space else "UNKNOWN"
     saved_overlays = None
     if hide_overlays and space is not None and hasattr(space, "overlay"):
         saved_overlays = space.overlay.show_overlays
@@ -154,7 +155,8 @@ def get_viewport_screenshot(params):
     with open(tmp, "rb") as f:
         data = base64.b64encode(f.read()).decode()
 
-    return {"image": data, "format": response_fmt, "bytes": len(data) * 3 // 4}
+    return {"image": data, "format": response_fmt, "bytes": len(data) * 3 // 4,
+            "shading": shading_mode}
 
 
 def get_viewport_collage(params):

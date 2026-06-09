@@ -9,13 +9,23 @@ from .common import world_bbox
 
 
 def get_scene_tree():
+    from collections import Counter
+    mesh_count = Counter(
+        obj.data.name for obj in bpy.context.scene.objects
+        if obj.type == 'MESH' and obj.data
+    )
+
+    def obj_line(obj, pad=""):
+        active = " ● active" if obj == bpy.context.active_object else ""
+        sel = " ◆" if obj.select_get() else ""
+        linked = " (linked)" if obj.type == 'MESH' and obj.data and mesh_count[obj.data.name] > 1 else ""
+        return f"{pad}├── {obj.name} [{obj.type}]{linked}{active}{sel}"
+
     def fmt_collection(col, depth=0):
         pad = "│   " * depth
         lines = [f"{pad}├── {col.name}/"]
         for obj in col.objects:
-            active = " ● active" if obj == bpy.context.active_object else ""
-            sel = " ◆" if obj.select_get() else ""
-            lines.append(f"{pad}│   ├── {obj.name} [{obj.type}]{active}{sel}")
+            lines.append(obj_line(obj, pad + "│   "))
         for child in col.children:
             lines += fmt_collection(child, depth + 1)
         return lines
@@ -24,9 +34,7 @@ def get_scene_tree():
     for col in bpy.context.scene.collection.children:
         lines += fmt_collection(col)
     for obj in bpy.context.scene.collection.objects:
-        active = " ● active" if obj == bpy.context.active_object else ""
-        sel = " ◆" if obj.select_get() else ""
-        lines.append(f"├── {obj.name} [{obj.type}]{active}{sel}")
+        lines.append(obj_line(obj))
     return {"tree": "\n".join(lines)}
 
 

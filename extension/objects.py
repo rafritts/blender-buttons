@@ -61,6 +61,7 @@ def delete_object(params):
 
 
 def _delete_collection(coll):
+    coll_name = coll.name
     members = [o.name for o in coll.all_objects]
     if bpy.context.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
@@ -81,7 +82,9 @@ def _delete_collection(coll):
     for c in sub_colls:
         bpy.data.collections.remove(c)
     bpy.data.collections.remove(coll)
-    return {"success": True, "deleted_group": coll.name, "deleted_members": members}
+    for c in [c for c in bpy.data.collections if not c.all_objects and not c.children]:
+        bpy.data.collections.remove(c)
+    return {"success": True, "deleted_group": coll_name, "deleted_members": members}
 
 
 def duplicate_object(params):

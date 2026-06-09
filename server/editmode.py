@@ -2,14 +2,17 @@ from server._core import mcp, call_blender, _status
 
 
 @mcp.tool()
-def bevel(factor: float = 0.05, segments: int = 1, affect: str = "EDGES", label: str = "") -> str:
+def bevel(factor: float = 0.05, segments: int = 1, affect: str = "EDGES", label: str = "",
+          target: str = "") -> str:
     """
     Bevel selected edges or vertices in edit mode.
     factor: bevel size as a fraction of the object's smallest dimension (0.05 = 5%)
     segments: edge loops added (more = smoother curve)
     affect: EDGES | VERTICES
+    target: optional object name — auto-selects it, enters edit mode, exits after.
     """
-    result = call_blender("bevel", {"factor": factor, "segments": segments, "affect": affect}, label=label)
+    result = call_blender("bevel", {"factor": factor, "segments": segments, "affect": affect,
+                                    "target": target}, label=label)
     if result.get("success"):
         main = f"ok (offset={result.get('offset_world')}) [{result.get('op_id','')}]"
     else:
@@ -18,13 +21,15 @@ def bevel(factor: float = 0.05, segments: int = 1, affect: str = "EDGES", label:
 
 
 @mcp.tool()
-def extrude(x: float = 0.0, y: float = 0.0, z: float = 0.0, label: str = "") -> str:
+def extrude(x: float = 0.0, y: float = 0.0, z: float = 0.0, label: str = "",
+            target: str = "") -> str:
     """
     Extrude selected geometry in edit mode and translate by a fraction of the object's dimensions.
     x/y/z: fraction of object dimension along that axis (0.5 = 50% of width/depth/height).
     Returns the actual world-space translation applied.
+    target: optional object name — auto-selects it, enters edit mode, exits after.
     """
-    result = call_blender("extrude", {"x": x, "y": y, "z": z}, label=label)
+    result = call_blender("extrude", {"x": x, "y": y, "z": z, "target": target}, label=label)
     if result.get("success"):
         main = f"ok translation={result.get('translation_world')} [{result.get('op_id','')}]"
     else:
@@ -66,14 +71,16 @@ def select_by_axis(axis: str = "Z", factor: float = 0.5, comparison: str = "GREA
 
 
 @mcp.tool()
-def move_vertices(x: float = 0.0, y: float = 0.0, z: float = 0.0, label: str = "") -> str:
+def move_vertices(x: float = 0.0, y: float = 0.0, z: float = 0.0, label: str = "",
+                  target: str = "") -> str:
     """
     Translate selected vertices in edit mode using bmesh.
     x/y/z: fraction of object dimension along that axis (0.1 = 10% of width/depth/height).
     Negative values move in the opposite direction.
-    Must be in edit mode with vertices selected.
+    target: optional object name — auto-selects it, enters edit mode, exits after.
+    Must be in edit mode with vertices selected (or provide target).
     """
-    result = call_blender("move_vertices", {"x": x, "y": y, "z": z}, label=label)
+    result = call_blender("move_vertices", {"x": x, "y": y, "z": z, "target": target}, label=label)
     if result.get("success"):
         main = f"Moved {result['verts_moved']} verts by {result['delta_world']} [{result.get('op_id','')}]"
     else:
@@ -83,14 +90,16 @@ def move_vertices(x: float = 0.0, y: float = 0.0, z: float = 0.0, label: str = "
 
 @mcp.tool()
 def scale_vertices(x: float = 1.0, y: float = 1.0, z: float = 1.0,
-                   pivot: str = "SELECTION", label: str = "") -> str:
+                   pivot: str = "SELECTION", label: str = "", target: str = "") -> str:
     """
     Scale selected vertices in edit mode using bmesh.
     x/y/z: scale multipliers per axis (0.5 = half, 2.0 = double)
     pivot: SELECTION (around selection center) | ORIGIN (around object origin)
-    Must be in edit mode with vertices selected.
+    target: optional object name — auto-selects it, enters edit mode, exits after.
+    Must be in edit mode with vertices selected (or provide target).
     """
-    result = call_blender("scale_vertices", {"x": x, "y": y, "z": z, "pivot": pivot}, label=label)
+    result = call_blender("scale_vertices", {"x": x, "y": y, "z": z, "pivot": pivot,
+                                             "target": target}, label=label)
     if result.get("success"):
         main = f"Scaled {result['verts_scaled']} verts [{result.get('op_id','')}]"
     else:
@@ -183,7 +192,7 @@ def inflate_selection(amount: float = 0.003, label: str = "") -> str:
 
 
 @mcp.tool()
-def delete_geometry(mode: str = "VERT", label: str = "") -> str:
+def delete_geometry(mode: str = "VERT", label: str = "", target: str = "") -> str:
     """
     Delete the current selection in edit mode.
     mode: VERT | EDGE | FACE | ONLY_FACE | EDGE_FACE
@@ -191,9 +200,10 @@ def delete_geometry(mode: str = "VERT", label: str = "") -> str:
       - FACE       — delete selected faces (and the edges/verts only used by them)
       - ONLY_FACE  — delete just the faces, leaving an open hole bounded by their edges
       - EDGE_FACE  — delete edges + faces, leave verts
+    target: optional object name — auto-selects it, enters edit mode, exits after.
     Must be in edit mode. Pairs with select_by_axis/select_between for "carve away half".
     """
-    result = call_blender("delete_geometry", {"mode": mode}, label=label)
+    result = call_blender("delete_geometry", {"mode": mode, "target": target}, label=label)
     if result.get("success"):
         main = f"deleted ({mode}) [{result.get('op_id','')}]"
     else:
@@ -202,16 +212,21 @@ def delete_geometry(mode: str = "VERT", label: str = "") -> str:
 
 
 @mcp.tool()
-def loop_cut(axis: str = "Z", cuts: int = 1, label: str = "") -> str:
+def loop_cut(axis: str = "Z", cuts: int = 1, label: str = "", target: str = "") -> str:
     """
     Add edge loop cuts perpendicular to the given axis using bmesh.
-    Must be in edit mode. axis: X | Y | Z
-    Finds all edges running along that axis and subdivides them.
-    label: optional name for the history log
+    Finds all edges running along that axis and inserts loops crossing it.
+    axis: X | Y | Z — edges running along this axis are subdivided,
+          producing loops that sit at fixed positions on that axis.
+          e.g. axis=Z → horizontal loops; axis=X → vertical loops at constant X.
+    target: optional object name — auto-selects it, enters edit mode, exits after.
+    Must be in edit mode (or provide target).
     """
-    result = call_blender("loop_cut", {"axis": axis, "cuts": cuts}, label=label)
+    result = call_blender("loop_cut", {"axis": axis, "cuts": cuts, "target": target}, label=label)
     if result.get("success"):
-        main = f"Cut {result['edges_subdivided']} edges x{result['cuts']} [{result.get('op_id','')}]"
+        positions = result.get("loop_positions", [])
+        pos_str = f"  {axis}={positions}" if positions else ""
+        main = f"Cut {result['edges_subdivided']} edges x{result['cuts']}{pos_str} [{result.get('op_id','')}]"
     else:
         main = result.get("error", "failed")
     return main + _status(result)
@@ -264,11 +279,12 @@ def select_between(axis: str = "Z", lo: float = 0.0, hi: float = 1.0,
 
 
 @mcp.tool()
-def mark_sharp(clear: bool = False, label: str = "") -> str:
+def mark_sharp(clear: bool = False, label: str = "", target: str = "") -> str:
     """Mark selected edges as sharp (or clear) in edit mode. Required after SubSurf so
     boxy details (hand/foot edges, jaw line) stay crisp instead of melting into blobs.
-    Switch to EDGE component mode first."""
-    result = call_blender("mark_sharp", {"clear": clear}, label=label)
+    Switch to EDGE component mode first.
+    target: optional object name — auto-selects it, enters edit mode, exits after."""
+    result = call_blender("mark_sharp", {"clear": clear, "target": target}, label=label)
     if result.get("success"):
         verb = "cleared" if clear else "marked"
         main = f"{verb} sharp on {result['edges_marked']} edge(s) [{result.get('op_id','')}]"
@@ -278,11 +294,12 @@ def mark_sharp(clear: bool = False, label: str = "") -> str:
 
 
 @mcp.tool()
-def set_edge_crease(weight: float = 1.0, label: str = "") -> str:
+def set_edge_crease(weight: float = 1.0, label: str = "", target: str = "") -> str:
     """Set the SubSurf edge-crease weight on selected edges in edit mode.
     weight: 0..1. 0 = no crease (smooth), 1 = perfectly sharp under SubSurf.
-    Use to preserve hard edges on boxy hands/feet/jaws when a SubSurf modifier is active."""
-    result = call_blender("set_edge_crease", {"weight": weight}, label=label)
+    Use to preserve hard edges on boxy hands/feet/jaws when a SubSurf modifier is active.
+    target: optional object name — auto-selects it, enters edit mode, exits after."""
+    result = call_blender("set_edge_crease", {"weight": weight, "target": target}, label=label)
     if result.get("success"):
         main = f"creased {result['edges_creased']} edge(s) at weight={result['weight']}"
     else:
@@ -292,14 +309,16 @@ def set_edge_crease(weight: float = 1.0, label: str = "") -> str:
 
 @mcp.tool()
 def merge_by_distance(threshold: float = 0.001, selected_only: bool = False,
-                      label: str = "") -> str:
+                      label: str = "", target: str = "") -> str:
     """Weld coincident vertices in edit mode.
     After join_objects, run this to fuse the seams between formerly-separate meshes so
     SubSurf treats the result as one continuous skin instead of N disconnected pieces.
     threshold: weld distance in meters (default 1mm).
-    selected_only: only merge currently-selected verts. Default: whole mesh."""
+    selected_only: only merge currently-selected verts. Default: whole mesh.
+    target: optional object name — auto-selects it, enters edit mode, exits after."""
     result = call_blender("merge_by_distance",
-                          {"threshold": threshold, "selected_only": selected_only}, label=label)
+                          {"threshold": threshold, "selected_only": selected_only,
+                           "target": target}, label=label)
     if result.get("success"):
         main = (f"merged {result['merged']} verts (before={result['verts_before']} "
                 f"after={result['verts_after']}, threshold={result['threshold']}m)")

@@ -58,6 +58,34 @@ TOOLS = {}
 for _mod in _TOOL_MODULES:
     TOOLS.update(_mod.TOOLS)
 
+# Tools that require edit mode — support an optional `target` param that auto-selects the
+# named object and enters edit mode, then exits back to OBJECT mode after the call.
+EDIT_MODE_TOOLS = {
+    "bevel", "extrude", "loop_cut", "set_component_mode", "select_all",
+    "select_by_axis", "select_between", "grow_selection", "move_vertices",
+    "scale_vertices", "delete_geometry", "separate_selection", "jitter_vertices",
+    "random_select", "proportional_move", "inflate_selection", "mark_sharp",
+    "set_edge_crease", "merge_by_distance", "select_in_sphere", "split_by_part",
+    "get_rings", "select_ring", "select_rings", "scale_rings", "taper_end", "taper_section",
+}
+
+
+def _enter_edit_for_target(target_name):
+    """Select target and enter EDIT mode. Returns (switched, error)."""
+    active = bpy.context.active_object
+    if active is not None and active.name == target_name and active.mode == 'EDIT':
+        return False, None
+    if active is not None and active.mode == 'EDIT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    obj = bpy.data.objects.get(target_name)
+    if obj is None:
+        return False, f"target '{target_name}' not found"
+    bpy.ops.object.select_all(action='DESELECT')
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode='EDIT')
+    return True, None
+
 
 def execute_command(command):
     tool   = command.get("tool")
@@ -66,6 +94,14 @@ def execute_command(command):
     fn = TOOLS.get(tool)
     if fn is None:
         return {"error": f"Unknown tool: {tool}. Available: {list(TOOLS.keys())}"}
+
+    target = params.pop("target", "") if tool in EDIT_MODE_TOOLS else ""
+    auto_switched = False
+    if target:
+        auto_switched, err = _enter_edit_for_target(target)
+        if err:
+            return {"error": err}
+
     try:
         result = fn(params)
         if tool not in state.NO_LOG_TOOLS and result.get("success"):
@@ -78,6 +114,12 @@ def execute_command(command):
         return result
     except Exception as e:
         return {"error": str(e)}
+    finally:
+        if auto_switched:
+            try:
+                bpy.ops.object.mode_set(mode='OBJECT')
+            except Exception:
+                pass
 
 
 def handle_client(conn):

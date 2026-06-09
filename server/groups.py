@@ -5,15 +5,16 @@ from server._core import mcp, call_blender, _status
 def group(name: str, parts: list, label: str = "") -> str:
     """
     Create (or extend) a named group containing the given parts.
-    A group is a Blender collection — any tool that accepts `targets` can take the
-    group name and act on all members.
+    A group is a Blender collection — any tool that accepts `targets` (or
+    `set_material`'s `target`) can take the group name and act on all members.
 
     name: group name (unique).
-    parts: list of object names to include.
+    parts: list of object names OR existing group names. Group names become
+           nested sub-collections; `targets` consumers see them recursively.
 
-    Example: group("chair", ["seat", "leg_front_left", "leg_front_right",
-                              "leg_back_left", "leg_back_right", ...])
-             then smooth_edges("chair") finishes every part in one call.
+    Examples:
+      group("chair", ["seat", "leg_front_left", "leg_front_right", ...])
+      group("girl", ["skin", "hair", "shirt", "skirt"])   # nests existing groups
     """
     result = call_blender("group", {"name": name, "parts": parts}, label=label)
     if result.get("success"):
