@@ -1,0 +1,167 @@
+from server._core import mcp, call_blender, _status
+
+
+# All sculpt_* tools accept a world-space brush center (at_x/y/z) and radius in
+# meters, plus a falloff curve. They work on the named target object whether or
+# not it's currently active — no need to be in edit mode. If the mesh is too
+# coarse to register the brush, pass subdivide=True to add density first.
+
+
+def _sculpt_result(brush: str, result: dict) -> str:
+    if result.get("success"):
+        sub = result.get("subdivided_edges", 0)
+        sub_note = f" (+{sub} edges subdivided)" if sub else ""
+        verts = result.get("verts_affected", result.get("verts_per_pass", "?"))
+        if "iterations" in result and "verts_per_pass" in result:
+            head = f"{brush}: {result['iterations']} iterations × {verts} verts{sub_note}"
+        else:
+            head = f"{brush}: affected {verts} verts{sub_note}"
+        warn = result.get("warning")
+        if warn:
+            head += f"\n  ⚠ {warn}"
+        return head
+    return result.get("error", "failed")
+
+
+@mcp.tool()
+def sculpt_grab(target: str, at_x: float, at_y: float, at_z: float, radius: float,
+                to_x: float, to_y: float, to_z: float,
+                falloff: str = "SMOOTH", subdivide: bool = False,
+                label: str = "") -> str:
+    """Pull a region of `target` toward a world-space point.
+
+    Verts at the brush center (at_x, at_y, at_z) move by the full offset (to - at);
+    verts at radius edge don't move; everything between interpolates by falloff.
+    Use this to drag clay from one point to another — bulge a cheekbone, pull a
+    handle outward, lift a brow.
+
+    falloff: SMOOTH | LINEAR | SPHERE | SHARP | ROOT | CONSTANT.
+    subdivide: if the mesh is too coarse in the brush region, set True to locally
+               subdivide edges before sculpting.
+    """
+    result = call_blender("sculpt_grab", {
+        "target": target, "at": [at_x, at_y, at_z], "to": [to_x, to_y, to_z],
+        "radius": radius, "falloff": falloff, "subdivide": subdivide,
+    }, label=label)
+    return _sculpt_result("grab", result) + _status(result)
+
+
+@mcp.tool()
+def sculpt_inflate(target: str, at_x: float, at_y: float, at_z: float, radius: float,
+                   amount: float, falloff: str = "SMOOTH", subdivide: bool = False,
+                   label: str = "") -> str:
+    """Push verts along their OWN normals — organic bulge or deflate.
+
+    amount: meters along each vert's normal. Positive = outward (bulge),
+            negative = inward (deflate). Differs from sculpt_draw because each
+            vert moves along its own surface normal, so curved areas bulge
+            outward in their natural direction.
+    """
+    result = call_blender("sculpt_inflate", {
+        "target": target, "at": [at_x, at_y, at_z], "radius": radius,
+        "amount": amount, "falloff": falloff, "subdivide": subdivide,
+    }, label=label)
+    return _sculpt_result("inflate", result) + _status(result)
+
+
+@mcp.tool()
+def sculpt_draw(target: str, at_x: float, at_y: float, at_z: float, radius: float,
+                amount: float, normal_x: float = 0.0, normal_y: float = 0.0,
+                normal_z: float = 0.0, falloff: str = "SMOOTH",
+                subdivide: bool = False, label: str = "") -> str:
+    """Push verts along a SINGLE averaged normal — uniform-direction ridge or dent.
+
+    amount: meters along the averaged normal. Signed.
+    normal_x/y/z: optional world-space normal override. If all three are 0, the
+                  average of vert normals in the region is used. Override when
+                  the surface is curved enough that the average is unstable, or
+                  when you want a specific direction (e.g. [0, 0, 1] to push up).
+    """
+    normal = [normal_x, normal_y, normal_z] if any([normal_x, normal_y, normal_z]) else None
+    params = {"target": target, "at": [at_x, at_y, at_z], "radius": radius,
+              "amount": amount, "falloff": falloff, "subdivide": subdivide}
+    if normal is not None:
+        params["normal"] = normal
+    result = call_blender("sculpt_draw", params, label=label)
+    return _sculpt_result("draw", result) + _status(result)
+
+
+@mcp.tool()
+def sculpt_smooth(target: str, at_x: float, at_y: float, at_z: float, radius: float,
+                  iterations: int = 1, falloff: str = "SMOOTH",
+                  subdivide: bool = False, label: str = "") -> str:
+    """Laplacian relax — pull each vert toward the centroid of its neighbors.
+
+    iterations: how many smoothing passes. More iterations = more relaxation.
+                There's no `amount` parameter — strength is iterations × falloff.
+    """
+    result = call_blender("sculpt_smooth", {
+        "target": target, "at": [at_x, at_y, at_z], "radius": radius,
+        "iterations": iterations, "falloff": falloff, "subdivide": subdivide,
+    }, label=label)
+    return _sculpt_result("smooth", result) + _status(result)
+
+
+@mcp.tool()
+def sculpt_crease(target: str, at_x: float, at_y: float, at_z: float, radius: float,
+                  amount: float, falloff: str = "SHARP", subdivide: bool = False,
+                  label: str = "") -> str:
+    """Pull verts toward the brush center — sharp folds, valleys, seams.
+
+    Default falloff is SHARP because the whole point is a tight fold; pass
+    falloff='SMOOTH' for a softer crease.
+
+    amount: meters of pull toward center. Positive = pull in (valley),
+            negative = push out (ridge).
+    """
+    result = call_blender("sculpt_crease", {
+        "target": target, "at": [at_x, at_y, at_z], "radius": radius,
+        "amount": amount, "falloff": falloff, "subdivide": subdivide,
+    }, label=label)
+    return _sculpt_result("crease", result) + _status(result)
+
+
+@mcp.tool()
+def sculpt_pinch(target: str, at_x: float, at_y: float, at_z: float, radius: float,
+                 amount: float, falloff: str = "SMOOTH", subdivide: bool = False,
+                 label: str = "") -> str:
+    """Pull verts radially inward in their TANGENT PLANE — tightens without raising.
+
+    Unlike crease (which moves verts toward the center directly), pinch projects
+    the toward-center direction onto each vert's tangent plane. The surface
+    puckers without changing its average height — good for tightening features
+    like lip corners, fabric folds, or pinching a sphere into a teardrop.
+
+    amount: meters of in-plane pull. Positive = inward, negative = outward.
+    """
+    result = call_blender("sculpt_pinch", {
+        "target": target, "at": [at_x, at_y, at_z], "radius": radius,
+        "amount": amount, "falloff": falloff, "subdivide": subdivide,
+    }, label=label)
+    return _sculpt_result("pinch", result) + _status(result)
+
+
+@mcp.tool()
+def sculpt_flatten(target: str, at_x: float, at_y: float, at_z: float, radius: float,
+                   amount: float = 1.0,
+                   plane_normal_x: float = 0.0, plane_normal_y: float = 0.0,
+                   plane_normal_z: float = 0.0,
+                   falloff: str = "SMOOTH", subdivide: bool = False,
+                   label: str = "") -> str:
+    """Project verts toward an average plane through the brush center — smooth out bumps.
+
+    amount: 0..1 blend toward the plane (default 1.0 = fully flatten).
+            Negative values push AWAY from the plane (amplify bumps).
+    plane_normal_x/y/z: optional world-space plane normal override. If all three
+                        are 0, the average of vert normals in the region is used.
+                        Pass an override for "flatten against THIS plane"
+                        (e.g. [0, 0, 1] to flatten against the ground plane).
+    """
+    plane = [plane_normal_x, plane_normal_y, plane_normal_z] \
+        if any([plane_normal_x, plane_normal_y, plane_normal_z]) else None
+    params = {"target": target, "at": [at_x, at_y, at_z], "radius": radius,
+              "amount": amount, "falloff": falloff, "subdivide": subdivide}
+    if plane is not None:
+        params["plane_normal"] = plane
+    result = call_blender("sculpt_flatten", params, label=label)
+    return _sculpt_result("flatten", result) + _status(result)

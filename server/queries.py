@@ -1,0 +1,176 @@
+import json
+from server._core import mcp, call_blender, _status
+
+
+@mcp.tool()
+def get_scene_tree() -> str:
+    """List all objects in the Blender scene as a tree. Call this first to know what exists."""
+    result = call_blender("get_scene_tree")
+    return result.get("tree", result.get("error", "unknown error"))
+
+
+@mcp.tool()
+def get_blender_status() -> str:
+    """
+    Full Blender context snapshot. Returns mode, active + selected objects, dimensions,
+    world Z range, last history action, and (in Edit Mode) component type, selection counts,
+    and selection Z range. This is also automatically appended to every other tool's output.
+    """
+    result = call_blender("get_blender_status")
+    if not result.get("success"):
+        return result.get("error", "failed")
+    s = result["status"]
+    lines = [
+        f"mode:           {s['mode']}",
+        f"active_object:  {s['active_object']} ({s['active_type']})",
+        f"selected:       {s['selected_objects']}",
+        f"location:       {s.get('location')}",
+        f"dimensions:     {s.get('dimensions')}     (world bbox)",
+        f"rotation_deg:   {s.get('rotation_deg')}",
+        f"world_bounds:   {s.get('world_bounds')}",
+        f"history_depth:  {s['history_depth']}",
+        f"last_action:    {s['last_action']}",
+    ]
+    if "edit" in s:
+        e = s["edit"]
+        lines += [
+            f"--- edit mode ---",
+            f"component_mode: {e['component_mode']}",
+            f"selected:       {e['selected']}",
+            f"total:          {e['total']}",
+            f"sel_z_range:    {e.get('selection_z_range', 'none')}",
+        ]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_mesh_profile(axis: str = "Z") -> str:
+    """
+    Slice the active mesh into rings along an axis and report the width/extent at each ring.
+    axis: X | Y | Z — the axis to slice along (default Z for vertical objects like blades)
+    Returns a table: position along axis, plus min/max/width on the other two axes.
+    Use this to understand actual geometry before making edits — no guessing needed.
+    """
+    result = call_blender("get_mesh_profile", {"axis": axis})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    profile = result["profile"]
+    ax = result["axis"]
+    other = [n for n in ['X', 'Y', 'Z'] if n != ax]
+    lines = [f"{'':>8}  " + "  ".join(f"{n:>22}" for n in other)]
+    for r in profile:
+        cols = []
+        for n in other:
+            lo, hi = r[f"{n}_range"]
+            w = r[f"{n}_width"]
+            cols.append(f"{lo:+.4f}→{hi:+.4f} ({w:.4f})")
+        lines.append(f"{ax}={r[ax]:+.4f}  " + "  ".join(cols))
+    return f"{len(profile)} rings along {ax}:\n" + "\n".join(lines) + _status(result)
+
+
+@mcp.tool()
+def get_object_info(name: str = "") -> str:
+    """
+    Detailed state dump of an object: location, scale, rotation, dimensions, world bbox,
+    and vertex/edge/face counts.
+
+    Prefer `describe(name)` for normal workflows — it returns a relational sentence
+    instead of raw coordinates. Use this when you specifically need the underlying
+    coordinate/scale/rotation values (debugging, math).
+
+    name: target object. If omitted, falls back to the active object.
+    """
+    params = {"name": name} if name else {}
+    result = call_blender("get_object_info", params)
+    if result.get("success"):
+        return json.dumps(result["info"], indent=2) + _status(result)
+    return result.get("error", "failed")
+
+
+@mcp.tool()
+def describe(name: str) -> str:
+    """
+    Describe an object in RELATIONAL terms — what it rests on, what it's flush with,
+    and its dimensions. No raw world coordinates.
+
+    Prefer this over get_object_info for normal workflows. Coords appear in get_object_info
+    when you really need them; describe() is the everyday tool because relational
+    descriptions are what you actually reason in.
+
+    Example output:
+        "leg_front_left: standing on floor; flush left of seat; size 0.04 × 0.04 × 0.45 m (W×D×H)"
+    """
+    result = call_blender("describe", {"name": name})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    return result["description"] + _status(result)
+
+
+@mcp.tool()
+def get_current_selection() -> str:
+    """
+    Describe the current vertex selection in Edit Mode.
+    Returns: selected vert count, world-space centroid, world-space bounding box.
+    Use this to understand where your selection actually is before moving or scaling it.
+    Must be in Edit Mode.
+    """
+    result = call_blender("get_current_selection")
+    if not result.get("success"):
+        return result.get("error", "failed")
+    if result["selected_count"] == 0:
+        return "No vertices selected." + _status(result)
+    lines = [
+        f"selected_verts: {result['selected_count']}",
+        f"centroid_world: {result['centroid_world']}",
+        f"bbox_world:",
+        f"  x: {result['bbox_world']['x']}",
+        f"  y: {result['bbox_world']['y']}",
+        f"  z: {result['bbox_world']['z']}",
+    ]
+    return "\n".join(lines) + _status(result)
+
+
+@mcp.tool()
+def distance_between(a: str, b: str, axis: str = "ANY") -> str:
+    """
+    Centre-to-centre distance between two objects, in meters.
+    axis: ANY (3D Euclidean) | X | Y | Z (single-axis distance).
+
+    Use this when you'd otherwise be tempted to fetch coords of both and subtract —
+    let the server do the math so you don't carry numbers in your head.
+    """
+    result = call_blender("distance_between", {"a": a, "b": b, "axis": axis})
+    if result.get("success"):
+        return f"{a} ↔ {b} ({result['axis']}): {result['distance']} m" + _status(result)
+    return result.get("error", "failed")
+
+
+@mcp.tool()
+def gap_between(a: str, b: str) -> str:
+    """
+    Smallest empty distance between two objects' bounding boxes, per axis.
+    Negative = overlap. Useful for "are these touching?" and "how much room is left?"
+    """
+    result = call_blender("gap_between", {"a": a, "b": b})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    touching = result.get("touching_on_axes") or []
+    touching_str = f" — touching on {touching}" if touching else ""
+    main = (f"gap {a} ↔ {b}: x={result['gap_x']}  y={result['gap_y']}  z={result['gap_z']}"
+            f"{touching_str}")
+    return main + _status(result)
+
+
+@mcp.tool()
+def is_aligned(a: str, b: str, side: str = "TOP", tolerance: float = 0.001) -> str:
+    """
+    Check whether two objects share an aligned side / center.
+    side: TOP | BOTTOM | LEFT | RIGHT | FRONT | BACK | CENTER_X | CENTER_Y | CENTER_Z
+
+    Use this instead of fetching world-bounds for two objects and comparing.
+    """
+    result = call_blender("is_aligned", {"a": a, "b": b, "side": side, "tolerance": tolerance})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    verdict = "ALIGNED" if result["aligned"] else "NOT aligned"
+    return f"{a} vs {b} on {side}: {verdict} (diff={result['difference']})" + _status(result)

@@ -1,0 +1,143 @@
+from server._core import mcp, call_blender, _status, _targets
+
+
+@mcp.tool()
+def nudge(targets: str = "", right: float = 0.0, left: float = 0.0,
+          up: float = 0.0, down: float = 0.0,
+          back: float = 0.0, forward: float = 0.0, label: str = "") -> str:
+    """
+    Move objects by a relative offset, in SEMANTIC directions instead of XYZ.
+    right/left → ±X, back/forward → ±Y, up/down → ±Z. All in meters.
+
+    Prefer placement spec (`on=` on add_*) for FIRST placement. Use nudge for fine
+    adjustments after the fact (e.g. "shift this 1cm to the right to align with X").
+
+    targets: single object name, a group name, or comma-separated list. Empty = active object.
+    Example: nudge("seat", up=0.02) — raise the seat 2cm.
+    """
+    result = call_blender("nudge", {
+        "targets": _targets(targets),
+        "right": right, "left": left, "up": up, "down": down, "back": back, "forward": forward,
+    }, label=label)
+    if result.get("success"):
+        main = f"nudged {result['moved']} by {result['delta']} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def resize(targets: str = "", width: float = None, depth: float = None, height: float = None,
+           label: str = "") -> str:
+    """
+    Resize objects to ABSOLUTE world-space dimensions (meters). Each axis is optional;
+    omitted axes preserve their current size. Scale is baked after resize so modifiers
+    (bevel etc.) behave uniformly.
+
+    Prefer creating primitives at the right size up front (add_box etc.) — this is for
+    after-the-fact corrections ("make the seat 5cm taller").
+
+    targets: single object name, group name, or comma-separated list. Empty = active object.
+    Example: resize("seat", height=0.04) — make the seat 4cm thick.
+    """
+    params = {"targets": _targets(targets)}
+    if width is not None:  params["width"] = width
+    if depth is not None:  params["depth"] = depth
+    if height is not None: params["height"] = height
+    result = call_blender("resize", params, label=label)
+    if result.get("success"):
+        main = f"resized: {result['resized']} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def apply_transform(targets: str = "", scale: bool = True,
+                    rotation: bool = False, location: bool = False, label: str = "") -> str:
+    """
+    Bake an object's transform into its mesh data. After applying scale, obj.scale = [1,1,1]
+    and bevels/modifiers behave uniformly. Apply rotation to clear rotation_euler. Apply
+    location only if you really want the origin pinned at world (0,0,0) — usually unwanted.
+
+    Primitives created with add_box etc. already have scale baked, so you rarely need this.
+    Reach for it after `resize` if you bypass the built-in bake, or to fix imported objects.
+
+    targets: single object name, group name, or comma-separated list. Empty = active object.
+    """
+    result = call_blender("apply_transform", {
+        "targets": _targets(targets), "scale": scale, "rotation": rotation, "location": location,
+    }, label=label)
+    if result.get("success"):
+        flags = [k for k in ("scale", "rotation", "location") if result.get(k)]
+        main = f"applied {flags} on {result['applied_to']} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def rotate_object(angle: float, axis: str = "Z", targets: str = "", label: str = "") -> str:
+    """
+    Rotate objects by `angle` degrees around `axis` (X | Y | Z).
+    targets: single object name, group name, or comma-separated list. Empty = active object.
+    """
+    result = call_blender("rotate_object", {
+        "angle": angle, "axis": axis, "targets": _targets(targets),
+    }, label=label)
+    if result.get("success"):
+        main = f"rotated {result['rotated']} by {angle}° on {axis} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def snap_to(target: str, side: str = "Z_MAX", source_side: str = "AUTO",
+            offset: float = 0.0, label: str = "") -> str:
+    """
+    Translate the active object so one of its bbox faces aligns with a face of `target`.
+
+    side:        which face of TARGET to snap to.  X_MIN | X_MAX | Y_MIN | Y_MAX | Z_MIN | Z_MAX
+    source_side: which face of ACTIVE to align there.
+                 AUTO (default) = the opposite face on the same axis (so they touch flush).
+                 CENTER = align active's center to target's chosen face.
+                 explicit X_MIN..Z_MAX must be on the same axis as `side`.
+    offset:      world-units along the side axis, applied AFTER alignment.
+                 +ve = move active further in the +axis direction (more overlap when snapping to MAX-side).
+
+    Examples:
+      snap_to(target="Crossguard", side="Z_MAX")                          # grip bottom flush with crossguard top
+      snap_to(target="Grip", side="Z_MAX", offset=-0.04)                  # pommel sinks 0.04 into grip
+      snap_to(target="Wall", side="X_MAX", source_side="X_MAX")           # both right-faces align (flush, not next-to)
+    """
+    params = {"target": target, "side": side, "source_side": source_side, "offset": offset}
+    result = call_blender("snap_to", params, label=label)
+    if result.get("success"):
+        main = (f"snap_to {target}.{side}: delta={result['delta']} "
+                f"({result['source_side']}→{result['target_coord']})  [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def snap_to_grid(size: float = 0.1, axes: str = "XYZ", label: str = "") -> str:
+    """
+    Round the active object's location to multiples of `size` on the chosen axes.
+
+    size: grid spacing in world units (e.g., 0.05, 0.1, 0.25, 1.0)
+    axes: any of "X", "Y", "Z", or combinations like "XZ" — only these axes are snapped.
+
+    Snaps the ORIGIN/pivot — does not change dims, rotation, or geometry.
+    Pairs naturally with snap_to: free-place, snap-to-grid for alignment, snap-to for stacking.
+    """
+    params = {"size": size, "axes": axes}
+    result = call_blender("snap_to_grid", params, label=label)
+    if result.get("success"):
+        moves = result.get("snapped", [])
+        moved_summary = ", ".join(f"{m['axis']}:{m['from']}→{m['to']}" for m in moves if abs(m.get('moved', 0)) > 1e-9) or "no change"
+        main = f"snap_to_grid {size} on {axes}: {moved_summary}  [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)

@@ -56,23 +56,49 @@ def _capture_viewport(scene, window, screen, area, region, path, width, height):
         bpy.ops.render.opengl(write_still=True)
 
 
-def _write_png(rgba_float, path):
-    import struct, zlib
+def _normalize_format(fmt):
+    """Return (blender_enum, file_ext, response_format) for a user-supplied format string."""
+    f = (fmt or "PNG").upper()
+    if f in ("JPG", "JPEG"):
+        return "JPEG", "jpg", "jpeg"
+    if f == "PNG":
+        return "PNG", "png", "png"
+    raise ValueError(f"format must be PNG or JPEG, got '{fmt}'")
+
+
+def _apply_image_settings(scene, blender_fmt, quality, compression):
+    """Apply file_format + quality + compression. Returns the saved prior state for restore."""
+    saved = {
+        "file_format": scene.render.image_settings.file_format,
+        "quality":     scene.render.image_settings.quality,
+        "compression": scene.render.image_settings.compression,
+    }
+    scene.render.image_settings.file_format = blender_fmt
+    scene.render.image_settings.quality = int(quality)
+    scene.render.image_settings.compression = int(compression)
+    return saved
+
+
+def _restore_image_settings(scene, saved):
+    scene.render.image_settings.file_format = saved["file_format"]
+    scene.render.image_settings.quality     = saved["quality"]
+    scene.render.image_settings.compression = saved["compression"]
+
+
+def _save_array_image(rgba_float, path, blender_fmt, quality, compression):
+    """Save a numpy (H, W, 4) float RGBA array via Blender's image API. Handles PNG + JPEG."""
     import numpy as np
     h, w = rgba_float.shape[:2]
-    pixels = (np.clip(rgba_float, 0, 1) * 255).astype(np.uint8)
-
-    def chunk(tag, data):
-        c = tag + data
-        return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
-
-    ihdr = chunk(b'IHDR', struct.pack('>II', w, h) + bytes([8, 6, 0, 0, 0]))
-    raw = b''.join(b'\x00' + pixels[r].tobytes() for r in range(h))
-    idat = chunk(b'IDAT', zlib.compress(raw, 6))
-    iend = chunk(b'IEND', b'')
-
-    with open(path, 'wb') as f:
-        f.write(b'\x89PNG\r\n\x1a\n' + ihdr + idat + iend)
+    img = bpy.data.images.new("__bb_collage_export__", w, h, alpha=True, float_buffer=False)
+    flipped = np.flipud(rgba_float).astype(np.float32)
+    img.pixels.foreach_set(flipped.ravel())
+    scene = bpy.context.scene
+    saved = _apply_image_settings(scene, blender_fmt, quality, compression)
+    try:
+        img.save_render(path)
+    finally:
+        _restore_image_settings(scene, saved)
+        bpy.data.images.remove(img)
 
 
 def get_viewport_screenshot(params):
@@ -83,16 +109,21 @@ def get_viewport_screenshot(params):
     width = params.get("width", 960)
     height = params.get("height", 540)
     hide_overlays = bool(params.get("hide_overlays", False))
+    try:
+        blender_fmt, ext, response_fmt = _normalize_format(params.get("format", "PNG"))
+    except ValueError as e:
+        return {"error": str(e)}
+    quality = int(params.get("quality", 85))
+    compression = int(params.get("compression", 15))
 
     scene = bpy.context.scene
     old_path = scene.render.filepath
-    old_format = scene.render.image_settings.file_format
     old_res_x = scene.render.resolution_x
     old_res_y = scene.render.resolution_y
     old_res_pct = scene.render.resolution_percentage
 
-    tmp = os.path.join(tempfile.gettempdir(), "bb_viewport.png")
-    scene.render.image_settings.file_format = 'PNG'
+    tmp = os.path.join(tempfile.gettempdir(), f"bb_viewport.{ext}")
+    saved_img_settings = _apply_image_settings(scene, blender_fmt, quality, compression)
     scene.render.resolution_percentage = 100
 
     space = next((s for s in area.spaces if s.type == 'VIEW_3D'), None)
@@ -115,7 +146,7 @@ def get_viewport_screenshot(params):
             space.overlay.show_overlays = saved_overlays
 
     scene.render.filepath = old_path
-    scene.render.image_settings.file_format = old_format
+    _restore_image_settings(scene, saved_img_settings)
     scene.render.resolution_x = old_res_x
     scene.render.resolution_y = old_res_y
     scene.render.resolution_percentage = old_res_pct
@@ -123,7 +154,7 @@ def get_viewport_screenshot(params):
     with open(tmp, "rb") as f:
         data = base64.b64encode(f.read()).decode()
 
-    return {"image": data, "format": "png"}
+    return {"image": data, "format": response_fmt, "bytes": len(data) * 3 // 4}
 
 
 def get_viewport_collage(params):
@@ -133,6 +164,12 @@ def get_viewport_collage(params):
     zoom = params.get("zoom", 1.0)
     panel_w = max(160, int(320 * zoom))
     panel_h = max(90,  int(180 * zoom))
+    try:
+        blender_fmt, ext, response_fmt = _normalize_format(params.get("format", "PNG"))
+    except ValueError as e:
+        return {"error": str(e)}
+    quality = int(params.get("quality", 85))
+    compression = int(params.get("compression", 15))
 
     window, screen, area, region = find_view3d_context()
     if area is None:
@@ -181,12 +218,13 @@ def get_viewport_collage(params):
 
     scene = bpy.context.scene
     old_path   = scene.render.filepath
-    old_format = scene.render.image_settings.file_format
     old_res_x  = scene.render.resolution_x
     old_res_y  = scene.render.resolution_y
     old_res_pct = scene.render.resolution_percentage
 
-    scene.render.image_settings.file_format = 'PNG'
+    # Per-panel intermediate is always PNG (lossless) so the final assembly is clean.
+    # Final output is encoded per the requested format below.
+    panel_saved = _apply_image_settings(scene, 'PNG', 100, 15)
     scene.render.resolution_percentage = 100
 
     views = ["FRONT", "RIGHT", "TOP", "BACK", "LEFT", "PERSP"]
@@ -229,8 +267,8 @@ def get_viewport_collage(params):
     row2 = np.concatenate(panels[3:6], axis=1)
     grid = np.concatenate([row1, row2], axis=0)
 
-    out = os.path.join(tempfile.gettempdir(), "bb_collage.png")
-    _write_png(grid, out)
+    out = os.path.join(tempfile.gettempdir(), f"bb_collage.{ext}")
+    _save_array_image(grid, out, blender_fmt, quality, compression)
 
     bpy.ops.object.select_all(action='DESELECT')
     for o in saved_selected:
@@ -244,7 +282,7 @@ def get_viewport_collage(params):
         bpy.ops.object.mode_set(mode='EDIT')
 
     scene.render.filepath = old_path
-    scene.render.image_settings.file_format = old_format
+    _restore_image_settings(scene, panel_saved)
     scene.render.resolution_x = old_res_x
     scene.render.resolution_y = old_res_y
     scene.render.resolution_percentage = old_res_pct
@@ -254,7 +292,8 @@ def get_viewport_collage(params):
 
     return {
         "image": data,
-        "format": "png",
+        "format": response_fmt,
+        "bytes": len(data) * 3 // 4,
         "layout": "row1: FRONT | RIGHT | TOP   row2: BACK | LEFT | PERSP",
         "panel_size": f"{panel_w}x{panel_h}",
         "target": target,
