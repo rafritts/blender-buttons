@@ -125,7 +125,26 @@ def join_objects(params):
     bpy.context.view_layer.objects.active = first
     bpy.ops.object.join()
     result = bpy.context.active_object
-    return {"success": True, "result_object": result.name if result else None, "joined": names}
+
+    merged = None
+    merge_threshold = params.get("merge_threshold")
+    if merge_threshold is not None and result is not None:
+        import bmesh
+        threshold = float(merge_threshold)
+        bpy.ops.object.mode_set(mode='EDIT')
+        bm = bmesh.from_edit_mesh(result.data)
+        before = len(bm.verts)
+        bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=threshold)
+        after = len(bm.verts)
+        bmesh.update_edit_mesh(result.data)
+        bpy.ops.object.mode_set(mode='OBJECT')
+        merged = {"threshold": threshold, "verts_before": before,
+                  "verts_after": after, "merged": before - after}
+
+    out = {"success": True, "result_object": result.name if result else None, "joined": names}
+    if merged is not None:
+        out["merged"] = merged
+    return out
 
 
 def set_mode(params):

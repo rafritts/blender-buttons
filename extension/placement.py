@@ -21,9 +21,19 @@ Adjacency placements (set 1 axis + center the other 2 on target):
   {"in_front_of": "name"}   -- flush to target's -Y side
   {"behind": "name"}        -- flush to target's +Y side
 
+Mirror placement (sets cx from another object's center, flipping the chosen axis):
+  {"mirror_of": "name", "axis": "X"}   -- center = (-cx_of_name, cy, cz) when axis=X
+                                          (axis Y or Z analogous)
+
+Absolute axis overrides (applied AFTER relational resolution; always win):
+  {"x": value}              -- center X = value
+  {"y": value}              -- center Y = value
+  (use "raise_to"/"on_floor" for Z — they set Z_MIN, not Z_CENTER)
+
 Z overrides (always applied last, win conflicts):
   {"on_floor": True}        -- Z_MIN of new = 0
   {"raise_to": value}       -- Z_MIN of new = value
+  {"z": value}              -- center Z = value (alternative to raise_to)
 
 Modifiers:
   {"gap": 0.02}             -- spacing for on/under/left_of/right_of/in_front_of/behind
@@ -123,11 +133,33 @@ def resolve_placement(spec, dims):
         cy = ymax + d / 2 + gap
         cz = (zmin + zmax) / 2
 
+    # Mirror placement — sets center from another object, flipping the chosen axis
+    if "mirror_of" in spec:
+        src_cx, src_cy, src_cz = center(spec["mirror_of"])
+        axis = spec.get("axis", "X").upper()
+        cx, cy, cz = src_cx, src_cy, src_cz
+        if axis == "X":
+            cx = -src_cx
+        elif axis == "Y":
+            cy = -src_cy
+        elif axis == "Z":
+            cz = -src_cz
+        else:
+            raise ValueError(f"mirror_of axis must be X, Y, or Z (got {axis!r})")
+
     # Z overrides (last word)
     if spec.get("on_floor"):
         cz = h / 2
     if "raise_to" in spec:
         cz = spec["raise_to"] + h / 2
+
+    # Absolute X/Y/Z overrides — always last word for that axis.
+    if "x" in spec:
+        cx = float(spec["x"])
+    if "y" in spec:
+        cy = float(spec["y"])
+    if "z" in spec:
+        cz = float(spec["z"])
 
     return (cx, cy, cz)
 

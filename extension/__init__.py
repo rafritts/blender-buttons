@@ -13,11 +13,12 @@ module whose name matches the tool family:
                   remove_modifier / list_modifiers / apply_modifiers
   editmode.py     bevel / extrude / loop_cut / select_* / grow_selection / move/scale_vertices /
                   delete_geometry / separate_selection / jitter_vertices / random_select /
-                  proportional_move
+                  proportional_move / inflate_selection
   rings.py        get_rings / select_ring(s) / scale_rings / taper_end / taper_section
   shading.py      shade_smooth / shade_flat / set_material (Principled BSDF)
   lighting.py     add_light / modify_light / set_world_background / set_camera_dof
   scatter.py      scatter_on_surface (the donut-tutorial sprinkle step)
+  sculpt.py       sculpt_grab / inflate / draw / smooth / crease / pinch / flatten
   viewport.py     screenshot / collage / view angle / shading mode / framing / orbit / camera positioning
   history.py      get_history / undo_steps / undo_to
   designs.py      save_design / open_design / list_designs
@@ -39,6 +40,7 @@ from . import server, state, ui
 def register():
     for cls in ui.CLASSES:
         bpy.utils.register_class(cls)
+    ui.start_server()
 
 
 def unregister():

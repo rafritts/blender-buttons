@@ -432,6 +432,45 @@ def jitter_vertices(params):
             "amount": amount, "axis": axis, "seed": seed}
 
 
+def inflate_selection(params):
+    """Push selected verts along their normals by a fixed amount — the sculpt 'Inflate' brush as a one-shot.
+
+    amount: meters to move along each vert's normal. Positive = outward (puff up),
+            negative = inward (deflate). Default 0.003 (3mm).
+
+    Use case: bulbous drip tips. After pulling drip-tip verts down with
+    proportional_move, select just the tip verts and inflate_selection(amount=0.003)
+    to bulge them outward into proper teardrop bulbs instead of pointy tongues.
+    """
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    amount = float(params.get("amount", 0.003))
+
+    scale = obj.scale
+    sx = abs(scale.x) or 1.0
+    sy = abs(scale.y) or 1.0
+    sz = abs(scale.z) or 1.0
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    selected = [v for v in bm.verts if v.select]
+    if not selected:
+        return {"error": "No vertices selected"}
+    moved = 0
+    for v in selected:
+        n = v.normal
+        if n.length == 0:
+            continue
+        v.co.x += n.x * amount / sx
+        v.co.y += n.y * amount / sy
+        v.co.z += n.z * amount / sz
+        moved += 1
+    bmesh.update_edit_mesh(obj.data)
+    push_undo(f"inflate_selection {amount}")
+    return {"success": True, "verts_inflated": moved, "amount": amount}
+
+
 _DELETE_TYPES = {"VERT", "EDGE", "FACE", "ONLY_FACE", "EDGE_FACE"}
 
 
@@ -489,6 +528,145 @@ def separate_selection(params):
     return {"success": True, "new_object": new_name, "source": obj.name}
 
 
+def mark_sharp(params):
+    """Mark selected edges as sharp (or clear). SubSurf + auto-smooth then preserves
+    these as crisp creases instead of melting them into rounded blobs.
+
+    clear: if true, unmark instead of mark. Default false.
+    Operates on the currently selected edges. Switch to edge mode first.
+    """
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    clear = bool(params.get("clear", False))
+    bm = bmesh.from_edit_mesh(obj.data)
+    sel = [e for e in bm.edges if e.select]
+    if not sel:
+        return {"error": "No edges selected"}
+    for e in sel:
+        e.smooth = bool(clear)  # smooth=False == sharp
+    bmesh.update_edit_mesh(obj.data)
+    push_undo(f"mark_sharp clear={clear}")
+    return {"success": True, "edges_marked": len(sel), "clear": clear}
+
+
+def set_edge_crease(params):
+    """Set the SubSurf edge-crease weight on selected edges. 0 = no crease (default smoothing),
+    1 = perfectly sharp under SubSurf. Use on hand/foot boxes after SubSurf to keep silhouette.
+
+    weight: 0..1. Default 1.0.
+    """
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    weight = float(params.get("weight", 1.0))
+    weight = max(0.0, min(1.0, weight))
+    bm = bmesh.from_edit_mesh(obj.data)
+    sel = [e for e in bm.edges if e.select]
+    if not sel:
+        return {"error": "No edges selected"}
+    crease_layer = bm.edges.layers.crease.verify() if hasattr(bm.edges.layers.crease, "verify") \
+                    else (bm.edges.layers.crease.active or bm.edges.layers.crease.new())
+    for e in sel:
+        e[crease_layer] = weight
+    bmesh.update_edit_mesh(obj.data)
+    push_undo(f"set_edge_crease {weight}")
+    return {"success": True, "edges_creased": len(sel), "weight": weight}
+
+
+def merge_by_distance(params):
+    """Weld coincident vertices in edit mode. After join_objects this fuses the seams
+    between formerly-separate meshes so SubSurf treats the result as one continuous skin.
+
+    threshold:    welding distance in meters (default 0.001 = 1mm).
+    selected_only: if true, only merge currently selected verts. Default false (whole mesh).
+    """
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    threshold = float(params.get("threshold", 0.001))
+    selected_only = bool(params.get("selected_only", False))
+    bm = bmesh.from_edit_mesh(obj.data)
+    verts = [v for v in bm.verts if v.select] if selected_only else list(bm.verts)
+    if not verts:
+        return {"error": "No vertices to merge"}
+    before = len(bm.verts)
+    bmesh.ops.remove_doubles(bm, verts=verts, dist=threshold)
+    after = len(bm.verts)
+    bmesh.update_edit_mesh(obj.data)
+    push_undo(f"merge_by_distance {threshold}")
+    return {"success": True, "threshold": threshold, "verts_before": before,
+            "verts_after": after, "merged": before - after}
+
+
+def select_in_sphere(params):
+    """Select vertices inside a world-space sphere — for localized region editing on joined meshes.
+
+    center: [x, y, z] world coords (required).
+    radius: meters (required).
+    action: SELECT (replace) | ADD | DESELECT. Default SELECT.
+
+    Pair with proportional_move or inflate_selection to bulge/sculpt that region.
+    """
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    center = params.get("center")
+    if not (isinstance(center, list) and len(center) == 3):
+        return {"error": "'center' must be a [x, y, z] list"}
+    radius = float(params.get("radius", 0.1))
+    if radius <= 0:
+        return {"error": "'radius' must be > 0"}
+    action = (params.get("action") or "SELECT").upper()
+    cx, cy, cz = float(center[0]), float(center[1]), float(center[2])
+    r2 = radius * radius
+    bm = bmesh.from_edit_mesh(obj.data)
+    mat = obj.matrix_world
+    count = 0
+    for v in bm.verts:
+        wv = mat @ v.co
+        d2 = (wv.x - cx) ** 2 + (wv.y - cy) ** 2 + (wv.z - cz) ** 2
+        inside = d2 <= r2
+        if action == "DESELECT":
+            if inside:
+                v.select = False
+                count += 1
+        elif action == "ADD":
+            if inside:
+                v.select = True
+                count += 1
+        else:
+            v.select = inside
+            if inside:
+                count += 1
+    bm.select_flush_mode()
+    bmesh.update_edit_mesh(obj.data)
+    return {"success": True, "selected": count, "center": [cx, cy, cz], "radius": radius,
+            "action": action}
+
+
+def split_by_part(params):
+    """Split the active mesh into separate objects, one per connected component (P → By Loose Parts).
+
+    After join_objects you lose per-part addressability; this restores it.
+    Returns the names of the resulting objects.
+    """
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    before = set(bpy.data.objects.keys())
+    bpy.ops.mesh.separate(type='LOOSE')
+    after = set(bpy.data.objects.keys())
+    new_names = sorted(after - before)
+    push_undo("split_by_part")
+    return {"success": True, "source": obj.name, "new_objects": new_names,
+            "part_count": len(new_names) + 1}
+
+
 TOOLS = {
     "bevel":              bevel,
     "extrude":            extrude,
@@ -505,4 +683,10 @@ TOOLS = {
     "jitter_vertices":    jitter_vertices,
     "random_select":      random_select,
     "proportional_move":  proportional_move,
+    "inflate_selection":  inflate_selection,
+    "mark_sharp":         mark_sharp,
+    "set_edge_crease":    set_edge_crease,
+    "merge_by_distance":  merge_by_distance,
+    "select_in_sphere":   select_in_sphere,
+    "split_by_part":      split_by_part,
 }

@@ -155,6 +155,28 @@ def add_modifier(params):
             mod.limit_method = limit
         if hasattr(mod, 'angle_limit'):
             mod.angle_limit = math.radians(params.get("angle_limit", 30.0))
+    if mod_type == "MIRROR":
+        axis = (params.get("axis") or "X").upper()
+        use_x = "X" in axis
+        use_y = "Y" in axis
+        use_z = "Z" in axis
+        if hasattr(mod, "use_axis"):
+            mod.use_axis[0] = use_x
+            mod.use_axis[1] = use_y
+            mod.use_axis[2] = use_z
+        merge_threshold = params.get("merge_threshold")
+        if merge_threshold is not None:
+            if hasattr(mod, "use_mirror_merge"):
+                mod.use_mirror_merge = True
+            if hasattr(mod, "merge_threshold"):
+                mod.merge_threshold = float(merge_threshold)
+        mirror_object = params.get("mirror_object")
+        if mirror_object and hasattr(mod, "mirror_object"):
+            mo = bpy.data.objects.get(mirror_object)
+            if mo is None:
+                obj.modifiers.remove(mod)
+                return {"error": f"mirror_object '{mirror_object}' not found"}
+            mod.mirror_object = mo
     if mod_type == "SHRINKWRAP":
         target_name = params.get("target")
         if not target_name:

@@ -238,8 +238,68 @@ def add_circle(params):
     )
 
 
+_BULK_DISPATCH = {
+    "box":       lambda p: add_box(p),
+    "plane":     lambda p: add_plane(p),
+    "cylinder":  lambda p: add_cylinder(p),
+    "sphere":    lambda p: add_sphere(p),
+    "cone":      lambda p: add_cone(p),
+    "torus":     lambda p: add_torus(p),
+    "icosphere": lambda p: add_icosphere(p),
+    "circle":    lambda p: add_circle(p),
+}
+
+
+def add_primitives(params):
+    """Bulk-add primitives in one call. Each item is a dict with at minimum
+    {"type": "box|plane|cylinder|sphere|cone|torus|icosphere|circle", "name": "..."}
+    plus whatever the matching single-primitive tool accepts (width/depth/height,
+    radius, on=..., rot_x/y/z, etc.).
+
+    Stops on the first failure and returns what succeeded.
+    """
+    specs = params.get("specs") or []
+    if not isinstance(specs, list) or not specs:
+        return {"error": "'specs' must be a non-empty list of primitive dicts"}
+    created = []
+    for i, s in enumerate(specs):
+        if not isinstance(s, dict):
+            return {"error": f"specs[{i}] is not a dict", "created": created}
+        ptype = (s.get("type") or "").lower()
+        if ptype not in _BULK_DISPATCH:
+            return {"error": f"specs[{i}].type '{ptype}' invalid. "
+                              f"Use one of {sorted(_BULK_DISPATCH)}", "created": created}
+        sub = {k: v for k, v in s.items() if k != "type"}
+        result = _BULK_DISPATCH[ptype](sub)
+        if not result.get("success"):
+            return {"error": f"specs[{i}] ({ptype}): {result.get('error')}",
+                    "created": created}
+        created.append({"type": ptype, "name": result["object_name"],
+                        "dimensions": result.get("dimensions")})
+    return {"success": True, "created": created, "count": len(created)}
+
+
+def add_floor(params):
+    """Add a large ground plane at z=0 for character-modeling reference and shadow catching.
+
+    name: object name (default 'floor').
+    size: side length in meters (default 10).
+    """
+    name = params.get("name") or "floor"
+    size = float(params.get("size", 10.0))
+    return _build_primitive(
+        name=name,
+        ptype="PLANE",
+        target_dims=(size, size, 0.0),
+        on={"z": 0.0},
+        rotation_deg=[0, 0, 0],
+    )
+
+
 TOOLS = {
-    "add_box":       add_box,
+    "add_box":        add_box,
+    "add_primitives": add_primitives,
+    "add_floor":      add_floor,
     "add_plane":     add_plane,
     "add_cylinder":  add_cylinder,
     "add_sphere":    add_sphere,

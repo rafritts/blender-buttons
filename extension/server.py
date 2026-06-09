@@ -24,6 +24,7 @@ from . import (
     relational,
     rings,
     scatter,
+    sculpt,
     shading,
     state,
     status,
@@ -49,6 +50,7 @@ _TOOL_MODULES = (
     shading,
     lighting,
     scatter,
+    sculpt,
     designs,
 )
 

@@ -7,18 +7,26 @@ import bpy
 from . import server, state
 
 
+def start_server():
+    """Start the TCP server + queue processor. Safe to call when already running."""
+    if state._running:
+        return False
+    state._running = True
+    state._server_thread = threading.Thread(target=server.server_loop, daemon=True)
+    state._server_thread.start()
+    if not bpy.app.timers.is_registered(server.process_queue):
+        bpy.app.timers.register(server.process_queue, persistent=True)
+    return True
+
+
 class BB_OT_StartServer(bpy.types.Operator):
     bl_idname = "bb.start_server"
     bl_label = "Start Server"
 
     def execute(self, context):
-        if state._running:
+        if not start_server():
             self.report({'INFO'}, "Already running")
             return {'FINISHED'}
-        state._running = True
-        state._server_thread = threading.Thread(target=server.server_loop, daemon=True)
-        state._server_thread.start()
-        bpy.app.timers.register(server.process_queue, persistent=True)
         self.report({'INFO'}, f"Blender Buttons listening on port {state.PORT}")
         return {'FINISHED'}
 

@@ -74,3 +74,144 @@ to see materials/lighting in the captured image.
 **What we have:** nothing. All primitives are meshes.
 
 **Why deferred:** curves are their own datablock type with control points, handles, bevel objects, taper objects. A first-class `add_bezier_circle` / `add_bezier_path` is doable but it's a new module (`curves.py`), not a one-tool addition.
+
+---
+
+# MCP gaps surfaced by the anime base-character build
+
+Live attempt at a 7-heads-tall T-pose nude base mesh. Each entry describes the friction in concrete terms, the proposed tool/fix, where in code to make the change, and an effort estimate.
+
+**Implementation priority for next session** (top 6, ordered by how much they hurt this build):
+
+1. Symmetry — `mirror_of` in placement DSL **+** wrap MIRROR modifier in `add_modifier`
+2. `taper_section` rotation bug (real bug, not missing feature)
+3. Edge crease / mark sharp (so SubSurf preserves hand/foot silhouettes)
+4. `merge_by_distance` (post `join_objects`, eliminates seam shading artifacts)
+5. Placement DSL: absolute `x` / `y` overrides (kills the placement→nudge round trip)
+6. `frame_scene(targets=...)` (current `frame_scene` includes lights, useless)
+
+## C1. No symmetry — every left-side limb was a hand-copied right-side op
+
+**What hurt:** built `thigh_R` → had to manually build `thigh_L`. Did the same for calf, upper_arm, forearm, hand, foot. Worse, every edit-mode taper had to be done twice with ring indices flipped (right side ring 0=top, left side ring 0=bottom because `_compute_rings` sorts ascending by world coord). ~50% of build calls were just mirrored duplicates.
+
+**Fix A — placement DSL `mirror_of`:** in `extension/placement.py:resolve_placement`, add a spec form:
+```
+{"mirror_of": "thigh_R", "axis": "X"}  # → centers at (-cx_of_thigh_R, cy, cz)
+```
+Effort: ~20 lines. Trivial.
+
+**Fix B — `add_modifier(type='MIRROR', axis='X', merge_threshold=0.001)`:** wrap Blender's mirror modifier in `extension/finishes.py:add_modifier`. Then build only the right side; modifier produces the left automatically AND edits propagate. Effort: ~30 lines. Easy.
+
+**Fix C — `duplicate_mirrored(name, axis='X', new_name)`:** for static (non-modifier) mirroring after the fact. `bpy.ops.object.duplicate` + apply transform with flipped axis scale + recalc normals. Effort: ~40 lines. Easy.
+
+All three would coexist; A is for first-placement, B for live editing, C for one-shot mirror.
+
+## C2. `taper_section` ignores object rotation (real bug)
+
+**What hurt:** arms rotated 90° around Y came out **oval**, not round, because cross-section scaling only affected one of the two non-axis world directions.
+
+**Root cause:** `extension/rings.py` — `_compute_rings` groups by **world** coord (correct), but `taper_section` then scales `v.co[ax]` in **local** coords. For a rotated cylinder, scaling local Y affects world Y, but scaling local Z (which equals world X for an arm) has no effect because all verts in a ring share the same local Z (it's the length axis post-rotation).
+
+**Fix:** convert centroid + verts to world via `mat = obj.matrix_world`, scale in world, convert back via `mat.inverted()`. ~10 line change in `taper_section` (and analogously in `taper_end`). Easy.
+
+**File:** `extension/rings.py`, `taper_section` ~line 260, `taper_end` similar.
+
+## C3. SubSurf had no crease control — hand/foot boxes became blobs
+
+**What hurt:** added SubSurf to the joined body for smoothing; the rectangular hand and foot boxes melted into rounded pebbles because no edges were marked sharp.
+
+**Fix:** new edit-mode tool `mark_sharp(angle_threshold=30)` and `set_edge_crease(weight=1.0)`. Both operate on selected edges. `mark_sharp` toggles `edge.smooth = False`; `set_edge_crease` uses `bm.edges.layers.crease.verify()` then `edge[crease_layer] = weight`.
+
+**File:** new functions in `extension/editmode.py`. Effort: ~30 lines each. Trivial.
+
+## C4. `join_objects` doesn't merge seam vertices — body stays segmented
+
+**What hurt:** joined torso+pelvis+limbs into one mesh; surface still reads as 16 disconnected pieces because object boundaries had coincident-but-separate verts. SubSurf then smoothed each piece independently → mannequin look, not continuous skin.
+
+**Fix:** `merge_by_distance(threshold=0.001, targets='')` — edit-mode op wrapping `bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=threshold)`. Or extend `join_objects` with `merge_threshold` param that auto-welds after joining.
+
+**File:** new function in `extension/editmode.py`, plus optional param in `extension/objects.py:join_objects`. Effort: ~15 lines. Trivial.
+
+## C5. Placement DSL: no absolute `x` / `y`, no `mirror_of`
+
+**What hurt:** `raise_to: 0.4` always puts (X, Y) at (0, 0). Every limb wanted a side-offset, so I had to `add_*` then `nudge`. Doubled the call count.
+
+**Fix:** in `extension/placement.py:resolve_placement`, allow `x`, `y`, `z` overrides at the top level of the spec, applied AFTER relational resolution. Example: `{"raise_to": 0.4, "x": 0.085}` → bottom at z=0.4, centered at x=0.085, y=0.
+
+**File:** `extension/placement.py`. Effort: ~10 lines. Trivial.
+
+Pair with `mirror_of` from C1 for the cleanest API.
+
+## C6. `frame_scene` includes lights — useless framing
+
+**What hurt:** called `frame_scene()`; viewport zoomed out to fit the lights at z=3, leaving the character tiny. Had to manually `orbit_viewport` with eyeballed distance.
+
+**Fix:** `frame_scene(targets='')` — if targets given, fit only those objects; otherwise current behavior. Or skip lights/cameras by default and add an `include_lights=False` flag.
+
+**File:** `extension/viewport.py`. Effort: ~15 lines. Trivial.
+
+## C7. `taper_section` only does linear interpolation
+
+**What hurt:** sculpting a calf bulge (wider at mid, narrow at ankle) needed **two** taper_section calls with a hard inflection at the bulge ring. Same for chest swell. A curve param would do it in one.
+
+**Fix:** add `curve: 'linear' | 'ease_in_out' | 'smoothstep' | 'bezier'` param. Replace `t = (ring_i - from_idx) / span` with a curve eval.
+
+**File:** `extension/rings.py:taper_section`. Effort: ~20 lines. Easy.
+
+## C8. No localized region-editing on a joined mesh
+
+**What hurt:** after joining the body, couldn't say "inflate this chest region" or "push out the bust" — `taper_section` only operates on whole-axis rings of an isolated object.
+
+**Fix path:** `select_in_sphere(center=[x,y,z], radius)` for spatial selection, then existing `proportional_move` or new `inflate_selection(amount)` along normals.
+
+**File:** new function in `extension/editmode.py`. Effort: 1 day. Medium — design-y.
+
+## C9. No bulk primitive add
+
+**What hurt:** 16 body parts = 16 separate `add_box`/`add_cylinder` calls. Each round-trips through the MCP socket queue.
+
+**Fix:** either `add_primitives(specs=[{type,name,...}, ...])` batched, or accept `parts=[...]` on existing tools. Trade-off: simpler API vs. fewer round trips.
+
+**File:** new function in `extension/primitives.py`. Effort: ~40 lines. Easy.
+
+## C10. `join_objects` is one-way — no `split_by_part`
+
+**What hurt:** after joining, can no longer say "re-taper thigh_R's knee." Lost per-part addressability.
+
+**Fix:** `split_by_part()` — wraps `bpy.ops.mesh.separate(type='LOOSE')`. Splits the active mesh into separate objects, one per connected component. Names become `<base>.001`, `.002`, etc. Auto-name from per-island bbox if possible.
+
+**File:** new function in `extension/editmode.py`. Effort: ~20 lines. Easy.
+
+## C11. No hide-overlay screenshot mode
+
+**What hurt:** every screenshot showed the orange selection outline of whatever was last selected, including the entire joined body. No clean hero shot.
+
+**Fix:** `get_viewport_screenshot(hide_overlays=False)` — toggle `space.overlay.show_overlays` around the screenshot capture.
+
+**File:** `extension/viewport.py:get_viewport_screenshot`. Effort: ~10 lines. Trivial.
+
+## C12. No `add_floor` / ground reference
+
+**What hurt:** "feet on z=0" was eyeball-checked. A 2m × 2m ground plane would make floor reference obvious and give shadow catching for hero shots.
+
+**Fix:** could be done with `add_plane`, but a `add_floor(size=10, material='matte_gray')` helper would set up the standard char-modeling ground in one call.
+
+**File:** new function in `extension/primitives.py`. Effort: ~15 lines. Trivial. Lowest priority.
+
+---
+
+# Long-term gaps (character quality finish line — NOT for next session)
+
+These are the road from a base mesh to Wuthering-Waves-quality. Listed for the north star, not for now:
+
+- Sculpt brushes (semantic, not gesture-based — e.g. `inflate_region(center, radius, amount)`)
+- Multires + dyntopo wrappers
+- Retopology — auto-retopo or guided
+- Armature creation + auto-weight (rigify is the target)
+- Pose mode — `pose_bone(name, rot=[x,y,z])`
+- UV unwrap with seam control
+- Material node graph beyond Principled BSDF
+- Hair card system
+- Face topology: eyes/nose/mouth loops with subsurf-correct flow
+- Curve objects (carry-over from donut gaps #9)
+- Render to file (carry-over from donut gaps #7)

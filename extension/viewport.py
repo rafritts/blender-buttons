@@ -82,6 +82,7 @@ def get_viewport_screenshot(params):
 
     width = params.get("width", 960)
     height = params.get("height", 540)
+    hide_overlays = bool(params.get("hide_overlays", False))
 
     scene = bpy.context.scene
     old_path = scene.render.filepath
@@ -94,8 +95,14 @@ def get_viewport_screenshot(params):
     scene.render.image_settings.file_format = 'PNG'
     scene.render.resolution_percentage = 100
 
+    space = next((s for s in area.spaces if s.type == 'VIEW_3D'), None)
+    saved_overlays = None
+    if hide_overlays and space is not None and hasattr(space, "overlay"):
+        saved_overlays = space.overlay.show_overlays
+        space.overlay.show_overlays = False
+
     global _screenshot_overlay_text
-    _screenshot_overlay_text = "+Z up   (Blender world)"
+    _screenshot_overlay_text = "" if hide_overlays else "+Z up   (Blender world)"
     overlay_handle = bpy.types.SpaceView3D.draw_handler_add(
         _draw_screenshot_overlay, (), 'WINDOW', 'POST_PIXEL'
     )
@@ -104,6 +111,8 @@ def get_viewport_screenshot(params):
     finally:
         bpy.types.SpaceView3D.draw_handler_remove(overlay_handle, 'WINDOW')
         _screenshot_overlay_text = ""
+        if saved_overlays is not None and space is not None:
+            space.overlay.show_overlays = saved_overlays
 
     scene.render.filepath = old_path
     scene.render.image_settings.file_format = old_format
@@ -270,9 +279,69 @@ def set_viewport_angle(params):
 
 
 def frame_scene(params):
+    """Fit objects in the viewport. By default ignores lights/cameras so they don't
+    blow out the framing.
+
+    targets: optional comma-separated names or single name. If given, fit only those.
+    include_lights: include LIGHT/CAMERA objects in the fit. Default False.
+    """
     window, screen, area, region = find_view3d_context()
     if area is None:
         return {"error": "No 3D viewport found"}
+
+    targets = params.get("targets") or ""
+    include_lights = bool(params.get("include_lights", False))
+
+    if targets or not include_lights:
+        if isinstance(targets, list):
+            names = [str(s).strip() for s in targets if s]
+        else:
+            names = [s.strip() for s in str(targets).split(",") if s.strip()]
+
+        if names:
+            from .common import resolve_targets
+            objs, err = resolve_targets(names if len(names) > 1 else names[0])
+            if err:
+                return {"error": err}
+        else:
+            objs = [o for o in bpy.context.scene.objects
+                    if include_lights or o.type not in {'LIGHT', 'CAMERA'}]
+
+        if not objs:
+            return {"error": "No objects to frame"}
+
+        active = bpy.context.view_layer.objects.active
+        was_edit = active is not None and active.mode == 'EDIT'
+        if was_edit:
+            bpy.ops.object.mode_set(mode='OBJECT')
+        saved_active = bpy.context.view_layer.objects.active
+        saved_selected = list(bpy.context.selected_objects)
+
+        bpy.ops.object.select_all(action='DESELECT')
+        for o in objs:
+            try:
+                o.select_set(True)
+            except Exception:
+                pass
+        bpy.context.view_layer.objects.active = objs[0]
+
+        with bpy.context.temp_override(window=window, screen=screen, area=area, region=region):
+            bpy.ops.view3d.view_selected(use_all_regions=False)
+
+        bpy.ops.object.select_all(action='DESELECT')
+        for o in saved_selected:
+            try:
+                o.select_set(True)
+            except Exception:
+                pass
+        if saved_active:
+            bpy.context.view_layer.objects.active = saved_active
+        if was_edit and saved_active:
+            bpy.ops.object.mode_set(mode='EDIT')
+
+        return {"success": True, "framed": [o.name for o in objs],
+                "include_lights": include_lights}
+
     with bpy.context.temp_override(window=window, screen=screen, area=area, region=region):
         bpy.ops.view3d.view_all(center=False)
     return {"success": True}
@@ -336,6 +405,60 @@ def set_camera_position(params):
     return {"success": True, "camera": cam.name}
 
 
+def add_camera(params):
+    """Create a new camera and set it as the active scene camera.
+
+    name:     required, unique.
+    x, y, z:  world position (default 7, -7, 5).
+    target:   optional object name to aim at. If omitted, uses target_x/y/z.
+    target_x, target_y, target_z: world point to aim at (default 0, 0, 0).
+    lens:     focal length in mm (default 50).
+    """
+    name = params.get("name")
+    if not name:
+        return {"error": "'name' is required"}
+    if bpy.data.objects.get(name) is not None:
+        return {"error": f"Object '{name}' already exists"}
+
+    x = params.get("x", 7.0)
+    y = params.get("y", -7.0)
+    z = params.get("z", 5.0)
+    lens = float(params.get("lens", 50.0))
+
+    target = params.get("target")
+    if target:
+        tgt = bpy.data.objects.get(target)
+        if tgt is None:
+            return {"error": f"target '{target}' not found"}
+        from .common import world_center
+        tx, ty, tz = world_center(tgt)
+    else:
+        tx = params.get("target_x", 0.0)
+        ty = params.get("target_y", 0.0)
+        tz = params.get("target_z", 0.0)
+
+    cam_data = bpy.data.cameras.new(name=name)
+    cam_data.lens = lens
+    obj = bpy.data.objects.new(name=name, object_data=cam_data)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.location = (x, y, z)
+
+    direction = mathutils.Vector((tx, ty, tz)) - mathutils.Vector((x, y, z))
+    obj.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()
+
+    bpy.context.scene.camera = obj
+    bpy.context.view_layer.update()
+
+    return {
+        "success": True,
+        "camera": obj.name,
+        "location": [round(x, 4), round(y, 4), round(z, 4)],
+        "target": [round(tx, 4), round(ty, 4), round(tz, 4)],
+        "lens": lens,
+        "active": True,
+    }
+
+
 _SHADING_TYPES = {"WIREFRAME", "SOLID", "MATERIAL", "RENDERED"}
 
 
@@ -374,4 +497,5 @@ TOOLS = {
     "zoom_to_selected":        zoom_to_selected,
     "orbit_viewport":          orbit_viewport,
     "set_camera_position":     set_camera_position,
+    "add_camera":              add_camera,
 }

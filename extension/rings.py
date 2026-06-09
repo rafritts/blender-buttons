@@ -200,17 +200,23 @@ def taper_end(params):
     pos, vert_indices = rings[ring_idx]
     verts = [bm.verts[i] for i in vert_indices]
     other_idxs = [i for i in range(3) if i != axis_idx]
-    centroid = [0.0, 0.0, 0.0]
-    for v in verts:
-        centroid[0] += v.co.x; centroid[1] += v.co.y; centroid[2] += v.co.z
-    centroid = [c / len(verts) for c in centroid]
-    for v in verts:
+    # Scale in world space so rotated objects get a uniform cross-section taper.
+    mat = obj.matrix_world
+    mat_inv = mat.inverted()
+    world_cos = [mat @ v.co for v in verts]
+    centroid_w = mathutils.Vector((0.0, 0.0, 0.0))
+    for wc in world_cos:
+        centroid_w += wc
+    centroid_w /= len(world_cos)
+    for v, wc in zip(verts, world_cos):
+        new_w = wc.copy()
         for ax in other_idxs:
-            v.co[ax] = centroid[ax] + (v.co[ax] - centroid[ax]) * scale
+            new_w[ax] = centroid_w[ax] + (wc[ax] - centroid_w[ax]) * scale
+        v.co = mat_inv @ new_w
     bmesh.update_edit_mesh(obj.data)
     push_undo(f"taper_end {axis} {end} scale={scale}")
 
-    world_centroid = obj.matrix_world @ mathutils.Vector(centroid)
+    world_centroid = centroid_w
     nearby = nearby_objects(
         (world_centroid.x, world_centroid.y, world_centroid.z),
         exclude_names={obj.name},
@@ -230,8 +236,27 @@ def taper_end(params):
     }
 
 
+_CURVES = {"linear", "ease_in_out", "smoothstep", "ease_in", "ease_out"}
+
+
+def _curve_eval(t, curve):
+    if curve == "smoothstep" or curve == "ease_in_out":
+        return t * t * (3.0 - 2.0 * t)
+    if curve == "ease_in":
+        return t * t
+    if curve == "ease_out":
+        return 1.0 - (1.0 - t) * (1.0 - t)
+    return t  # linear
+
+
 def taper_section(params):
-    """Linearly interpolate scale across a span of rings on the two non-axis directions."""
+    """Interpolate scale across a span of rings on the two non-axis directions.
+
+    Scaling is done in WORLD space so rotated objects get an even, axis-aligned
+    cross-section taper instead of an oval (fixes the rotated-arm bug).
+
+    curve: linear (default) | smoothstep | ease_in_out | ease_in | ease_out.
+    """
     import bmesh
     obj = bpy.context.active_object
     if obj is None or obj.mode != 'EDIT':
@@ -243,6 +268,9 @@ def taper_section(params):
     x_end = params.get("x_end", 1.0)
     y_start = params.get("y_start", 1.0)
     y_end = params.get("y_end", 1.0)
+    curve = (params.get("curve") or "linear").lower()
+    if curve not in _CURVES:
+        return {"error": f"Invalid curve '{curve}'. Use one of {sorted(_CURVES)}"}
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
     bm, rings = _compute_rings(obj, axis_idx)
     n = len(rings)
@@ -255,25 +283,33 @@ def taper_section(params):
     if from_idx < 0 or to_idx >= n:
         return {"error": f"Ring range [{from_idx}, {to_idx}] out of [0, {n-1}]"}
     other_idxs = [i for i in range(3) if i != axis_idx]
+    if len(other_idxs) != 2:
+        return {"error": "Internal: expected exactly 2 non-axis directions"}
     span = max(1, to_idx - from_idx)
+    mat = obj.matrix_world
+    mat_inv = mat.inverted()
     affected = 0
     for ring_i in range(from_idx, to_idx + 1):
         _, vert_indices = rings[ring_i]
         t = (ring_i - from_idx) / span
-        sx = x_start + t * (x_end - x_start)
-        sy = y_start + t * (y_end - y_start)
+        tt = _curve_eval(t, curve)
+        sx = x_start + tt * (x_end - x_start)
+        sy = y_start + tt * (y_end - y_start)
         verts = [bm.verts[i] for i in vert_indices]
-        centroid = [0.0, 0.0, 0.0]
-        for v in verts:
-            centroid[0] += v.co.x; centroid[1] += v.co.y; centroid[2] += v.co.z
-        centroid = [c / len(verts) for c in centroid]
-        scales = {other_idxs[0]: sx, other_idxs[1]: sy} if len(other_idxs) == 2 else {}
-        for v in verts:
+        world_cos = [mat @ v.co for v in verts]
+        centroid_w = mathutils.Vector((0.0, 0.0, 0.0))
+        for wc in world_cos:
+            centroid_w += wc
+        centroid_w /= len(world_cos)
+        scales = {other_idxs[0]: sx, other_idxs[1]: sy}
+        for v, wc in zip(verts, world_cos):
+            new_w = wc.copy()
             for ax, sc in scales.items():
-                v.co[ax] = centroid[ax] + (v.co[ax] - centroid[ax]) * sc
+                new_w[ax] = centroid_w[ax] + (wc[ax] - centroid_w[ax]) * sc
+            v.co = mat_inv @ new_w
         affected += len(verts)
     bmesh.update_edit_mesh(obj.data)
-    push_undo(f"taper_section {axis} {from_idx}..{to_idx}")
+    push_undo(f"taper_section {axis} {from_idx}..{to_idx} {curve}")
     return {
         "success": True,
         "axis": axis,
