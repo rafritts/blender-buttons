@@ -172,12 +172,43 @@ def get_object_info(params):
     xs = [v.x for v in world_bb]
     ys = [v.y for v in world_bb]
     zs = [v.z for v in world_bb]
+
+    mat3 = obj.matrix_world.to_3x3()
+    local_z_world = (mat3 @ mathutils.Vector((0, 0, 1)))
+    local_x_world = (mat3 @ mathutils.Vector((1, 0, 0)))
+    if local_z_world.length > 1e-9: local_z_world.normalize()
+    if local_x_world.length > 1e-9: local_x_world.normalize()
+    world_up = mathutils.Vector((0, 0, 1))
+    tilt_deg = round(math.degrees(local_z_world.angle(world_up)), 2)
+    lx_xy = mathutils.Vector((local_x_world.x, local_x_world.y, 0.0))
+    if lx_xy.length > 1e-6:
+        lx_xy.normalize()
+        yaw_deg = round(math.degrees(math.atan2(lx_xy.y, lx_xy.x)), 2)
+    else:
+        yaw_deg = None  # local +X is vertical — yaw undefined
+
+    if tilt_deg < 1.0:
+        orient = "upright"
+    elif tilt_deg < 5.0:
+        orient = f"nearly upright (tilted {tilt_deg}° from vertical)"
+    elif tilt_deg > 175.0:
+        orient = f"upside-down (tilted {tilt_deg}° from vertical)"
+    elif 85.0 < tilt_deg < 95.0:
+        orient = f"on its side (tilted {tilt_deg}° from vertical)"
+    else:
+        orient = f"tilted {tilt_deg}° from vertical"
+    if yaw_deg is not None and abs(yaw_deg) > 1.0:
+        orient += f", yaw {yaw_deg}°"
+
     info = {
         "name": obj.name,
         "type": obj.type,
         "location": [round(loc.x, 4), round(loc.y, 4), round(loc.z, 4)],
         "scale": [round(scale.x, 4), round(scale.y, 4), round(scale.z, 4)],
         "rotation_deg": [round(math.degrees(rot.x), 2), round(math.degrees(rot.y), 2), round(math.degrees(rot.z), 2)],
+        "tilt_off_vertical_deg": tilt_deg,
+        "yaw_deg": yaw_deg,
+        "orientation": orient,
         "dimensions": [round(max(xs) - min(xs), 4), round(max(ys) - min(ys), 4), round(max(zs) - min(zs), 4)],
         "world_bounds": {
             "x": [round(min(xs), 4), round(max(xs), 4)],

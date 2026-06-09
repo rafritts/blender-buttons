@@ -168,6 +168,67 @@ def snap_to(params):
     }
 
 
+def set_origin(params):
+    """Move an object's origin/pivot to a chosen point.
+
+    mode:
+      geometry    — origin to mesh median (Blender's ORIGIN_GEOMETRY/MEDIAN).
+      bbox_center — origin to bbox centre (ORIGIN_GEOMETRY/BOUNDS).
+      mass        — origin to centre of mass (assumes uniform density).
+      cursor      — origin to the current 3D cursor location.
+      bottom|top|front|back|left|right — origin to the centre of that bbox face.
+
+    Geometry is unchanged in world space; only the local-space pivot moves.
+    Mostly used before rotate_object so the rotation pivots around the right point.
+    """
+    targets = params.get("targets")
+    mode = params.get("mode", "geometry").lower()
+    objs, err = resolve_targets(targets)
+    if err:
+        return {"error": err}
+
+    direct = {
+        "geometry":    ("ORIGIN_GEOMETRY", "MEDIAN"),
+        "bbox_center": ("ORIGIN_GEOMETRY", "BOUNDS"),
+        "mass":        ("ORIGIN_CENTER_OF_MASS", "MEDIAN"),
+        "cursor":      ("ORIGIN_CURSOR", "MEDIAN"),
+    }
+    face_modes = {"bottom", "top", "front", "back", "left", "right"}
+    if mode not in direct and mode not in face_modes:
+        return {"error": (f"Invalid mode '{mode}'. Use "
+                          "geometry|bbox_center|mass|cursor|bottom|top|front|back|left|right")}
+
+    saved_cursor = bpy.context.scene.cursor.location.copy()
+    results = []
+    try:
+        for o in objs:
+            activate(o)
+            if mode in direct:
+                op_type, center = direct[mode]
+                bpy.ops.object.origin_set(type=op_type, center=center)
+            else:
+                xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(o)
+                cx = (xmin + xmax) * 0.5
+                cy = (ymin + ymax) * 0.5
+                cz = (zmin + zmax) * 0.5
+                if   mode == "bottom": cz = zmin
+                elif mode == "top":    cz = zmax
+                elif mode == "front":  cy = ymin
+                elif mode == "back":   cy = ymax
+                elif mode == "left":   cx = xmin
+                elif mode == "right":  cx = xmax
+                bpy.context.scene.cursor.location = (cx, cy, cz)
+                bpy.ops.object.origin_set(type='ORIGIN_CURSOR')
+            results.append({
+                "name": o.name,
+                "origin": [round(o.location.x, 5), round(o.location.y, 5), round(o.location.z, 5)],
+            })
+    finally:
+        bpy.context.scene.cursor.location = saved_cursor
+
+    return {"success": True, "mode": mode, "updated": results}
+
+
 def snap_to_grid(params):
     """Round the active object's location to multiples of `size` on the chosen axes."""
     obj = bpy.context.active_object
@@ -197,4 +258,5 @@ TOOLS = {
     "apply_transform": apply_transform,
     "snap_to":         snap_to,
     "snap_to_grid":    snap_to_grid,
+    "set_origin":      set_origin,
 }

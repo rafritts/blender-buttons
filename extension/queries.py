@@ -143,9 +143,116 @@ def is_aligned(params):
             "aligned": abs(va - vb) < tolerance, "difference": round(va - vb, 5)}
 
 
+def check_symmetry(params):
+    """Object-level symmetry check across a world-space plane.
+
+    For each mesh object on the positive side of the plane, tries to find a
+    counterpart on the negative side at the mirrored centre with similar bbox
+    dimensions. Reports unmatched objects on each side and objects sitting on
+    the plane.
+
+    axis:      X|Y|Z — the axis the plane is perpendicular to. Default X
+               (the most common mirror plane).
+    plane:     world coordinate of the mirror plane on `axis`. Default 0.
+    tolerance: how close mirrored centres and bbox dims must match. Default 0.01 m.
+    targets:   optional — restrict to specific objects/collections instead of all meshes.
+    """
+    axis = params.get("axis", "X").upper()
+    plane = float(params.get("plane", 0.0))
+    tol = float(params.get("tolerance", 0.01))
+    targets = params.get("targets")
+
+    axis_idx = {"X": 0, "Y": 1, "Z": 2}.get(axis)
+    if axis_idx is None:
+        return {"error": "axis must be X, Y, or Z"}
+
+    if targets:
+        from .common import resolve_targets
+        objs, err = resolve_targets(targets)
+        if err:
+            return {"error": err}
+        mesh_objs = [o for o in objs if o.type == 'MESH']
+    else:
+        mesh_objs = [o for o in bpy.context.scene.objects if o.type == 'MESH']
+
+    pos_side, neg_side, on_plane = [], [], []
+    for o in mesh_objs:
+        c = world_center(o)
+        off = c[axis_idx] - plane
+        if abs(off) < tol:
+            on_plane.append(o)
+        elif off > 0:
+            pos_side.append(o)
+        else:
+            neg_side.append(o)
+
+    from .common import world_bbox as _wb
+    def _bbox_dims(o):
+        xmin, ymin, zmin, xmax, ymax, zmax = _wb(o)
+        return (xmax - xmin, ymax - ymin, zmax - zmin)
+
+    pairs = []
+    unmatched_pos = []
+    unmatched_neg = list(neg_side)
+
+    for p in pos_side:
+        pc = list(world_center(p))
+        pc[axis_idx] = 2 * plane - pc[axis_idx]
+        pd = _bbox_dims(p)
+
+        best = None
+        best_score = float("inf")
+        dim_tol = max(tol * 5, max(pd) * 0.05)
+        center_tol = max(tol * 5, 0.02)
+        for n in unmatched_neg:
+            nc = world_center(n)
+            d = math.sqrt(sum((pc[i] - nc[i]) ** 2 for i in range(3)))
+            if d > center_tol:
+                continue
+            nd = _bbox_dims(n)
+            dim_diff = sum(abs(pd[i] - nd[i]) for i in range(3))
+            if dim_diff > dim_tol:
+                continue
+            score = d + dim_diff
+            if score < best_score:
+                best = n
+                best_score = score
+
+        if best is not None:
+            pairs.append({
+                "pos": p.name, "neg": best.name,
+                "center_diff": round(best_score, 5),
+            })
+            unmatched_neg.remove(best)
+        else:
+            unmatched_pos.append(p.name)
+
+    unmatched_neg_names = [o.name for o in unmatched_neg]
+    is_symmetric = not unmatched_pos and not unmatched_neg_names
+
+    return {
+        "success": True,
+        "axis": axis,
+        "plane": plane,
+        "tolerance": tol,
+        "is_symmetric": is_symmetric,
+        "pairs": pairs,
+        "unmatched_positive_side": unmatched_pos,
+        "unmatched_negative_side": unmatched_neg_names,
+        "on_plane": [o.name for o in on_plane],
+        "summary": (
+            f"symmetric across {axis}={plane}" if is_symmetric
+            else (f"asymmetric across {axis}={plane}: "
+                  f"{len(unmatched_pos)} unmatched on +{axis}, "
+                  f"{len(unmatched_neg_names)} unmatched on -{axis}")
+        ),
+    }
+
+
 TOOLS = {
     "describe":         describe,
     "distance_between": distance_between,
     "gap_between":      gap_between,
     "is_aligned":       is_aligned,
+    "check_symmetry":   check_symmetry,
 }

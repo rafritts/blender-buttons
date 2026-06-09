@@ -360,6 +360,92 @@ def apply_modifiers(params):
     return {"success": True, "applied": applied, "object": obj.name}
 
 
+def boolean(params):
+    """Cut, fuse, or intersect two meshes via a Boolean modifier.
+
+    target:      the mesh that will be modified (kept after the op).
+    cutter:      the mesh used as the operand. Typically hidden after the op.
+    op:          DIFFERENCE (default — subtract cutter from target),
+                 UNION       (fuse them),
+                 INTERSECT   (keep only the overlap).
+    solver:      EXACT (default — robust, slower) | FAST (legacy, brittle).
+    apply:       if True, apply the modifier immediately and bake into target's mesh.
+                 If False, leave the modifier live so you can tweak the cutter
+                 and see updates. Default False.
+    hide_cutter: hide the cutter object in viewport + render after the op (default True).
+
+    KNOWN FRAGILITY: boolean ops are sensitive to mesh quality. They fail or
+    produce garbage on non-manifold meshes, overlapping coplanar faces, and
+    objects with un-applied non-uniform scale. If apply fails, run
+    `apply_transform(targets='target,cutter', scale=True)` first and retry.
+    The modifier is left in place on apply failure so you can inspect it.
+    """
+    target_name = params.get("target")
+    cutter_name = params.get("cutter")
+    op          = (params.get("op", "DIFFERENCE") or "DIFFERENCE").upper()
+    solver      = (params.get("solver", "EXACT") or "EXACT").upper()
+    apply       = bool(params.get("apply", False))
+    hide_cutter = bool(params.get("hide_cutter", True))
+
+    if not target_name or not cutter_name:
+        return {"error": "'target' and 'cutter' are required"}
+    target = bpy.data.objects.get(target_name)
+    cutter = bpy.data.objects.get(cutter_name)
+    if target is None: return {"error": f"target '{target_name}' not found"}
+    if cutter is None: return {"error": f"cutter '{cutter_name}' not found"}
+    if target == cutter: return {"error": "target and cutter must be different objects"}
+    if target.type != 'MESH' or cutter.type != 'MESH':
+        return {"error": "both target and cutter must be mesh objects"}
+    if op not in ("UNION", "DIFFERENCE", "INTERSECT"):
+        return {"error": "op must be UNION, DIFFERENCE, or INTERSECT"}
+    if solver not in ("EXACT", "FAST"):
+        return {"error": "solver must be EXACT or FAST"}
+
+    mod_name = f"bool_{op.lower()}_{cutter_name}"
+    mod = target.modifiers.new(name=mod_name, type='BOOLEAN')
+    mod.operation = op
+    mod.object = cutter
+    if hasattr(mod, "solver"):
+        mod.solver = solver
+
+    applied = False
+    apply_error = None
+    if apply:
+        activate(target)
+        try:
+            bpy.ops.object.modifier_apply(modifier=mod.name)
+            applied = True
+        except RuntimeError as e:
+            apply_error = str(e)
+
+    if hide_cutter:
+        try:
+            cutter.hide_set(True)
+        except Exception:
+            pass
+        cutter.hide_render = True
+
+    result = {
+        "success": True,
+        "target": target_name,
+        "cutter": cutter_name,
+        "op": op,
+        "solver": solver,
+        "applied": applied,
+        "modifier": None if applied else mod.name,
+        "cutter_hidden": hide_cutter,
+    }
+    if apply_error is not None:
+        result["apply_error"] = apply_error
+        result["hint"] = (
+            "boolean apply failed — likely non-manifold geometry, overlapping "
+            "faces, or un-applied scale. Try apply_transform(scale=True) on both "
+            "objects, or set solver='FAST'. Modifier is still on the target so "
+            "you can inspect or remove_modifier."
+        )
+    return result
+
+
 TOOLS = {
     "smooth_edges":    smooth_edges,
     "round_corners":   round_corners,
@@ -368,4 +454,5 @@ TOOLS = {
     "remove_modifier": remove_modifier,
     "list_modifiers":  list_modifiers,
     "apply_modifiers": apply_modifiers,
+    "boolean":         boolean,
 }
