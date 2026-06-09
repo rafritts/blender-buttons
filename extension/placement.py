@@ -14,6 +14,8 @@ Whole-object placements (set all three axes):
   {"between": ["a", "b"]}   -- centered on midpoint of two object centers
   {"at_corner": {"of": "name", "corner": "front_left"|"front_right"|"back_left"|"back_right"}}
                             -- bottom-{corner} of new aligns with bottom-{corner} of target
+  {"at": [x, y, z]}         -- center at the literal world coordinate (full ripcord;
+                               prefer relational keys when an anchor object exists)
 
 Adjacency placements (set 1 axis + center the other 2 on target):
   {"left_of": "name"}       -- flush to target's -X side, Y/Z centered on target
@@ -44,6 +46,15 @@ import bpy
 
 from .common import world_bbox
 
+# Every key resolve_placement understands. Anything else in a spec is a typo or
+# an unsupported idea — reject loudly instead of silently ignoring it.
+VALID_SPEC_KEYS = {
+    "on", "under", "between", "centered_on", "at_corner", "at",
+    "left_of", "right_of", "in_front_of", "behind",
+    "mirror_of", "axis",
+    "on_floor", "raise_to", "x", "y", "z", "gap",
+}
+
 
 def resolve_placement(spec, dims):
     """Compute world-space center (cx, cy, cz) for a new object with given dims.
@@ -56,6 +67,13 @@ def resolve_placement(spec, dims):
 
     if not isinstance(spec, dict):
         raise ValueError(f"Placement spec must be a dict, got {type(spec).__name__}")
+
+    unknown = set(spec) - VALID_SPEC_KEYS
+    if unknown:
+        raise ValueError(
+            f"Unknown placement key(s) {sorted(unknown)}. "
+            f"Valid keys: {sorted(VALID_SPEC_KEYS)}"
+        )
 
     gap = spec.get("gap", 0.0)
 
@@ -70,7 +88,12 @@ def resolve_placement(spec, dims):
         return ((xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2)
 
     # Whole-object placements
-    if "on" in spec:
+    if "at" in spec:
+        at = spec["at"]
+        if not (isinstance(at, (list, tuple)) and len(at) == 3):
+            raise ValueError("'at' requires [x, y, z] — three world coordinates for the center")
+        cx, cy, cz = float(at[0]), float(at[1]), float(at[2])
+    elif "on" in spec:
         xmin, ymin, zmin, xmax, ymax, zmax = bbox(spec["on"])
         cx = (xmin + xmax) / 2
         cy = (ymin + ymax) / 2

@@ -4,6 +4,7 @@ This package is split into single-topic modules. To find a tool, look in the
 module whose name matches the tool family:
 
   primitives.py   add_box / add_plane / add_cylinder / add_sphere / add_cone
+  curves.py       spline_tube (interpolating curve swept into a tube mesh)
   objects.py      select / delete / rename / duplicate / join / mode / info / profile / selection
   transforms.py   nudge / resize / rotate / apply_transform / snap_to / snap_to_grid
   queries.py      describe / distance_between / gap_between / is_aligned

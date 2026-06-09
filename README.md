@@ -78,7 +78,7 @@ Read-only / image tools (`get_blender_status`, `get_viewport_screenshot`, `get_v
 | `describe(name)` | Relational sentence about an object — what it rests on, what it's flush with, dimensions. **Prefer this over `get_object_info` for normal workflows.** |
 | `get_scene_tree()` | All objects in the scene as an ASCII tree, with active/selected markers |
 | `get_blender_status()` | Full context snapshot: mode, active object, dims, Z range, edit-mode selection counts |
-| `get_object_info(name="")` | Coordinate dump (location, scale, rotation, world bounding box, vert/edge/face counts). Use when you actually need the raw numbers. |
+| `get_object_info(name="")` | Coordinate dump (location, scale, rotation, world bounding box, vert/edge/face counts, material slots, modifier stack). Use when you actually need the raw numbers. |
 | `get_mesh_profile(axis="Z")` | Slice the active mesh into rings along an axis; reports min/max/width at each ring. |
 | `get_history()` | Full operation log with IDs. Use with `undo_to`. |
 
@@ -119,6 +119,7 @@ Every `add_*` takes exact world-space dimensions in meters plus an optional `on`
 | `add_cylinder(name, radius, height, on=None, vertices=32, cap_fill="NGON", rot_x, rot_y, rot_z)` | Cylinder aligned to Z. |
 | `add_sphere(name, radius, on=None, segments=32, rings=16, rot_x, rot_y, rot_z)` | UV sphere of exact radius. |
 | `add_cone(name, radius_bottom, height, radius_top=0.0, on=None, vertices=32, cap_fill="NGON", rot_x, rot_y, rot_z)` | Cone or truncated cone. |
+| `spline_tube(name, points, radius=0.02, resolution=8, sides=4)` | Tube swept along an interpolating spline that passes THROUGH every control point (no Bezier handles). Points are `[x,y,z]` or `{"near": "obj", "offset": [dx,dy,dz]}` (anchored to an object's center, resolved once at creation). `radius` is a float or a per-point list for taper. Result is a plain capped mesh; `describe()` reports the through-points. Hair strands, cables, ribbons, branches. |
 
 #### Placement DSL — the `on=` parameter
 
@@ -132,17 +133,21 @@ A dict combining one or more constraint keys:
 | `{"centered_on": "name"}` | Match XYZ centers |
 | `{"at_corner": {"of": "name", "corner": "front_left"\|"front_right"\|"back_left"\|"back_right"}}` | Bottom-corner of new aligns with bottom-corner of target |
 | `{"left_of": "name"}` / `right_of` / `in_front_of` / `behind` | Flush against the named side; remaining axes centered on target |
+| `{"mirror_of": "name", "axis": "X"}` | Center copied from target with one axis flipped — symmetric placement |
+| `{"at": [x, y, z]}` | Center at the literal world coordinate (full ripcord) |
+| `{"x": 0.085}` / `{"y": ...}` / `{"z": ...}` | Override one center axis, applied after relational keys |
 | `{"on_floor": True}` | Bottom of new = Z 0 (overrides Z from above keys) |
 | `{"raise_to": 0.45}` | Bottom of new = Z 0.45 (literal Z value — ripcord) |
 | `{"gap": 0.02}` | Spacing modifier for on/under/left_of/etc. (positive = farther apart; negative = overlap) |
 
 Combine freely: `on={"at_corner": {"of": "seat", "corner": "front_left"}, "on_floor": True}`.
+Unknown keys are rejected with an error listing the valid vocabulary — no silent ignores.
 
 #### Relational queries — read scene state without coords
 
 | Tool | Description |
 |------|-------------|
-| `describe(name)` | Relational sentence: what the object rests on, what it's flush with, its dimensions. Prefer over `get_object_info` for normal workflows. |
+| `describe(name)` | Relational sentence: what the object rests on, what it's flush with, its dimensions, and its material (name + Principled values). Spline tubes also report their through-points. Prefer over `get_object_info` for normal workflows. |
 | `distance_between(a, b, axis="ANY")` | Center-to-center distance. `axis`: ANY \| X \| Y \| Z. |
 | `gap_between(a, b)` | Empty space between bounding boxes per axis; negative = overlap. |
 | `is_aligned(a, b, side="TOP", tolerance=0.001)` | True/False for face or center alignment. `side`: TOP \| BOTTOM \| LEFT \| RIGHT \| FRONT \| BACK \| CENTER_X \| CENTER_Y \| CENTER_Z. |
@@ -154,7 +159,7 @@ Combine freely: `on={"at_corner": {"of": "seat", "corner": "front_left"}, "on_fl
 | Tool | Description |
 |------|-------------|
 | `match_dimension(target, reference, axis="Z")` | Resize `target` so its size on `axis` equals `reference`'s size. |
-| `mirror_across(targets, plane="X", suffix="_mirror")` | Duplicate parts and mirror copies across a world axis plane through origin. |
+| `mirror_across(targets, plane="X", suffix="_mirror", replace=None)` | Duplicate parts and mirror copies across a world axis plane through origin. `replace=["_R", "_L"]` swaps the naming token (`eye_R` → `eye_L`) instead of appending the suffix. |
 | `distribute_evenly(targets, between=[a, b], axis="X")` | Position parts evenly between two anchors. |
 | `array_at_corners(prototype, of, standing_on_floor=True, keep_original=False, name_prefix="")` | Duplicate prototype to all 4 corners of target's footprint. Names: `<prefix>_front_left` etc. |
 | `array_along(prototype, count, between=[a, b], axis="X", keep_original=False, name_prefix="")` | Duplicate prototype N times, evenly spaced between two anchors. Names: `<prefix>_1`..`_N`. |
@@ -164,7 +169,8 @@ Combine freely: `on={"at_corner": {"of": "seat", "corner": "front_left"}, "on_fl
 | Tool | Description |
 |------|-------------|
 | `nudge(targets="", right, left, up, down, back, forward)` | Relative offset in semantic directions (meters). Empty `targets` = active object. |
-| `resize(targets="", width, depth, height)` | Absolute resize (any axis omitted preserves current size). Scale is baked after. |
+| `resize(targets="", width, depth, height)` | Absolute resize (any axis omitted preserves current size). Scale is baked after. Warns when a target is rotated (world-axis resize shears non-axis-aligned geometry). |
+| `scale_group(targets, factor, pivot="center")` | Uniformly scale a whole assembly about a SHARED pivot, preserving relative layout. `pivot`: `center` \| `bottom_center` (keeps feet on floor) \| `origin` \| object name. What `resize` can't do: make a 12-part head assembly 8% bigger in place. |
 | `rotate_object(angle, axis="Z", targets="")` | Rotate by degrees around axis. |
 | `apply_transform(targets="", scale=True, rotation=False, location=False)` | Bake transforms into mesh data. |
 | `snap_to(target, side, source_side="AUTO", offset=0.0)` | Move the active object so one of its bbox faces aligns with `target`'s named face. Lower-level than the placement DSL but still relational. |
@@ -183,6 +189,7 @@ Combine freely: `on={"at_corner": {"of": "seat", "corner": "front_left"}, "on_fl
 | Tool | Description |
 |------|-------------|
 | `smooth_edges(targets="", width=0.002, segments=2, angle_limit=30.0)` | Round off sharp edges. Bundles BEVEL (angle-limited so coplanar edges are ignored) + shade_smooth + auto_smooth + apply. Use as the standard "make it look less blocky" verb. |
+| `bend(targets, angle, axis="X", apply=True)` | Bend objects into an arc (SimpleDeform BEND, baked by default). `axis` is the axis to bend AROUND: a vertical object curls into a C in the perpendicular plane. Tapered cylinder + bend = hair lock / bent limb / rocker rail. Needs segments along the length (`loop_cut` first) to bend smoothly. |
 | `add_modifier(type, name, levels, width, segments, limit_method="ANGLE", angle_limit=30.0)` | Lower-level modifier add. For BEVEL, `limit_method` and `angle_limit` are now exposed. |
 | `apply_modifiers(name)` | Apply all modifiers on the named object (or active). |
 
@@ -350,7 +357,7 @@ snap_to_grid(size=0.5, axes="XY")                                # snap WallA to
 
 **loop_cut on tapered meshes** — cuts are placed at edge midpoints, not at uniform Z intervals. On a tapered cone/blade, new rings will already inherit the taper proportionally. To push rings to a specific width, select the ring after cutting and use `scale_vertices`.
 
-**Screenshots** — `get_viewport_screenshot` captures whatever the viewport is showing right now. Call `orbit_viewport` or `set_viewport_angle` first to frame the shot you want. Do not use `set_viewport_angle(CAMERA)` for inspection — it shows the camera border crop and the camera object wireframe.
+**Screenshots** — `get_viewport_screenshot` captures whatever the viewport is showing right now. Call `orbit_viewport` or `set_viewport_angle` first to frame the shot you want. Do not use `set_viewport_angle(CAMERA)` for inspection — it shows the camera border crop and the camera object wireframe. Capture forces a depsgraph update + viewport redraw first, so material/geometry edits made since the last capture are always reflected (socket-driven edits don't generate the UI events that normally trigger redraws).
 
 **Object names** — every `add_*` primitive tool requires a `name` argument and sets it immediately on the object and its mesh data. Blender may append `.001` if the name already exists; the actual name assigned is returned. Use `get_scene_tree` to verify.
 

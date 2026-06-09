@@ -12,6 +12,7 @@ import threading
 import bpy
 
 from . import (
+    curves,
     designs,
     editmode,
     finishes,
@@ -39,6 +40,7 @@ _TOOL_MODULES = (
     viewport,
     history,
     primitives,
+    curves,
     objects,
     transforms,
     queries,

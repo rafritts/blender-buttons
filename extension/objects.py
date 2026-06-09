@@ -223,6 +223,10 @@ def get_object_info(params):
         info["vertex_count"] = len(obj.data.vertices)
         info["edge_count"] = len(obj.data.edges)
         info["face_count"] = len(obj.data.polygons)
+        from .common import material_summary
+        info["materials"] = material_summary(obj)
+        if obj.modifiers:
+            info["modifiers"] = [{"name": m.name, "type": m.type} for m in obj.modifiers]
     return {"success": True, "info": info}
 
 

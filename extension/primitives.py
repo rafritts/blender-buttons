@@ -269,7 +269,11 @@ def add_primitives(params):
         if ptype not in _BULK_DISPATCH:
             return {"error": f"specs[{i}].type '{ptype}' invalid. "
                               f"Use one of {sorted(_BULK_DISPATCH)}", "created": created}
-        sub = {k: v for k, v in s.items() if k != "type"}
+        sub = {k: v for k, v in s.items() if k not in ("type", "rot_x", "rot_y", "rot_z")}
+        # Single-primitive MCP tools expose rot_x/y/z and map them to rotation_deg;
+        # bulk specs use the same names, so do the same mapping here.
+        if any(k in s for k in ("rot_x", "rot_y", "rot_z")) and "rotation_deg" not in sub:
+            sub["rotation_deg"] = [s.get("rot_x", 0), s.get("rot_y", 0), s.get("rot_z", 0)]
         result = _BULK_DISPATCH[ptype](sub)
         if not result.get("success"):
             return {"error": f"specs[{i}] ({ptype}): {result.get('error')}",

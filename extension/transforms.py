@@ -43,7 +43,14 @@ def resize(params):
         return {"error": "resize requires at least one of width, depth, height"}
 
     results = []
+    warnings = []
     for o in objs:
+        if any(abs(r) > 0.0087 for r in o.rotation_euler):  # > ~0.5°
+            warnings.append(
+                f"'{o.name}' is rotated {[round(math.degrees(r), 1) for r in o.rotation_euler]}° — "
+                "resize works in WORLD axes, so non-axis-aligned geometry will shear. "
+                "Recreate the primitive at the right size, or apply_transform(rotation=True) first."
+            )
         xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(o)
         cur_w, cur_d, cur_h = xmax - xmin, ymax - ymin, zmax - zmin
         sx = (w / cur_w) if (w is not None and cur_w > 1e-9) else 1.0
@@ -59,7 +66,82 @@ def resize(params):
         results.append({"name": o.name, "dims": [round(xmax - xmin, 4),
                                                   round(ymax - ymin, 4),
                                                   round(zmax - zmin, 4)]})
-    return {"success": True, "resized": results}
+    out = {"success": True, "resized": results}
+    if warnings:
+        out["warnings"] = warnings
+    return out
+
+
+def scale_group(params):
+    """Uniformly scale a set of objects about a SHARED pivot, preserving their
+    relative layout. This is what resize can't do: resize sets each member to the
+    same absolute dims; scale_group makes a whole assembly N% bigger in place.
+
+    targets: object/group name or list (required).
+    factor:  uniform scale multiplier (required; e.g. 1.08 = 8% bigger).
+    pivot:   "center" (default — combined bbox center) | "bottom_center"
+             (combined bbox center XY at zmin — keeps feet on the floor) |
+             "origin" (world 0,0,0) | an object name (its bbox center) |
+             [x, y, z] literal world point.
+    """
+    targets = params.get("targets")
+    factor = params.get("factor")
+    pivot_spec = params.get("pivot", "center")
+    objs, err = resolve_targets(targets)
+    if err:
+        return {"error": err}
+    if factor is None:
+        return {"error": "'factor' is required (e.g. 1.08 to grow 8%)"}
+    factor = float(factor)
+    if factor <= 0:
+        return {"error": "'factor' must be > 0"}
+
+    boxes = [world_bbox(o) for o in objs]
+    xmin = min(b[0] for b in boxes); ymin = min(b[1] for b in boxes)
+    zmin = min(b[2] for b in boxes)
+    xmax = max(b[3] for b in boxes); ymax = max(b[4] for b in boxes)
+    zmax = max(b[5] for b in boxes)
+
+    if isinstance(pivot_spec, (list, tuple)) and len(pivot_spec) == 3:
+        pivot = tuple(float(v) for v in pivot_spec)
+    elif pivot_spec == "center":
+        pivot = ((xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2)
+    elif pivot_spec == "bottom_center":
+        pivot = ((xmin + xmax) / 2, (ymin + ymax) / 2, zmin)
+    elif pivot_spec == "origin":
+        pivot = (0.0, 0.0, 0.0)
+    else:
+        anchor = bpy.data.objects.get(str(pivot_spec))
+        if anchor is None:
+            return {"error": (f"pivot '{pivot_spec}' not understood — use 'center', "
+                              "'bottom_center', 'origin', an object name, or [x, y, z]")}
+        a_xmin, a_ymin, a_zmin, a_xmax, a_ymax, a_zmax = world_bbox(anchor)
+        pivot = ((a_xmin + a_xmax) / 2, (a_ymin + a_ymax) / 2, (a_zmin + a_zmax) / 2)
+
+    # Uniform scale about a pivot: p' = pivot + factor * (p - pivot). For objects
+    # that's location moved toward/away from the pivot plus local scale (uniform
+    # scale commutes with rotation, so rotated parts stay correct).
+    for o in objs:
+        o.location = tuple(pivot[i] + factor * (o.location[i] - pivot[i]) for i in range(3))
+        o.scale = tuple(s * factor for s in o.scale)
+    bpy.context.view_layer.update()
+    for o in objs:
+        if o.type == 'MESH':
+            activate(o)
+            bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+
+    boxes = [world_bbox(o) for o in objs]
+    return {
+        "success": True,
+        "scaled": [o.name for o in objs],
+        "factor": factor,
+        "pivot": [round(v, 5) for v in pivot],
+        "bounds_after": {
+            "x": [round(min(b[0] for b in boxes), 4), round(max(b[3] for b in boxes), 4)],
+            "y": [round(min(b[1] for b in boxes), 4), round(max(b[4] for b in boxes), 4)],
+            "z": [round(min(b[2] for b in boxes), 4), round(max(b[5] for b in boxes), 4)],
+        },
+    }
 
 
 def apply_transform(params):
@@ -254,6 +336,7 @@ def snap_to_grid(params):
 TOOLS = {
     "nudge":           nudge,
     "resize":          resize,
+    "scale_group":     scale_group,
     "rotate_object":   rotate_object,
     "apply_transform": apply_transform,
     "snap_to":         snap_to,

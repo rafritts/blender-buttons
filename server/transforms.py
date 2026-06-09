@@ -47,6 +47,36 @@ def resize(targets: str = "", width: float = None, depth: float = None, height: 
     result = call_blender("resize", params, label=label)
     if result.get("success"):
         main = f"resized: {result['resized']} [{result.get('op_id','')}]"
+        for warning in result.get("warnings", []):
+            main += f"\n⚠ {warning}"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def scale_group(targets: str, factor: float, pivot: str = "center", label: str = "") -> str:
+    """
+    Uniformly scale a whole assembly about a SHARED pivot, preserving relative layout.
+    Use when a multi-part construction needs to be N% bigger/smaller in place —
+    resize can't do this (it sets each member to the same absolute dims).
+
+    targets: object name, group name, or comma-separated list (required).
+    factor:  uniform multiplier — 1.08 = 8% bigger, 0.5 = half size.
+    pivot:   "center" (default — combined bbox center) | "bottom_center" (keeps
+             feet on the floor) | "origin" (world 0,0,0) | an object name (scale
+             about that object's center).
+
+    Example: scale_group("head_assembly", factor=1.08, pivot="center")
+    """
+    result = call_blender("scale_group", {
+        "targets": _targets(targets), "factor": factor, "pivot": pivot,
+    }, label=label)
+    if result.get("success"):
+        b = result["bounds_after"]
+        main = (f"scaled {len(result['scaled'])} part(s) ×{result['factor']} about "
+                f"{result['pivot']}; now x={b['x']} y={b['y']} z={b['z']} "
+                f"[{result.get('op_id','')}]")
     else:
         main = result.get("error", "failed")
     return main + _status(result)

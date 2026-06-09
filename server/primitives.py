@@ -1,3 +1,5 @@
+from typing import Union
+
 from server._core import mcp, call_blender, _status, _add_result
 
 
@@ -24,12 +26,22 @@ from server._core import mcp, call_blender, _status, _add_result
 #     {"in_front_of": "name"}          → flush against target's −Y side
 #     {"behind":      "name"}          → flush against target's +Y side
 #
+#   Mirror (center copied from another object, one axis flipped):
+#     {"mirror_of": "thigh_R", "axis": "X"}  → center = thigh_R's center with X negated
+#
+#   Absolute coordinates (the ripcord — prefer relational keys when an anchor exists):
+#     {"at": [x, y, z]}                → center at the literal world coordinate
+#     {"x": 0.085} / {"y": ...} / {"z": ...}  → override just that center axis,
+#                                       applied AFTER relational keys (combine freely)
+#
 #   Z overrides (applied last; win conflicts with the above):
 #     {"on_floor":  true}              → bottom of new = Z 0
 #     {"raise_to":  0.45}              → bottom of new = Z 0.45  (literal Z — ripcord)
 #
 #   Modifier:
 #     {"gap": 0.01}                    → spacing for on/under/left_of/etc.
+#
+#   Unknown keys are rejected with an error (no silent ignores).
 #
 # Examples:
 #   on={"at_corner": {"of": "seat", "corner": "front_left"}, "on_floor": True}
@@ -201,6 +213,49 @@ def add_circle(name: str, radius: float,
         "rotation_deg": [rot_x, rot_y, rot_z],
     }, label=label)
     return _add_result("CIRCLE", result) + _status(result)
+
+
+@mcp.tool()
+def spline_tube(name: str, points: list, radius: Union[float, list] = 0.02,
+                resolution: int = 8, sides: int = 4, label: str = "") -> str:
+    """
+    Create a tube mesh swept along a smooth curve that passes THROUGH every
+    control point (interpolating spline — no Bezier handles). The go-to tool for
+    hair strands, cables, ribbons, handles, branches, and any curved organic shape.
+
+    name:    REQUIRED — object name (must be unique).
+    points:  2–32 control points the curve passes through. Each is either
+             [x, y, z] world coords (ripcord), or
+             {"near": "object_name", "offset": [dx, dy, dz]} — anchored to an
+             existing object's bbox center, resolved once at creation.
+    radius:  tube radius in meters. A single number, OR a list with one radius
+             per control point for taper (e.g. [0.03, 0.02, 0.005] = thick root
+             to thin tip — a hair strand).
+    resolution: curve samples per segment (default 8; raise for tight bends).
+    sides:   cross-section smoothness (default 4 ≈ 16-sided tube).
+
+    The result is a normal mesh object — group it, material it, mirror it like
+    any primitive. describe() reports the through-points for later adjustment.
+
+    Example — hair strand from scalp to shoulder, curving outward:
+      spline_tube("hair_strand_R",
+                  points=[{"near": "head", "offset": [0.08, 0, 0.05]},
+                          [0.14, -0.02, 1.35],
+                          [0.11, -0.04, 1.15]],
+                  radius=[0.025, 0.018, 0.004])
+    """
+    result = call_blender("spline_tube", {
+        "name": name, "points": points, "radius": radius,
+        "resolution": resolution, "sides": sides,
+    }, label=label)
+    if result.get("success"):
+        main = (f"Added SPLINE_TUBE as '{result['object_name']}' through "
+                f"{len(result['points'])} points, length={result['length']}m, "
+                f"radii={result['radii']}, dims={result.get('dimensions')} "
+                f"[{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
 
 
 @mcp.tool()

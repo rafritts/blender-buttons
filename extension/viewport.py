@@ -48,10 +48,31 @@ def find_view3d_context():
     return None, None, None, None
 
 
+def _force_viewport_refresh(window, screen, area, region):
+    """Flush pending scene edits into the viewport before capturing.
+
+    Commands arrive over the socket queue, not through UI events, so material
+    and geometry edits can sit un-evaluated — screenshots then show stale
+    frames. Force the depsgraph current and run one real redraw cycle.
+    """
+    bpy.context.view_layer.update()
+    try:
+        bpy.context.evaluated_depsgraph_get().update()
+    except Exception:
+        pass
+    area.tag_redraw()
+    try:
+        with bpy.context.temp_override(window=window, screen=screen, area=area, region=region):
+            bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
+    except Exception:
+        pass
+
+
 def _capture_viewport(scene, window, screen, area, region, path, width, height):
     scene.render.filepath = path
     scene.render.resolution_x = width
     scene.render.resolution_y = height
+    _force_viewport_refresh(window, screen, area, region)
     with bpy.context.temp_override(window=window, screen=screen, area=area, region=region):
         bpy.ops.render.opengl(write_still=True)
 

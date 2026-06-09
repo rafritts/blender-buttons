@@ -73,6 +73,43 @@ def resolve_targets(targets):
     return objs, None
 
 
+def material_summary(obj):
+    """Readable summary of an object's material slots — name plus the Principled
+    BSDF values set_material writes. Setters need matching getters: this is what
+    lets describe()/get_object_info() answer 'what material is on X?'."""
+    if obj.data is None or not hasattr(obj.data, "materials"):
+        return []
+    out = []
+    for slot_idx, mat in enumerate(obj.data.materials):
+        if mat is None:
+            out.append({"slot": slot_idx, "name": None})
+            continue
+        entry = {"slot": slot_idx, "name": mat.name}
+        if mat.use_nodes:
+            bsdf = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+            if bsdf is not None:
+                def _inp(key):
+                    return bsdf.inputs[key].default_value if key in bsdf.inputs else None
+                bc = _inp("Base Color")
+                if bc is not None:
+                    entry["base_color"] = [round(c, 3) for c in tuple(bc)[:4]]
+                for key, label in (("metallic", "Metallic"), ("roughness", "Roughness"),
+                                   ("alpha", "Alpha")):
+                    v = _inp(label)
+                    if v is not None:
+                        entry[key] = round(float(v), 3)
+                es = _inp("Emission Strength")
+                if es is not None and float(es) > 0:
+                    entry["emission_strength"] = round(float(es), 3)
+                    ec = _inp("Emission Color")
+                    if ec is None:
+                        ec = _inp("Emission")
+                    if ec is not None:
+                        entry["emission_color"] = [round(c, 3) for c in tuple(ec)[:4]]
+        out.append(entry)
+    return out
+
+
 def activate(obj):
     """Make obj the sole selected + active object."""
     if bpy.context.mode != 'OBJECT':

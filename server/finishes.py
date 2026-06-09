@@ -33,6 +33,40 @@ def round_corners(target: str, corners: list, radius: float = 0.02,
 
 
 @mcp.tool()
+def bend(targets: str, angle: float, axis: str = "X", apply: bool = True,
+         label: str = "") -> str:
+    """
+    Bend objects into an arc — the one-call curving verb. Tapered cylinder + bend
+    = curved hair lock, bent limb, banana, rocker rail.
+
+    targets: object name, group name, or comma-separated list.
+    angle:   bend angle in degrees. 30–60 = gentle arc, 90 = quarter turn,
+             180 = U shape. Negative flips direction.
+    axis:    the axis to bend AROUND (X | Y | Z, local, through the object's
+             origin). A vertical object bends into a C in the plane
+             perpendicular to this axis: X curls it forward/back, Y left/right.
+    apply:   bake into the mesh (default True). False keeps the modifier live
+             so modify_modifier can adjust the angle later.
+
+    Bending needs segments along the length to look smooth — if the result is
+    faceted, run loop_cut(axis=Z, cuts=8, target=<name>) first and bend again.
+
+    Example: bend("hair_lock_R", angle=40, axis="Y") — curl a hair strand outward.
+    """
+    result = call_blender("bend", {
+        "targets": _targets(targets), "angle": angle, "axis": axis, "apply": apply,
+    }, label=label)
+    if result.get("success"):
+        main = (f"bent {[b['name'] for b in result['bent']]} by {angle}° around {axis}"
+                f"{' (applied)' if result.get('applied') else ' (live modifier)'} "
+                f"[{result.get('op_id','')}]")
+        for warning in result.get("warnings", []):
+            main += f"\n⚠ {warning}"
+        return main + _status(result)
+    return result.get("error", "failed")
+
+
+@mcp.tool()
 def smooth_edges(targets: str = "", width: float = 0.002, segments: int = 2,
                  angle_limit: float = 30.0, label: str = "") -> str:
     """

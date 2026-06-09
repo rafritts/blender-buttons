@@ -38,10 +38,15 @@ def match_dimension(params):
 
 def mirror_across(params):
     """Duplicate parts and mirror the copies across a world axis plane.
-    plane: 'X' (mirror across YZ plane through origin), 'Y', or 'Z'."""
+    plane: 'X' (mirror across YZ plane through origin), 'Y', or 'Z'.
+    replace: optional ["_R", "_L"] — copies of names containing the first string
+    get it swapped for the second ('eye_R' → 'eye_L') instead of suffix appending."""
     targets = params.get("targets")
     plane = params.get("plane", "X").upper()
     suffix = params.get("suffix", "_mirror")
+    replace = params.get("replace")
+    if replace is not None and not (isinstance(replace, (list, tuple)) and len(replace) == 2):
+        return {"error": "'replace' must be a 2-item list like [\"_R\", \"_L\"]"}
     objs, err = resolve_targets(targets)
     if err:
         return {"error": err}
@@ -55,7 +60,10 @@ def mirror_across(params):
         activate(o)
         bpy.ops.object.duplicate(linked=False)
         dup = bpy.context.active_object
-        dup_name = o.name + suffix
+        if replace and replace[0] in o.name:
+            dup_name = o.name.replace(replace[0], replace[1])
+        else:
+            dup_name = o.name + suffix
         if bpy.data.objects.get(dup_name) is None:
             dup.name = dup_name
             if dup.data:

@@ -4,7 +4,7 @@ import math
 
 import bpy
 
-from .common import world_bbox, world_center
+from .common import material_summary, world_bbox, world_center
 
 
 def describe(params):
@@ -51,15 +51,43 @@ def describe(params):
         relations.append(f"freestanding (origin {round(zmin, 3)}m above floor)")
 
     dim_str = f"size {round(w, 3)} × {round(d, 3)} × {round(h, 3)} m (W×D×H)"
-    sentence = f"{name}: {'; '.join(relations)}; {dim_str}"
 
-    return {
+    materials = material_summary(obj)
+    mat_strs = []
+    for m in materials:
+        if not m.get("name"):
+            continue
+        bits = [m["name"]]
+        if "base_color" in m:
+            bits.append(f"color={m['base_color'][:3]}")
+        if "roughness" in m:
+            bits.append(f"rough={m['roughness']}")
+        if m.get("metallic"):
+            bits.append(f"metal={m['metallic']}")
+        if m.get("emission_strength"):
+            bits.append(f"glow={m['emission_strength']}")
+        mat_strs.append(" ".join(bits))
+    mat_str = f"material: {', '.join(mat_strs)}" if mat_strs else "no material"
+
+    parts = relations + [dim_str, mat_str]
+
+    spline_pts = obj.get("bb_spline_points")
+    if spline_pts:
+        parts.append(f"spline tube through {spline_pts}")
+
+    sentence = f"{name}: {'; '.join(parts)}"
+
+    result = {
         "success": True,
         "name": name,
         "description": sentence,
         "relations": relations,
         "dimensions": {"width": round(w, 4), "depth": round(d, 4), "height": round(h, 4)},
+        "materials": materials,
     }
+    if spline_pts:
+        result["spline_points"] = spline_pts
+    return result
 
 
 def distance_between(params):

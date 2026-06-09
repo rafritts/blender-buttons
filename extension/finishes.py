@@ -134,6 +134,71 @@ def round_corners(params):
             "radius": radius, "segments": segments, "edges_beveled": selected}
 
 
+def bend(params):
+    """Bend objects into an arc — the one-call curving verb (SimpleDeform BEND).
+
+    targets: object name, group name, or list (required).
+    angle:   bend angle in degrees (required). 30–60 = gentle arc, 90 = quarter
+             turn, 180 = U shape. Negative flips direction.
+    axis:    X | Y | Z — the axis to bend AROUND (through each object's origin,
+             local space). A vertical (Z-tall) object bends into a C in the
+             plane perpendicular to this axis: axis=X curls it forward/back,
+             axis=Y curls it left/right. Default X.
+    apply:   bake the deformation into the mesh (default True). Pass False to
+             keep the modifier live for tweaking via modify_modifier.
+
+    Geometry needs segments along its length to bend smoothly — primitives like
+    cylinders/cones have them around the circumference but only 2 rings along Z;
+    run loop_cut first if the bend comes out faceted.
+    """
+    targets = params.get("targets")
+    angle = params.get("angle")
+    axis = (params.get("axis") or "X").upper()
+    do_apply = params.get("apply", True)
+    if angle is None:
+        return {"error": "'angle' (degrees) is required"}
+    if axis not in ("X", "Y", "Z"):
+        return {"error": "axis must be X, Y, or Z"}
+    objs, err = resolve_targets(targets)
+    if err:
+        return {"error": err}
+
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    bent = []
+    notes = []
+    for o in objs:
+        if o.type != 'MESH':
+            continue
+        xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(o)
+        dims = (xmax - xmin, ymax - ymin, zmax - zmin)
+        long_axis = "XYZ"[dims.index(max(dims))]
+        if long_axis == axis:
+            notes.append(f"'{o.name}': bending around its own long axis ({axis}) "
+                         "barely changes shape — a perpendicular axis usually wants this")
+        activate(o)
+        mod = o.modifiers.new(name="Bend", type='SIMPLE_DEFORM')
+        mod.deform_method = 'BEND'
+        mod.deform_axis = axis
+        mod.angle = math.radians(float(angle))
+        if do_apply:
+            bpy.ops.object.modifier_apply(modifier=mod.name)
+        xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(o)
+        bent.append({"name": o.name,
+                     "dims_after": [round(xmax - xmin, 4), round(ymax - ymin, 4),
+                                    round(zmax - zmin, 4)]})
+
+    if not bent:
+        return {"error": "No mesh objects in targets"}
+    push_undo(f"bend {angle}° around {axis}")
+    out = {"success": True, "bent": bent, "angle": angle, "axis": axis,
+           "applied": bool(do_apply)}
+    if notes:
+        out["warnings"] = notes
+    return out
+
+
 def add_modifier(params):
     mod_type = params.get("type", "SUBSURF").upper()
     name     = params.get("name", mod_type.capitalize())
@@ -449,6 +514,7 @@ def boolean(params):
 TOOLS = {
     "smooth_edges":    smooth_edges,
     "round_corners":   round_corners,
+    "bend":            bend,
     "add_modifier":    add_modifier,
     "modify_modifier": modify_modifier,
     "remove_modifier": remove_modifier,

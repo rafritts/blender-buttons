@@ -67,13 +67,15 @@ source's mesh data so memory stays cheap. Capped at 5000 per call.
 `server/main.py:set_viewport_shading`. Call before `get_viewport_screenshot`
 to see materials/lighting in the captured image.
 
-## 9. Curve objects (Bézier / NURBS)
+## 9. Curve objects (Bézier / NURBS) — PARTIALLY IMPLEMENTED
 
 **Tutorial step:** Andrew uses a Bézier circle as a particle distribution control / for camera dolly paths.
 
-**What we have:** nothing. All primitives are meshes.
-
-**Why deferred:** curves are their own datablock type with control points, handles, bevel objects, taper objects. A first-class `add_bezier_circle` / `add_bezier_path` is doable but it's a new module (`curves.py`), not a one-tool addition.
+**What we have now:** `spline_tube` (`extension/curves.py`) — interpolating
+(Catmull-Rom) curve through 2–32 points, swept as a tube with per-point radius,
+converted to mesh in one call. Deliberately NOT Bezier-handle-based: through-points
+are verifiable claims for an LLM; tangent handles are invisible state. Curve
+datablocks as live scene objects (camera paths, particle controls) remain unbuilt.
 
 ---
 
@@ -215,3 +217,77 @@ These are the road from a base mesh to Wuthering-Waves-quality. Listed for the n
 - Face topology: eyes/nose/mouth loops with subsurf-correct flow
 - Curve objects (carry-over from donut gaps #9)
 - Render to file (carry-over from donut gaps #7)
+
+---
+
+# MCP gaps surfaced by the primitive-assembly anime girl build (2026-06-09)
+
+A 36-part character (head, hair, dress, limbs from shaped primitives) built
+entirely through the placement → resize → mirror → material → screenshot loop.
+All items below are IMPLEMENTED as of this session; details for the record.
+
+## D1. Placement DSL silently ignored unknown keys — IMPLEMENTED
+
+`on={"at": [0, 0, 1.48]}` did nothing: the object landed at the origin with no
+error, and the build fell back to add-then-nudge for all ~25 parts (doubled the
+call count). Two fixes in `extension/placement.py`:
+- `{"at": [x, y, z]}` is now a real key — literal world-coordinate center (ripcord).
+- `resolve_placement` validates against `VALID_SPEC_KEYS` and rejects unknown
+  keys with the full valid vocabulary in the error.
+
+## D2. add_primitives dropped rot_x/y/z in bulk specs — IMPLEMENTED
+
+Single-primitive tools map `rot_x/y/z` → `rotation_deg`; the bulk path passed
+specs through raw, so `{"type": "cylinder", ..., "rot_y": 14}` created an
+UNROTATED cylinder silently (the character's A-pose arms came out vertical).
+`extension/primitives.py:add_primitives` now does the same mapping.
+
+## D3. Stale viewport screenshots — IMPLEMENTED
+
+After `set_material`/`resize` edits, `get_viewport_screenshot` returned
+byte-identical stale frames (several iterations were spent "re-fixing" shoes
+that were already fixed; diagnosed with a glowing red debug material). Root
+cause: socket-driven edits generate no UI events, so the depsgraph/viewport
+never refreshed before capture. `_capture_viewport` now forces
+`view_layer.update()` + `evaluated_depsgraph_get().update()` + a real
+`wm.redraw_timer` cycle first.
+
+## D4. Setters without getters: no material introspection — IMPLEMENTED
+
+`set_material` existed but nothing reported what was assigned.
+`common.material_summary()` reads back slot names + Principled values
+(base_color, roughness, metallic, alpha, emission); `describe()` includes a
+material clause, `get_object_info()` gains `materials` + `modifiers`.
+
+## D5. resize on rotated objects shears silently — IMPLEMENTED (warning)
+
+`resize` works in world axes; on a rotated cylinder it shears the geometry and
+the bbox math is rotation-inflated. Now warns per rotated target and suggests
+recreating at size or `apply_transform(rotation=True)` first.
+
+## D6. No group scale about a shared pivot — IMPLEMENTED
+
+Wanted "make head+hair 8% bigger" (12 objects); `resize` can't (it sets each
+member to identical absolute dims). `scale_group(targets, factor, pivot)`
+scales locations + local scales about a shared pivot (`center`,
+`bottom_center`, `origin`, object name, or literal point), then bakes scale.
+
+## D7. mirror_across name pollution — IMPLEMENTED
+
+Suffix appending produced `eye_R_L`-style names. `replace=["_R", "_L"]` swaps
+the token instead; names without the token fall back to the suffix.
+
+## D8. No curving primitives at all — IMPLEMENTED (bend + spline_tube)
+
+Everything buildable was straight or linearly tapered; hair locks and curved
+strands had no path. Two new verbs:
+- `bend(targets, angle, axis, apply=True)` — SimpleDeform BEND wrapper
+  (`extension/finishes.py`). One-call arc on existing geometry.
+- `spline_tube(name, points, radius, resolution, sides)` — new module
+  `extension/curves.py`. Interpolating Catmull-Rom curve THROUGH 2–32 control
+  points ([x,y,z] or {"near": obj, "offset": [...]}), swept with per-point
+  radius, capped, converted to mesh in one call. Through-points are stored on
+  the object and reported by describe().
+
+Verified by `bb_e2e_test.py`-style headless run (flatpak Blender 5.1,
+38 assertions) + pure-math tests for the Catmull-Rom sampler.

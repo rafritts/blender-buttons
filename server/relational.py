@@ -20,7 +20,7 @@ def match_dimension(target: str, reference: str, axis: str = "Z", label: str = "
 
 @mcp.tool()
 def mirror_across(targets: str, plane: str = "X", suffix: str = "_mirror",
-                  label: str = "") -> str:
+                  replace: list = None, label: str = "") -> str:
     """
     Duplicate parts and mirror the copies across a world axis plane through origin.
     plane: 'X' mirrors across the YZ plane (flips +X ↔ −X); 'Y' and 'Z' analogous.
@@ -29,11 +29,17 @@ def mirror_across(targets: str, plane: str = "X", suffix: str = "_mirror",
     build the left side, then mirror_across('X') to get the right side.
 
     targets: single object name, group name, or comma-separated list.
-    Example: mirror_across("leg_front_left,leg_back_left", plane="X", suffix="_right")
+    replace: optional 2-item list — swap a naming token instead of appending suffix.
+             ["_R", "_L"] turns 'eye_R' into 'eye_L'. Names without the token
+             fall back to suffix appending.
+    Examples:
+      mirror_across("leg_front_left,leg_back_left", plane="X", suffix="_right")
+      mirror_across("eye_R,arm_R,leg_R", plane="X", replace=["_R", "_L"])
     """
-    result = call_blender("mirror_across", {
-        "targets": _targets(targets), "plane": plane, "suffix": suffix,
-    }, label=label)
+    params = {"targets": _targets(targets), "plane": plane, "suffix": suffix}
+    if replace is not None:
+        params["replace"] = replace
+    result = call_blender("mirror_across", params, label=label)
     if result.get("success"):
         return (f"mirrored across {plane}: {result['mirrored_to']} "
                 f"[{result.get('op_id','')}]" + _status(result))
