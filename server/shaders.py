@@ -35,7 +35,10 @@ def set_toon_material(target: str,
     gradient_bottom: flat base color (e.g. brighter hair toward the tips).
     material_name:   defaults to "<target>_toon"; reused/updated in place if present.
 
-    Pair with add_outline() for the full inked-cartoon look.
+    Pair with add_outline() for the full inked-cartoon look. Also run
+    set_color_management(view_transform="Standard") — the default AgX transform
+    filmically mutes these flat colors and the cel banding, so toon work looks
+    washed out until you switch to Standard.
     Example: set_toon_material("hair", base_color=[0.55,0.2,0.6], bands=3, rim_color=[1,1,1])
     """
     params = {"target": target, "bands": bands, "shadow_softness": shadow_softness,

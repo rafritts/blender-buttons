@@ -47,6 +47,13 @@ def _status(result: dict) -> str:
         f"  rot_deg:     {s.get('rotation_deg')}",
         f"  last_action: {s.get('last_action')}",
     ]
+    r = s.get("render")
+    if r:
+        rt = f"  raytracing={r['raytracing']}" if "raytracing" in r else ""
+        lines.append(
+            f"  render:      {r['engine']}  view={r['view_transform']} "
+            f"look={r['look']} exp={r['exposure']} gamma={r['gamma']}{rt}"
+        )
     if "edit" in s:
         e = s["edit"]
         lines += [

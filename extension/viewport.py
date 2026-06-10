@@ -418,6 +418,28 @@ def zoom_to_selected(params):
     return {"success": True}
 
 
+def _scene_view_bounds():
+    """Union world bbox of visible mesh objects (selection if any are selected,
+    else the whole scene). Returns (center, diagonal) or None when nothing fits."""
+    from .common import world_bbox
+    objs = [o for o in bpy.context.selected_objects if o.type == 'MESH']
+    if not objs:
+        objs = [o for o in bpy.context.scene.objects
+                if o.type == 'MESH' and o.visible_get()]
+    if not objs:
+        return None
+    xs0, ys0, zs0, xs1, ys1, zs1 = [], [], [], [], [], []
+    for o in objs:
+        xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(o)
+        xs0.append(xmin); ys0.append(ymin); zs0.append(zmin)
+        xs1.append(xmax); ys1.append(ymax); zs1.append(zmax)
+    lo = (min(xs0), min(ys0), min(zs0))
+    hi = (max(xs1), max(ys1), max(zs1))
+    center = tuple((a + b) / 2.0 for a, b in zip(lo, hi))
+    diag = math.sqrt(sum((b - a) ** 2 for a, b in zip(lo, hi)))
+    return center, diag
+
+
 def orbit_viewport(params):
     azimuth  = params.get("azimuth",  45.0)
     elevation = params.get("elevation", 25.0)
@@ -425,6 +447,19 @@ def orbit_viewport(params):
     tx = params.get("target_x", 0.0)
     ty = params.get("target_y", 0.0)
     tz = params.get("target_z", 1.0)
+
+    # auto_frame: derive target + distance from the scene/selection bounds so the
+    # subject fills the frame at the current orbit angle — no eyeballing distance.
+    auto_framed = None
+    if params.get("auto_frame"):
+        bounds = _scene_view_bounds()
+        if bounds is None:
+            return {"error": "auto_frame: no visible mesh objects to frame"}
+        center, diag = bounds
+        tx, ty, tz = center
+        distance = max(diag * 1.5, 0.5)  # 1.5× diagonal frames with a little margin
+        auto_framed = {"target": [round(c, 4) for c in center],
+                       "distance": round(distance, 4)}
 
     window, screen, area, region = find_view3d_context()
     if area is None:
@@ -446,7 +481,10 @@ def orbit_viewport(params):
     q_el = mathutils.Quaternion((1.0, 0.0, 0.0), math.radians(-elevation))
     r3d.view_rotation = r3d.view_rotation @ q_el
 
-    return {"success": True}
+    out = {"success": True}
+    if auto_framed is not None:
+        out["auto_framed"] = auto_framed
+    return out
 
 
 def set_camera_position(params):

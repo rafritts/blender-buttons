@@ -5,7 +5,7 @@ import math
 import bpy
 import mathutils
 
-from .common import world_bbox
+from .common import world_bbox, world_center, activate
 
 
 def rename_object(params):
@@ -297,11 +297,91 @@ def get_current_selection(params):
     }
 
 
+def duplicate_mirrored(params):
+    """Bake a mirrored copy of an object across a world axis plane.
+
+    The static "make the other half" escape hatch — for symmetry that's already
+    finalized (the MIRROR modifier / placement mirror_of handle live cases).
+
+    target:   object to mirror (required).
+    axis:     X | Y | Z — the plane is perpendicular to this axis (default X,
+              i.e. mirror left↔right across the Y-Z plane).
+    pivot:    "WORLD" (default — reflect across the axis=0 plane through the
+              world origin) | "SELF" (reflect about the object's own origin) |
+              an object name (reflect across the plane through that object's
+              center) | [x, y, z] explicit plane point.
+    new_name: name for the copy. Defaults to "<target>_mirror".
+
+    Reflection inverts the mesh, so winding/normals are recalculated outward
+    afterward and the transform is applied (scale stays positive, [1,1,1])."""
+    target = params.get("target")
+    if not target:
+        return {"error": "'target' is required"}
+    obj = bpy.data.objects.get(target)
+    if obj is None:
+        return {"error": f"Object '{target}' not found"}
+    axis = (params.get("axis") or "X").upper()
+    if axis not in ("X", "Y", "Z"):
+        return {"error": "axis must be X, Y, or Z"}
+    ai = "XYZ".index(axis)
+
+    pivot = params.get("pivot", "WORLD")
+    if isinstance(pivot, (list, tuple)) and len(pivot) == 3:
+        c = mathutils.Vector(pivot)
+    elif isinstance(pivot, str) and pivot.upper() == "WORLD":
+        c = mathutils.Vector((0.0, 0.0, 0.0))
+    elif isinstance(pivot, str) and pivot.upper() == "SELF":
+        c = obj.matrix_world.translation.copy()
+    else:  # object name
+        piv = bpy.data.objects.get(pivot)
+        if piv is None:
+            return {"error": f"pivot object '{pivot}' not found"}
+        c = mathutils.Vector(world_center(piv))
+
+    # Reflection across the plane through c, perpendicular to `axis`:
+    #   R = T(c) · S(-1 on axis) · T(-c)
+    S = mathutils.Matrix.Identity(4)
+    S[ai][ai] = -1.0
+    R = mathutils.Matrix.Translation(c) @ S @ mathutils.Matrix.Translation(-c)
+
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    activate(obj)
+    bpy.ops.object.duplicate(linked=False)
+    dup = bpy.context.active_object
+    dup.matrix_world = R @ dup.matrix_world
+
+    new_name = params.get("new_name") or f"{target}_mirror"
+    dup.name = new_name
+    if dup.data and dup.data.users == 1:
+        dup.data.name = new_name
+
+    # Bake the negative-determinant transform, then fix the inverted normals.
+    activate(dup)
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    if dup.type == 'MESH':
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='SELECT')
+        bpy.ops.mesh.normals_make_consistent(inside=False)
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(dup)
+    return {
+        "success": True,
+        "original": target,
+        "mirror": dup.name,
+        "axis": axis,
+        "pivot": pivot,
+        "dimensions": [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)],
+    }
+
+
 TOOLS = {
     "rename_object":         rename_object,
     "select_object":         select_object,
     "delete_object":         delete_object,
     "duplicate_object":      duplicate_object,
+    "duplicate_mirrored":    duplicate_mirrored,
     "join_objects":          join_objects,
     "set_mode":              set_mode,
     "get_object_info":       get_object_info,

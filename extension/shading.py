@@ -84,6 +84,30 @@ def _set_input(node, key, value):
     return False
 
 
+def _srgb_to_linear(c):
+    """Standard sRGB transfer function, per channel (0..1 in, 0..1 out)."""
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def hex_to_linear_rgba(hex_str):
+    """Parse a "#RRGGBB" / "#RRGGBBAA" hex color (sRGB, as picked from any
+    reference/screenshot) into scene-linear [r, g, b, a].
+
+    Blender stores Base Color in scene-linear space, so a raw 8-bit hex value
+    fed in as floats reads far too pale. Convert through the sRGB curve first.
+    Raises ValueError on a malformed string."""
+    s = hex_str.strip().lstrip("#")
+    if len(s) not in (6, 8):
+        raise ValueError(f"hex must be '#RRGGBB' or '#RRGGBBAA', got '{hex_str}'")
+    try:
+        ints = [int(s[i:i + 2], 16) for i in range(0, len(s), 2)]
+    except ValueError:
+        raise ValueError(f"hex contains non-hex digits: '{hex_str}'")
+    r, g, b = (_srgb_to_linear(v / 255.0) for v in ints[:3])
+    a = ints[3] / 255.0 if len(ints) == 4 else 1.0  # alpha is linear (no curve)
+    return [round(r, 6), round(g, 6), round(b, 6), round(a, 6)]
+
+
 def set_material(params):
     """Create or update a Principled BSDF material and assign it to an object.
 
@@ -115,12 +139,20 @@ def set_material(params):
 
     applied = []
 
+    # hex (sRGB) takes precedence over base_color floats and is converted to
+    # scene-linear so the rendered color matches the reference it was picked from.
+    hex_str = params.get("hex")
     bc = params.get("base_color")
+    if hex_str:
+        try:
+            bc = hex_to_linear_rgba(hex_str)
+        except ValueError as e:
+            return {"error": str(e)}
     if bc is not None:
         if len(bc) == 3:
             bc = list(bc) + [1.0]
         if _set_input(bsdf, "Base Color", tuple(bc)):
-            applied.append(f"base_color={bc}")
+            applied.append(f"hex={hex_str}→{bc}" if hex_str else f"base_color={bc}")
 
     for key, label in (("metallic", "Metallic"),
                        ("roughness", "Roughness"),

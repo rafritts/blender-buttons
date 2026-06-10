@@ -118,6 +118,48 @@ def list_modifiers(target: str) -> str:
 
 
 @mcp.tool()
+def boolean(target: str, cutter: str, op: str = "DIFFERENCE",
+            solver: str = "EXACT", apply: bool = False, hide_cutter: bool = True,
+            label: str = "") -> str:
+    """
+    Cut, fuse, or intersect two meshes via a Boolean modifier. The general verb
+    for keyholes, mortises, split-lid chests, half-barrels, drilled holes, etc.
+    — position a cutter mesh where you want the operation, then call this.
+
+    target:      the mesh that is modified and kept.
+    cutter:      the mesh used as the operand (hidden afterward by default).
+    op:          DIFFERENCE (default — subtract cutter from target) |
+                 UNION (fuse) | INTERSECT (keep only the overlap).
+    solver:      EXACT (default — robust) | FAST (legacy, brittle).
+    apply:       True bakes the result into target's mesh immediately; False
+                 (default) leaves the modifier live so you can move the cutter
+                 and watch it update, then apply_modifiers later.
+    hide_cutter: hide the cutter in viewport + render after the op (default True).
+
+    To make a half-cylinder / arch (classic chest lid): add a cylinder, add a box
+    spanning the lower half, then boolean(lid, box, op="DIFFERENCE").
+
+    FRAGILITY: booleans dislike non-manifold meshes, coplanar overlapping faces,
+    and un-applied non-uniform scale. If apply fails, run
+    apply_transform(targets="<target>,<cutter>", scale=True) and retry, or
+    solver="FAST". On apply failure the modifier is left in place to inspect.
+    """
+    result = call_blender("boolean", {
+        "target": target, "cutter": cutter, "op": op, "solver": solver,
+        "apply": apply, "hide_cutter": hide_cutter,
+    }, label=label)
+    if result.get("success"):
+        state = "applied (baked)" if result.get("applied") else f"live modifier '{result.get('modifier')}'"
+        main = (f"boolean {result['op']} '{result['cutter']}' → '{result['target']}' "
+                f"[{result['solver']}]: {state} [{result.get('op_id','')}]")
+        if result.get("apply_error"):
+            main += f"\n⚠ apply failed: {result['apply_error']}\n  {result.get('hint','')}"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def apply_modifiers(name: str = "") -> str:
     """
     Apply all modifiers on an object, collapsing them into the base mesh.

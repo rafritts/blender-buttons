@@ -130,6 +130,8 @@ def taper_end(axis: str = "Z", end: str = "MAX", scale: float = 0.0, label: str 
         if nearby:
             nearby_str = ", ".join(f"{n['name']}@{n['dist']}u" for n in nearby)
             main += f"\n  nearby: {nearby_str}"
+        for w in result.get("warnings", []):
+            main += f"\n⚠ {w}"
     else:
         main = result.get("error", "failed")
     return main + _status(result)

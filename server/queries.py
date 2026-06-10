@@ -31,6 +31,13 @@ def get_blender_status() -> str:
         f"history_depth:  {s['history_depth']}",
         f"last_action:    {s['last_action']}",
     ]
+    if "render" in s:
+        r = s["render"]
+        rt = f"  raytracing={r['raytracing']}" if "raytracing" in r else ""
+        lines.append(
+            f"render:         {r['engine']}  view_transform={r['view_transform']} "
+            f"look={r['look']} exposure={r['exposure']} gamma={r['gamma']}{rt}"
+        )
     if "edit" in s:
         e = s["edit"]
         lines += [

@@ -70,6 +70,40 @@ def duplicate_object(name: str, new_name: str = "") -> str:
 
 
 @mcp.tool()
+def duplicate_mirrored(target: str, axis: str = "X", pivot: str = "WORLD",
+                       new_name: str = "", label: str = "") -> str:
+    """
+    Bake a mirrored copy of an object across a world axis plane — the one-shot
+    "make the other half" verb for symmetry that's already finalized (a left
+    boot → right boot, one earring → the pair). For LIVE symmetry while you're
+    still editing, prefer the MIRROR modifier (add_modifier type='MIRROR') or the
+    placement DSL's mirror_of; this bakes a static, independent copy.
+
+    target:   object to mirror.
+    axis:     X | Y | Z — plane perpendicular to this axis. Default X
+              (mirror left↔right across the Y-Z plane).
+    pivot:    "WORLD" (default — reflect across the axis=0 plane at the world
+              origin) | "SELF" (about the object's own origin) | an object name
+              (across the plane through that object's center).
+    new_name: name for the copy (default "<target>_mirror").
+
+    Normals are recalculated outward after the reflection, and the transform is
+    applied so the copy ships with clean [1,1,1] scale.
+
+    Example: duplicate_mirrored("boot_L", axis="X", new_name="boot_R")
+    """
+    result = call_blender("duplicate_mirrored", {
+        "target": target, "axis": axis, "pivot": pivot, "new_name": new_name,
+    }, label=label)
+    if result.get("success"):
+        main = (f"mirrored '{result['original']}' → '{result['mirror']}' across {result['axis']} "
+                f"(pivot={result['pivot']}) dims={result['dimensions']} [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def join_objects(names: list, merge_threshold: float = None) -> str:
     """
     Join multiple objects into one. The first name in the list becomes the surviving object.

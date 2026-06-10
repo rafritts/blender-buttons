@@ -125,6 +125,7 @@ def shade_flat(targets: str = "", label: str = "") -> str:
 @mcp.tool()
 def set_material(target: str,
                  base_color: list = None,
+                 hex: str = "",
                  metallic: float = None,
                  roughness: float = None,
                  ior: float = None,
@@ -140,7 +141,11 @@ def set_material(target: str,
     target:        REQUIRED — object OR group name. Group expands to every
                    mesh inside (recursively), so one call materialises a whole
                    sub-assembly with a single shared material.
-    base_color:    [r, g, b] or [r, g, b, a], floats 0..1.
+    base_color:    [r, g, b] or [r, g, b, a], floats 0..1 (scene-linear).
+    hex:           "#RRGGBB" or "#RRGGBBAA" sRGB color (as picked from a
+                   reference image / color picker). Converted to scene-linear
+                   internally — use this instead of base_color when matching a
+                   reference, or the color renders far too pale. Overrides base_color.
     metallic:      0..1 (0 = dielectric, 1 = metal).
     roughness:     0..1 (0 = mirror, 1 = chalk).
     ior:           index of refraction. Glass ≈ 1.5, water ≈ 1.33. Default 1.45.
@@ -155,6 +160,7 @@ def set_material(target: str,
     """
     params = {"target": target}
     if material_name:        params["material_name"] = material_name
+    if hex:                  params["hex"] = hex
     if base_color is not None:        params["base_color"] = base_color
     if metallic is not None:          params["metallic"] = metallic
     if roughness is not None:         params["roughness"] = roughness

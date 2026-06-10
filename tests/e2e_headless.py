@@ -418,6 +418,109 @@ try:
 except OSError:
     pass
 
+print("== E6 hex color → scene-linear ==")
+from extension.shading import hex_to_linear_rgba  # noqa: E402
+lin = hex_to_linear_rgba("#5C3317")
+check("hex parses to 4 floats", len(lin) == 4, lin)
+check("hex sRGB→linear darkens R (0.36→~0.11)", lin[0] < 0.2, lin[0])
+check("hex alpha defaults to 1.0", lin[3] == 1.0, lin[3])
+check("hex with alpha parses", hex_to_linear_rgba("#5C331780")[3] < 0.6,
+      hex_to_linear_rgba("#5C331780")[3])
+try:
+    hex_to_linear_rgba("#xyz")
+    check("bad hex raises", False)
+except ValueError:
+    check("bad hex raises", True)
+run("add_box", name="hex_box", width=0.3, depth=0.3, height=0.3, on={"at": [40, 0, 0.15]})
+r = run("set_material", target="hex_box", hex="#5C3317", roughness=0.6)
+check("set_material hex success", r.get("success"), r.get("error"))
+_mat = bpy.data.objects["hex_box"].data.materials[0]
+_bsdf = next(n for n in _mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
+check("base color set from hex (linear)", abs(_bsdf.inputs["Base Color"].default_value[0] - lin[0]) < 1e-4,
+      list(_bsdf.inputs["Base Color"].default_value))
+
+print("== E10 color management ==")
+r = run("set_color_management", view_transform="Standard", exposure=0.5)
+check("set_color_management success", r.get("success"), r.get("error"))
+check("view_transform applied", bpy.context.scene.view_settings.view_transform == "Standard",
+      bpy.context.scene.view_settings.view_transform)
+check("exposure applied", abs(bpy.context.scene.view_settings.exposure - 0.5) < 1e-4)
+r = run("set_color_management", view_transform="NopeNotReal")
+check("bad view_transform errors", "error" in r, r)
+# status surfaces render block
+st = run("get_blender_status")["status"]
+check("status has render block", "render" in st, list(st.keys()))
+check("status render has view_transform", st.get("render", {}).get("view_transform") == "Standard",
+      st.get("render"))
+
+print("== E11 render quality ==")
+r = run("set_render_quality", raytracing=True, ao=True, samples=32)
+check("set_render_quality success", r.get("success"), r.get("error"))
+_eevee = getattr(bpy.context.scene, "eevee", None)
+if _eevee is not None and hasattr(_eevee, "use_raytracing"):
+    check("raytracing enabled", _eevee.use_raytracing is True, _eevee.use_raytracing)
+    check("status reports raytracing", st_rt := run("get_blender_status")["status"].get("render", {}).get("raytracing") is not None, None)
+else:
+    print("  skip raytracing assert (no use_raytracing on this build)")
+
+print("== E7 auto-frame bounds ==")
+from extension.viewport import _scene_view_bounds  # noqa: E402
+run("add_box", name="af_a", width=1.0, depth=1.0, height=1.0, on={"at": [60, 0, 0.5]})
+run("add_box", name="af_b", width=1.0, depth=1.0, height=1.0, on={"at": [62, 0, 0.5]})
+bpy.ops.object.select_all(action='DESELECT')
+bpy.data.objects["af_a"].select_set(True)
+bpy.data.objects["af_b"].select_set(True)
+_bounds = _scene_view_bounds()
+check("scene bounds computed", _bounds is not None)
+if _bounds:
+    _center, _diag = _bounds
+    check("auto-frame center between the two boxes", abs(_center[0] - 61.0) < 0.6, _center)
+    check("auto-frame diagonal positive", _diag > 1.0, _diag)
+
+print("== E4 boolean ==")
+run("add_box", name="bool_target", width=1.0, depth=1.0, height=1.0, on={"at": [70, 0, 0.5]})
+run("add_box", name="bool_cutter", width=0.4, depth=0.4, height=2.0, on={"at": [70, 0, 1.0]})
+_v_before = len(bpy.data.objects["bool_target"].data.vertices)
+r = run("boolean", target="bool_target", cutter="bool_cutter", op="DIFFERENCE", apply=True)
+check("boolean success", r.get("success"), r.get("error"))
+check("boolean applied (baked)", r.get("applied") is True, r)
+check("boolean changed target geometry",
+      len(bpy.data.objects["bool_target"].data.vertices) != _v_before,
+      (_v_before, len(bpy.data.objects["bool_target"].data.vertices)))
+check("cutter hidden from render", bpy.data.objects["bool_cutter"].hide_render is True)
+
+print("== duplicate_mirrored ==")
+run("add_box", name="mir_src", width=0.4, depth=0.2, height=0.6, on={"at": [80, 1.0, 0.3]})
+r = run("duplicate_mirrored", target="mir_src", axis="Y", pivot="WORLD", new_name="mir_dst")
+check("duplicate_mirrored success", r.get("success"), r.get("error"))
+check("mirror object created", bpy.data.objects.get("mir_dst") is not None)
+_src_c = world_center(bpy.data.objects["mir_src"])
+_dst_c = world_center(bpy.data.objects["mir_dst"])
+check("mirror reflected across Y=0", abs(_dst_c[1] + _src_c[1]) < 1e-3, (_src_c[1], _dst_c[1]))
+check("mirror keeps clean +scale", all(s > 0 for s in bpy.data.objects["mir_dst"].scale),
+      list(bpy.data.objects["mir_dst"].scale))
+
+print("== E8 deform-after-bevel guard ==")
+import bmesh as _bm  # noqa: E402
+def _make_ringed(name, zs, at_x):
+    me = bpy.data.meshes.new(name)
+    ob = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(ob)
+    bm = _bm.new()
+    for z in zs:
+        for (x, y) in [(-.5, -.5), (.5, -.5), (.5, .5), (-.5, .5)]:
+            bm.verts.new((at_x + x, y, z))
+    bm.to_mesh(me)
+    bm.free()
+    return ob
+_make_ringed("sliver_top", [0.0, 0.99, 1.0], 90)   # extreme ring 1% from neighbor
+r = run("taper_end", target="sliver_top", axis="Z", end="MAX", scale=0.5)
+check("taper_end on sliver succeeds", r.get("success"), r.get("error"))
+check("sliver triggers bevel-guard warning", len(r.get("warnings", [])) > 0, r.get("warnings"))
+_make_ringed("clean_rings", [0.0, 0.5, 1.0], 95)    # evenly spaced — no sliver
+r = run("taper_end", target="clean_rings", axis="Z", end="MAX", scale=0.5)
+check("clean mesh: no false warning", len(r.get("warnings", [])) == 0, r.get("warnings"))
+
 print()
 if failures:
     print(f"E2E: {len(failures)} FAILURES: {failures}")

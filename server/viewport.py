@@ -129,16 +129,30 @@ def zoom_to_selected() -> str:
 
 @mcp.tool()
 def orbit_viewport(azimuth: float = 45.0, elevation: float = 25.0, distance: float = 8.0,
-                   target_x: float = 0.0, target_y: float = 0.0, target_z: float = 1.0) -> str:
+                   target_x: float = 0.0, target_y: float = 0.0, target_z: float = 1.0,
+                   auto_frame: bool = False) -> str:
     """
     Position the viewport perspective camera using orbit controls.
     azimuth: horizontal angle in degrees (0=front, +right, -left)
     elevation: vertical angle in degrees (positive=from above)
     distance: distance from target
+    auto_frame: if True, ignore target_*/distance and auto-frame the scene — aims
+                at the bounding-box center of the selection (or all visible meshes
+                if nothing is selected) and pulls back to fit. The default
+                azimuth=45/elevation=25 then gives a clean three-quarter "hero"
+                shot of whatever's in the scene, no distance-eyeballing.
+
+    Example: orbit_viewport(auto_frame=True)  # framed 3/4 view of the whole model
     """
     result = call_blender("orbit_viewport", {
         "azimuth": azimuth, "elevation": elevation, "distance": distance,
         "target_x": target_x, "target_y": target_y, "target_z": target_z,
+        "auto_frame": auto_frame,
     })
-    main = "ok" if result.get("success") else result.get("error", "failed")
+    if result.get("success"):
+        af = result.get("auto_framed")
+        main = (f"orbit: framed {af['target']} @ distance {af['distance']}"
+                if af else "ok")
+    else:
+        main = result.get("error", "failed")
     return main + _status(result)

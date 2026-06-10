@@ -127,6 +127,80 @@ def search_hdris(query: str, limit: int = 10) -> str:
 
 
 @mcp.tool()
+def set_color_management(view_transform: str = "", look: str = "",
+                         exposure: float = None, gamma: float = None,
+                         label: str = "") -> str:
+    """
+    Control the scene's view transform / look / exposure / gamma — how Blender
+    tone-maps the render, independent of the materials and lights.
+
+    Blender 4.x defaults to the AgX view transform: filmic, it lifts and
+    desaturates midtones. Great for realistic PBR, but it MUTES flat toon/NPR
+    colors and emission glow. If a toon scene or saturated color renders washed
+    out and grey, this is usually why.
+
+    view_transform: 'Standard' (no tone-mapping — use for cel/NPR work) |
+                    'AgX' (filmic, default — use for PBR/realism) | 'Filmic' | 'Raw'.
+    look:           contrast look, e.g. 'None', 'Medium Contrast', 'AgX - Punchy'.
+    exposure:       stops of exposure (default 0).
+    gamma:          display gamma (default 1.0).
+
+    Current values are reported in get_blender_status under `render:`.
+    Recommendation: set_toon_material scenes want view_transform='Standard'.
+
+    Example: set_color_management(view_transform="Standard")  # un-mute toon colors
+    """
+    params = {}
+    if view_transform: params["view_transform"] = view_transform
+    if look:           params["look"] = look
+    if exposure is not None: params["exposure"] = exposure
+    if gamma is not None:    params["gamma"] = gamma
+    result = call_blender("set_color_management", params, label=label)
+    if result.get("success"):
+        main = (f"color management: {result['applied']} "
+                f"(now view_transform={result['view_transform']}, look={result['look']}, "
+                f"exposure={result['exposure']}, gamma={result['gamma']}) [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def set_render_quality(raytracing: bool = None, ao: bool = None,
+                       shadows: bool = None, samples: int = None,
+                       label: str = "") -> str:
+    """
+    Toggle Eevee render-quality features that are OFF by default in Blender 4.x.
+
+    raytracing: screen-space ray tracing. REQUIRED for crisp metal reflections
+                and sharp specular highlights — without it, metallic=1 reflects
+                only the low-res world probe and looks like plastic. Turn this on
+                whenever a scene has metal or glass.
+    ao:         ambient occlusion (contact shadows in crevices/seams).
+    shadows:    soft shadows.
+    samples:    render sample count (higher = less noise, slower). Try 64–128.
+
+    Pairs with set_color_management: together they're "control how Blender draws
+    the asset" vs. just modelling it. (No effect under Cycles — it ray-traces always.)
+
+    Example: set_render_quality(raytracing=True, ao=True)  # make metals reflect
+    """
+    params = {}
+    if raytracing is not None: params["raytracing"] = raytracing
+    if ao is not None:         params["ao"] = ao
+    if shadows is not None:    params["shadows"] = shadows
+    if samples is not None:    params["samples"] = samples
+    result = call_blender("set_render_quality", params, label=label)
+    if result.get("success"):
+        tail = f" (skipped: {result['skipped']})" if result.get("skipped") else ""
+        main = (f"render quality [{result['engine']}]: {result['applied']}{tail} "
+                f"[{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def set_camera_position(x: float, y: float, z: float,
                         target_x: float = 0.0, target_y: float = 0.0, target_z: float = 0.0) -> str:
     """Move the scene camera to a position aimed at a target point."""

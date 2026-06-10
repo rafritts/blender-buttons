@@ -283,9 +283,122 @@ def modify_light(params):
     }
 
 
+def set_color_management(params):
+    """Set the scene's view transform / look / exposure / gamma.
+
+    Blender 4.x defaults to the AgX view transform, which lifts and desaturates
+    midtones — great for filmic PBR, but it mutes flat toon/NPR colors and any
+    emission-driven glow. Switch to 'Standard' for cel-shaded work.
+
+    view_transform: 'Standard' | 'AgX' | 'Filmic' | 'Raw' | ... (any installed).
+    look:           contrast look, e.g. 'None', 'AgX - Punchy', 'Medium Contrast'.
+    exposure:       stops of exposure (float, default 0).
+    gamma:          display gamma (float, default 1.0).
+    """
+    scene = bpy.context.scene
+    vs = scene.view_settings
+    applied = []
+
+    vt = params.get("view_transform")
+    if vt is not None:
+        try:
+            vs.view_transform = vt
+        except TypeError:
+            return {"error": f"view_transform '{vt}' not available. "
+                             "Common: Standard, AgX, Filmic, Raw."}
+        applied.append(f"view_transform={vt}")
+
+    look = params.get("look")
+    if look is not None:
+        try:
+            vs.look = look
+        except TypeError:
+            return {"error": f"look '{look}' not available for the current view transform."}
+        applied.append(f"look={look}")
+
+    exposure = params.get("exposure")
+    if exposure is not None:
+        vs.exposure = float(exposure)
+        applied.append(f"exposure={exposure}")
+
+    gamma = params.get("gamma")
+    if gamma is not None:
+        vs.gamma = float(gamma)
+        applied.append(f"gamma={gamma}")
+
+    return {
+        "success": True,
+        "applied": applied,
+        "view_transform": vs.view_transform,
+        "look": vs.look,
+        "exposure": round(vs.exposure, 4),
+        "gamma": round(vs.gamma, 4),
+    }
+
+
+def set_render_quality(params):
+    """Toggle Eevee render-quality features that are off by default in Blender 4.x.
+
+    raytracing: enable screen-space ray tracing — required for crisp metal
+                reflections and sharp specular highlights. Without it metallic=1
+                only reflects the low-res world probe and reads as plastic.
+    ao:         ambient occlusion (contact shadows in crevices).
+    shadows:    soft/jittered shadows.
+    samples:    viewport+render sample count (higher = less noise, slower).
+
+    Only the Eevee properties that exist in this Blender build are touched;
+    others are reported as skipped. (Cycles ignores these — it ray-traces always.)
+    """
+    scene = bpy.context.scene
+    eevee = getattr(scene, "eevee", None)
+    if eevee is None:
+        return {"error": "scene.eevee not available (is the render engine Eevee?)"}
+    applied = []
+    skipped = []
+
+    def _toggle(attr, val, label):
+        if hasattr(eevee, attr):
+            setattr(eevee, attr, bool(val))
+            applied.append(f"{label}={bool(val)}")
+        else:
+            skipped.append(label)
+
+    rt = params.get("raytracing")
+    if rt is not None:
+        _toggle("use_raytracing", rt, "raytracing")
+    ao = params.get("ao")
+    if ao is not None:
+        # Eevee Next dropped use_gtao for use_ambient_occlusion-less raytraced AO;
+        # set whichever exists.
+        if hasattr(eevee, "use_gtao"):
+            eevee.use_gtao = bool(ao)
+            applied.append(f"ao={bool(ao)}")
+        else:
+            skipped.append("ao")
+    shadows = params.get("shadows")
+    if shadows is not None:
+        _toggle("use_shadows", shadows, "shadows")
+    samples = params.get("samples")
+    if samples is not None:
+        if hasattr(eevee, "taa_render_samples"):
+            eevee.taa_render_samples = int(samples)
+        if hasattr(eevee, "taa_samples"):
+            eevee.taa_samples = int(samples)
+        applied.append(f"samples={int(samples)}")
+
+    return {
+        "success": True,
+        "engine": scene.render.engine,
+        "applied": applied,
+        "skipped": skipped,
+    }
+
+
 TOOLS = {
     "add_light":            add_light,
     "modify_light":         modify_light,
     "set_world_background": set_world_background,
     "set_camera_dof":       set_camera_dof,
+    "set_color_management": set_color_management,
+    "set_render_quality":   set_render_quality,
 }

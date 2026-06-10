@@ -59,6 +59,22 @@ def get_blender_status(params):
         "history_depth": len(state._history),
     }
 
+    # Render/display settings — an agent can't diagnose washed-out (AgX) or
+    # plastic-metal (no raytracing) renders without seeing these.
+    scene = bpy.context.scene
+    vs = scene.view_settings
+    render = {
+        "engine": scene.render.engine,
+        "view_transform": vs.view_transform,
+        "look": vs.look,
+        "exposure": round(vs.exposure, 4),
+        "gamma": round(vs.gamma, 4),
+    }
+    eevee = getattr(scene, "eevee", None)
+    if eevee is not None and hasattr(eevee, "use_raytracing"):
+        render["raytracing"] = eevee.use_raytracing
+    status["render"] = render
+
     if obj:
         status["location"] = [round(v, 4) for v in obj.location]
         status["rotation_deg"] = [round(math.degrees(v), 2) for v in obj.rotation_euler]

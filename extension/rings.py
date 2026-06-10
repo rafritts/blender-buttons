@@ -12,6 +12,7 @@ def _compute_rings(obj, axis_idx, decimals=4):
     Returns (bmesh, [(position_world, [vert_indices]), ...]) sorted by position ascending."""
     import bmesh
     bm = bmesh.from_edit_mesh(obj.data)
+    bm.verts.ensure_lookup_table()  # callers subscript bm.verts[i] by these indices
     mat = obj.matrix_world
     buckets = {}
     for i, v in enumerate(bm.verts):
@@ -197,6 +198,26 @@ def taper_end(params):
     if not rings:
         return {"error": "No rings found"}
     ring_idx = len(rings) - 1 if end == "MAX" else 0
+
+    # E8 guard: after smooth_edges/bevel bakes a roundover, a thin sliver ring
+    # sits just inside the extreme face. Tapering THAT collapses the 2–6mm bevel
+    # lip, not the wall — almost never what's wanted. If the extreme ring is
+    # hugging its neighbor (gap < 2% of the axis extent), warn and point at
+    # taper_section, which ramps the taper across the full run of rings.
+    warnings = []
+    if len(rings) >= 3:
+        axis_extent = rings[-1][0] - rings[0][0]
+        neighbor = rings[-2][0] if end == "MAX" else rings[1][0]
+        gap = abs(rings[ring_idx][0] - neighbor)
+        if axis_extent > 1e-6 and gap < 0.02 * axis_extent:
+            warnings.append(
+                f"extreme {axis} ring is only {gap:.4f}m from its neighbor "
+                f"({gap / axis_extent * 100:.1f}% of the {axis_extent:.4f}m extent) "
+                "— this looks like a bevel sliver, so taper_end will collapse the "
+                "rounded lip, not the wall. Use taper_section over the full ring "
+                "range to taper the body instead."
+            )
+
     pos, vert_indices = rings[ring_idx]
     verts = [bm.verts[i] for i in vert_indices]
     other_idxs = [i for i in range(3) if i != axis_idx]
@@ -233,6 +254,7 @@ def taper_end(params):
         "position_world": round(pos, 4),
         "collapsed_world": [round(world_centroid.x, 4), round(world_centroid.y, 4), round(world_centroid.z, 4)],
         "nearby_objects": nearby,
+        "warnings": warnings,
     }
 
 

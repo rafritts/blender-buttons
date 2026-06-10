@@ -85,6 +85,8 @@ def add_plane(name: str, width: float, depth: float,
     """
     Add a flat plane (single quad) of exact W × D dimensions in meters.
     on: placement spec — see PLACEMENT DSL.
+    rot_x/y/z: rotation in degrees; placement stays flush (resolved against the
+            post-rotation bounding box, not the unrotated one).
     """
     result = call_blender("add_plane", {
         "name": name, "width": width, "depth": depth,
@@ -103,6 +105,8 @@ def add_cylinder(name: str, radius: float, height: float,
     vertices: edge count around the circumference (more = smoother).
     cap_fill: NGON | TRIFAN | NOTHING.
     on: placement spec — see PLACEMENT DSL.
+    rot_x/y/z: rotation in degrees; placement stays flush (resolved against the
+            post-rotation bounding box, not the unrotated one).
     """
     result = call_blender("add_cylinder", {
         "name": name, "radius": radius, "height": height,
@@ -121,6 +125,8 @@ def add_sphere(name: str, radius: float,
     Add a UV sphere of exact radius in meters.
     segments / rings: longitudinal / latitudinal divisions.
     on: placement spec — see PLACEMENT DSL.
+    rot_x/y/z: rotation in degrees; placement stays flush (resolved against the
+            post-rotation bounding box, not the unrotated one).
     """
     result = call_blender("add_sphere", {
         "name": name, "radius": radius,
@@ -140,6 +146,8 @@ def add_cone(name: str, radius_bottom: float, height: float, radius_top: float =
     radius_bottom: base radius in meters.   radius_top: top radius (0 = sharp point).
     height: total Z extent in meters.
     on: placement spec — see PLACEMENT DSL.
+    rot_x/y/z: rotation in degrees; placement stays flush (resolved against the
+            post-rotation bounding box, not the unrotated one).
     """
     result = call_blender("add_cone", {
         "name": name, "radius_bottom": radius_bottom, "radius_top": radius_top,
@@ -164,7 +172,8 @@ def add_torus(name: str, major_radius: float, minor_radius: float,
     on: placement spec — see PLACEMENT DSL.
 
     Use cases: knocker rings, washers, handles, hoops, donuts.
-    To stand a ring vertically (hole facing forward), pass rot_x=90.
+    To stand a ring vertically (hole facing forward), pass rot_x=90. Placement
+    stays flush — it resolves against the post-rotation bounding box.
     """
     result = call_blender("add_torus", {
         "name": name, "major_radius": major_radius, "minor_radius": minor_radius,
@@ -186,6 +195,8 @@ def add_icosphere(name: str, radius: float,
 
     subdivisions: 1 (20 faces) | 2 (80) | 3 (320) | 4 (1280) | 5 (5120). Default 2.
     on: placement spec — see PLACEMENT DSL.
+    rot_x/y/z: rotation in degrees; placement stays flush (resolved against the
+            post-rotation bounding box, not the unrotated one).
     """
     result = call_blender("add_icosphere", {
         "name": name, "radius": radius,
@@ -208,6 +219,8 @@ def add_circle(name: str, radius: float,
     vertices:  edge count around the circumference.
     fill_type: NOTHING (open ring, vertices only) | NGON (filled disc) | TRIFAN.
     on: placement spec — see PLACEMENT DSL.
+    rot_x/y/z: rotation in degrees; placement stays flush (resolved against the
+            post-rotation bounding box, not the unrotated one).
     """
     result = call_blender("add_circle", {
         "name": name, "radius": radius,
