@@ -521,6 +521,66 @@ _make_ringed("clean_rings", [0.0, 0.5, 1.0], 95)    # evenly spaced — no slive
 r = run("taper_end", target="clean_rings", axis="Z", end="MAX", scale=0.5)
 check("clean mesh: no false warning", len(r.get("warnings", [])) == 0, r.get("warnings"))
 
+print("== add_curve (live datablock) ==")
+r = run("add_curve", name="dolly", points=[[6, -6, 3], [0, -8, 3], [-6, -6, 3]],
+        type="BEZIER")
+check("add_curve success", r.get("success"), r.get("error"))
+_c = bpy.data.objects.get("dolly")
+check("curve object created", _c is not None and _c.type == 'CURVE', _c)
+if _c:
+    check("datablock is a real curve", isinstance(_c.data, bpy.types.Curve))
+    check("spline is bezier with 3 pts",
+          _c.data.splines[0].type == 'BEZIER' and len(_c.data.splines[0].bezier_points) == 3,
+          (_c.data.splines[0].type, len(_c.data.splines[0].bezier_points)))
+r = run("add_curve", name="hoop", points=[[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]],
+        type="NURBS", cyclic=True, bevel_depth=0.05)
+check("nurbs cyclic curve success", r.get("success"), r.get("error"))
+_h = bpy.data.objects.get("hoop")
+check("nurbs spline cyclic + beveled",
+      _h is not None and _h.data.splines[0].use_cyclic_u and _h.data.bevel_depth > 0,
+      (_h.data.splines[0].use_cyclic_u, _h.data.bevel_depth) if _h else None)
+r = run("add_curve", name="bad", points=[[0, 0, 0]])
+check("add_curve too-few-points errors", "error" in r, r)
+
+print("== E5 band_around ==")
+# Two boxes offset in X form a composite silhouette; a Z-band should hug both.
+run("add_box", name="bnd_a", width=1.0, depth=1.0, height=2.0, on={"at": [110, 0, 1.0]})
+run("add_box", name="bnd_b", width=1.0, depth=1.0, height=2.0, on={"at": [111.2, 0, 1.0]})
+r = run("band_around", name="bnd_strap", targets=["bnd_a", "bnd_b"], axis="Z",
+        at=1.0, width=0.2, thickness=0.05)
+check("band_around success", r.get("success"), r.get("error"))
+if r.get("success"):
+    _b = bpy.data.objects["bnd_strap"]
+    check("band is a mesh with geometry", len(_b.data.vertices) >= 12, len(_b.data.vertices))
+    bx = world_bbox(_b)
+    # Band spans both boxes in X (≈ from 109.5 to 111.7 plus thickness) and is
+    # ~width tall in Z (0.2 + a hair). It must be wider in X than tall in Z.
+    check("band wraps both boxes in X", (bx[3] - bx[0]) > 2.0, (bx[0], bx[3]))
+    check("band height ≈ width param", abs((bx[5] - bx[2]) - 0.2) < 0.01, (bx[2], bx[5]))
+    check("band stands proud (closed loop has faces)", len(_b.data.polygons) >= 12,
+          len(_b.data.polygons))
+r = run("band_around", name="bnd_bad", targets=["bnd_a"], axis="Q")
+check("band bad axis errors", "error" in r, r)
+
+print("== render_to_file ==")
+run("add_box", name="rnd_box", width=1.0, depth=1.0, height=1.0, on={"at": [100, 0, 0.5]})
+run("add_camera", name="rnd_cam", x=103, y=-3, z=2, target="rnd_box")
+_rpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_render_test")
+r = run("render_to_file", filepath=_rpath, resolution_x=64, resolution_y=48,
+        engine="CYCLES", samples=1, format="PNG")
+check("render_to_file success", r.get("success"), r.get("error"))
+if r.get("success"):
+    check("render wrote a .png", r["filepath"].endswith(".png"), r["filepath"])
+    check("render file exists + non-empty",
+          os.path.isfile(r["filepath"]) and os.path.getsize(r["filepath"]) > 0, r)
+    check("render resolution honored", r["resolution"] == [64, 48], r["resolution"])
+    try:
+        os.remove(r["filepath"])
+    except OSError:
+        pass
+r = run("render_to_file", filepath="/tmp/should_fail", format="BOGUS")
+check("bad format errors", "error" in r, r)
+
 print()
 if failures:
     print(f"E2E: {len(failures)} FAILURES: {failures}")

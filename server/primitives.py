@@ -274,6 +274,45 @@ def spline_tube(name: str, points: list, radius: Union[float, list] = 0.02,
 
 
 @mcp.tool()
+def add_curve(name: str, points: list, type: str = "BEZIER", cyclic: bool = False,
+              resolution: int = 12, bevel_depth: float = 0.0, label: str = "") -> str:
+    """
+    Create a LIVE curve object (a real Bézier/NURBS/POLY datablock), not a baked
+    mesh. Use this when you need an editable curve in the scene: a camera DOLLY
+    PATH (set it as a Follow Path constraint target), a bevel/taper profile, or a
+    distribution control for scattering. For a one-shot swept TUBE MESH (hair,
+    cable, handle), use spline_tube instead — that bakes straight to geometry.
+
+    name:        object name (required, unique).
+    points:      2+ control points. Each is [x, y, z] world coords, or
+                 {"near": "object", "offset": [dx, dy, dz]} anchored to an object's
+                 center (resolved once at creation).
+    type:        BEZIER (default — smooth, auto-handles pass through each point) |
+                 NURBS (smooth, approximating) | POLY (straight line segments).
+    cyclic:      True closes the curve into a loop.
+    resolution:  eval subdivisions per segment (default 12; raise for smoother).
+    bevel_depth: round-bevel radius in meters. >0 gives the curve thickness so it
+                 renders as a solid tube; 0 (default) leaves a zero-width path.
+
+    Example — a camera dolly arc: add_curve("dolly", points=[[6,-6,3],[0,-8,3],[-6,-6,3]],
+                                            type="BEZIER")
+    """
+    result = call_blender("add_curve", {
+        "name": name, "points": points, "type": type, "cyclic": cyclic,
+        "resolution": resolution, "bevel_depth": bevel_depth,
+    }, label=label)
+    if result.get("success"):
+        main = (f"Added {result['type']} curve '{result['object_name']}' "
+                f"({result['control_points']} pts"
+                f"{', cyclic' if result['cyclic'] else ''}"
+                f"{', bevel ' + str(result['bevel_depth']) + 'm' if result['bevel_depth'] else ''}) "
+                f"dims={result['dimensions']} [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def add_floor(name: str = "floor", size: float = 10.0, label: str = "") -> str:
     """Add a large ground plane at z=0 for character-modeling reference + shadow catching.
     name: object name (default 'floor'). size: side length in meters (default 10)."""

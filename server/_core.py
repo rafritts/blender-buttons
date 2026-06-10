@@ -8,10 +8,12 @@ ADDON_PORT = 8765
 mcp = FastMCP("blender-buttons")
 
 
-def call_blender(tool: str, params: dict = None, label: str = "") -> dict:
-    payload = json.dumps({"tool": tool, "params": params or {}, "label": label}) + "\n"
+def call_blender(tool: str, params: dict = None, label: str = "", timeout: float = 30) -> dict:
+    payload = json.dumps({"tool": tool, "params": params or {}, "label": label,
+                          "timeout": timeout}) + "\n"
     try:
-        with socket.create_connection((ADDON_HOST, ADDON_PORT), timeout=30) as sock:
+        with socket.create_connection((ADDON_HOST, ADDON_PORT), timeout=timeout) as sock:
+            sock.settimeout(timeout)  # cap each recv too, so long renders aren't cut at 30s
             sock.sendall(payload.encode())
             data = b""
             while True:

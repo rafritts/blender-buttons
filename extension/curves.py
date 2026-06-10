@@ -191,6 +191,86 @@ def spline_tube(params):
     }
 
 
+def add_curve(params):
+    """Create a LIVE curve datablock object (not a baked mesh).
+
+    Unlike spline_tube (which samples a spline into a fixed mesh), this leaves a
+    real editable curve object in the scene — the thing you want as a camera dolly
+    path (Follow Path constraint target), a bevel/taper profile, or a scatter
+    distribution control. Editable after the fact in Blender's curve tools.
+
+    name:      object name (required, unique).
+    points:    2+ control points. Each is [x, y, z] or {"near": obj, "offset":[..]}
+               (same resolution as spline_tube).
+    type:      BEZIER (default, smooth auto-handles through each point) |
+               NURBS (smooth, approximating) | POLY (straight segments).
+    cyclic:    close the curve into a loop (default False).
+    resolution: curve render/eval subdivisions per segment (default 12).
+    bevel_depth: optional round-bevel radius (meters). >0 gives the curve
+               thickness so it renders as a tube; 0 (default) is a pure path.
+    """
+    name = params.get("name")
+    if not name:
+        return {"error": "'name' is required"}
+    if bpy.data.objects.get(name) is not None:
+        return {"error": f"Object '{name}' already exists"}
+
+    raw = params.get("points") or []
+    if len(raw) < 2:
+        return {"error": "'points' needs at least 2 control points"}
+    pts = []
+    for i, entry in enumerate(raw):
+        p, err = _resolve_point(entry, i)
+        if err:
+            return {"error": err}
+        pts.append(p)
+
+    ctype = (params.get("type") or "BEZIER").upper()
+    if ctype not in ("BEZIER", "NURBS", "POLY"):
+        return {"error": "type must be BEZIER, NURBS, or POLY"}
+    cyclic = bool(params.get("cyclic", False))
+    resolution = int(params.get("resolution", 12))
+    bevel_depth = float(params.get("bevel_depth", 0.0))
+
+    curve = bpy.data.curves.new(name, 'CURVE')
+    curve.dimensions = '3D'
+    curve.resolution_u = resolution
+    if bevel_depth > 0.0:
+        curve.bevel_depth = bevel_depth
+
+    spline = curve.splines.new(ctype)
+    if ctype == 'BEZIER':
+        spline.bezier_points.add(len(pts) - 1)
+        for bp, p in zip(spline.bezier_points, pts):
+            bp.co = p
+            bp.handle_left_type = 'AUTO'
+            bp.handle_right_type = 'AUTO'
+    else:
+        spline.points.add(len(pts) - 1)
+        for sp, p in zip(spline.points, pts):
+            sp.co = (p[0], p[1], p[2], 1.0)
+        if ctype == 'NURBS':
+            spline.order_u = min(4, len(pts))
+            spline.use_endpoint_u = True
+    spline.use_cyclic_u = cyclic
+
+    obj = bpy.data.objects.new(name, curve)
+    bpy.context.scene.collection.objects.link(obj)
+    bpy.context.view_layer.update()
+
+    xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
+    return {
+        "success": True,
+        "object_name": obj.name,
+        "type": ctype,
+        "control_points": len(pts),
+        "cyclic": cyclic,
+        "bevel_depth": bevel_depth,
+        "dimensions": [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)],
+    }
+
+
 TOOLS = {
     "spline_tube": spline_tube,
+    "add_curve":   add_curve,
 }

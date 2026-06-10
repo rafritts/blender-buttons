@@ -201,6 +201,47 @@ def set_render_quality(raytracing: bool = None, ao: bool = None,
 
 
 @mcp.tool()
+def render_to_file(filepath: str,
+                   resolution_x: int = None, resolution_y: int = None,
+                   samples: int = None, engine: str = "",
+                   format: str = "PNG", transparent: bool = None,
+                   timeout: float = 300, label: str = "") -> str:
+    """
+    Render the scene camera to an image file on disk (final-quality output, not
+    the quick viewport screenshot). Requires a camera — add_camera first.
+
+    filepath:     output path (~ expanded; extension auto-added to match format).
+    resolution_x/y: pixel dimensions (default: keep the scene's current).
+    samples:      render sample count (higher = cleaner + slower).
+    engine:       'BLENDER_EEVEE_NEXT' | 'CYCLES' (default: keep current).
+    format:       PNG (default) | JPEG | OPEN_EXR | TIFF | WEBP.
+    transparent:  True → transparent background (alpha in PNG/EXR).
+    timeout:      seconds to allow the render to run before giving up (default 300).
+                  Raise it for heavy Cycles renders.
+
+    SYNCHRONOUS: this blocks Blender's main thread (the viewport freezes) for the
+    whole render. Keep samples modest for interactive sessions.
+
+    Example: render_to_file("~/renders/hero.png", resolution_x=1920, resolution_y=1080,
+                            samples=128, transparent=True)
+    """
+    params = {"filepath": filepath, "format": format}
+    if resolution_x is not None: params["resolution_x"] = resolution_x
+    if resolution_y is not None: params["resolution_y"] = resolution_y
+    if samples is not None:      params["samples"] = samples
+    if engine:                   params["engine"] = engine
+    if transparent is not None:  params["transparent"] = transparent
+    result = call_blender("render_to_file", params, label=label, timeout=timeout)
+    if result.get("success"):
+        kb = result["bytes"] / 1024.0
+        main = (f"rendered {result['resolution']} [{result['engine']}, {result['format']}] "
+                f"→ {result['filepath']} ({kb:.0f} KB) [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def set_camera_position(x: float, y: float, z: float,
                         target_x: float = 0.0, target_y: float = 0.0, target_z: float = 0.0) -> str:
     """Move the scene camera to a position aimed at a target point."""

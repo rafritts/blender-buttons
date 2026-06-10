@@ -33,6 +33,7 @@ from server import (  # noqa: F401
     relational,
     groups,
     finishes,
+    bands,
     shaders,
     textures,
     scene,

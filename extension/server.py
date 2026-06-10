@@ -12,6 +12,7 @@ import threading
 import bpy
 
 from . import (
+    bands,
     curves,
     designs,
     editmode,
@@ -23,6 +24,7 @@ from . import (
     primitives,
     queries,
     relational,
+    render,
     rings,
     scatter,
     sculpt,
@@ -51,10 +53,12 @@ _TOOL_MODULES = (
     finishes,
     editmode,
     rings,
+    bands,
     shading,
     shaders,
     textures,
     lighting,
+    render,
     scatter,
     sculpt,
     designs,
@@ -160,8 +164,11 @@ def handle_client(conn):
             result_event.set()
             return None
 
+        # Per-call timeout: long-running ops (render_to_file) carry their own
+        # ceiling so they aren't cut off at the default 30s.
+        timeout = command.get("timeout") or 30
         state._request_queue.put(on_main_thread)
-        result_event.wait(timeout=30)
+        result_event.wait(timeout=timeout)
 
         conn.sendall((json.dumps(result_box[0]) + "\n").encode())
     except Exception as e:
