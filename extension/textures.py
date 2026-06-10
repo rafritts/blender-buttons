@@ -17,9 +17,15 @@ def set_textured_material(params):
     set_textured_material MCP tool resolves the Poly Haven asset to paths first.
 
     target:     object OR group name.
-    maps:       {"diffuse": path, "normal": path, "roughness": path} (any subset;
-                diffuse expected). Paths are local files the server already cached.
+    maps:       {"diffuse": path, "normal": path, "roughness": path, "metal": path}
+                (any subset; diffuse expected). Paths are local files the server
+                already cached.
     scale:      texture tiling scale (Mapping node), default 1.0.
+    base_color: optional [r,g,b(,a)] — REPLACES the diffuse map (no diffuse node
+                is created): the scan contributes roughness/normal/metal surface
+                detail while the color is yours (e.g. gold trim from a gray scan).
+    metallic:   optional 0..1 — sets the Metallic input directly, overriding the
+                metal map if one was supplied.
     asset_id /  recorded on mat['bb_texture'] for describe() readback.
     resolution:
     """
@@ -32,6 +38,8 @@ def set_textured_material(params):
     scale = float(params.get("scale", 1.0))
     resolution = params.get("resolution", "1k")
     asset_id = params.get("asset_id", "")
+    base_color = params.get("base_color")
+    metallic = params.get("metallic")
 
     objs, err = resolve_targets(target)
     if err:
@@ -67,7 +75,11 @@ def set_textured_material(params):
         return n
 
     wired = []
-    if maps.get("diffuse"):
+    if base_color is not None:
+        c = list(base_color) + [1.0] if len(base_color) == 3 else list(base_color)
+        bsdf.inputs['Base Color'].default_value = tuple(float(x) for x in c[:4])
+        wired.append("base_color override")
+    elif maps.get("diffuse"):
         d = image_node(maps["diffuse"], 'sRGB', 250)
         nt.links.new(d.outputs['Color'], bsdf.inputs['Base Color'])
         wired.append("diffuse")
@@ -75,6 +87,13 @@ def set_textured_material(params):
         r = image_node(maps["roughness"], 'Non-Color', 0)
         nt.links.new(r.outputs['Color'], bsdf.inputs['Roughness'])
         wired.append("roughness")
+    if metallic is not None:
+        bsdf.inputs['Metallic'].default_value = float(metallic)
+        wired.append(f"metallic={float(metallic)}")
+    elif maps.get("metal"):
+        m = image_node(maps["metal"], 'Non-Color', 500)
+        nt.links.new(m.outputs['Color'], bsdf.inputs['Metallic'])
+        wired.append("metal")
     if maps.get("normal"):
         n = image_node(maps["normal"], 'Non-Color', -250)
         nm = nt.nodes.new('ShaderNodeNormalMap'); nm.location = (0, -250)
@@ -82,9 +101,12 @@ def set_textured_material(params):
         nt.links.new(nm.outputs['Normal'], bsdf.inputs['Normal'])
         wired.append("normal")
 
-    mat["bb_texture"] = json.dumps({
-        "asset_id": asset_id, "resolution": resolution, "scale": scale,
-    })
+    store = {"asset_id": asset_id, "resolution": resolution, "scale": scale}
+    if base_color is not None:
+        store["base_color"] = [float(x) for x in base_color]
+    if metallic is not None:
+        store["metallic"] = float(metallic)
+    mat["bb_texture"] = json.dumps(store)
 
     for o in meshes:
         if o.data.materials:

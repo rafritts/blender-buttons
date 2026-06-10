@@ -317,7 +317,42 @@ check("bb_texture asset_id round-trips", txstore.get("asset_id") == "test_asset"
 check("bb_texture scale round-trips", txstore.get("scale") == 2.0, txstore)
 r = run("describe", name="tex_box")
 check("describe mentions texture", "texture(" in r.get("description", ""), r.get("description"))
-for _p in (_dif, _nor, _rgh):
+
+print("== T6b set_textured_material metal map + overrides ==")
+_met = _make_img("texmet", [1.0, 1.0, 1.0, 1])
+run("add_box", name="tex_box_m", width=0.6, depth=0.6, height=0.6, on={"at": [48, 0, 0]})
+r = run("set_textured_material", target="tex_box_m",
+        maps={"diffuse": _dif, "roughness": _rgh, "metal": _met},
+        asset_id="test_metal", resolution="1k")
+check("metal-map wiring success", r.get("success"), r.get("error"))
+_mmat = bpy.data.objects["tex_box_m"].data.materials[0]
+_mbsdf = next(n for n in _mmat.node_tree.nodes if n.bl_idname == 'ShaderNodeBsdfPrincipled')
+check("Metallic input linked to metal map", _mbsdf.inputs['Metallic'].is_linked)
+check("metal map is Non-Color",
+      next((n.image.colorspace_settings.name for n in _mmat.node_tree.nodes
+            if n.bl_idname == 'ShaderNodeTexImage' and 'texmet' in n.image.filepath), None)
+      == 'Non-Color')
+run("add_box", name="tex_box_o", width=0.6, depth=0.6, height=0.6, on={"at": [50, 0, 0]})
+r = run("set_textured_material", target="tex_box_o",
+        maps={"diffuse": _dif, "roughness": _rgh, "metal": _met},
+        base_color=[1.0, 0.55, 0.09], metallic=1.0,
+        asset_id="test_gold", resolution="1k")
+check("override wiring success", r.get("success"), r.get("error"))
+_omat = bpy.data.objects["tex_box_o"].data.materials[0]
+_obsdf = next(n for n in _omat.node_tree.nodes if n.bl_idname == 'ShaderNodeBsdfPrincipled')
+check("Base Color NOT linked (override)", not _obsdf.inputs['Base Color'].is_linked)
+check("Base Color override value",
+      abs(_obsdf.inputs['Base Color'].default_value[0] - 1.0) < 1e-6
+      and abs(_obsdf.inputs['Base Color'].default_value[1] - 0.55) < 1e-6)
+check("Metallic NOT linked (override)", not _obsdf.inputs['Metallic'].is_linked)
+check("Metallic forced to 1.0", abs(_obsdf.inputs['Metallic'].default_value - 1.0) < 1e-6)
+check("roughness still linked", _obsdf.inputs['Roughness'].is_linked)
+_ostore = _json.loads(_omat["bb_texture"])
+check("bb_texture records overrides",
+      _ostore.get("metallic") == 1.0 and _ostore.get("base_color") == [1.0, 0.55, 0.09],
+      _ostore)
+
+for _p in (_dif, _nor, _rgh, _met):
     try:
         os.remove(_p)
     except OSError:

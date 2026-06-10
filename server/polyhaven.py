@@ -31,6 +31,7 @@ TEXTURE_MAPS = {
     "diffuse":   (["Diffuse"], ["jpg", "png", "exr"]),
     "normal":    (["nor_gl"],  ["jpg", "png", "exr"]),
     "roughness": (["Rough"],   ["jpg", "png", "exr"]),
+    "metal":     (["Metal"],   ["jpg", "png", "exr"]),
 }
 HDRI_FORMATS = ["hdr", "exr"]
 
