@@ -24,8 +24,13 @@ def set_textured_material(params):
     base_color: optional [r,g,b(,a)] — REPLACES the diffuse map (no diffuse node
                 is created): the scan contributes roughness/normal/metal surface
                 detail while the color is yours (e.g. gold trim from a gray scan).
+    tint:       optional [r,g,b(,a)] — MULTIPLIES the diffuse map (keeps the
+                grain/color variation, shifts it darker/warmer). Ignored when
+                base_color is given.
     metallic:   optional 0..1 — sets the Metallic input directly, overriding the
                 metal map if one was supplied.
+    roughness:  optional 0..1 — sets the Roughness input directly, overriding
+                the roughness map (1.0 = fully matte, no sheen).
     asset_id /  recorded on mat['bb_texture'] for describe() readback.
     resolution:
     """
@@ -40,6 +45,8 @@ def set_textured_material(params):
     asset_id = params.get("asset_id", "")
     base_color = params.get("base_color")
     metallic = params.get("metallic")
+    tint = params.get("tint")
+    roughness = params.get("roughness")
 
     objs, err = resolve_targets(target)
     if err:
@@ -81,9 +88,23 @@ def set_textured_material(params):
         wired.append("base_color override")
     elif maps.get("diffuse"):
         d = image_node(maps["diffuse"], 'sRGB', 250)
-        nt.links.new(d.outputs['Color'], bsdf.inputs['Base Color'])
-        wired.append("diffuse")
-    if maps.get("roughness"):
+        if tint is not None:
+            t = list(tint) + [1.0] if len(tint) == 3 else list(tint)
+            mix = nt.nodes.new('ShaderNodeMix'); mix.location = (60, 250)
+            mix.data_type = 'RGBA'
+            mix.blend_type = 'MULTIPLY'
+            mix.inputs['Factor'].default_value = 1.0
+            nt.links.new(d.outputs['Color'], mix.inputs['A'])
+            mix.inputs['B'].default_value = tuple(float(x) for x in t[:4])
+            nt.links.new(mix.outputs['Result'], bsdf.inputs['Base Color'])
+            wired.append("diffuse*tint")
+        else:
+            nt.links.new(d.outputs['Color'], bsdf.inputs['Base Color'])
+            wired.append("diffuse")
+    if roughness is not None:
+        bsdf.inputs['Roughness'].default_value = float(roughness)
+        wired.append(f"roughness={float(roughness)}")
+    elif maps.get("roughness"):
         r = image_node(maps["roughness"], 'Non-Color', 0)
         nt.links.new(r.outputs['Color'], bsdf.inputs['Roughness'])
         wired.append("roughness")
@@ -106,6 +127,10 @@ def set_textured_material(params):
         store["base_color"] = [float(x) for x in base_color]
     if metallic is not None:
         store["metallic"] = float(metallic)
+    if tint is not None:
+        store["tint"] = [float(x) for x in tint]
+    if roughness is not None:
+        store["roughness"] = float(roughness)
     mat["bb_texture"] = json.dumps(store)
 
     for o in meshes:

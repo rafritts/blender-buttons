@@ -352,6 +352,29 @@ check("bb_texture records overrides",
       _ostore.get("metallic") == 1.0 and _ostore.get("base_color") == [1.0, 0.55, 0.09],
       _ostore)
 
+print("== T6c set_textured_material tint + roughness override ==")
+run("add_box", name="tex_box_t", width=0.6, depth=0.6, height=0.6, on={"at": [52, 0, 0]})
+r = run("set_textured_material", target="tex_box_t",
+        maps={"diffuse": _dif, "roughness": _rgh},
+        tint=[0.5, 0.4, 0.35], roughness=1.0,
+        asset_id="test_tint", resolution="1k")
+check("tint wiring success", r.get("success"), r.get("error"))
+_tmat = bpy.data.objects["tex_box_t"].data.materials[0]
+_tbsdf = next(n for n in _tmat.node_tree.nodes if n.bl_idname == 'ShaderNodeBsdfPrincipled')
+_tmix = next((n for n in _tmat.node_tree.nodes if n.bl_idname == 'ShaderNodeMix'), None)
+check("Mix(multiply) node present", _tmix is not None and _tmix.blend_type == 'MULTIPLY',
+      getattr(_tmix, 'blend_type', None))
+check("Base Color fed by mix", _tbsdf.inputs['Base Color'].is_linked
+      and _tbsdf.inputs['Base Color'].links[0].from_node == _tmix)
+check("diffuse map feeds mix A", _tmix.inputs['A'].is_linked)
+check("tint value in mix B", abs(_tmix.inputs['B'].default_value[0] - 0.5) < 1e-6
+      and abs(_tmix.inputs['B'].default_value[1] - 0.4) < 1e-6)
+check("Roughness NOT linked (override)", not _tbsdf.inputs['Roughness'].is_linked)
+check("Roughness forced to 1.0", abs(_tbsdf.inputs['Roughness'].default_value - 1.0) < 1e-6)
+_tstore = _json.loads(_tmat["bb_texture"])
+check("bb_texture records tint+roughness",
+      _tstore.get("tint") == [0.5, 0.4, 0.35] and _tstore.get("roughness") == 1.0, _tstore)
+
 for _p in (_dif, _nor, _rgh, _met):
     try:
         os.remove(_p)

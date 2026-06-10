@@ -22,7 +22,8 @@ def search_textures(query: str, limit: int = 10) -> str:
 @mcp.tool()
 def set_textured_material(target: str, asset_id: str, scale: float = 1.0,
                           resolution: str = "1k", base_color: list = None,
-                          metallic: float = None, material_name: str = "",
+                          tint: list = None, metallic: float = None,
+                          roughness: float = None, material_name: str = "",
                           label: str = "") -> str:
     """
     Apply a real photo-scanned PBR material from Poly Haven (CC0) to an object or
@@ -37,8 +38,13 @@ def set_textured_material(target: str, asset_id: str, scale: float = 1.0,
                 diffuse so its roughness/normal/metal surface detail carries
                 YOUR color. The trick for materials Poly Haven doesn't stock:
                 gold trim = a scratched gray-metal scan + base_color gold.
+    tint:       optional [r,g,b] multiplied over the scan's diffuse — keeps the
+                grain and color variation but shifts it (e.g. [0.5,0.4,0.35]
+                darkens + warms a pale wood). Ignored if base_color is given.
     metallic:   optional 0..1 — forces the Metallic input (overrides the metal
                 map). Use 1.0 with base_color to turn any scan into a metal.
+    roughness:  optional 0..1 — forces the Roughness input (overrides the
+                roughness map). 1.0 = fully matte, no sheen at all.
 
     A bad id or a network failure returns a clean error and leaves the object's
     material unchanged. Subsequent calls for the same asset/resolution hit the
@@ -52,8 +58,12 @@ def set_textured_material(target: str, asset_id: str, scale: float = 1.0,
               "resolution": resolution, "asset_id": asset_id}
     if base_color is not None:
         params["base_color"] = base_color
+    if tint is not None:
+        params["tint"] = tint
     if metallic is not None:
         params["metallic"] = metallic
+    if roughness is not None:
+        params["roughness"] = roughness
     if material_name:
         params["material_name"] = material_name
     result = call_blender("set_textured_material", params, label=label)
