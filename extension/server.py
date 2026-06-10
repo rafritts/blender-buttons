@@ -30,6 +30,7 @@ from . import (
     shading,
     state,
     status,
+    textures,
     transforms,
     viewport,
 )
@@ -52,6 +53,7 @@ _TOOL_MODULES = (
     rings,
     shading,
     shaders,
+    textures,
     lighting,
     scatter,
     sculpt,

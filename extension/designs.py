@@ -19,8 +19,16 @@ def save_design(params):
     if not name.endswith(".blend"):
         name += ".blend"
     path = os.path.join(_designs_dir(), name)
+    # Pack external files (e.g. cached Poly Haven texture/HDRI images) into the
+    # .blend so saved designs are self-contained and don't dangle on cache paths.
+    packed = False
+    try:
+        bpy.ops.file.pack_all()
+        packed = True
+    except Exception:
+        pass
     bpy.ops.wm.save_as_mainfile(filepath=path, copy=True)
-    return {"saved": path}
+    return {"saved": path, "packed": packed}
 
 
 def open_design(params):

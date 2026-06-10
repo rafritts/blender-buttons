@@ -34,6 +34,7 @@ from server import (  # noqa: F401
     groups,
     finishes,
     shaders,
+    textures,
     scene,
     designs,
     sculpt,

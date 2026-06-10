@@ -281,6 +281,48 @@ check("world depth unchanged", abs((b1[4] - b1[1]) - (b0[4] - b0[1])) < 1e-4,
 check("world height unchanged", abs((b1[5] - b1[2]) - (b0[5] - b0[2])) < 1e-4,
       (b1[5] - b1[2], b0[5] - b0[2]))
 
+print("== T6 set_textured_material (node wiring from local paths) ==")
+_texdir = os.path.dirname(os.path.abspath(__file__))
+def _make_img(nm, col):
+    im = bpy.data.images.new(nm, 4, 4)
+    im.pixels = list(col) * 16
+    p = os.path.join(_texdir, f"_{nm}.png")
+    im.filepath_raw = p
+    im.file_format = 'PNG'
+    im.save()
+    return p
+_dif = _make_img("texdif", [0.6, 0.3, 0.1, 1])
+_nor = _make_img("texnor", [0.5, 0.5, 1.0, 1])
+_rgh = _make_img("texrgh", [0.4, 0.4, 0.4, 1])
+run("add_box", name="tex_box", width=0.6, depth=0.6, height=0.6, on={"at": [46, 0, 0]})
+r = run("set_textured_material", target="tex_box",
+        maps={"diffuse": _dif, "normal": _nor, "roughness": _rgh},
+        scale=2.0, asset_id="test_asset", resolution="1k")
+check("set_textured_material success", r.get("success"), r.get("error"))
+txmat = bpy.data.objects["tex_box"].data.materials[0]
+img_nodes = [n for n in txmat.node_tree.nodes if n.bl_idname == 'ShaderNodeTexImage']
+check("3 image texture nodes", len(img_nodes) == 3, len(img_nodes))
+check("all BOX projection", all(n.projection == 'BOX' for n in img_nodes),
+      [n.projection for n in img_nodes])
+check("projection_blend 0.2", all(abs(n.projection_blend - 0.2) < 1e-6 for n in img_nodes))
+cspaces = sorted(n.image.colorspace_settings.name for n in img_nodes)
+check("colorspaces: 1 sRGB + 2 Non-Color",
+      cspaces.count('sRGB') == 1 and cspaces.count('Non-Color') == 2, cspaces)
+check("has NormalMap node", any(n.bl_idname == 'ShaderNodeNormalMap'
+                                for n in txmat.node_tree.nodes))
+check("has Mapping node", any(n.bl_idname == 'ShaderNodeMapping'
+                              for n in txmat.node_tree.nodes))
+txstore = _json.loads(txmat["bb_texture"]) if txmat.get("bb_texture") else {}
+check("bb_texture asset_id round-trips", txstore.get("asset_id") == "test_asset", txstore)
+check("bb_texture scale round-trips", txstore.get("scale") == 2.0, txstore)
+r = run("describe", name="tex_box")
+check("describe mentions texture", "texture(" in r.get("description", ""), r.get("description"))
+for _p in (_dif, _nor, _rgh):
+    try:
+        os.remove(_p)
+    except OSError:
+        pass
+
 print()
 if failures:
     print(f"E2E: {len(failures)} FAILURES: {failures}")

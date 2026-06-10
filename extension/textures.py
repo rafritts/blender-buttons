@@ -1,0 +1,106 @@
+"""Textured PBR materials wired from LOCAL image paths (no network here).
+
+The server (server/polyhaven.py) downloads + caches Poly Haven maps and passes
+their local file paths in; this module only wires the Principled BSDF node graph.
+Box projection means no UV unwrap is needed or attempted.
+"""
+
+import json
+
+import bpy
+
+from .common import resolve_targets
+
+
+def set_textured_material(params):
+    """Wire a Principled BSDF from local PBR map paths. Internal — the
+    set_textured_material MCP tool resolves the Poly Haven asset to paths first.
+
+    target:     object OR group name.
+    maps:       {"diffuse": path, "normal": path, "roughness": path} (any subset;
+                diffuse expected). Paths are local files the server already cached.
+    scale:      texture tiling scale (Mapping node), default 1.0.
+    asset_id /  recorded on mat['bb_texture'] for describe() readback.
+    resolution:
+    """
+    target = params.get("target")
+    if not target:
+        return {"error": "'target' (object or group name) is required"}
+    maps = params.get("maps") or {}
+    if not maps:
+        return {"error": "no texture maps supplied"}
+    scale = float(params.get("scale", 1.0))
+    resolution = params.get("resolution", "1k")
+    asset_id = params.get("asset_id", "")
+
+    objs, err = resolve_targets(target)
+    if err:
+        return {"error": err}
+    meshes = [o for o in objs if o.type == 'MESH']
+    if not meshes:
+        return {"error": f"'{target}' contains no mesh objects"}
+
+    mat_name = params.get("material_name") or f"{target}_tex"
+    mat = bpy.data.materials.get(mat_name) or bpy.data.materials.new(mat_name)
+    mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+
+    out = nt.nodes.new('ShaderNodeOutputMaterial'); out.location = (600, 0)
+    bsdf = nt.nodes.new('ShaderNodeBsdfPrincipled'); bsdf.location = (300, 0)
+    nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
+
+    # Box projection driven by object coordinates — no UV unwrap needed.
+    texco = nt.nodes.new('ShaderNodeTexCoord'); texco.location = (-700, 0)
+    mapping = nt.nodes.new('ShaderNodeMapping'); mapping.location = (-500, 0)
+    mapping.inputs['Scale'].default_value = (scale, scale, scale)
+    nt.links.new(texco.outputs['Object'], mapping.inputs['Vector'])
+
+    def image_node(path, colorspace, y):
+        n = nt.nodes.new('ShaderNodeTexImage'); n.location = (-250, y)
+        img = bpy.data.images.load(path, check_existing=True)
+        n.image = img
+        img.colorspace_settings.name = colorspace
+        n.projection = 'BOX'
+        n.projection_blend = 0.2
+        nt.links.new(mapping.outputs['Vector'], n.inputs['Vector'])
+        return n
+
+    wired = []
+    if maps.get("diffuse"):
+        d = image_node(maps["diffuse"], 'sRGB', 250)
+        nt.links.new(d.outputs['Color'], bsdf.inputs['Base Color'])
+        wired.append("diffuse")
+    if maps.get("roughness"):
+        r = image_node(maps["roughness"], 'Non-Color', 0)
+        nt.links.new(r.outputs['Color'], bsdf.inputs['Roughness'])
+        wired.append("roughness")
+    if maps.get("normal"):
+        n = image_node(maps["normal"], 'Non-Color', -250)
+        nm = nt.nodes.new('ShaderNodeNormalMap'); nm.location = (0, -250)
+        nt.links.new(n.outputs['Color'], nm.inputs['Color'])
+        nt.links.new(nm.outputs['Normal'], bsdf.inputs['Normal'])
+        wired.append("normal")
+
+    mat["bb_texture"] = json.dumps({
+        "asset_id": asset_id, "resolution": resolution, "scale": scale,
+    })
+
+    for o in meshes:
+        if o.data.materials:
+            o.data.materials[0] = mat
+        else:
+            o.data.materials.append(mat)
+
+    return {
+        "success": True,
+        "target": target,
+        "material": mat.name,
+        "assigned_to": [o.name for o in meshes],
+        "maps_wired": wired,
+    }
+
+
+TOOLS = {
+    "set_textured_material": set_textured_material,
+}
