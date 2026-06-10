@@ -66,7 +66,9 @@ def add_box(name: str, width: float, depth: float, height: float,
     width:  X extent in meters.   depth: Y extent.   height: Z extent.
     on:     placement spec — see PLACEMENT DSL at the top of this file.
             If omitted, the box is created at world origin.
-    rot_x/y/z: optional rotation in degrees (applied after placement).
+    rot_x/y/z: optional rotation in degrees. Placement is rotation-aware: a
+            rotated primitive still rests/sits flush where the `on` spec says
+            (the post-rotation bounding box is what gets placed).
     """
     result = call_blender("add_box", {
         "name": name, "width": width, "depth": depth, "height": height,

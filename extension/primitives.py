@@ -7,9 +7,30 @@ and an optional placement spec, never raw coordinates.
 import math
 
 import bpy
+import mathutils
 
 from .common import activate, world_bbox
 from .placement import resolve_placement
+
+
+def _rotated_dims(dims, rotation_rad):
+    """World-space bbox extents of a `dims`-sized box after `rotation_rad`.
+
+    Primitives are created centered on their origin, so rotation is about the
+    center — the rotated bbox stays centered and only its extents change. Placement
+    must resolve against THESE extents, not the unrotated ones, or a rotated
+    primitive lands wrong (gaps.md E2: a rot_y=90 cylinder floated above its rim)."""
+    if not any(rotation_rad):
+        return dims
+    mat = mathutils.Euler(rotation_rad, 'XYZ').to_matrix()
+    hx, hy, hz = dims[0] / 2, dims[1] / 2, dims[2] / 2
+    xs, ys, zs = [], [], []
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            for sz in (-1, 1):
+                v = mat @ mathutils.Vector((sx * hx, sy * hy, sz * hz))
+                xs.append(v.x); ys.append(v.y); zs.append(v.z)
+    return (max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs))
 
 
 def _build_primitive(name, ptype, target_dims, on, rotation_deg, extra=None):
@@ -108,7 +129,9 @@ def _build_primitive(name, ptype, target_dims, on, rotation_deg, extra=None):
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
 
     try:
-        cx, cy, cz = resolve_placement(on, target_dims)
+        # Resolve placement against the POST-rotation extents so rotated
+        # primitives rest/sit flush where the spec says (gaps.md E2).
+        cx, cy, cz = resolve_placement(on, _rotated_dims(target_dims, rotation_rad))
     except ValueError as e:
         bpy.data.objects.remove(obj, do_unlink=True)
         return {"error": str(e)}

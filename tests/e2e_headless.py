@@ -241,6 +241,28 @@ check("edit-mode undo success", r.get("success"), r.get("error"))
 check("edit-mode undo restored verts", len(bpy.data.objects["u_edit"].data.vertices) == v0,
       (v0, len(bpy.data.objects["u_edit"].data.vertices)))
 
+print("== T4 placement resolves before rotation ==")
+run("add_box", name="floor_box", width=1.0, depth=1.0, height=0.4, on={"at": [30, 0, 0.2]})
+fb = world_bbox(bpy.data.objects["floor_box"])
+# rot_y=90 cylinder placed ON the floor box must rest flush, not float
+r = run("add_cylinder", name="rot_cyl", radius=0.3, height=1.0, rot_y=90,
+        on={"on": "floor_box"})
+check("rotated on-placement success", r.get("success"), r.get("error"))
+cb = world_bbox(bpy.data.objects["rot_cyl"])
+check("rot_y=90 cyl rests on floor (zmin == floor zmax)", abs(cb[2] - fb[5]) < 1e-4,
+      (cb[2], fb[5]))
+# rot_x=90 cylinder in_front_of must be flush (its ymax == floor ymin)
+r = run("add_cylinder", name="front_cyl", radius=0.2, height=0.8, rot_x=90,
+        on={"in_front_of": "floor_box"})
+check("rotated in_front_of success", r.get("success"), r.get("error"))
+fc = world_bbox(bpy.data.objects["front_cyl"])
+check("rot_x=90 cyl flush in front (ymax == floor ymin)", abs(fc[4] - fb[1]) < 1e-4,
+      (fc[4], fb[1]))
+# unrotated placement unchanged
+run("add_box", name="plain_on", width=0.2, depth=0.2, height=0.2, on={"on": "floor_box"})
+pb = world_bbox(bpy.data.objects["plain_on"])
+check("unrotated on-placement still flush", abs(pb[2] - fb[5]) < 1e-4, (pb[2], fb[5]))
+
 print()
 if failures:
     print(f"E2E: {len(failures)} FAILURES: {failures}")
