@@ -291,3 +291,124 @@ strands had no path. Two new verbs:
 
 Verified by `bb_e2e_test.py`-style headless run (flatpak Blender 5.1,
 38 assertions) + pure-math tests for the Catmull-Rom sampler.
+
+---
+
+# MCP gaps surfaced by the anime treasure chest build (2026-06-10)
+
+A Genshin-style treasure chest: box body, half-barrel lid, gold straps wrapping
+body+lid, corner feet, lock plate/tongue/knob. 15 parts. The build worked, but
+one gap destroyed the entire scene mid-session and forced a full rebuild.
+
+## E1. undo() rolled back the whole session and the history log didn't notice — CRITICAL
+
+**What hurt:** called `undo(steps=2)` to revert one bad `resize` + one
+`set_material` (27 ops into the build). The scene reset to the Blender startup
+state: every chest part gone, the default Cube resurrected. `get_history` still
+listed all 27 ops as "remaining" — the MCP history log and Blender's real undo
+stack are completely desynced. There is no redo tool, so the only recovery was
+rebuilding all 15 parts from scratch (~25 calls).
+
+**Root cause hypothesis:** MCP tool calls arrive over the socket without UI
+events, so Blender doesn't push an undo step per tool — `steps=2` therefore
+walked back through whatever sparse undo points existed, landing at file-open.
+
+**Fix:** each mutating tool should push exactly one named undo point
+(`bpy.ops.ed.undo_push(message=op_id)`); `undo(steps=N)` then maps 1:1 to tool
+calls. After undoing, verify the scene matches the history entry's recorded
+post-state (object names at minimum) and report what was actually reverted.
+Add `redo()`. Until then `undo` is more dangerous than helpful — a destructive
+tool masquerading as a safety net.
+
+**File:** `extension/` op dispatch + history module. Effort: medium, but top priority.
+
+## E2. Placement DSL resolves before rotation — every rotated primitive lands wrong
+
+**What hurt:** the lid is a cylinder with `rot_y=90` placed `on={"on": "lid_rim"}`.
+Placement used the UNROTATED bbox (tall thin cylinder), then rotation spun it
+around its center — the barrel floated 0.2m above the rim. Same story for the
+`rot_x=90` lock plate and knob (`in_front_of` left them floating 2–7cm off the
+surface). Every rotated part in the build (4 of 15) needed a follow-up `snap_to`
+to land where the placement spec already said it should be.
+
+**Fix:** in `resolve_placement`, apply `rotation_deg` to the primitive's bbox
+FIRST, then resolve `on`/`in_front_of`/etc. against the rotated extents. The
+docstring's "rotation applied after placement" ordering is exactly backwards
+from what relational placement means.
+
+**File:** `extension/placement.py` + primitive creation path. Effort: ~30 lines.
+
+## E3. resize on rotated objects: warns AFTER mutating, and maps axes wrong (follow-up to D5)
+
+**What hurt:** `resize("lid", width=0.98)` on the rot_y=90 barrel. Requested
+world width 1.06→0.98; instead world HEIGHT went 0.66→0.61 (squashed
+cross-section) and width stayed 1.06 — the scale factor was computed from world
+dims but applied to local axes. The D5 warning printed, but only after the
+geometry was already wrong, which is what triggered the E1 undo disaster.
+
+**Fix:** resolve the world→local axis mapping through the rotation matrix (for
+axis-aligned rotations this is exact), or refuse to touch rotated objects and
+suggest `apply_transform(rotation=True)` BEFORE mutating. A warning attached to
+a wrong result is the worst of both.
+
+**File:** `extension/objects.py:resize`. Effort: ~20 lines.
+
+## E4. No arch/half-cylinder primitive and no boolean cut
+
+**What hurt:** the classic chest lid is a half-barrel. Closest path: full
+cylinder sunk halfway into the body so the lower half hides inside. Works for a
+closed silhouette, but the hidden half is wasted geometry, the trick collapses
+the moment the chest needs to open (interior shows the buried barrel), and
+nothing similar exists for any shape whose cut face is visible.
+
+**Fix options:** (a) profile primitives — `add_arch`/`add_wedge`/`add_half_cylinder`
+(general: a 2D profile swept along an axis); (b) a `cut_with(target, cutter,
+keep='ABOVE')` boolean wrapper. (b) is more general — it also covers keyholes,
+mortises, and split-lid chests.
+
+**File:** `extension/primitives.py` or BOOLEAN in `extension/finishes.py:add_modifier`.
+
+## E5. No "band around a composite silhouette"
+
+**What hurt:** each gold strap wrapping body+lid had to be hand-assembled from
+a box (body section) and an oversized short cylinder (lid section), with proud
+offsets matched by eye (box sits 0.02 proud, ring 0.015 — there's a visible
+2cm step where they meet at the seam). Two parts + one snap per strap, twice.
+
+**Fix:** `band_around(targets, axis='X', at=0.27, width=0.09, thickness=0.02)` —
+take the combined cross-section silhouette of `targets` at the given axis
+position, offset it outward by `thickness`, sweep it `width` wide. Covers chest
+straps, barrel hoops, belts, pipe clamps — a general primitive, not a chest tool.
+
+**File:** new module. Effort: medium (silhouette extraction is the design work).
+
+## E6. set_material colors are linear floats — "dark chocolate" renders pastel
+
+**What hurt:** `base_color=[0.22, 0.1, 0.045]` (dark brown as picked from any
+color reference) displayed as pale tan: Blender treats the floats as scene-linear,
+and linear→sRGB lifts 0.22 to ~0.5. Took two material rounds to get actual brown
+(the working value was `[0.09, 0.04, 0.018]` — numbers no human associates with
+mid-brown).
+
+**Fix:** accept `hex="#5C3317"` (sRGB) and convert to linear internally; state
+the color space explicitly in the docstring either way.
+
+**File:** `server/finishes.py` + `extension/finishes.py:set_material`. Effort: ~15 lines.
+
+## E7. No 3/4 viewport preset (minor)
+
+`set_viewport_angle` has only axis-aligned views; judging a build wants the 3/4
+hero angle, which means `orbit_viewport` with magic numbers (azimuth -30,
+elevation 18, distance ≈ 2.5× subject size...). A `THREE_QUARTER` preset that
+auto-frames the targets — or `orbit_viewport(distance='AUTO')` — would remove
+the eyeballing. The collage's PERSP panel proves the framing math already exists.
+
+## E8. Deform-after-bevel ordering trap (minor, not hit — avoided)
+
+Wanted a slight anime flare (body wider at top) AFTER `smooth_edges` had baked
+its bevel. `taper_end` operates on the extreme ring along the axis — which, post
+bevel, is the 6mm bottom sliver of the bevel itself, so it would pinch the bevel
+instead of tapering the wall. Skipped the flare rather than risk it (this was
+the same session as E1, with no undo to lean on). A guard would help: if the
+extreme ring spans <2% of the axis extent, suggest `taper_section` over the full
+range instead.
