@@ -412,3 +412,30 @@ instead of tapering the wall. Skipped the flare rather than risk it (this was
 the same session as E1, with no undo to lean on). A guard would help: if the
 extreme ring spans <2% of the axis extent, suggest `taper_section` over the full
 range instead.
+
+# Follow-up from shopping-list verification (2026-06-10, post T1–T7)
+
+## E1-residual. Live-session undo is a no-op; verification correctly catches it
+
+T3 fixed the bookkeeping and added post-step verification — and that part works:
+`undo(1)` after an `add_box` in a LIVE interactive session left the box in the
+scene, and the tool reported `POST-UNDO MISMATCH` loudly instead of claiming
+success. `redo(1)` then re-synced the log to the scene (`verified ✓`). The spec's
+fallback ("a lying undo is worse than no undo") is satisfied.
+
+But the underlying `bpy.ops.ed.undo` does nothing in the live socket→timer
+context, even with the `temp_override(window=...)`. The headless e2e passes the
+same sequence, so this is interactive-session-specific — likely the undo steps
+pushed from a timer aren't registered against the window's undo stack the
+override points at. Needs investigation in a live session specifically; the
+headless harness can't reproduce it. Until then the practical guidance stands:
+checkpoint with `save_design`, recover with `open_design` — but undo is now
+fail-loud instead of scene-destroying, so it's safe to *attempt*.
+
+## E9 (minor). `add_box` docstring still says rotation "applied after placement"
+
+T4 made placement resolve against the rotated bbox (verified live: a
+`rot_y=90` box placed `on` the lid landed exactly on the lid's top). But the
+per-tool doc lines in `server/primitives.py` still read "applied after
+placement", which now under-describes the behavior. One-line doc fix per
+primitive that takes `rot_*` + `on`.
