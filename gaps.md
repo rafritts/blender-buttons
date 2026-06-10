@@ -1,16 +1,13 @@
 # MCP gaps
 
-## No `new_scene` — can't do File → New → General
-
-There is no way to reset to a fresh scene; "start over" means walking the scene tree and calling `delete_object` on everything, then manually resetting world background, color management, and render settings that earlier work mutated. A `new_scene()` tool wrapping `bpy.ops.wm.read_homefile(app_template="")` (plus re-arming the socket server if the reload drops it) would make this one call. Interim workaround: an empty template saved as `~/blender-designs/_empty_general.blend` — `open_design("_empty_general")` is the poor man's File → New.
-
-## Live-session undo is a no-op (E1-residual)
-
-`bpy.ops.ed.undo` does nothing in the live socket→timer context even with `temp_override(window=...)`. The headless e2e passes because it pushes undo through a different path. Needs investigation in a live session specifically. Current state: undo is fail-loud (reports POST-UNDO MISMATCH instead of silently destroying the scene), but it doesn't actually revert. Practical workaround: `save_design` / `open_design`.
+_(none open)_
 
 ---
 
 # Recently closed
+
+- **Live-session undo (E1-residual)** — `bpy.ops.ed.undo` was a no-op in the live socket→timer context. Root cause: `temp_override(window=wins[0])` REPLACES the context with only the window, dropping the screen/area the global-undo operator resolves against, so it ran as a silent no-op. (Headless passed because with no windows it took the bare `bpy.ops.ed.undo()` path.) Fix: `state.ui_override()` builds a full VIEW_3D context (window + screen + area + region), used by both `_step_op` (history.py) and `push_undo_step` (state.py); returns None in headless so that path is unchanged. Verified live: `undo(2)` / `redo(2)` actually revert/replay with `✓ scene verified against history snapshot` and no POST-UNDO MISMATCH. Headless e2e still green (no regression).
+- **`new_scene(empty=False)`** — File → New → General in one call. Wraps `bpy.ops.wm.read_homefile(app_template="")` (resets world / color-management / render settings with it), clears the history bookkeeping, and re-registers the persistent queue timer defensively. `empty=True` additionally wipes the startup cube/camera/light for a bare modelling slate. The daemon socket thread + `persistent=True` timer both survive the reload, so no full re-arm was needed. Replaces the `open_design("_empty_general")` workaround. Verified live + e2e.
 
 - **E4** — `boolean(target, cutter, op, solver, apply, hide_cutter)` MCP wrapper. Keyholes, mortises, split-lid chests, half-barrels.
 - **E5** — `band_around(name, targets, axis, at, width, thickness)`: a strap/hoop/belt following the convex-hull silhouette of the combined targets (bridges gaps between parts).

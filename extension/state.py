@@ -37,6 +37,10 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
     "get_mesh_profile", "get_rings", "parts_in", "list_modifiers", "list_designs",
     "set_viewport_angle", "set_viewport_shading", "frame_scene",
     "zoom_to_selected", "orbit_viewport",
+    # new_scene reloads the startup file, wiping Blender's undo stack and the
+    # scene; it resets the history log itself (designs.new_scene) rather than
+    # pushing an undo step that would immediately be desynced.
+    "new_scene",
 }
 
 # Tools that should NOT have blender_status appended to their result
@@ -51,6 +55,37 @@ def scene_object_names():
     """Sorted list of the current scene's object names — the per-op snapshot used
     to verify the scene actually matches the history log after an undo/redo."""
     return sorted(o.name for o in bpy.context.scene.objects)
+
+
+def ui_override():
+    """Build a context-override dict (window + screen + VIEW_3D area + region)
+    for running UI-context operators — undo / redo / undo_push — from the
+    socket→timer thread.
+
+    A bare `temp_override(window=...)` REPLACES the context with only the window,
+    dropping the screen/area the global-undo operator resolves against. In a live
+    GUI session that makes `bpy.ops.ed.undo()` a silent no-op (gaps.md:
+    live-session undo). Supplying the full VIEW_3D context is the canonical recipe
+    for driving these operators from a script.
+
+    Returns None in headless / windowless contexts, where the bare operator call
+    already works — so the headless path is left exactly as it was."""
+    wm = bpy.context.window_manager
+    wins = list(wm.windows) if wm else []
+    if not wins:
+        return None
+    win = wins[0]
+    override = {"window": win}
+    screen = getattr(win, "screen", None)
+    if screen:
+        override["screen"] = screen
+        area = next((a for a in screen.areas if a.type == 'VIEW_3D'), None)
+        if area:
+            override["area"] = area
+            region = next((r for r in area.regions if r.type == 'WINDOW'), None)
+            if region:
+                override["region"] = region
+    return override
 
 
 def log_operation(tool, params, label=""):
@@ -71,9 +106,9 @@ def push_undo_step(message):
     a handful of sparse undo points (gaps.md E1). Called once per mutating tool
     by the dispatch — never from inside tools (that would double-push)."""
     try:
-        wins = bpy.context.window_manager.windows
-        if wins:
-            with bpy.context.temp_override(window=wins[0]):
+        override = ui_override()
+        if override:
+            with bpy.context.temp_override(**override):
                 bpy.ops.ed.undo_push(message=str(message)[:64])
         else:
             bpy.ops.ed.undo_push(message=str(message)[:64])

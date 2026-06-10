@@ -1,4 +1,4 @@
-from server._core import mcp, call_blender
+from server._core import mcp, call_blender, _status
 
 
 @mcp.tool()
@@ -27,6 +27,31 @@ def open_design(name: str) -> str:
     if result.get("opened"):
         return f"opened: {result['opened']}"
     return result.get("error", "failed")
+
+
+@mcp.tool()
+def new_scene(empty: bool = False) -> str:
+    """
+    Reset to a fresh scene — the MCP equivalent of File > New > General.
+
+    Loads Blender's startup file: the default cube, camera, and light, with the
+    world background, color management, and render settings all reset to
+    defaults. Use this to "start over" cleanly instead of walking the scene tree
+    deleting every object by hand and trying to un-do earlier world/render tweaks.
+
+    empty: True → also delete the startup cube/camera/light, leaving a bare scene
+           (a clean modelling slate). Default False = true File > New > General.
+
+    The operation history log is cleared (the reload wipes Blender's undo stack),
+    so undo() won't reach back past a new_scene.
+    """
+    result = call_blender("new_scene", {"empty": empty})
+    if result.get("success"):
+        objs = result.get("objects") or []
+        main = f"reset to {result.get('reset_to')} — objects: {objs or '(none)'}"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
 
 
 @mcp.tool()

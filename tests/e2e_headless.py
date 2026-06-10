@@ -644,6 +644,26 @@ check("posing the root bone deforms the mesh (top vertex swings)", _dh > 0.5,
 r = run("pose_bone", armature="limb_rig", bone="nonexistent", rot=[0, 0, 0])
 check("pose_bone unknown bone errors", "error" in r, r)
 
+print("== new_scene (File > New > General) ==")
+import extension.state as _st  # noqa: E402
+# Build a couple of ops first so there's history to clear.
+run("add_box", name="ns_box", width=0.2, depth=0.2, height=0.2, on={"at": [0, 0, 0]})
+check("history non-empty before reset", len(_st._history) > 0, len(_st._history))
+r = run("new_scene")
+check("new_scene success", r.get("success"), r.get("error"))
+check("reset_to is File > New > General", r.get("reset_to") == "File > New > General", r.get("reset_to"))
+_names = set(o.name for o in bpy.data.objects)
+check("startup objects restored", len(_names) >= 3 and "ns_box" not in _names, sorted(_names))
+check("history cleared after new_scene", len(_st._history) == 0, len(_st._history))
+check("redo stack cleared", len(_st._redo_stack) == 0, len(_st._redo_stack))
+check("undo baseline reset", _st._undo_baseline is None, _st._undo_baseline)
+# empty=True wipes even the startup cube/camera/light
+r = run("new_scene", empty=True)
+check("new_scene empty success", r.get("success"), r.get("error"))
+check("empty reset_to label", r.get("reset_to") == "empty scene", r.get("reset_to"))
+check("empty scene has no objects", len(bpy.data.objects) == 0, len(bpy.data.objects))
+check("empty reports removed objects", len(r.get("removed", [])) >= 1, r.get("removed"))
+
 print()
 if failures:
     print(f"E2E: {len(failures)} FAILURES: {failures}")

@@ -18,11 +18,13 @@ def get_history(params):
 
 
 def _step_op(op_name):
-    """Run bpy.ops.ed.<undo|redo> with a window override when one exists."""
+    """Run bpy.ops.ed.<undo|redo> under a full VIEW_3D context override when a
+    GUI window exists (a bare window-only override is a no-op for global undo —
+    see state.ui_override / gaps.md), or a bare call in headless."""
     op = getattr(bpy.ops.ed, op_name)
-    wins = bpy.context.window_manager.windows
-    if wins:
-        with bpy.context.temp_override(window=wins[0]):
+    override = state.ui_override()
+    if override:
+        with bpy.context.temp_override(**override):
             op()
     else:
         op()
