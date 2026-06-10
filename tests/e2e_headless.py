@@ -581,6 +581,69 @@ if r.get("success"):
 r = run("render_to_file", filepath="/tmp/should_fail", format="BOGUS")
 check("bad format errors", "error" in r, r)
 
+print("== Tier C: armature + auto_weight + pose ==")
+# Bone-heat weighting is well-conditioned near the world origin, so the limb
+# lives at origin here (other test objects don't interfere — weighting is
+# selection-scoped). auto_weight warns if weighting ever comes back empty.
+BX = 0.0
+run("add_box", name="limb", width=0.3, depth=0.3, height=2.0, on={"at": [BX, 0, 1.0]})
+run("loop_cut", target="limb", axis="Z", cuts=8)   # segments so the joint can bend
+r = run("create_armature", name="limb_rig", bones=[
+    {"name": "lower", "head": [BX, 0, 0.0], "tail": [BX, 0, 1.0]},
+    {"name": "upper", "head": [BX, 0, 1.0], "tail": [BX, 0, 2.0],
+     "parent": "lower", "connected": True},
+])
+check("create_armature success", r.get("success"), r.get("error"))
+check("armature has 2 bones", r.get("bone_count") == 2, r.get("bones"))
+_arm = bpy.data.objects.get("limb_rig")
+check("armature object is ARMATURE", _arm is not None and _arm.type == 'ARMATURE')
+check("child bone parented", _arm.data.bones["upper"].parent is not None
+      and _arm.data.bones["upper"].parent.name == "lower")
+
+r = run("create_armature", name="bad_rig", bones=[
+    {"name": "x", "head": [0, 0, 0], "tail": [0, 0, 0]}])  # zero-length
+check("zero-length bone errors", "error" in r, r)
+
+r = run("auto_weight", mesh="limb", armature="limb_rig")
+check("auto_weight success", r.get("success"), r.get("error"))
+check("auto_weight made vertex groups", r.get("vertex_groups") >= 2, r.get("vertex_groups"))
+check("auto_weight actually weighted vertices", r.get("weighted_vertices", 0) > 0,
+      r.get("weighted_vertices"))
+check("no empty-weight warning at origin", len(r.get("warnings", [])) == 0, r.get("warnings"))
+_limb = bpy.data.objects["limb"]
+check("armature modifier added", any(m.type == 'ARMATURE' for m in _limb.modifiers),
+      [m.type for m in _limb.modifiers])
+
+
+def _top_vertex_world():
+    """World position of the highest rest-vertex, read from the EVALUATED mesh
+    (so armature deformation is included)."""
+    rest = _limb.data.vertices
+    top_idx = max(range(len(rest)), key=lambda i: rest[i].co.z)
+    deps = bpy.context.evaluated_depsgraph_get()
+    ev = _limb.evaluated_get(deps)
+    em = ev.to_mesh()
+    wco = ev.matrix_world @ em.vertices[top_idx].co
+    ev.to_mesh_clear()
+    return wco.copy()
+
+
+_before = _top_vertex_world()
+# Bend the ROOT bone about local Z (perpendicular to the bone — local Y runs
+# along it and would only twist). Bending the root swings the whole chain, so
+# the top vertex must move a lot. Swing direction depends on bone-local axes,
+# so check horizontal (XY) displacement rather than a specific axis.
+r = run("pose_bone", armature="limb_rig", bone="lower", rot=[0, 0, 60])
+check("pose_bone success", r.get("success"), r.get("error"))
+check("returned to object mode", bpy.context.mode == 'OBJECT', bpy.context.mode)
+bpy.context.view_layer.update()
+_after = _top_vertex_world()
+_dh = ((_after.x - _before.x) ** 2 + (_after.y - _before.y) ** 2) ** 0.5
+check("posing the root bone deforms the mesh (top vertex swings)", _dh > 0.5,
+      (round(_before.x, 3), round(_before.y, 3), round(_after.x, 3), round(_after.y, 3), round(_dh, 3)))
+r = run("pose_bone", armature="limb_rig", bone="nonexistent", rot=[0, 0, 0])
+check("pose_bone unknown bone errors", "error" in r, r)
+
 print()
 if failures:
     print(f"E2E: {len(failures)} FAILURES: {failures}")

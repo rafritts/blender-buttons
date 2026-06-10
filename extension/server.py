@@ -12,6 +12,7 @@ import threading
 import bpy
 
 from . import (
+    armature,
     bands,
     curves,
     designs,
@@ -59,6 +60,7 @@ _TOOL_MODULES = (
     textures,
     lighting,
     render,
+    armature,
     scatter,
     sculpt,
     designs,

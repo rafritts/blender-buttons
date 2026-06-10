@@ -34,6 +34,7 @@ from server import (  # noqa: F401
     groups,
     finishes,
     bands,
+    armature,
     shaders,
     textures,
     scene,
