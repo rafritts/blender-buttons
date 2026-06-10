@@ -1,5 +1,9 @@
 # MCP gaps
 
+## No `new_scene` — can't do File → New → General
+
+There is no way to reset to a fresh scene; "start over" means walking the scene tree and calling `delete_object` on everything, then manually resetting world background, color management, and render settings that earlier work mutated. A `new_scene()` tool wrapping `bpy.ops.wm.read_homefile(app_template="")` (plus re-arming the socket server if the reload drops it) would make this one call. Interim workaround: an empty template saved as `~/blender-designs/_empty_general.blend` — `open_design("_empty_general")` is the poor man's File → New.
+
 ## Live-session undo is a no-op (E1-residual)
 
 `bpy.ops.ed.undo` does nothing in the live socket→timer context even with `temp_override(window=...)`. The headless e2e passes because it pushes undo through a different path. Needs investigation in a live session specifically. Current state: undo is fail-loud (reports POST-UNDO MISMATCH instead of silently destroying the scene), but it doesn't actually revert. Practical workaround: `save_design` / `open_design`.
