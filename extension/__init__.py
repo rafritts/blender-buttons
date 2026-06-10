@@ -21,7 +21,8 @@ module whose name matches the tool family:
   scatter.py      scatter_on_surface (the donut-tutorial sprinkle step)
   sculpt.py       sculpt_grab / inflate / draw / smooth / crease / pinch / flatten
   viewport.py     screenshot / collage / view angle / shading mode / framing / orbit / camera positioning
-  history.py      get_history / undo_steps / undo_to
+  shaders.py      set_toon_material (cel/anime) / add_outline / remove_outline
+  history.py      get_history / undo_steps / redo_steps / undo_to
   designs.py      save_design / open_design / list_designs
   status.py       get_scene_tree / get_blender_status
 
@@ -41,6 +42,15 @@ from . import server, state, ui
 def register():
     for cls in ui.CLASSES:
         bpy.utils.register_class(cls)
+    # One MCP tool call == one undo step, so a long build needs deep undo history.
+    # Raise the limit (never lower it) so undo stays 1:1 with the log past the
+    # default 32 steps — the E1 disaster was 27 ops in.
+    try:
+        prefs = bpy.context.preferences.edit
+        if prefs.undo_steps < 256:
+            prefs.undo_steps = 256
+    except Exception:
+        pass
     ui.start_server()
 
 

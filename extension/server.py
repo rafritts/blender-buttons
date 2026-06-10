@@ -106,24 +106,36 @@ def execute_command(command):
         if err:
             return {"error": err}
 
+    is_mutating = tool not in state.NON_UNDOABLE_TOOLS
+    # Snapshot the scene once, before the very first mutating op, so an undo that
+    # walks all the way back to empty can still be verified against a known state.
+    if is_mutating and not state._history and state._undo_baseline is None:
+        state._undo_baseline = state.scene_object_names()
+
     try:
         result = fn(params)
-        if tool not in state.NO_LOG_TOOLS and result.get("success"):
-            result["op_id"] = state.log_operation(tool, params, label)
-        if tool not in state.NO_STATUS_TOOLS:
-            try:
-                result["blender_status"] = status.get_blender_status({}).get("status")
-            except Exception:
-                pass
-        return result
     except Exception as e:
-        return {"error": str(e)}
+        result = {"error": str(e)}
     finally:
         if auto_switched:
             try:
                 bpy.ops.object.mode_set(mode='OBJECT')
             except Exception:
                 pass
+
+    # Log + push the undo step AFTER edit-mode tools have returned to OBJECT mode,
+    # so each step is an object-mode checkpoint (undoable from object mode) and
+    # the history log stays exactly 1:1 with Blender's undo stack.
+    if is_mutating and isinstance(result, dict) and result.get("success"):
+        result["op_id"] = state.log_operation(tool, params, label)
+        state.push_undo_step(result["op_id"])
+
+    if tool not in state.NO_STATUS_TOOLS and isinstance(result, dict):
+        try:
+            result["blender_status"] = status.get_blender_status({}).get("status")
+        except Exception:
+            pass
+    return result
 
 
 def handle_client(conn):

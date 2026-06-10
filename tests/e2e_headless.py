@@ -200,6 +200,47 @@ check("toon still in slot 0", tb.data.materials[0].get("bb_toon") is not None,
       tb.data.materials[0].name if tb.data.materials[0] else None)
 check("outline appended after toon", len(tb.data.materials) == 2, len(tb.data.materials))
 
+print("== T3 undo / redo / verification ==")
+for i in range(5):
+    run("add_box", name=f"u_box{i}", width=0.1, depth=0.1, height=0.1, on={"at": [10 + i, 0, 0]})
+present = lambda n: bpy.data.objects.get(n) is not None
+check("5 undo boxes present", all(present(f"u_box{i}") for i in range(5)))
+r = run("undo_steps", steps=2)
+check("undo(2) success", r.get("success"), r.get("error"))
+check("undo(2) reverted 2", r.get("steps") == 2, r.get("steps"))
+check("u_box4 removed by undo", not present("u_box4"))
+check("u_box3 removed by undo", not present("u_box3"))
+check("u_box2 still present", present("u_box2"))
+check("u_box0 still present", present("u_box0"))
+check("undo verified against snapshot", r.get("verified") is True, r.get("warning"))
+check("redo_available == 2 after undo", r.get("redo_available") == 2, r.get("redo_available"))
+# redo brings one back
+r = run("redo_steps", steps=1)
+check("redo(1) success", r.get("success"), r.get("error"))
+check("u_box3 restored by redo", present("u_box3"))
+check("u_box4 still gone after redo(1)", not present("u_box4"))
+check("redo verified", r.get("verified") is True, r.get("warning"))
+# undo past available depth: error, scene untouched
+n_before = len(bpy.data.objects)
+r = run("undo_steps", steps=100000)
+check("undo past depth errors", "error" in r, r)
+check("scene untouched on over-undo", len(bpy.data.objects) == n_before, (n_before, len(bpy.data.objects)))
+# a new mutating op clears the redo branch
+run("add_box", name="u_fork", width=0.1, depth=0.1, height=0.1, on={"at": [20, 0, 0]})
+r = run("get_history")
+check("new op clears redo branch", r.get("redo_available") == 0, r.get("redo_available"))
+# edit-mode op undo (push happens after mode restore -> must be undoable from object mode)
+run("add_box", name="u_edit", width=0.4, depth=0.4, height=0.4, on={"at": [22, 0, 0]})
+v0 = len(bpy.data.objects["u_edit"].data.vertices)
+r = run("loop_cut", target="u_edit", axis="Z", cuts=1)
+check("loop_cut success", r.get("success"), r.get("error"))
+v1 = len(bpy.data.objects["u_edit"].data.vertices)
+check("loop_cut added verts", v1 > v0, (v0, v1))
+r = run("undo_steps", steps=1)
+check("edit-mode undo success", r.get("success"), r.get("error"))
+check("edit-mode undo restored verts", len(bpy.data.objects["u_edit"].data.vertices) == v0,
+      (v0, len(bpy.data.objects["u_edit"].data.vertices)))
+
 print()
 if failures:
     print(f"E2E: {len(failures)} FAILURES: {failures}")
