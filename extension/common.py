@@ -85,6 +85,22 @@ def material_summary(obj):
             out.append({"slot": slot_idx, "name": None})
             continue
         entry = {"slot": slot_idx, "name": mat.name}
+        toon = mat.get("bb_toon")
+        if toon is not None:
+            # Toon materials are reported from their stored params, not by
+            # parsing the cel node graph (which has no Principled BSDF).
+            try:
+                import json as _json
+                entry["toon"] = _json.loads(toon)
+            except (ValueError, TypeError):
+                pass
+        tex = mat.get("bb_texture")
+        if tex is not None:
+            try:
+                import json as _json
+                entry["texture"] = _json.loads(tex)
+            except (ValueError, TypeError):
+                pass
         if mat.use_nodes:
             bsdf = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
             if bsdf is not None:

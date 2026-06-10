@@ -66,6 +66,13 @@ def describe(params):
             bits.append(f"metal={m['metallic']}")
         if m.get("emission_strength"):
             bits.append(f"glow={m['emission_strength']}")
+        if "toon" in m:
+            t = m["toon"]
+            bits.append(f"toon(bands={t.get('bands')}"
+                        + (", rim" if t.get("rim_color") else "")
+                        + (", gradient" if t.get("gradient_top") else "") + ")")
+        if "texture" in m:
+            bits.append(f"texture({m['texture'].get('asset_id')}@{m['texture'].get('resolution')})")
         mat_strs.append(" ".join(bits))
     mat_str = f"material: {', '.join(mat_strs)}" if mat_strs else "no material"
 

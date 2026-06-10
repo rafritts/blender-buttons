@@ -142,6 +142,37 @@ check("arm_L mirrored to -X", abs(cl[0] + 0.3) < 1e-4, cl)
 r = run("mirror_across", targets="t_box", plane="X", replace=["_R", "_L"])
 check("no-token falls back to suffix", "t_box_mirror" in r.get("mirrored_to", []), r)
 
+print("== T1 set_toon_material ==")
+run("add_sphere", name="toon_ball", radius=0.5, on={"at": [5, 0, 0]})
+r = run("set_toon_material", target="toon_ball", base_color=[0.2, 0.5, 0.9], bands=3)
+check("toon success", r.get("success"), r.get("error"))
+tmat = bpy.data.objects["toon_ball"].data.materials[0]
+check("toon material assigned", tmat is not None and tmat.get("bb_toon") is not None)
+import json as _json
+stored = _json.loads(tmat["bb_toon"]) if tmat and tmat.get("bb_toon") else {}
+check("bb_toon round-trips bands", stored.get("bands") == 3, stored.get("bands"))
+check("bb_toon round-trips base_color", stored.get("base_color")[:3] == [0.2, 0.5, 0.9], stored.get("base_color"))
+check("bb_toon graph_version", stored.get("graph_version") == 1)
+nodes = tmat.node_tree.nodes
+has_s2rgb = any(n.bl_idname == "ShaderNodeShaderToRGB" for n in nodes)
+check("graph has ShaderToRGB", has_s2rgb)
+ramp = next((n for n in nodes if n.bl_idname == "ShaderNodeValToRGB"), None)
+check("graph has ColorRamp", ramp is not None)
+check("ColorRamp is CONSTANT", ramp is not None and ramp.color_ramp.interpolation == "CONSTANT",
+      ramp.color_ramp.interpolation if ramp else None)
+check("ColorRamp has 3 stops", ramp is not None and len(ramp.color_ramp.elements) == 3,
+      len(ramp.color_ramp.elements) if ramp else 0)
+# idempotent reuse: second call, different shadow_color, same datablock
+n_mats_before = len(bpy.data.materials)
+r = run("set_toon_material", target="toon_ball", base_color=[0.2, 0.5, 0.9],
+        bands=3, shadow_color=[0.1, 0.1, 0.3])
+check("toon reuse success", r.get("success"), r.get("error"))
+check("no .001 duplicate material", len(bpy.data.materials) == n_mats_before,
+      (n_mats_before, len(bpy.data.materials)))
+check("same material datablock", bpy.data.objects["toon_ball"].data.materials[0] == tmat)
+r = run("describe", name="toon_ball")
+check("describe mentions toon", "toon(" in r.get("description", ""), r.get("description"))
+
 print()
 if failures:
     print(f"E2E: {len(failures)} FAILURES: {failures}")
