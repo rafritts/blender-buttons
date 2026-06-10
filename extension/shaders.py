@@ -213,6 +213,126 @@ def set_toon_material(params):
     }
 
 
+def _emission_material(name, color):
+    """A flat, backface-culled emission material — the outline shell color."""
+    mat = bpy.data.materials.get(name) or bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    out = nt.nodes.new('ShaderNodeOutputMaterial')
+    emit = nt.nodes.new('ShaderNodeEmission')
+    emit.inputs['Color'].default_value = color
+    emit.inputs['Strength'].default_value = 1.0
+    nt.links.new(emit.outputs['Emission'], out.inputs['Surface'])
+    # Cull front faces so only the flipped-normal back hull (the outline) shows.
+    mat.use_backface_culling = True
+    return mat
+
+
+def _strip_outline(obj):
+    """Remove the bb_outline modifier + the material slot it appended. Returns True
+    if an outline was present."""
+    state = obj.get("bb_outline")
+    if state is None:
+        return False
+    mod = obj.modifiers.get("bb_outline")
+    if mod is not None:
+        obj.modifiers.remove(mod)
+    try:
+        data = json.loads(state)
+        mat_name = data.get("material")
+    except (ValueError, TypeError):
+        mat_name = None
+    if mat_name is not None and obj.data is not None:
+        idx = next((i for i, m in enumerate(obj.data.materials)
+                    if m is not None and m.name == mat_name), None)
+        if idx is not None:
+            activate(obj)
+            obj.active_material_index = idx
+            bpy.ops.object.material_slot_remove()
+    del obj["bb_outline"]
+    return True
+
+
+def add_outline(params):
+    """Add a cartoon outline by the inverted-hull method — a flipped-normal,
+    backface-culled emission shell grown off the object's own geometry via a
+    Solidify modifier. No duplicate object is created.
+
+    target:    object OR group name (group expands to every mesh inside).
+    thickness: outline width in WORLD meters. On a ~1m prop, 0.005-0.015 is the
+               sane range. Default 0.01.
+    color:     [r,g,b(,a)] outline color (scene-linear). Default black.
+
+    Composes with set_toon_material: the outline is APPENDED as a new material
+    slot, so slot 0 (e.g. the toon material) is left untouched. Idempotent —
+    re-running replaces the existing outline. Remove with remove_outline.
+    """
+    target = params.get("target")
+    if not target:
+        return {"error": "'target' (object or group name) is required"}
+    thickness = float(params.get("thickness", 0.01))
+    color = _rgba(params.get("color", [0, 0, 0]))
+    objs, err = resolve_targets(target)
+    if err:
+        return {"error": err}
+    meshes = [o for o in objs if o.type == 'MESH']
+    if not meshes:
+        return {"error": f"'{target}' contains no mesh objects"}
+
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    outlined = []
+    for o in meshes:
+        _strip_outline(o)  # idempotent: clear any prior outline first
+        # The inverted hull needs the base faces on slot 0 and the rim on slot 1.
+        # If the object has no material yet, add an empty base slot so the
+        # Solidify material_offset still lands the rim on the appended slot.
+        if not o.data.materials:
+            o.data.materials.append(None)
+        omat = _emission_material(f"{o.name}_outline", color)
+        o.data.materials.append(omat)
+        slot_idx = len(o.data.materials) - 1
+
+        mod = o.modifiers.new(name="bb_outline", type='SOLIDIFY')
+        mod.thickness = thickness
+        mod.use_flip_normals = True
+        mod.material_offset = 1
+        mod.offset = 1
+
+        o["bb_outline"] = json.dumps({
+            "thickness": thickness, "color": list(color),
+            "material": omat.name, "slot": slot_idx,
+        })
+        outlined.append(o.name)
+
+    return {"success": True, "outlined": outlined, "thickness": thickness}
+
+
+def remove_outline(params):
+    """Remove the inverted-hull outline added by add_outline — deletes the
+    bb_outline Solidify modifier and the material slot it appended, nothing else.
+
+    target: object OR group name.
+    """
+    target = params.get("target")
+    if not target:
+        return {"error": "'target' (object or group name) is required"}
+    objs, err = resolve_targets(target)
+    if err:
+        return {"error": err}
+    meshes = [o for o in objs if o.type == 'MESH']
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    removed = [o.name for o in meshes if _strip_outline(o)]
+    if not removed:
+        return {"error": f"'{target}' has no outline to remove"}
+    return {"success": True, "removed": removed}
+
+
 TOOLS = {
     "set_toon_material": set_toon_material,
+    "add_outline":       add_outline,
+    "remove_outline":    remove_outline,
 }

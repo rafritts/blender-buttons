@@ -54,3 +54,49 @@ def set_toon_material(target: str,
     else:
         main = result.get("error", "failed")
     return main + _status(result)
+
+
+@mcp.tool()
+def add_outline(target: str, thickness: float = 0.01, color: list = None,
+                label: str = "") -> str:
+    """
+    Add a cartoon outline by the inverted-hull method — a flipped-normal,
+    backface-culled emission shell grown off the object's own geometry. No
+    duplicate object is created. Pair with set_toon_material for the full
+    inked-cartoon look.
+
+    target:    object OR group name (group expands to every mesh inside).
+    thickness: outline width in WORLD meters. On a ~1m prop, 0.005-0.015 is the
+               sane range. Default 0.01 (1cm).
+    color:     [r,g,b(,a)] outline color, scene-linear floats. Default black.
+
+    The outline is APPENDED as a new material slot, so an existing slot-0
+    material (e.g. a toon material) is left untouched. Idempotent. Undo with
+    remove_outline.
+    """
+    params = {"target": target, "thickness": thickness}
+    if color is not None:
+        params["color"] = color
+    result = call_blender("add_outline", params, label=label)
+    if result.get("success"):
+        main = (f"outlined {result['outlined']} (thickness={result['thickness']}m) "
+                f"[{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def remove_outline(target: str, label: str = "") -> str:
+    """
+    Remove the inverted-hull outline added by add_outline — deletes the Solidify
+    modifier and the material slot it appended, nothing else.
+
+    target: object OR group name.
+    """
+    result = call_blender("remove_outline", {"target": target}, label=label)
+    if result.get("success"):
+        main = f"removed outline from {result['removed']} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)

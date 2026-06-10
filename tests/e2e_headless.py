@@ -173,6 +173,33 @@ check("same material datablock", bpy.data.objects["toon_ball"].data.materials[0]
 r = run("describe", name="toon_ball")
 check("describe mentions toon", "toon(" in r.get("description", ""), r.get("description"))
 
+print("== T2 add_outline / remove_outline ==")
+run("add_box", name="out_box", width=0.5, depth=0.5, height=0.5, on={"at": [7, 0, 0]})
+r = run("add_outline", target="out_box", thickness=0.01, color=[0, 0, 0])
+check("add_outline success", r.get("success"), r.get("error"))
+ob = bpy.data.objects["out_box"]
+omod = ob.modifiers.get("bb_outline")
+check("bb_outline modifier exists", omod is not None)
+check("outline normals flipped", omod is not None and omod.use_flip_normals)
+check("outline material_offset=1", omod is not None and omod.material_offset == 1)
+check("two material slots", len(ob.data.materials) == 2, len(ob.data.materials))
+slot1 = ob.data.materials[1] if len(ob.data.materials) > 1 else None
+check("slot1 backface-culled", slot1 is not None and slot1.use_backface_culling)
+check("slot1 is emission", slot1 is not None and any(
+    n.bl_idname == "ShaderNodeEmission" for n in slot1.node_tree.nodes))
+# remove restores 1 slot, 0 outline modifiers
+r = run("remove_outline", target="out_box")
+check("remove_outline success", r.get("success"), r.get("error"))
+check("one slot after remove", len(ob.data.materials) == 1, len(ob.data.materials))
+check("no bb_outline modifier after remove", ob.modifiers.get("bb_outline") is None)
+# composes with toon: slot 0 toon material untouched
+r = run("add_outline", target="toon_ball", thickness=0.008)
+check("outline on toon success", r.get("success"), r.get("error"))
+tb = bpy.data.objects["toon_ball"]
+check("toon still in slot 0", tb.data.materials[0].get("bb_toon") is not None,
+      tb.data.materials[0].name if tb.data.materials[0] else None)
+check("outline appended after toon", len(tb.data.materials) == 2, len(tb.data.materials))
+
 print()
 if failures:
     print(f"E2E: {len(failures)} FAILURES: {failures}")
