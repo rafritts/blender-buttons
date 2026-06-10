@@ -439,3 +439,25 @@ T4 made placement resolve against the rotated bbox (verified live: a
 per-tool doc lines in `server/primitives.py` still read "applied after
 placement", which now under-describes the behavior. One-line doc fix per
 primitive that takes `rot_*` + `on`.
+
+## E10. Color management is not exposed — AgX silently mutes every render
+
+Surfaced by the PBR re-skin of the chest (2026-06-10). `dark_wooden_planks`'s
+diffuse map is genuinely dark brown on disk, the node wiring is correct
+(sRGB diffuse → Base Color, Non-Color roughness/normal), yet the render reads
+pale warm gray. Lighting-ratio changes barely moved it. The same muting hit the
+toon build: pure-emission gold `[0.85, 0.58, 0.2]` displayed as flat tan, and
+emission bypasses lighting entirely — so the common factor is the VIEW
+TRANSFORM. Blender 4.x defaults to AgX, which lifts and desaturates midtones.
+
+No tool can see or change `scene.view_settings` (view transform, look,
+exposure, gamma), so an agent can't even diagnose this without guessing — and
+NPR/toon work actively wants Standard (no tone mapping of emission), while PBR
+work wants AgX/Filmic highlight rolloff. The two styles need different
+transforms and the agent controls neither.
+
+Want: `set_color_management(view_transform, look='', exposure=0, gamma=1)` +
+current values in `get_blender_status` (or screenshot metadata, next to the
+shading mode that's already reported there). `set_toon_material`'s docs should
+then recommend Standard. **File:** `server/scene.py` + `extension/lighting.py`
+(or a new `extension/color.py`). Effort: small, low risk — four scene fields.
