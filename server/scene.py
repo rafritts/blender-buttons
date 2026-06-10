@@ -1,4 +1,7 @@
+import os
+
 from server._core import mcp, call_blender, _status
+from server import polyhaven
 
 
 @mcp.tool()
@@ -62,23 +65,37 @@ def modify_light(name: str, energy: float = None, color: list = None,
 
 @mcp.tool()
 def set_world_background(color: list = None, strength: float = None,
-                         hdri: str = "", label: str = "") -> str:
+                         hdri: str = "", resolution: str = "2k", label: str = "") -> str:
     """
-    Set the world background. Either a solid color (cheap ambient) or an HDRI image
-    (image-based lighting — gives free realistic environment light + reflections).
+    Set the world background. Either a solid color (cheap ambient) or an HDRI
+    (image-based lighting — free realistic environment light + reflections).
 
     color:    [r, g, b] solid color, floats 0..1. Ignored if `hdri` is set.
     strength: light intensity from the background. Default 1.0.
-    hdri:     path to an HDRI/EXR file. Connected as an Environment Texture.
+    hdri:     EITHER a path to a local HDRI/EXR file, OR a Poly Haven HDRI asset id
+              (from search_hdris, e.g. "studio_small_03"). If it isn't an existing
+              file, it's fetched from Poly Haven (CC0) and cached.
+    resolution: Poly Haven HDRI resolution when fetching by id — "1k", "2k" (default),
+              "4k", "8k".
 
     Examples:
-      set_world_background(color=[0.05, 0.05, 0.08], strength=0.3)         # dim blue room
-      set_world_background(hdri="~/hdris/studio.exr", strength=1.0)        # studio lighting
+      set_world_background(color=[0.05, 0.05, 0.08], strength=0.3)     # dim blue room
+      set_world_background(hdri="~/hdris/studio.exr")                  # local file
+      set_world_background(hdri="studio_small_03", resolution="2k")    # Poly Haven id
     """
     params = {}
     if color is not None:    params["color"] = color
     if strength is not None: params["strength"] = strength
-    if hdri:                 params["hdri"] = hdri
+    if hdri:
+        # A local file passes straight through; anything else is a Poly Haven id
+        # resolved + cached to a local path here (the addon never hits the network).
+        if os.path.isfile(os.path.expanduser(hdri)):
+            params["hdri"] = hdri
+        else:
+            try:
+                params["hdri"] = polyhaven.ensure_hdri(hdri, resolution)
+            except polyhaven.PolyHavenError as e:
+                return f"could not fetch HDRI '{hdri}': {e}. World unchanged."
     result = call_blender("set_world_background", params, label=label)
     if result.get("success"):
         if result["mode"] == "hdri":
@@ -91,6 +108,22 @@ def set_world_background(color: list = None, strength: float = None,
     else:
         main = result.get("error", "failed")
     return main + _status(result)
+
+
+@mcp.tool()
+def search_hdris(query: str, limit: int = 10) -> str:
+    """
+    Search Poly Haven's CC0 HDRI library by keyword (lighting mood / place —
+    e.g. "studio", "sunset", "overcast", "night city"). Returns asset ids to pass
+    to set_world_background(hdri=...). Cached 24h, so it works offline after first use.
+    """
+    try:
+        results = polyhaven.search(query, "hdris", limit)
+    except polyhaven.PolyHavenError as e:
+        return f"HDRI search failed: {e}"
+    if not results:
+        return f"No HDRIs match '{query}'."
+    return "\n".join(f"{r['id']}  [{', '.join(r['tags'][:6])}]" for r in results)
 
 
 @mcp.tool()

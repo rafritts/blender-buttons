@@ -55,9 +55,19 @@ try:
 except ph.PolyHavenError:
     check("bad id raises PolyHavenError", True)
 
-print("== hdri search ==")
+print("== hdri search + download ==")
 hres = ph.search("studio", "hdris", 5)
 check("hdri search returns hits", len(hres) > 0, hres)
+hid = hres[0]["id"]
+shutil.rmtree(ph.CACHE_ROOT / "hdris" / hid, ignore_errors=True)
+ph.reset_download_count()
+hpath = ph.ensure_hdri(hid, "1k")
+check("hdri resolved to .hdr/.exr", hpath.endswith((".hdr", ".exr")), hpath)
+check("hdri file exists in cache dir", os.path.exists(hpath) and str(ph.CACHE_ROOT) in hpath, hpath)
+check("hdri first resolve downloaded", ph.download_count() == 1, ph.download_count())
+ph.reset_download_count()
+ph.ensure_hdri(hid, "1k")
+check("hdri second resolve cached", ph.download_count() == 0, ph.download_count())
 
 print()
 if failures:

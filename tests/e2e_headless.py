@@ -323,6 +323,43 @@ for _p in (_dif, _nor, _rgh):
     except OSError:
         pass
 
+print("== T7 set_world_background HDRI ==")
+# Poly Haven id resolution is server-side (no bpy); here we resolve via the same
+# client, then verify the addon wires an Environment Texture node to the cached
+# file — the full id→cache→env-texture path.
+try:
+    from server import polyhaven as _ph  # stdlib-only, safe to import in Blender
+    _hres = _ph.search("studio", "hdris", 5)
+    _hpath = _ph.ensure_hdri(_hres[0]["id"], "1k")
+    _net = True
+except Exception as _e:
+    _net = False
+    print(f"  skip T7 network (offline: {_e})")
+if _net:
+    r = run("set_world_background", hdri=_hpath, strength=1.0)
+    check("hdri world success", r.get("success"), r.get("error"))
+    check("world mode hdri", r.get("mode") == "hdri", r.get("mode"))
+    world_nt = bpy.context.scene.world.node_tree
+    env = next((n for n in world_nt.nodes if n.type == 'TEX_ENVIRONMENT'), None)
+    check("environment texture node present", env is not None)
+    check("env points at cached hdri file",
+          env is not None and env.image is not None and str(_ph.CACHE_ROOT) in env.image.filepath,
+          env.image.filepath if (env and env.image) else None)
+# explicit local file path still behaves as before (regression)
+_localhdri = os.path.join(_texdir, "_localenv.hdr")
+_li = bpy.data.images.new("localenv", 4, 2, float_buffer=True)
+_li.pixels = [0.5] * (4 * 2 * 4)
+_li.filepath_raw = _localhdri
+_li.file_format = 'HDR'
+_li.save()
+r = run("set_world_background", hdri=_localhdri, strength=0.8)
+check("explicit hdri path success", r.get("success"), r.get("error"))
+check("explicit hdri path used verbatim", r.get("hdri") == _localhdri, r.get("hdri"))
+try:
+    os.remove(_localhdri)
+except OSError:
+    pass
+
 print()
 if failures:
     print(f"E2E: {len(failures)} FAILURES: {failures}")
