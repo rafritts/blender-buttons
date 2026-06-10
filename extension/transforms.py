@@ -28,9 +28,29 @@ def nudge(params):
             "delta": [round(dx, 5), round(dy, 5), round(dz, 5)]}
 
 
+def _axis_permutation(rot_matrix, tol=1e-4):
+    """For an axis-aligned rotation (90°-multiples only), return perm where
+    perm[j] = local axis index driving WORLD axis j. Returns None for any
+    non-axis-aligned (arbitrary) rotation. world = R @ local, so world[j]
+    depends on local[i] via R[j][i]."""
+    perm = [None, None, None]
+    for j in range(3):
+        ones = [i for i in range(3) if abs(abs(rot_matrix[j][i]) - 1.0) < tol]
+        zeros = [i for i in range(3) if abs(rot_matrix[j][i]) < tol]
+        if len(ones) != 1 or len(zeros) != 2:
+            return None
+        perm[j] = ones[0]
+    return perm if sorted(perm) == [0, 1, 2] else None
+
+
 def resize(params):
     """Resize objects to absolute world-space dimensions (width × depth × height).
-    Each dim is optional; omitted dims preserve current size."""
+    Each dim is optional; omitted dims preserve current size.
+
+    Rotated objects: resize targets WORLD axes. For axis-aligned rotations
+    (90° multiples) the world→local axis mapping is exact, so this works. For
+    arbitrary rotations it would shear the geometry, so resize REFUSES before
+    touching anything and asks you to apply_transform(rotation=True) first."""
     targets = params.get("targets")
     objs, err = resolve_targets(targets)
     if err:
@@ -41,24 +61,40 @@ def resize(params):
     h = params.get("height")
     if w is None and d is None and h is None:
         return {"error": "resize requires at least one of width, depth, height"}
+    req = [w, d, h]  # requested WORLD X / Y / Z extents
 
-    results = []
-    warnings = []
+    # Refuse arbitrary rotations BEFORE mutating anything (gaps.md E3: a warning
+    # attached to an already-sheared result is the worst of both).
     for o in objs:
         if any(abs(r) > 0.0087 for r in o.rotation_euler):  # > ~0.5°
-            warnings.append(
-                f"'{o.name}' is rotated {[round(math.degrees(r), 1) for r in o.rotation_euler]}° — "
-                "resize works in WORLD axes, so non-axis-aligned geometry will shear. "
-                "Recreate the primitive at the right size, or apply_transform(rotation=True) first."
-            )
+            if _axis_permutation(o.rotation_euler.to_matrix()) is None:
+                deg = [round(math.degrees(r), 1) for r in o.rotation_euler]
+                return {"error": (
+                    f"'{o.name}' has a non-axis-aligned rotation {deg}° — resize works "
+                    "in WORLD axes and would shear it. Run apply_transform(rotation=True) "
+                    "on it first, or recreate the primitive at the target size. "
+                    "Nothing was changed.")}
+
+    results = []
+    for o in objs:
         xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(o)
-        cur_w, cur_d, cur_h = xmax - xmin, ymax - ymin, zmax - zmin
-        sx = (w / cur_w) if (w is not None and cur_w > 1e-9) else 1.0
-        sy = (d / cur_d) if (d is not None and cur_d > 1e-9) else 1.0
-        sz = (h / cur_h) if (h is not None and cur_h > 1e-9) else 1.0
-        o.scale.x *= sx
-        o.scale.y *= sy
-        o.scale.z *= sz
+        cur_world = [xmax - xmin, ymax - ymin, zmax - zmin]
+        rotated = any(abs(r) > 0.0087 for r in o.rotation_euler)
+        if rotated:
+            # Axis-aligned: scale the LOCAL axis that drives each requested WORLD axis.
+            perm = _axis_permutation(o.rotation_euler.to_matrix())
+            mult = [1.0, 1.0, 1.0]
+            for j in range(3):
+                if req[j] is None or cur_world[j] <= 1e-9:
+                    continue
+                mult[perm[j]] *= req[j] / cur_world[j]
+            o.scale.x *= mult[0]
+            o.scale.y *= mult[1]
+            o.scale.z *= mult[2]
+        else:
+            o.scale.x *= (w / cur_world[0]) if (w is not None and cur_world[0] > 1e-9) else 1.0
+            o.scale.y *= (d / cur_world[1]) if (d is not None and cur_world[1] > 1e-9) else 1.0
+            o.scale.z *= (h / cur_world[2]) if (h is not None and cur_world[2] > 1e-9) else 1.0
         bpy.context.view_layer.update()
         activate(o)
         bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
@@ -66,10 +102,7 @@ def resize(params):
         results.append({"name": o.name, "dims": [round(xmax - xmin, 4),
                                                   round(ymax - ymin, 4),
                                                   round(zmax - zmin, 4)]})
-    out = {"success": True, "resized": results}
-    if warnings:
-        out["warnings"] = warnings
-    return out
+    return {"success": True, "resized": results}
 
 
 def scale_group(params):

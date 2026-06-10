@@ -59,12 +59,17 @@ check("bulk add success", r.get("success"), r.get("error"))
 rot_y = math.degrees(bpy.data.objects["t_cyl"].rotation_euler.y)
 check("t_cyl rot_y == 14", abs(rot_y - 14) < 1e-3, rot_y)
 
-print("== resize: rotation warning ==")
+print("== resize: rotated-object handling (T5) ==")
+# arbitrary rotation (t_cyl is rot_y=14°): refuse BEFORE mutating
+before = world_bbox(bpy.data.objects["t_cyl"])
 r = run("resize", targets="t_cyl", height=0.6)
-check("resize success", r.get("success"), r.get("error"))
-check("rotation warning present", any("rotated" in w for w in r.get("warnings", [])),
-      r.get("warnings"))
+check("arbitrary-rotation resize refused", "error" in r, r)
+after = world_bbox(bpy.data.objects["t_cyl"])
+check("refused resize left geometry untouched",
+      all(abs(before[i] - after[i]) < 1e-6 for i in range(6)), (before, after))
+# unrotated resize unchanged from prior behavior, no warnings
 r = run("resize", targets="t_box", height=0.3)
+check("unrotated resize success", r.get("success"), r.get("error"))
 check("no warning on unrotated", not r.get("warnings"), r.get("warnings"))
 
 print("== spline_tube ==")
@@ -262,6 +267,19 @@ check("rot_x=90 cyl flush in front (ymax == floor ymin)", abs(fc[4] - fb[1]) < 1
 run("add_box", name="plain_on", width=0.2, depth=0.2, height=0.2, on={"on": "floor_box"})
 pb = world_bbox(bpy.data.objects["plain_on"])
 check("unrotated on-placement still flush", abs(pb[2] - fb[5]) < 1e-4, (pb[2], fb[5]))
+
+print("== T5 resize on axis-aligned rotation ==")
+run("add_cylinder", name="r90", radius=0.3, height=1.0, rot_y=90, on={"at": [42, 0, 0]})
+b0 = world_bbox(bpy.data.objects["r90"])  # world X≈1.0 (height), Y≈Z≈0.6
+r = run("resize", targets="r90", width=0.5)  # request WORLD width
+check("axis-aligned resize success", r.get("success"), r.get("error"))
+check("axis-aligned resize no warnings", not r.get("warnings"), r.get("warnings"))
+b1 = world_bbox(bpy.data.objects["r90"])
+check("world width set exactly to 0.5", abs((b1[3] - b1[0]) - 0.5) < 1e-4, b1[3] - b1[0])
+check("world depth unchanged", abs((b1[4] - b1[1]) - (b0[4] - b0[1])) < 1e-4,
+      (b1[4] - b1[1], b0[4] - b0[1]))
+check("world height unchanged", abs((b1[5] - b1[2]) - (b0[5] - b0[2])) < 1e-4,
+      (b1[5] - b1[2], b0[5] - b0[2]))
 
 print()
 if failures:
