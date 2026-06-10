@@ -461,3 +461,29 @@ current values in `get_blender_status` (or screenshot metadata, next to the
 shading mode that's already reported there). `set_toon_material`'s docs should
 then recommend Standard. **File:** `server/scene.py` + `extension/lighting.py`
 (or a new `extension/color.py`). Effort: small, low risk — four scene fields.
+
+## E11. Eevee raytracing is off and unreachable — metals can't look like metal
+
+Confirmed by headless inspection of the saved chest .blend:
+`scene.eevee.use_raytracing == False` (Blender's default). With it off, a
+metallic=1 material reflects only the low-res world probe — no screen-space
+reflections of the ground, the other parts, or anything crisp — which is
+exactly the "fake plastic gold" read. The user called it on sight.
+
+No tool exposes render-quality settings. Want a small
+`set_render_quality(raytracing=None, ao=None, shadows=None, samples=None)` —
+or fold the raytracing toggle into set_viewport_shading. Pairs with E10:
+together they're "the agent can model the asset but can't control how Blender
+draws it." **File:** `server/scene.py` + extension counterpart. Effort: small,
+low risk.
+
+## E12. set_textured_material ignores metalness — metal scans render as plastic
+
+server/polyhaven.py downloads diffuse/roughness/normal only, and the node
+wiring never touches the Metallic input. Poly Haven metal assets ship a
+metal/ARM map; without it, a scratched-brass scan becomes a shiny gray
+dielectric. This also closes the best workaround for flat-looking trim:
+photo-scanned roughness/metal variation is what sells metal (uniform roughness
+is the other half of the plastic look, alongside E11). Add "metal" to the map
+fetch list and wire it to Metallic (Non-Color). **File:** `server/polyhaven.py`
+map resolution + `extension/textures.py` wiring. Effort: small, low risk.
