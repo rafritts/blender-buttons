@@ -1,6 +1,15 @@
 # MCP gaps
 
-_No open gaps._
+## S1b-residual — lint skip-report is bypassed by GROUP expansion, 2026-06-11
+
+`audit_asset("throw_arm,winch_rope")` correctly prints `(skipped 1 non-mesh:
+winch_rope)`, but `audit_asset("catapult")` — a 9-part group containing the
+same curve — reports `8 object(s)` with no skip line (same for
+`validate_scene`). The group→objects resolution filters to meshes BEFORE the
+tools' `excluded_non_mesh` accounting, so the no-silent-caps fix only covers
+explicitly named targets. Fix where the group expands: pass non-mesh members
+through to the tool's exclusion accounting instead of dropping them at
+expansion.
 
 ## Tactile introspection — the design principle
 
