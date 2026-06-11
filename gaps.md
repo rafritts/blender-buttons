@@ -1,5 +1,44 @@
 # MCP gaps
 
+## Presentation-pass gaps (T1–T4) — texturing/lighting the catapult for a showcase, 2026-06-11
+
+Dressing a finished multi-material asset for hero renders. The build was done;
+every gap below is about *changing how it looks* without rebuilding it.
+
+- **T1 — materials are only addressable through an object's slot 0.**
+  `set_material` / `set_textured_material` always write the target's first
+  material slot. A multi-slot mesh (wheel: wood faces + iron rim faces) can't
+  have its secondary material changed at all, and a material shared across many
+  objects (`iron_mat` on 4 wheels + arm + drum) can't be restyled in one call —
+  the tools have no way to say "update the material *named* iron_mat".
+  Workaround that worked: add a throwaway box, apply with
+  `material_name="iron_mat"` (reuse-rewires the shared datablock in place, so
+  every slot-1 user updates), delete the box. That's three calls and a trick;
+  the primitive is one: address a material by NAME with no target object
+  (`set_material(material="iron_mat", ...)`), leaving slot assignments alone.
+  Slot-index targeting (`target="wheel_FL", slot=1`) is the same gap from the
+  other side.
+- **T2 — `set_camera_dof(focus_object=...)` focuses on the rest-pose origin.**
+  Object origins don't move under armature deform, so focusing on the posed
+  boulder (riding the cocked arm, ~1m from where its origin says it is) needed
+  hand-computed `focus_distance`. The fix mirrors R4's lesson: evaluate the
+  posed geometry — focus on the evaluated-bbox center, not the object origin.
+- **T3 — texture tint/override values are invisible to introspection.**
+  `describe` lists each slot's material with base color + roughness +
+  `texture(asset@res)`, but a `tint`/`base_color` override applied by
+  `set_textured_material` lives inside the node tree and is not reported — after
+  retinting the shared `rope_mat`, nothing deterministic could confirm the
+  change propagated (describe still showed the unused BSDF default
+  `[0.8, 0.8, 0.8]`); only a render could. Tactile-introspection hole: the
+  material line should read `texture(cotton_jersey@1k tint=[0.45,0.33,0.2])`.
+- **T4 — the agent can't see what the user's viewport is showing.** A whole
+  texture pass happened while the user's viewport sat in SOLID shading — they
+  watched gray blockout and reported "zero textures" while renders were fully
+  dressed. `get_viewport_screenshot` returns the shading mode in its metadata,
+  but the status block (the instrument panel every mutating call returns) does
+  not. One `viewport: SOLID` line in the status block would have flagged the
+  mismatch at the first `set_textured_material` call.
+
 ## S1b-residual — lint skip-report is bypassed by GROUP expansion, 2026-06-11
 
 `audit_asset("throw_arm,winch_rope")` correctly prints `(skipped 1 non-mesh:
@@ -10,8 +49,6 @@ tools' `excluded_non_mesh` accounting, so the no-silent-caps fix only covers
 explicitly named targets. Fix where the group expands: pass non-mesh members
 through to the tool's exclusion accounting instead of dropping them at
 expansion.
-
-## Tactile introspection — the design principle
 
 ## Tactile introspection — the design principle
 
