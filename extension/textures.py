@@ -137,16 +137,22 @@ def set_textured_material(params):
         store["roughness"] = float(roughness)
     mat["bb_texture"] = json.dumps(store)
 
+    slot_idx = int(params.get("slot")) if params.get("slot") is not None else 0
     for o in meshes:
-        if o.data.materials:
-            o.data.materials[0] = mat
+        mats = o.data.materials
+        if slot_idx < len(mats):
+            mats[slot_idx] = mat
+        elif slot_idx == len(mats):
+            mats.append(mat)
         else:
-            o.data.materials.append(mat)
+            return {"error": f"'{o.name}' has {len(mats)} slot(s); slot {slot_idx} is "
+                             f"out of range (can only append at index {len(mats)})"}
 
     return {
         "success": True,
         "target": target,
         "material": mat.name,
+        "slot": slot_idx,
         "assigned_to": [o.name for o in meshes],
         "maps_wired": wired,
     }

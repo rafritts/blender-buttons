@@ -111,7 +111,15 @@ def hex_to_linear_rgba(hex_str):
 def set_material(params):
     """Create or update a Principled BSDF material and assign it to an object.
 
-    target:        object name (required). Material is assigned to slot 0.
+    Addressing the material (gaps.md T1):
+    target:        object/group name. Material is assigned to slot 0 by default.
+    material:      address an EXISTING material datablock by name, with NO target —
+                   restyle a shared material everywhere it's used in one call
+                   (e.g. material="iron_mat" recolors every object using it).
+    slot:          with a target, operate on this material SLOT index instead of 0.
+                   Without material_name, edits the material already in that slot
+                   in place (restyle a multi-slot mesh's secondary material);
+                   with material_name, assigns the new material to that slot.
     material_name: name for the material (created if missing, reused if present).
                    If omitted, defaults to "<target>_mat".
     base_color:    [r, g, b] or [r, g, b, a], floats 0..1.
@@ -122,23 +130,43 @@ def set_material(params):
     emission_color: [r, g, b] glow color.
     emission_strength: glow intensity (watts/m²-ish).
     """
-    from .common import resolve_targets, has_material_slots
+    from .common import resolve_targets, has_material_slots, linked_guard_any
     target = params.get("target")
-    if not target:
-        return {"error": "'target' (object or group name) is required"}
-    objs, err = resolve_targets(target)
-    if err:
-        return {"error": err}
-    meshes = [o for o in objs if has_material_slots(o)]
-    if not meshes:
-        return {"error": f"'{target}' contains nothing that can hold a material"}
-    from .common import linked_guard_any
-    blocked = linked_guard_any(meshes)
-    if blocked:
-        return {"error": blocked}
+    material = params.get("material")
+    slot = params.get("slot")
 
-    mat_name = params.get("material_name") or f"{target}_mat"
-    mat = bpy.data.materials.get(mat_name) or bpy.data.materials.new(mat_name)
+    meshes = []
+    if material and not target:
+        # Address an existing material datablock directly — no object needed.
+        mat = bpy.data.materials.get(material)
+        if mat is None:
+            return {"error": f"material '{material}' not found"}
+    else:
+        if not target:
+            return {"error": "provide 'target' (object/group) or 'material' "
+                             "(existing material name to edit in place)"}
+        objs, err = resolve_targets(target)
+        if err:
+            return {"error": err}
+        meshes = [o for o in objs if has_material_slots(o)]
+        if not meshes:
+            return {"error": f"'{target}' contains nothing that can hold a material"}
+        blocked = linked_guard_any(meshes)
+        if blocked:
+            return {"error": blocked}
+        if slot is not None and params.get("material_name") is None and not material:
+            # Slot targeting with no new material → edit the material ALREADY in that
+            # slot, in place (restyle the wheel's iron rim sitting in slot 1).
+            slot_idx = int(slot)
+            o0 = meshes[0]
+            mats = o0.data.materials
+            if slot_idx < 0 or slot_idx >= len(mats) or mats[slot_idx] is None:
+                return {"error": f"'{o0.name}' has no material in slot {slot_idx}"}
+            mat = mats[slot_idx]
+            meshes = []  # editing the slot's material in place; no reassignment
+        else:
+            mat_name = params.get("material_name") or material or f"{target}_mat"
+            mat = bpy.data.materials.get(mat_name) or bpy.data.materials.new(mat_name)
     bsdf = _ensure_principled(mat)
 
     applied = []
@@ -184,17 +212,24 @@ def set_material(params):
     if es is not None and _set_input(bsdf, "Emission Strength", float(es)):
         applied.append(f"emission_strength={es}")
 
+    slot_idx = int(slot) if slot is not None else 0
     for obj in meshes:
-        if obj.data.materials:
-            obj.data.materials[0] = mat
+        mats = obj.data.materials
+        if slot_idx < len(mats):
+            mats[slot_idx] = mat
+        elif slot_idx == len(mats):
+            mats.append(mat)
         else:
-            obj.data.materials.append(mat)
+            return {"error": f"'{obj.name}' has {len(mats)} slot(s); slot {slot_idx} is "
+                             f"out of range (can only append at index {len(mats)})"}
 
     return {
         "success": True,
         "target": target,
         "assigned_to": [o.name for o in meshes],
         "material": mat.name,
+        "slot": slot_idx if slot is not None else None,
+        "edited_in_place": not meshes,
         "applied": applied,
     }
 

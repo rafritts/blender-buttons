@@ -223,6 +223,31 @@ def set_particle_visibility(name: str, show: bool = False, label: str = "") -> s
 
 
 @mcp.tool()
+def set_object_visibility(name: str, viewport: bool = None, render: bool = None,
+                          label: str = "") -> str:
+    """
+    Show or hide an object in the viewport and/or render — without deleting or
+    unbinding it. Hiding an armature hides its bones from the user's live view while
+    the Armature modifier keeps deforming the bound mesh; hiding a cutter/guide
+    declutters a hero shot.
+
+    Example: set_object_visibility("char_rig", viewport=False)   # hide the bones
+    """
+    params = {"name": name}
+    if viewport is not None:
+        params["viewport"] = viewport
+    if render is not None:
+        params["render"] = render
+    result = call_blender("set_object_visibility", params, label=label)
+    if result.get("success"):
+        main = (f"'{result['name']}': viewport={'shown' if result['viewport_visible'] else 'hidden'}, "
+                f"render={'shown' if result['render_visible'] else 'hidden'} [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def list_shape_keys(name: str) -> str:
     """
     List an object's shape keys (morph targets) and their current values — facial

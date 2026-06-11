@@ -24,7 +24,7 @@ def set_textured_material(target: str, asset_id: str, scale: float = 1.0,
                           resolution: str = "1k", base_color: list = None,
                           tint: list = None, metallic: float = None,
                           roughness: float = None, material_name: str = "",
-                          label: str = "") -> str:
+                          slot: int = None, label: str = "") -> str:
     """
     Apply a real photo-scanned PBR material from Poly Haven (CC0) to an object or
     group. Downloads + caches the diffuse/normal/roughness/metal maps server-side,
@@ -45,6 +45,8 @@ def set_textured_material(target: str, asset_id: str, scale: float = 1.0,
                 map). Use 1.0 with base_color to turn any scan into a metal.
     roughness:  optional 0..1 — forces the Roughness input (overrides the
                 roughness map). 1.0 = fully matte, no sheen at all.
+    slot:       material slot index to assign into (default 0) — for texturing a
+                multi-slot mesh's secondary material.
 
     A bad id or a network failure returns a clean error and leaves the object's
     material unchanged. Subsequent calls for the same asset/resolution hit the
@@ -66,6 +68,8 @@ def set_textured_material(target: str, asset_id: str, scale: float = 1.0,
         params["roughness"] = roughness
     if material_name:
         params["material_name"] = material_name
+    if slot is not None:
+        params["slot"] = slot
     result = call_blender("set_textured_material", params, label=label)
     if result.get("success"):
         main = (f"textured '{result['target']}' with {asset_id}@{resolution} "

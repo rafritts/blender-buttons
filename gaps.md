@@ -1,33 +1,7 @@
 # MCP gaps
 
-## Presentation-pass gaps (T1–T8) — texturing/lighting the catapult for a showcase, 2026-06-11
-
-Dressing a finished multi-material asset for hero renders. The build was done;
-every gap below is about *changing how it looks* without rebuilding it.
-
-- **T1 — materials are only addressable through an object's slot 0.**
-  `set_material` / `set_textured_material` always write the target's first
-  material slot. A multi-slot mesh (wheel: wood faces + iron rim faces) can't
-  have its secondary material changed at all, and a material shared across many
-  objects (`iron_mat` on 4 wheels + arm + drum) can't be restyled in one call —
-  the tools have no way to say "update the material *named* iron_mat".
-  Workaround that worked: add a throwaway box, apply with
-  `material_name="iron_mat"` (reuse-rewires the shared datablock in place, so
-  every slot-1 user updates), delete the box. That's three calls and a trick;
-  the primitive is one: address a material by NAME with no target object
-  (`set_material(material="iron_mat", ...)`), leaving slot assignments alone.
-  Slot-index targeting (`target="wheel_FL", slot=1`) is the same gap from the
-  other side.
-- **T5 — viewport overlays are screenshot-only configurable.**
-  `get_viewport_screenshot(hide_overlays=True)` cleans up the agent's view, but
-  nothing can clean up the USER's live viewport: with a rigged, scattered scene
-  the armature draws white octahedral bones over the meshes and every linked
-  instance draws a dashed relationship line — the textured model reads as gray
-  blockout to the person watching. T4's other half: the agent could *see* the
-  problem (after T4 lands) but still can't *fix* it. Primitive: a
-  `set_viewport_overlays(relationship_lines=, bones=, gizmos=, ...)` verb (or
-  per-object viewport visibility, e.g. hide the armature object from the
-  viewport without unbinding it).
+_All logged gaps (P, R, S, T, U series) are closed — see "Recently closed" below.
+New gaps from future builds go above this line._
 
 ## Tactile introspection — the design principle
 
@@ -41,6 +15,25 @@ coordinates. BVHTree makes the proximity queries milliseconds-cheap at hobby pol
 ---
 
 # Recently closed
+
+## Batch 6 — presentation pass (T1, T5), 2026-06-11
+
+Closes the T-series. e2e in `tests/e2e_batch6.py` (21 checks).
+
+- **T1 — materials addressable beyond slot 0.** `set_material(material="iron_mat",
+  …)` edits an EXISTING material datablock by name with no target — restyle a
+  shared material everywhere it's used in one call. `set_material(target=…,
+  slot=N)` operates on a specific slot: without `material_name` it edits the
+  material already in that slot in place (a multi-slot mesh's secondary material);
+  with one, it assigns there. `set_textured_material` gained the same `slot`.
+  Out-of-range slots fail loudly.
+- **T5 — the user's live viewport is configurable.** `set_viewport_overlays(
+  relationship_lines=, floor=, cursor=, wireframes=, text_info=, axes=, overlays=)`
+  toggles the overlays the PERSON sees (not just the agent's screenshot);
+  `set_object_visibility(name, viewport=, render=)` hides an object — e.g. an
+  armature, so its bones stop drawing over the meshes — while the Armature modifier
+  keeps deforming the bound mesh. (set_viewport_overlays is NON_UNDOABLE like
+  set_viewport_shading.)
 
 ## Batch 5 — production-asset access (U4, U7, U8, U10), 2026-06-11
 

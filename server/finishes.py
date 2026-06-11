@@ -123,7 +123,7 @@ def shade_flat(targets: str = "", label: str = "") -> str:
 
 
 @mcp.tool()
-def set_material(target: str,
+def set_material(target: str = "",
                  base_color: list = None,
                  hex: str = "",
                  metallic: float = None,
@@ -133,14 +133,22 @@ def set_material(target: str,
                  emission_color: list = None,
                  emission_strength: float = None,
                  material_name: str = "",
+                 material: str = "",
+                 slot: int = None,
                  label: str = "") -> str:
     """
-    Create or update a Principled BSDF material and assign it to `target` (slot 0).
-    Covers ~80% of real materials: color, metallic, roughness, IOR, alpha, emission.
+    Create or update a Principled BSDF material and assign it. Covers ~80% of real
+    materials: color, metallic, roughness, IOR, alpha, emission.
 
-    target:        REQUIRED — object OR group name. Group expands to every
-                   mesh inside (recursively), so one call materialises a whole
-                   sub-assembly with a single shared material.
+    target:        object OR group name. Group expands to every mesh inside
+                   (recursively). Material is assigned to slot 0 by default.
+    material:      address an EXISTING material datablock by NAME, with NO target —
+                   restyle a shared material everywhere it's used in one call
+                   (e.g. material="iron_mat" recolors all 4 wheels + arm at once).
+    slot:          with a target, operate on this material SLOT index instead of 0.
+                   Without material_name this edits the material already in that slot
+                   in place — the way to change a multi-slot mesh's SECONDARY
+                   material (wheel: wood in slot 0, iron rim in slot 1).
     base_color:    [r, g, b] or [r, g, b, a], floats 0..1 (scene-linear).
     hex:           "#RRGGBB" or "#RRGGBBAA" sRGB color (as picked from a
                    reference image / color picker). Converted to scene-linear
@@ -155,10 +163,13 @@ def set_material(target: str,
 
     Examples:
       set_material("donut", base_color=[0.8, 0.55, 0.35], roughness=0.6)   # dough
-      set_material("icing", base_color=[1.0, 0.85, 0.92], roughness=0.3)   # pink frosting
-      set_material("sprinkle_1", base_color=[1, 0.1, 0.1], roughness=0.4)
+      set_material(material="iron_mat", roughness=0.25, metallic=1.0)       # restyle shared
+      set_material("wheel_FL", slot=1, hex="#3a3a40")                       # the iron rim
     """
-    params = {"target": target}
+    params = {}
+    if target:               params["target"] = target
+    if material:             params["material"] = material
+    if slot is not None:     params["slot"] = slot
     if material_name:        params["material_name"] = material_name
     if hex:                  params["hex"] = hex
     if base_color is not None:        params["base_color"] = base_color
@@ -170,7 +181,12 @@ def set_material(target: str,
     if emission_strength is not None: params["emission_strength"] = emission_strength
     result = call_blender("set_material", params, label=label)
     if result.get("success"):
-        main = (f"material '{result['material']}' on '{result['target']}': "
+        if result.get("edited_in_place"):
+            where = "in place (all users updated)"
+        else:
+            slot_str = f" slot {result['slot']}" if result.get("slot") is not None else ""
+            where = f"on '{result.get('target')}'{slot_str}"
+        main = (f"material '{result['material']}' {where}: "
                 f"{result['applied']} [{result.get('op_id','')}]")
     else:
         main = result.get("error", "failed")

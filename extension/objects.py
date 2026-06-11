@@ -528,6 +528,28 @@ def set_shape_key(params):
     return {"success": True, "name": name, "key": key, "value": round(kb.value, 4)}
 
 
+def set_object_visibility(params):
+    """Show or hide an object in the viewport and/or render, without deleting or
+    unbinding it. Hiding an armature hides its bones from the user's live view while
+    the Armature modifier keeps deforming the bound mesh (gaps.md T5)."""
+    name = params.get("name")
+    obj = bpy.data.objects.get(name)
+    if obj is None:
+        return {"error": f"Object '{name}' not found"}
+    viewport = params.get("viewport")
+    render = params.get("render")
+    if viewport is None and render is None:
+        return {"error": "set 'viewport' and/or 'render' (bool) to show/hide"}
+    if viewport is not None:
+        obj.hide_set(not bool(viewport))
+        obj.hide_viewport = not bool(viewport)
+    if render is not None:
+        obj.hide_render = not bool(render)
+    return {"success": True, "name": name,
+            "viewport_visible": not obj.hide_viewport,
+            "render_visible": not obj.hide_render}
+
+
 TOOLS = {
     "rename_object":          rename_object,
     "select_object":          select_object,
@@ -544,4 +566,5 @@ TOOLS = {
     "set_particle_visibility": set_particle_visibility,
     "list_shape_keys":        list_shape_keys,
     "set_shape_key":          set_shape_key,
+    "set_object_visibility":  set_object_visibility,
 }

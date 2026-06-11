@@ -97,6 +97,35 @@ def set_viewport_shading(mode: str = "MATERIAL") -> str:
 
 
 @mcp.tool()
+def set_viewport_overlays(relationship_lines: bool = None, floor: bool = None,
+                          cursor: bool = None, wireframes: bool = None,
+                          text_info: bool = None, axes: bool = None,
+                          overlays: bool = None) -> str:
+    """
+    Toggle the USER's live 3D-viewport overlays — clean up what the PERSON watching
+    sees, not just the agent's screenshot. On a rigged, scattered scene the dashed
+    relationship lines and grid clutter make a fully textured model read as gray
+    blockout to whoever's looking.
+
+    Pass any of (bool each): relationship_lines, floor, cursor, wireframes,
+    text_info, axes, overlays (master on/off). To hide an armature's BONES from the
+    user, hide the armature object with set_object_visibility (the Armature modifier
+    keeps deforming the mesh).
+
+    Example: set_viewport_overlays(relationship_lines=False, cursor=False)
+    """
+    params = {k: v for k, v in {
+        "relationship_lines": relationship_lines, "floor": floor, "cursor": cursor,
+        "wireframes": wireframes, "text_info": text_info, "axes": axes,
+        "overlays": overlays,
+    }.items() if v is not None}
+    result = call_blender("set_viewport_overlays", params)
+    if result.get("success"):
+        return f"overlays updated: {result['changed']}"
+    return result.get("error", "failed")
+
+
+@mcp.tool()
 def frame_scene(targets: str = "", include_lights: bool = False) -> str:
     """Fit objects in the viewport.
 

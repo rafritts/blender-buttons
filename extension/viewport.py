@@ -588,11 +588,56 @@ def set_viewport_shading(params):
     return {"success": True, "mode": mode}
 
 
+_OVERLAY_FLAGS = {
+    "relationship_lines": "show_relationship_lines",
+    "floor":              "show_floor",
+    "cursor":             "show_cursor",
+    "wireframes":         "show_wireframes",
+    "text_info":          "show_text",
+    "overlays":           "show_overlays",   # master toggle
+}
+
+
+def set_viewport_overlays(params):
+    """Toggle the USER's live 3D-viewport overlays — clean up what the PERSON sees,
+    not just the agent's screenshot (gaps.md T5). On a rigged, scattered scene the
+    dashed relationship lines and grid clutter make a textured model read as gray
+    blockout to whoever's watching.
+
+    Pass any of: relationship_lines, floor, cursor, wireframes, text_info, axes,
+    overlays (master) — each a bool. To hide an armature's bones from the user, use
+    set_object_visibility on the armature (the Armature modifier keeps deforming)."""
+    window, screen, area, region = find_view3d_context()
+    if area is None:
+        return {"error": "No 3D viewport found (headless?)"}
+    space = next((s for s in area.spaces if s.type == 'VIEW_3D'), None)
+    if space is None:
+        return {"error": "No VIEW_3D space found"}
+    ov = space.overlay
+
+    changed = {}
+    for key, attr in _OVERLAY_FLAGS.items():
+        if params.get(key) is not None and hasattr(ov, attr):
+            setattr(ov, attr, bool(params[key]))
+            changed[key] = bool(params[key])
+    if params.get("axes") is not None:
+        val = bool(params["axes"])
+        ov.show_axis_x = val
+        ov.show_axis_y = val
+        changed["axes"] = val
+
+    if not changed:
+        opts = ", ".join(list(_OVERLAY_FLAGS) + ["axes"])
+        return {"error": f"no overlay flags given. Options (bool each): {opts}"}
+    return {"success": True, "changed": changed}
+
+
 TOOLS = {
     "get_viewport_screenshot": get_viewport_screenshot,
     "get_viewport_collage":    get_viewport_collage,
     "set_viewport_angle":      set_viewport_angle,
     "set_viewport_shading":    set_viewport_shading,
+    "set_viewport_overlays":   set_viewport_overlays,
     "frame_scene":             frame_scene,
     "zoom_to_selected":        zoom_to_selected,
     "orbit_viewport":          orbit_viewport,
