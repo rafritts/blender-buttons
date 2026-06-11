@@ -95,7 +95,7 @@ def get_object_info(name: str = "") -> str:
 
 
 @mcp.tool()
-def describe(name: str) -> str:
+def describe(name: str, posed: bool = False) -> str:
     """
     Describe an object in RELATIONAL terms — what it rests on, what it's flush with,
     and its dimensions. No raw world coordinates.
@@ -104,10 +104,15 @@ def describe(name: str) -> str:
     when you really need them; describe() is the everyday tool because relational
     descriptions are what you actually reason in.
 
+    posed: when True, report the EVALUATED geometry — bounds/center under current
+    modifiers AND armature pose — instead of rest placement, plus how far the posed
+    geometry sits from rest. Use this to find where a deformed/posed part actually
+    is (e.g. a cup riding a cocked rig) without dead-reckoning the bone pivot.
+
     Example output:
         "leg_front_left: standing on floor; flush left of seat; size 0.04 × 0.04 × 0.45 m (W×D×H)"
     """
-    result = call_blender("describe", {"name": name})
+    result = call_blender("describe", {"name": name, "posed": posed})
     if not result.get("success"):
         return result.get("error", "failed")
     return result["description"] + _status(result)

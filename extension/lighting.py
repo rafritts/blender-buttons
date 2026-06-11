@@ -159,7 +159,10 @@ def set_camera_dof(params):
 
     camera:         camera object name. If omitted, uses the scene camera.
     focus_distance: meters from camera to focal plane. Ignored if focus_object is set.
-    focus_object:   object name to focus on (camera auto-tracks its distance).
+    focus_object:   object name to focus on. Focuses on the object's EVALUATED
+                    (posed/deformed) geometry center at call time — not Blender's
+                    focus-object tracking, which follows the rest origin and so
+                    misses a boulder riding a cocked arm by ~1m (gaps.md T2).
     aperture:       f-stop value. Lower = shallower DoF (more blur).
                     Typical: 1.4 (very shallow), 2.8 (portrait), 8 (everything in focus).
     """
@@ -178,11 +181,23 @@ def set_camera_dof(params):
     dof.use_dof = True
 
     focus_object_name = params.get("focus_object")
+    focus_target = None
     if focus_object_name:
+        import mathutils
+        from .common import eval_world_center
         tgt = bpy.data.objects.get(focus_object_name)
         if tgt is None:
             return {"error": f"focus_object '{focus_object_name}' not found"}
-        dof.focus_object = tgt
+        # Project the evaluated-geometry center onto the camera's view axis to get
+        # the focal-plane distance (focus_distance is measured along the lens axis,
+        # not euclidean to the point). Setting a computed distance — not
+        # dof.focus_object — focuses on the POSED geometry, not the rest origin.
+        center = mathutils.Vector(eval_world_center(tgt))
+        cam_mat = cam.matrix_world
+        forward = (cam_mat.to_3x3() @ mathutils.Vector((0.0, 0.0, -1.0))).normalized()
+        dof.focus_object = None
+        dof.focus_distance = float((center - cam_mat.translation).dot(forward))
+        focus_target = tgt.name
     else:
         dof.focus_object = None
         fd = params.get("focus_distance")
@@ -198,7 +213,7 @@ def set_camera_dof(params):
         "success": True,
         "camera": cam.name,
         "use_dof": True,
-        "focus_object": dof.focus_object.name if dof.focus_object else None,
+        "focus_object": focus_target,
         "focus_distance": round(dof.focus_distance, 4),
         "aperture_fstop": round(dof.aperture_fstop, 4),
     }

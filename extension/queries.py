@@ -8,6 +8,22 @@ from .common import (eval_world_bmesh, material_summary, region_words,
                      world_bbox, world_center)
 
 
+def _base_mesh_world_center(obj):
+    """World center of the UNDEFORMED base mesh (obj.data.vertices) — the rest
+    reference for measuring pose displacement. obj.bound_box is already modifier-
+    aware in 5.1, so the base mesh itself is the honest 'before' for a posed object.
+    Falls back to the object origin for objects with no vertex data."""
+    me = getattr(obj, "data", None)
+    if me is None or not hasattr(me, "vertices") or not len(me.vertices):
+        return tuple(obj.matrix_world.translation)
+    mw = obj.matrix_world
+    xs, ys, zs = [], [], []
+    for v in me.vertices:
+        w = mw @ v.co
+        xs.append(w.x); ys.append(w.y); zs.append(w.z)
+    return ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, (min(zs) + max(zs)) / 2)
+
+
 def describe(params):
     """Describe an object in relational terms — what it rests on, what it's beside,
     and its dimensions. No raw world coordinates in the output."""
@@ -18,7 +34,16 @@ def describe(params):
     if obj is None:
         return {"error": f"Object '{name}' not found"}
 
-    xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
+    posed = bool(params.get("posed"))
+    if posed:
+        from .common import eval_world_bbox
+        xmin, ymin, zmin, xmax, ymax, zmax = eval_world_bbox(obj)
+        posed_offset_mm = round(math.dist(
+            ((xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2),
+            _base_mesh_world_center(obj)) * 1000, 1)
+    else:
+        xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
+        posed_offset_mm = None
     w, d, h = xmax - xmin, ymax - ymin, zmax - zmin
 
     relations = []
@@ -88,6 +113,8 @@ def describe(params):
     mat_str = f"material: {', '.join(mat_strs)}" if mat_strs else "no material"
 
     parts = relations + [dim_str, mat_str]
+    if posed:
+        parts.insert(0, f"posed (evaluated geometry; center {posed_offset_mm}mm from rest)")
 
     spline_pts = obj.get("bb_spline_points")
     if spline_pts:
@@ -105,6 +132,9 @@ def describe(params):
     }
     if spline_pts:
         result["spline_points"] = spline_pts
+    if posed:
+        result["posed"] = True
+        result["posed_center_offset_mm"] = posed_offset_mm
     return result
 
 

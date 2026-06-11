@@ -19,6 +19,38 @@ def world_center(obj):
     return ((xmin + xmax) * 0.5, (ymin + ymax) * 0.5, (zmin + zmax) * 0.5)
 
 
+def eval_world_bbox(obj):
+    """World-space bbox of obj's EVALUATED geometry — modifiers AND armature pose
+    applied. `world_bbox` reads the base-mesh `bound_box`, so it reports REST
+    placement; this reflects the deformed/posed shape, answering 'where is the
+    posed part actually?' (gaps.md T6, also fixes the T2 DOF case). Computed from
+    the evaluated mesh verts (correct under deform, where `bound_box` can lag).
+    Falls back to `world_bbox` for objects with no evaluable mesh."""
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    obj_eval = obj.evaluated_get(depsgraph)
+    try:
+        me = obj_eval.to_mesh()
+    except (RuntimeError, AttributeError):
+        return world_bbox(obj)
+    if me is None or not me.vertices:
+        if me is not None:
+            obj_eval.to_mesh_clear()
+        return world_bbox(obj)
+    mw = obj_eval.matrix_world
+    xs, ys, zs = [], [], []
+    for v in me.vertices:
+        w = mw @ v.co
+        xs.append(w.x); ys.append(w.y); zs.append(w.z)
+    obj_eval.to_mesh_clear()
+    return min(xs), min(ys), min(zs), max(xs), max(ys), max(zs)
+
+
+def eval_world_center(obj):
+    """World-space center of obj's EVALUATED (posed/deformed) geometry."""
+    xmin, ymin, zmin, xmax, ymax, zmax = eval_world_bbox(obj)
+    return ((xmin + xmax) * 0.5, (ymin + ymax) * 0.5, (zmin + zmax) * 0.5)
+
+
 def nearby_objects(world_pos, exclude_names=(), max_count=3):
     """Return up to max_count nearest mesh objects to world_pos, sorted by distance."""
     px, py, pz = world_pos

@@ -83,11 +83,6 @@ every gap below is about *changing how it looks* without rebuilding it.
   (`set_material(material="iron_mat", ...)`), leaving slot assignments alone.
   Slot-index targeting (`target="wheel_FL", slot=1`) is the same gap from the
   other side.
-- **T2 — `set_camera_dof(focus_object=...)` focuses on the rest-pose origin.**
-  Object origins don't move under armature deform, so focusing on the posed
-  boulder (riding the cocked arm, ~1m from where its origin says it is) needed
-  hand-computed `focus_distance`. The fix mirrors R4's lesson: evaluate the
-  posed geometry — focus on the evaluated-bbox center, not the object origin.
 - **T5 — viewport overlays are screenshot-only configurable.**
   `get_viewport_screenshot(hide_overlays=True)` cleans up the agent's view, but
   nothing can clean up the USER's live viewport: with a rigged, scattered scene
@@ -98,16 +93,6 @@ every gap below is about *changing how it looks* without rebuilding it.
   `set_viewport_overlays(relationship_lines=, bones=, gizmos=, ...)` verb (or
   per-object viewport visibility, e.g. hide the armature object from the
   viewport without unbinding it).
-
-- **T6 — no posed-position query for deformed meshes.** Object origins and
-  `describe`/`get_object_info` report REST placement; while the rig was cocked,
-  framing the camera on the relocated cup meant hand-deriving the bone pivot
-  from two measured point pairs and rotating the rest position by hand (the
-  exact dead-reckoning GUIDANCE_FOR_LLMS warns about). The armature object's
-  status-block bounds DO update with pose, but per-mesh evaluated bounds don't
-  exist as a query. Primitive: `describe(name, posed=True)` (or a
-  `where_is(name)`) returning evaluated-geometry bounds/center under current
-  modifiers — one call instead of trigonometry. Would also fix T2's DOF case.
 
 ## Tactile introspection — the design principle
 
@@ -121,6 +106,24 @@ coordinates. BVHTree makes the proximity queries milliseconds-cheap at hobby pol
 ---
 
 # Recently closed
+
+## Batch 3 — evaluated/posed-bounds primitive (T6, T2), 2026-06-11
+
+New `common.eval_world_bbox` / `eval_world_center` — evaluated (modifier- AND
+pose-aware) bounds computed from the evaluated mesh verts, so they're reliable
+even when `obj.bound_box` lags (its display bounds are pose-aware in 5.1 but only
+after a depsgraph update — which is what made describe look "rest" live). e2e in
+`tests/e2e_batch3.py` (12 checks).
+
+- **T6 — `describe(name, posed=True)`** reports the evaluated geometry's
+  bounds/dimensions plus `posed_center_offset_mm` = how far the deformed geometry
+  center sits from the UNDEFORMED base-mesh center (the dead-reckoning the
+  GUIDANCE warns about, in one call). `posed=False` is unchanged.
+- **T2 — `set_camera_dof(focus_object=…)`** now focuses on the evaluated-geometry
+  center, not Blender's focus-object tracking (which follows the rest origin — a
+  posed part rides ~1m off it). It projects the evaluated center onto the camera's
+  view axis to set `focus_distance` and clears `dof.focus_object`, so the focal
+  plane sits on the posed geometry at call time.
 
 ## Batch 2 — material introspection (U5, T3), 2026-06-11
 
