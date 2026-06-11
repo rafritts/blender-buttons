@@ -29,9 +29,12 @@ discover one.
   bone location alongside rotation (and an additive option — replace semantics
   forces re-deriving the full pose to nudge one axis).
 - **U4 — `get_scene_tree` doesn't scale.** On Spring it dumped ~400 objects —
-  300 of them `cs_*` bone-shape widgets — and the output truncated mid-tree
-  (lights/cameras/world never appeared), a silent cap of exactly the kind the
-  no-silent-caps principle forbids. Huge context burn, near-zero signal.
+  300 of them `cs_*` bone-shape widgets — and the output the agent received
+  cut off mid-tree (lights/cameras/world never appeared). Verified against the
+  code: there is NO cap or truncation in `get_scene_tree` itself — the clamp
+  happened in the agent harness swallowing a payload that size. So this is an
+  output-volume/scalability gap, not a no-silent-caps bug: at production scale
+  the full dump is unreadable by the consumer regardless of who truncates it.
   Primitive: depth limit, type/name filters, and collection summarization
   ("spring.rig.widgets/ — 310 meshes") with full expansion on request.
 - **U5 — Principled-slot material summaries are actively WRONG on node-graph
@@ -140,11 +143,18 @@ every gap below is about *changing how it looks* without rebuilding it.
   modifiers — one call instead of trigonometry. Would also fix T2's DOF case.
 - **T7 — deleted-object names stay claimed after a boolean.** Sequence:
   `boolean(..., hide_cutter=True)` → `delete_object(cutter)` reports deleted →
-  `add_sphere(name=<same name>)` fails with "already exists". Something (the
-  hidden-cutter bookkeeping, an undo snapshot, or an orphaned datablock) keeps
-  the name alive after a successful delete. Workaround: pick a fresh name. Fix:
-  delete should actually free the name (remove the datablock or rename the
-  orphan), or the error should say what is holding it.
+  `add_sphere(name=<same name>)` fails with "already exists". Workaround: pick
+  a fresh name. **ROOT CAUSE (live repro 2026-06-11): `delete_object` silently
+  no-ops on hidden objects.** Control (add → delete → re-add, never hidden)
+  is clean; with `hide_cutter=True` the delete reports "Deleted 't7_cutter'"
+  but the post-call status block still shows `active: t7_cutter` with readable
+  dims — the object never left `bpy.data`. Hidden objects can't be selected,
+  so a select-by-name → `bpy.ops.object.delete()` path deletes nothing; the
+  tool doesn't verify and reports success anyway (a silent-success violation,
+  T8's sibling). Not undo snapshots, not orphaned mesh data. Fix: delete via
+  `bpy.data.objects.remove(obj, do_unlink=True)` (ignores visibility/selection
+  entirely), or unhide before the ops path — and assert
+  `name not in bpy.data.objects` afterward, failing loudly if it survived.
 
 - **T8 — `boolean` reports success when the result is an empty mesh.** A
   DIFFERENCE slab cut against a joined mesh whose islands interpenetrate (arm
