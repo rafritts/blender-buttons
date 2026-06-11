@@ -72,15 +72,6 @@ discover one.
   likely an opaque error, possibly a silent no-op. Primitive: surface
   linked/override status in describe + scene tree, and fail loudly with a
   "linked data — needs a library override" message on mutation attempts.
-- **U11 — externally-opened files leave stale server state.** Spring was
-  opened by hand (File → Open); the status block still reports
-  `last_action: 'Final game ready overview render'` from the previous
-  catapult session. History, `diff_since` snapshots, and undo bookkeeping all
-  describe a scene that no longer exists — `undo()` here would try to "verify
-  against history snapshot" from another file. `new_scene` clears
-  bookkeeping; a manual file load bypasses it. Fix: a load-file handler
-  (`bpy.app.handlers.load_post`) that resets history state, the same reset
-  `new_scene` already does.
 
 ## Presentation-pass gaps (T1–T8) — texturing/lighting the catapult for a showcase, 2026-06-11
 
@@ -113,14 +104,6 @@ every gap below is about *changing how it looks* without rebuilding it.
   change propagated (describe still showed the unused BSDF default
   `[0.8, 0.8, 0.8]`); only a render could. Tactile-introspection hole: the
   material line should read `texture(cotton_jersey@1k tint=[0.45,0.33,0.2])`.
-- **T4 — the agent can't see what the user's viewport is showing.** A whole
-  texture pass happened while the user's viewport sat in SOLID shading — they
-  watched gray blockout and reported "zero textures" while renders were fully
-  dressed. `get_viewport_screenshot` returns the shading mode in its metadata,
-  but the status block (the instrument panel every mutating call returns) does
-  not. One `viewport: SOLID` line in the status block would have flagged the
-  mismatch at the first `set_textured_material` call.
-
 - **T5 — viewport overlays are screenshot-only configurable.**
   `get_viewport_screenshot(hide_overlays=True)` cleans up the agent's view, but
   nothing can clean up the USER's live viewport: with a rigged, scattered scene
@@ -141,43 +124,6 @@ every gap below is about *changing how it looks* without rebuilding it.
   exist as a query. Primitive: `describe(name, posed=True)` (or a
   `where_is(name)`) returning evaluated-geometry bounds/center under current
   modifiers — one call instead of trigonometry. Would also fix T2's DOF case.
-- **T7 — deleted-object names stay claimed after a boolean.** Sequence:
-  `boolean(..., hide_cutter=True)` → `delete_object(cutter)` reports deleted →
-  `add_sphere(name=<same name>)` fails with "already exists". Workaround: pick
-  a fresh name. **ROOT CAUSE (live repro 2026-06-11): `delete_object` silently
-  no-ops on hidden objects.** Control (add → delete → re-add, never hidden)
-  is clean; with `hide_cutter=True` the delete reports "Deleted 't7_cutter'"
-  but the post-call status block still shows `active: t7_cutter` with readable
-  dims — the object never left `bpy.data`. Hidden objects can't be selected,
-  so a select-by-name → `bpy.ops.object.delete()` path deletes nothing; the
-  tool doesn't verify and reports success anyway (a silent-success violation,
-  T8's sibling). Not undo snapshots, not orphaned mesh data. Fix: delete via
-  `bpy.data.objects.remove(obj, do_unlink=True)` (ignores visibility/selection
-  entirely), or unhide before the ops path — and assert
-  `name not in bpy.data.objects` afterward, failing loudly if it survived.
-
-- **T8 — `boolean` reports success when the result is an empty mesh.** A
-  DIFFERENCE slab cut against a joined mesh whose islands interpenetrate (arm
-  shaft poking into the bowl shell) returned "applied (baked)" — and the target
-  collapsed to zero verts. Only the status-block bounds (`dims: [0,0,0]`)
-  betrayed it; one render later it would have been "where did the throw arm
-  go". `undo()` recovered (E1's full-context fix verified in real anger), and
-  cutting the SPLIT-OFF island alone worked, so the rule is "split before you
-  boolean a multi-island mesh" — but the tool should catch the catastrophic
-  outcome itself: if the result has 0 verts (or loses >X% of input verts on a
-  DIFFERENCE), fail loudly and leave the modifier unapplied, the same way
-  apply-failure already does.
-
-## S1b-residual — lint skip-report is bypassed by GROUP expansion, 2026-06-11
-
-`audit_asset("throw_arm,winch_rope")` correctly prints `(skipped 1 non-mesh:
-winch_rope)`, but `audit_asset("catapult")` — a 9-part group containing the
-same curve — reports `8 object(s)` with no skip line (same for
-`validate_scene`). The group→objects resolution filters to meshes BEFORE the
-tools' `excluded_non_mesh` accounting, so the no-silent-caps fix only covers
-explicitly named targets. Fix where the group expands: pass non-mesh members
-through to the tool's exclusion accounting instead of dropping them at
-expansion.
 
 ## Tactile introspection — the design principle
 
@@ -191,6 +137,38 @@ coordinates. BVHTree makes the proximity queries milliseconds-cheap at hobby pol
 ---
 
 # Recently closed
+
+## Batch 1 — independent quick wins (T4, T7, T8, U11, S1b), 2026-06-11
+
+Five self-contained gaps with no shared dependencies. e2e in
+`tests/e2e_batch1.py` (24 checks); existing `tests/e2e_headless.py` still green.
+
+- **T4 — viewport shading in the status block.** `get_blender_status` now reports
+  `viewport: SOLID|MATERIAL|RENDERED|WIREFRAME` (first 3D viewport found via the
+  window-manager; omitted in true headless), and `server/_core._status` prints a
+  `viewport:` line. The agent can now catch "texturing while the user stares at
+  gray SOLID blockout" at the first material call.
+- **T7 — delete frees a hidden object's name.** Root cause confirmed: the old
+  `bpy.ops.object.delete()` path only acts on selected objects, and a hidden
+  cutter can't be selected — so it silently deleted nothing while reporting
+  success. `delete_object` now removes via `bpy.data.objects.remove(obj,
+  do_unlink=True)` (ignores visibility/selection) and asserts the name is gone,
+  failing loudly otherwise. `_delete_collection` hardened the same way (hidden
+  group members were the same latent bug).
+- **T8 — boolean refuses to bake an empty result.** Before applying, the
+  evaluated modifier mesh is vert-counted; a 0-vert result is refused — the
+  modifier is left live and unapplied (base mesh intact), with a loud
+  `empty_result`/`warning`, mirroring the existing apply-failure contract.
+  Normal booleans (incl. interior-cutter cavities) apply unchanged.
+- **U11 — history reset on manual file open.** New `state.reset_history_state()`
+  (the four clears `new_scene` does inline), driven by a `@persistent`
+  `load_post` handler registered in `extension/__init__`. A hand-opened file no
+  longer leaves history/diff/undo bookkeeping describing a dead scene.
+- **S1b — group expansion reports non-mesh members.** `resolve_targets` gained an
+  opt-in `include_non_mesh` flag (default keeps mesh-only behaviour for the many
+  transform/shading callers); `validate_scene` and `audit_asset` pass it so a
+  group's curves/empties reach the `excluded_non_mesh` accounting instead of
+  being dropped at expansion.
 
 ## Live-curve delivery gaps (S1–S2) — finishing the catapult rope, 2026-06-11
 

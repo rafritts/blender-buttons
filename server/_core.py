@@ -56,6 +56,8 @@ def _status(result: dict) -> str:
             f"  render:      {r['engine']}  view={r['view_transform']} "
             f"look={r['look']} exp={r['exposure']} gamma={r['gamma']}{rt}"
         )
+    if s.get("viewport"):
+        lines.append(f"  viewport:    {s['viewport']}  (user's live shading mode)")
     if "edit" in s:
         e = s["edit"]
         lines += [

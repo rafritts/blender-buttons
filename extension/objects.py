@@ -49,14 +49,19 @@ def delete_object(params):
         obj = bpy.data.objects.get(name)
         if obj is None:
             return {"error": f"Object or group '{name}' not found"}
-        bpy.ops.object.select_all(action='DESELECT')
-        obj.select_set(True)
-        bpy.context.view_layer.objects.active = obj
-    active = bpy.context.active_object
-    if active is None:
-        return {"error": "No active object to delete"}
-    deleted = active.name
-    bpy.ops.object.delete()
+    else:
+        obj = bpy.context.active_object
+        if obj is None:
+            return {"error": "No active object to delete"}
+    deleted = obj.name
+    # Delete via the data API, NOT bpy.ops.object.delete(): the operator only acts
+    # on SELECTED objects, and a hidden object (e.g. a boolean cutter hidden by
+    # hide_cutter=True) can't be selected — so the operator silently deletes nothing
+    # while the tool reports success, leaving the name claimed (gaps.md T7).
+    # objects.remove() ignores visibility/selection entirely.
+    bpy.data.objects.remove(obj, do_unlink=True)
+    if deleted in bpy.data.objects:
+        return {"error": f"delete failed: '{deleted}' still present after remove()"}
     return {"success": True, "deleted": deleted}
 
 
@@ -65,14 +70,10 @@ def _delete_collection(coll):
     members = [o.name for o in coll.all_objects]
     if bpy.context.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
-    bpy.ops.object.select_all(action='DESELECT')
-    for o in coll.all_objects:
-        try:
-            o.select_set(True)
-        except Exception:
-            pass
-    if any(o.select_get() for o in bpy.context.scene.objects):
-        bpy.ops.object.delete()
+    # Remove via the data API so hidden members are deleted too (bpy.ops.delete
+    # skips anything that can't be selected — same T7 no-op).
+    for o in list(coll.all_objects):
+        bpy.data.objects.remove(o, do_unlink=True)
     sub_colls = []
     def _collect(c):
         for child in c.children:

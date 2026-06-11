@@ -38,6 +38,22 @@ def get_scene_tree():
     return {"tree": "\n".join(lines)}
 
 
+def _viewport_shading():
+    """Shading mode of the user's first 3D viewport — 'SOLID', 'MATERIAL',
+    'RENDERED', or 'WIREFRAME'. Returns None in headless/windowless contexts."""
+    wm = bpy.context.window_manager
+    for win in (wm.windows if wm else []):
+        screen = getattr(win, "screen", None)
+        if not screen:
+            continue
+        for area in screen.areas:
+            if area.type == 'VIEW_3D':
+                space = next((s for s in area.spaces if s.type == 'VIEW_3D'), None)
+                if space:
+                    return space.shading.type
+    return None
+
+
 def get_blender_status(params):
     import bmesh as _bmesh
     # Force depsgraph evaluation so matrix_world / bound_box reflect any location, rotation,
@@ -74,6 +90,14 @@ def get_blender_status(params):
     if eevee is not None and hasattr(eevee, "use_raytracing"):
         render["raytracing"] = eevee.use_raytracing
     status["render"] = render
+
+    # The shading mode the USER is looking at. A texture pass run while their
+    # viewport sits in SOLID reads as gray blockout to them even as renders come
+    # out fully dressed (gaps.md T4) — surfacing it lets the agent catch the
+    # mismatch at the first material call. None in headless.
+    vp = _viewport_shading()
+    if vp is not None:
+        status["viewport"] = vp
 
     if obj:
         status["location"] = [round(v, 4) for v in obj.location]

@@ -92,6 +92,21 @@ NO_STATUS_TOOLS = {
 }
 
 
+def reset_history_state():
+    """Clear all undo/history/diff bookkeeping. The scene it described is gone.
+
+    new_scene does this inline when it reloads the startup file; a manual
+    File > Open bypasses every tool, so the load_post handler (extension/__init__)
+    calls this — otherwise history, diff_since snapshots, and undo verification all
+    describe a scene that no longer exists, and undo() would check against a
+    snapshot from another file (gaps.md U11)."""
+    global _undo_baseline
+    _history.clear()
+    _redo_stack.clear()
+    _snapshots.clear()
+    _undo_baseline = None
+
+
 def scene_object_names():
     """Sorted list of the current scene's object names — the per-op snapshot used
     to verify the scene actually matches the history log after an undo/redo."""

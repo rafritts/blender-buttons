@@ -36,11 +36,16 @@ def nearby_objects(world_pos, exclude_names=(), max_count=3):
     ]
 
 
-def resolve_targets(targets):
+def resolve_targets(targets, include_non_mesh=False):
     """Resolve a target spec into a list of bpy mesh objects.
 
     targets: str (single object or collection name), list[str], or None (-> active object).
     Collection names expand to all mesh objects inside (recursively).
+    include_non_mesh: when True, collection expansion keeps non-mesh members too
+        (curves, empties, armatures). Explicitly-named objects are always kept
+        regardless of type; only collection expansion filtered them out, which let
+        non-mesh members slip past the lint tools' excluded_non_mesh accounting
+        (gaps.md S1b). Lint tools that report what they skipped pass True.
     Returns (objects, error). On error, objects is None.
     """
     if targets is None:
@@ -67,7 +72,7 @@ def resolve_targets(targets):
             seen.add(obj.name)
         if coll is not None:
             for o in coll.all_objects:
-                if o.type == 'MESH' and o.name not in seen:
+                if (include_non_mesh or o.type == 'MESH') and o.name not in seen:
                     objs.append(o)
                     seen.add(o.name)
     return objs, None

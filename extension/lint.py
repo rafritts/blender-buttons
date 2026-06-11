@@ -135,11 +135,13 @@ def validate_scene(params):
     targets = params.get("targets")
     excluded = []
     if targets:
-        objs, err = resolve_targets(targets)
+        objs, err = resolve_targets(targets, include_non_mesh=True)
         if err:
             return {"error": err}
         # Curves, empties, lights etc. have no faces to lint — name what we drop
-        # rather than silently shrinking the count (no-silent-caps).
+        # rather than silently shrinking the count (no-silent-caps). include_non_mesh
+        # keeps collection members in scope so a group's non-mesh parts get reported
+        # here too, not just explicitly-named ones (gaps.md S1b).
         excluded = [o.name for o in objs if o.type != 'MESH']
         objs = [o for o in objs if o.type == 'MESH']
     else:
@@ -269,10 +271,12 @@ def audit_asset(params):
     vibes into countable findings."""
     import bpy
     targets = params.get("group") or params.get("targets")
-    objs, err = resolve_targets(targets)
+    objs, err = resolve_targets(targets, include_non_mesh=True)
     if err:
         return {"error": err}
     # Curves/empties carry no auditable geometry — name them, don't swallow them.
+    # include_non_mesh keeps group members in scope so non-mesh parts of a group are
+    # reported, not dropped at expansion (gaps.md S1b).
     excluded = [o.name for o in objs if o.type != 'MESH']
     objs = [o for o in objs if o.type == 'MESH']
     if not objs:

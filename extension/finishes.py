@@ -511,13 +511,29 @@ def boolean(params):
 
     applied = False
     apply_error = None
+    empty_result = False
     if apply:
-        activate(target)
-        try:
-            bpy.ops.object.modifier_apply(modifier=mod.name)
-            applied = True
-        except RuntimeError as e:
-            apply_error = str(e)
+        # Preview the modifier result before baking. A DIFFERENCE against a
+        # multi-island mesh whose islands interpenetrate can collapse the target to
+        # zero verts, and modifier_apply reports success on that empty result
+        # (gaps.md T8) — one render later it's "where did the part go". Check the
+        # evaluated mesh first; refuse to bake a 0-vert result and leave the
+        # modifier live (the base mesh is untouched until apply), exactly the way
+        # an apply failure already leaves the modifier for inspection.
+        bpy.context.view_layer.update()
+        eval_obj = target.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        eval_mesh = eval_obj.to_mesh()
+        result_verts = len(eval_mesh.vertices)
+        eval_obj.to_mesh_clear()
+        if result_verts == 0:
+            empty_result = True
+        else:
+            activate(target)
+            try:
+                bpy.ops.object.modifier_apply(modifier=mod.name)
+                applied = True
+            except RuntimeError as e:
+                apply_error = str(e)
 
     if hide_cutter:
         try:
@@ -543,6 +559,15 @@ def boolean(params):
             "faces, or un-applied scale. Try apply_transform(scale=True) on both "
             "objects, or set solver='FAST'. Modifier is still on the target so "
             "you can inspect or remove_modifier."
+        )
+    if empty_result:
+        result["empty_result"] = True
+        result["warning"] = (
+            f"REFUSED TO APPLY: the {op} result is an empty mesh (0 verts) — "
+            f"baking it would silently delete '{target_name}'. The modifier is left "
+            f"live and unapplied (base mesh intact); inspect it or remove_modifier. "
+            f"For a multi-island target, split_by_part and boolean the relevant "
+            f"island alone (gaps.md T8)."
         )
     return result
 

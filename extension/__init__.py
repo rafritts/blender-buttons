@@ -37,13 +37,24 @@ Shared support:
 """
 
 import bpy
+from bpy.app.handlers import persistent
 
 from . import server, state, ui
+
+
+@persistent
+def _on_load_post(*_args):
+    """A file opened by hand (File > Open) replaces the scene without going through
+    any tool, leaving the history/undo/diff bookkeeping describing the dead scene
+    (gaps.md U11). Reset it on every load, the same reset new_scene does inline."""
+    state.reset_history_state()
 
 
 def register():
     for cls in ui.CLASSES:
         bpy.utils.register_class(cls)
+    if _on_load_post not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_on_load_post)
     # One MCP tool call == one undo step, so a long build needs deep undo history.
     # Raise the limit (never lower it) so undo stays 1:1 with the log past the
     # default 32 steps — the E1 disaster was 27 ops in.
@@ -58,6 +69,8 @@ def register():
 
 def unregister():
     state._running = False
+    if _on_load_post in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_on_load_post)
     if bpy.app.timers.is_registered(server.process_queue):
         bpy.app.timers.unregister(server.process_queue)
     for cls in reversed(ui.CLASSES):
