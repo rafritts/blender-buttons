@@ -35,6 +35,45 @@ dead modifiers, prescribes `rebind_deform`. Then the prescription itself died:
   context is incorrect`. Other verbs mode-guard or switch; this one should
   too. Workaround: `set_mode(OBJECT)` first.
 
+- **X3 — `select_by_axis` doesn't flush vert selection to edge/face domains.**
+  In EDGE component mode it set my 24 target verts but the status block showed
+  ALL 6554 edges + 3268 faces still selected — the next `extrude` (region
+  extrude honors face selection) duplicated the ENTIRE arms mesh (3288→6576
+  verts) and translated the copy. Caught only because the status block prints
+  per-domain counts; `undo(1)` restored clean (snapshot verified). Fix:
+  selection verbs should flush to the active component domains (or force VERT
+  mode) so the selection the agent just made is the selection the next verb
+  acts on. Related missing primitive: no way to select an OPEN BOUNDARY loop
+  (mesh rim) — a tilted rim ring can't be isolated by axis bands (24-vert band
+  always dragged in 10 adjacent faces), which is what pushed me off extrude
+  entirely.
+
+- **X4 — CORRECTIVE_SMOOTH(rest_source=BIND) silently nullifies rest-shape
+  edits.** Position-only edits keep the vert count, so the V2/W2 topology
+  guard is rightly silent — but the CS bind stores the rest SHAPE, and the
+  modifier then treats the edit as deformation to smooth away. Measured live:
+  proportional-stretched the arm rim 8.5cm inboard (base rim now x=0.13);
+  hid the shirt and the EVALUATED arm still ends at x≈0.21 — ~94% of the edit
+  erased, no warning anywhere. The guard family should warn on position edits
+  too when a CS(BIND) is in the stack ("this modifier is fighting your edit —
+  rebind to accept the new rest shape"). Cure is `rebind_deform` → blocked by
+  X1; until then rest-shape editing on production meshes is silently impossible.
+
+- **X5 — no verb can neutralize a modifier.** `modify_modifier` exposes only
+  count/levels/offset/thickness/width/segments/angle_limit — no `factor`
+  (CORRECTIVE_SMOOTH, SMOOTH, DISPLACE strength), no viewport/render
+  enable-disable. When a modifier is actively harmful mid-edit (X4's CS) the
+  agent has no escape hatch short of `remove_modifier`, which throws away
+  production-tuned settings. Primitive: enable/disable toggle + the common
+  scalar (factor/strength) on modify_modifier.
+
+_Live state parked on X1: pullover cut to tank shape (2039→882 verts, white
+materials applied) with MESH_DEFORM + CORRECTIVE_SMOOTH binds dead; both arms
+proportional-stretched (+8.5cm inboard, +4.5cm up, base mesh only) to fill the
+shoulder void, pinned back by CS(BIND) until rebind. The moment X1 is fixed,
+the finish is: `rebind_deform("GEO-spring_pullover")`,
+`rebind_deform("GEO_spring_arms")`, pose-test, refine armpit blend._
+
 ## Tactile introspection — the design principle
 
 ## Tactile introspection — the design principle
