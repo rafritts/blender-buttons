@@ -1,6 +1,37 @@
 # MCP gaps
 
-_All logged gaps (P, R, S, T, U series) are closed — see "Recently closed" below.
+## Wardrobe-edit gaps (V1–V2) — re-dressing Spring (bandana off, tunic → tank top), 2026-06-11
+
+First real *destructive* edit of a production asset: delete the scarf + jacket,
+cut the pullover's sleeves/collar off to make a tank top. The edit verbs all
+worked (delete, mask removal, select_by_axis factor cuts with exact world
+thresholds, symmetric 471-vert sleeve selections). The gaps are in what happens
+to a production deform stack *after* you edit:
+
+- **V1 — mesh-deform bind is unreachable: no bind, no rebind.** Spring's cloth
+  is driven by `MESH_DEFORM` against BlenRig cages. After any topology edit the
+  bind is dead (see V2) and the toolset has NO recovery path: `add_modifier`
+  supports only 7 types (no MESH_DEFORM, no ARMATURE, no LATTICE), and nothing
+  wraps `bpy.ops.object.meshdeform_bind`. Workaround that worked: strip the
+  dead modifier and `auto_weight` straight to the armature — the heat solve
+  handled a 792-deform-bone production rig (713/713 verts weighted), but
+  direct skinning is a quality downgrade from cage deformation for cloth.
+  Primitive: `add_modifier(type="MESH_DEFORM", target=<cage>)` + a
+  `bind_mesh_deform(mesh, cage)` verb (bind/unbind/rebind); same door opens
+  ARMATURE/LATTICE modifier types, which are equally missing.
+- **V2 — topology edits silently kill deform binds.** `delete_geometry` on the
+  mesh-deform-bound pullover reported plain success; the bind data's vert count
+  no longer matched, so the modifier went dead with no signal anywhere. The
+  shirt LOOKED fine at rest — only a deliberate pose test (torso bend:
+  pants moved 5.4mm, shirt 1.4mm ≈ noise) exposed that it had stopped
+  following the rig. A user would discover this mid-animation. Tactile
+  principle: topology-changing edit verbs (the `_enter_edit_for_target`
+  family, U10's hook point) should check the target's modifiers for
+  vert-count-dependent bind data (MESH_DEFORM bound, CORRECTIVE_SMOOTH
+  bind_coords, SURFACE_DEFORM) and append a loud warning to the result:
+  "MeshDeform bind invalidated — rebind required (V1)".
+
+_All earlier gaps (P, R, S, T, U series) are closed — see "Recently closed" below.
 New gaps from future builds go above this line._
 
 ## Tactile introspection — the design principle
