@@ -15,6 +15,8 @@ import random as _random
 import bpy
 import mathutils
 
+from .common import resolve_targets, world_bbox
+
 
 def _area_weighted_face_sample(triangles, areas, total_area, rng):
     """Pick a triangle index, weighted by area."""
@@ -53,6 +55,10 @@ def scatter_on_surface(params):
     seed:          RNG seed for reproducibility. Default 0.
     parent_to_target: if true, parent every instance to the target so they move with it.
                       Default true.
+    avoid:         optional object or collection name to keep clear — a hero asset
+                   you don't want rocks landing inside. Instances whose (x, y)
+                   fall within its world XY footprint are rejection-sampled away.
+    avoid_margin:  meters to expand the avoid footprint by. Default 0.
 
     Returns count of instances created, the shared source mesh name, and a group
     name (the parent empty if parent_to_target=false, else just the target).
@@ -78,6 +84,22 @@ def scatter_on_surface(params):
     seed = int(params.get("seed", 0))
     parent_to_target = bool(params.get("parent_to_target", True))
     name_prefix = params.get("name_prefix") or f"{source_name}_inst"
+
+    # Optional exclusion zone: an XY footprint (world bbox of the avoid object/
+    # collection, expanded by margin) that instances must not land inside.
+    avoid_rect = None
+    avoid_spec = params.get("avoid")
+    if avoid_spec:
+        avoid_objs, err = resolve_targets(avoid_spec)
+        if err:
+            return {"error": f"'avoid': {err}"}
+        margin = float(params.get("avoid_margin", 0.0))
+        xs_lo, ys_lo, xs_hi, ys_hi = [], [], [], []
+        for ao in avoid_objs:
+            xmin, ymin, _zmin, xmax, ymax, _zmax = world_bbox(ao)
+            xs_lo.append(xmin); ys_lo.append(ymin); xs_hi.append(xmax); ys_hi.append(ymax)
+        avoid_rect = (min(xs_lo) - margin, min(ys_lo) - margin,
+                      max(xs_hi) + margin, max(ys_hi) + margin)
 
     # Evaluate target with all modifiers, get a triangulated mesh.
     depsgraph = bpy.context.evaluated_depsgraph_get()
@@ -116,13 +138,33 @@ def scatter_on_surface(params):
     if count > 5000:
         return {"error": f"count={count} exceeds 5000 cap (lots of objects = slow viewport)"}
 
+    def _in_avoid(p):
+        ax0, ay0, ax1, ay1 = avoid_rect
+        return ax0 <= p.x <= ax1 and ay0 <= p.y <= ay1
+
     z_axis = mathutils.Vector((0, 0, 1))
     source_mesh = source.data
     created = []
+    skipped = 0
     for i in range(count):
         ti = _area_weighted_face_sample(triangles, areas, total_area, rng)
         v0, v1, v2, normal = triangles[ti]
         pos = _random_point_in_triangle(v0, v1, v2, rng)
+
+        # Reject-sample out of the exclusion zone (cap tries so a target that's
+        # mostly covered can't spin forever — just drop the instance).
+        if avoid_rect is not None and _in_avoid(pos):
+            placed = False
+            for _ in range(20):
+                tj = _area_weighted_face_sample(triangles, areas, total_area, rng)
+                w0, w1, w2, normal = triangles[tj]
+                pos = _random_point_in_triangle(w0, w1, w2, rng)
+                if not _in_avoid(pos):
+                    placed = True
+                    break
+            if not placed:
+                skipped += 1
+                continue
 
         s = rng.uniform(scale_min, scale_max)
         inst = bpy.data.objects.new(name=f"{name_prefix}_{i:04d}", object_data=source_mesh)
@@ -150,6 +192,7 @@ def scatter_on_surface(params):
     return {
         "success": True,
         "scattered": len(created),
+        "skipped_in_avoid": skipped,
         "target": target_name,
         "source": source_name,
         "source_mesh": source_mesh.name,

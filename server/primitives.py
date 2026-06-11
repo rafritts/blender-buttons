@@ -284,9 +284,19 @@ def add_curve(name: str, points: list, type: str = "BEZIER", cyclic: bool = Fals
     cable, handle), use spline_tube instead — that bakes straight to geometry.
 
     name:        object name (required, unique).
-    points:      2+ control points. Each is [x, y, z] world coords, or
-                 {"near": "object", "offset": [dx, dy, dz]} anchored to an object's
-                 center (resolved once at creation).
+    points:      2+ control points. Each is [x, y, z] world coords,
+                 {"near": "object", "offset": [dx, dy, dz]} (positioned once at
+                 creation), or a dict carrying a live ANCHOR:
+                   {"at": [x,y,z], "anchor": {"object": "winch_drum"}}
+                   {"anchor": {"bone": "catapult_rig/arm_swing"}}   # pos = bone head
+                 An anchored point gets a Hook modifier and FOLLOWS that object/bone
+                 when it moves or poses — a rope/cable/hose/chain that stretches
+                 between a drum and a swinging arm. Anchor any point (both ends, a
+                 sag midpoint, or just one). Unanchored points stay in world space
+                 and the curve interpolates through them. IMPORTANT: create the
+                 curve with the rig in its REST pose — the hook captures each point
+                 in the bone's rest space, so anchoring while posed bakes in an
+                 offset. Add bevel_depth to give the rope thickness.
     type:        BEZIER (default — smooth, auto-handles pass through each point) |
                  NURBS (smooth, approximating) | POLY (straight line segments).
     cyclic:      True closes the curve into a loop.
@@ -294,8 +304,17 @@ def add_curve(name: str, points: list, type: str = "BEZIER", cyclic: bool = Fals
     bevel_depth: round-bevel radius in meters. >0 gives the curve thickness so it
                  renders as a solid tube; 0 (default) leaves a zero-width path.
 
-    Example — a camera dolly arc: add_curve("dolly", points=[[6,-6,3],[0,-8,3],[-6,-6,3]],
-                                            type="BEZIER")
+    An anchored curve is a LIVE rig accessory. For a game-ready mesh, pose the rig
+    then bake it with apply_modifiers(this curve) — that evaluates the hooks and
+    converts to a mesh.
+
+    Example — camera dolly arc: add_curve("dolly", points=[[6,-6,3],[0,-8,3],[-6,-6,3]],
+                                          type="BEZIER")
+    Example — catapult rope (drum→arm), 2cm thick:
+      add_curve("rope", type="NURBS", bevel_depth=0.02, points=[
+        {"anchor": {"object": "winch_drum"}},
+        {"at": [0, 0.5, 1.2]},                          # sag midpoint, stays put
+        {"anchor": {"bone": "catapult_rig/arm_swing"}}])
     """
     result = call_blender("add_curve", {
         "name": name, "points": points, "type": type, "cyclic": cyclic,
@@ -307,6 +326,9 @@ def add_curve(name: str, points: list, type: str = "BEZIER", cyclic: bool = Fals
                 f"{', cyclic' if result['cyclic'] else ''}"
                 f"{', bevel ' + str(result['bevel_depth']) + 'm' if result['bevel_depth'] else ''}) "
                 f"dims={result['dimensions']} [{result.get('op_id','')}]")
+        for a in result.get("anchored", []):
+            tgt = f"{a['target']}/{a['bone']}" if a.get("bone") else a["target"]
+            main += f"\n  ⚓ point {a['point']} hooked to {tgt} (follows when posed)"
     else:
         main = result.get("error", "failed")
     return main + _status(result)

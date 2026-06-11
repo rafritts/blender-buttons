@@ -95,6 +95,76 @@ def _resolve_point(entry, idx):
                   "{\"near\": name, \"offset\": [dx,dy,dz]}")
 
 
+def _resolve_anchor(anchor, idx):
+    """Validate a point's `anchor` spec and resolve its current world position.
+
+    Forms: {"object": "name"} | {"bone": "armature_name/bone_name"} |
+           {"bone": "bone_name", "armature": "armature_name"}.
+    Returns ({"object": bpy_obj, "bone": name|None, "world": Vector}, None) or
+    (None, error). For a bone, world position is its head in the CURRENT pose —
+    callers must anchor in the rig's rest pose (see add_curve)."""
+    if not isinstance(anchor, dict):
+        return None, f"points[{idx}]: 'anchor' must be a dict"
+    if "object" in anchor:
+        name = anchor["object"]
+        obj = bpy.data.objects.get(name)
+        if obj is None:
+            return None, f"points[{idx}]: anchor object '{name}' not found"
+        return {"object": obj, "bone": None,
+                "world": obj.matrix_world.translation.copy()}, None
+    if "bone" in anchor:
+        spec = anchor["bone"]
+        if "/" in spec:
+            arm_name, bone_name = spec.split("/", 1)
+        else:
+            arm_name, bone_name = anchor.get("armature"), spec
+        if not arm_name:
+            return None, (f"points[{idx}]: bone anchor needs \"armature/bone\" "
+                          "or a separate 'armature' key")
+        arm = bpy.data.objects.get(arm_name)
+        if arm is None or arm.type != 'ARMATURE':
+            return None, f"points[{idx}]: anchor armature '{arm_name}' not found"
+        pbone = arm.pose.bones.get(bone_name)
+        if pbone is None:
+            return None, (f"points[{idx}]: bone '{bone_name}' not on '{arm_name}' "
+                          f"(have {[b.name for b in arm.pose.bones]})")
+        world = (arm.matrix_world @ pbone.matrix).translation.copy()
+        return {"object": arm, "bone": bone_name, "world": world}, None
+    return None, f"points[{idx}]: 'anchor' needs 'object' or 'bone'"
+
+
+def _resolve_curve_point(entry, idx):
+    """Resolve one add_curve control point to (pos[x,y,z], anchor|None, error).
+
+    Position: [x,y,z] | {"at":[x,y,z]} | {"near":obj,"offset":[..]} | (default
+    to the anchor target's location if only an anchor is given). Anchor: optional
+    {"anchor": {...}} key making the point a live Hook target."""
+    if isinstance(entry, (list, tuple)) and len(entry) == 3:
+        return [float(v) for v in entry], None, None
+    if not isinstance(entry, dict):
+        return None, None, f"points[{idx}] must be [x,y,z] or a dict"
+
+    anchor = None
+    if entry.get("anchor") is not None:
+        anchor, err = _resolve_anchor(entry["anchor"], idx)
+        if err:
+            return None, None, err
+
+    if "at" in entry:
+        at = entry["at"]
+        if not (isinstance(at, (list, tuple)) and len(at) == 3):
+            return None, None, f"points[{idx}]: 'at' must be [x,y,z]"
+        return [float(v) for v in at], anchor, None
+    if "near" in entry:
+        pos, err = _resolve_point({"near": entry["near"],
+                                   "offset": entry.get("offset", [0, 0, 0])}, idx)
+        return (None, None, err) if err else (pos, anchor, None)
+    if anchor is not None:
+        return list(anchor["world"]), anchor, None
+    return None, None, (f"points[{idx}] needs a position ([x,y,z], 'at', or "
+                        "'near') or an 'anchor' to derive it from")
+
+
 def spline_tube(params):
     """Create a tube mesh swept along an interpolating spline through 2–32 points.
 
@@ -200,14 +270,27 @@ def add_curve(params):
     distribution control. Editable after the fact in Blender's curve tools.
 
     name:      object name (required, unique).
-    points:    2+ control points. Each is [x, y, z] or {"near": obj, "offset":[..]}
-               (same resolution as spline_tube).
+    points:    2+ control points. Each is [x, y, z], {"near": obj, "offset":[..]},
+               or a dict that also carries a live ANCHOR:
+                 {"at": [x,y,z], "anchor": {"object": "winch_drum"}}
+                 {"anchor": {"bone": "catapult_rig/arm_swing"}}   # pos = bone head
+               An anchored point gets a Hook modifier, so the curve follows that
+               object/bone when it moves or poses — a rope/cable/hose that stretches
+               between a drum and a swinging arm. Anchor ANY point (both ends, or a
+               sag midpoint); unanchored points stay put in world space and the
+               curve interpolates through them. IMPORTANT: anchor in the rig's REST
+               pose — the hook captures the point in the bone's rest space, so
+               assigning while posed bakes in an offset.
     type:      BEZIER (default, smooth auto-handles through each point) |
                NURBS (smooth, approximating) | POLY (straight segments).
     cyclic:    close the curve into a loop (default False).
     resolution: curve render/eval subdivisions per segment (default 12).
     bevel_depth: optional round-bevel radius (meters). >0 gives the curve
                thickness so it renders as a tube; 0 (default) is a pure path.
+
+    Delivery note: an anchored curve is a LIVE rig accessory. For a game-ready
+    mesh, pose the rig, then bake it — apply_modifiers on the curve (which
+    converts it to a mesh with the hooks evaluated).
     """
     name = params.get("name")
     if not name:
@@ -219,11 +302,13 @@ def add_curve(params):
     if len(raw) < 2:
         return {"error": "'points' needs at least 2 control points"}
     pts = []
+    anchors = []  # parallel to pts: anchor dict or None per control point
     for i, entry in enumerate(raw):
-        p, err = _resolve_point(entry, i)
+        p, anchor, err = _resolve_curve_point(entry, i)
         if err:
             return {"error": err}
         pts.append(p)
+        anchors.append(anchor)
 
     ctype = (params.get("type") or "BEZIER").upper()
     if ctype not in ("BEZIER", "NURBS", "POLY"):
@@ -258,6 +343,34 @@ def add_curve(params):
     bpy.context.scene.collection.objects.link(obj)
     bpy.context.view_layer.update()
 
+    # Live anchors → one Hook modifier per anchored control point. The hook
+    # formula deforms hooked points by  obj_world⁻¹ · target_world · matrix_inverse;
+    # add_curve always creates obj at the identity transform, so setting
+    # matrix_inverse = target_world⁻¹ makes the rest pose a no-op and the point
+    # follows the target's delta thereafter. For a BEZIER point the flat hook
+    # index space is (handle_left, co, handle_right) per point — hook all three
+    # so the whole point (and its handles) travel together.
+    anchored = []
+    for i, anchor in enumerate(anchors):
+        if anchor is None:
+            continue
+        target = anchor["object"]
+        bone = anchor["bone"]
+        mod = obj.modifiers.new(name=f"Hook_{i}_{target.name}", type='HOOK')
+        mod.object = target
+        if bone:
+            mod.subtarget = bone
+        mod.falloff_type = 'NONE'
+        idxs = [3 * i, 3 * i + 1, 3 * i + 2] if ctype == 'BEZIER' else [i]
+        mod.vertex_indices_set(idxs)
+        if bone:
+            target_mat = target.matrix_world @ target.pose.bones[bone].matrix
+        else:
+            target_mat = target.matrix_world
+        mod.matrix_inverse = target_mat.inverted()
+        anchored.append({"point": i, "target": target.name, "bone": bone})
+
+    bpy.context.view_layer.update()
     xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
     return {
         "success": True,
@@ -266,6 +379,7 @@ def add_curve(params):
         "control_points": len(pts),
         "cyclic": cyclic,
         "bevel_depth": bevel_depth,
+        "anchored": anchored,
         "dimensions": [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)],
     }
 

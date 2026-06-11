@@ -178,7 +178,8 @@ def scatter_on_surface(target: str, source: str, count: int = 100,
                        scale_min: float = 0.8, scale_max: float = 1.2,
                        align_normal: bool = True, rotate_z: bool = True,
                        parent_to_target: bool = True, seed: int = 0,
-                       name_prefix: str = "", label: str = "") -> str:
+                       name_prefix: str = "", avoid: str = "",
+                       avoid_margin: float = 0.0, label: str = "") -> str:
     """
     Scatter `count` copies of `source` randomly across `target`'s surface.
     The donut-tutorial sprinkles step.
@@ -191,6 +192,10 @@ def scatter_on_surface(target: str, source: str, count: int = 100,
     parent_to_target: parent every instance to target so they move/animate with it.
     seed: RNG seed for reproducibility.
     name_prefix: name prefix for generated objects (default "<source>_inst").
+    avoid: object or collection name to keep CLEAR — set-dressing ground rocks
+           around a hero asset without them landing inside its footprint. Instances
+           whose (x, y) fall within its world XY footprint are rejected and resampled.
+    avoid_margin: meters to expand the avoid footprint by (default 0).
 
     All instances share `source`'s mesh data — cheap memory-wise. Target's
     modifiers are evaluated, so sprinkles land on the visible (post-subsurf) surface.
@@ -200,12 +205,16 @@ def scatter_on_surface(target: str, source: str, count: int = 100,
         "scale_min": scale_min, "scale_max": scale_max,
         "align_normal": align_normal, "rotate_z": rotate_z,
         "parent_to_target": parent_to_target, "seed": seed,
-        "name_prefix": name_prefix,
+        "name_prefix": name_prefix, "avoid": avoid or None,
+        "avoid_margin": avoid_margin,
     }, label=label)
     if result.get("success"):
         main = (f"scattered {result['scattered']} copies of '{result['source']}' "
                 f"onto '{result['target']}' (mesh '{result['source_mesh']}') "
                 f"[{result.get('op_id','')}]")
+        skipped = result.get("skipped_in_avoid", 0)
+        if skipped:
+            main += f"\n  {skipped} instance(s) dropped — couldn't clear the '{avoid}' zone"
     else:
         main = result.get("error", "failed")
     return main + _status(result)

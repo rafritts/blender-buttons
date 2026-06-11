@@ -14,7 +14,10 @@ def create_armature(name: str, bones: list, label: str = "") -> str:
               "head": [0.2, 0, 1.4],     # joint start (world coords, meters)
               "tail": [0.5, 0, 1.4],     # joint end
               "parent": "shoulder_L",    # optional — name of another bone in this list
-              "connected": true}         # optional — snap head to parent's tail & connect
+              "connected": true,         # optional — snap head to parent's tail & connect
+              "deform": false}           # optional — exclude from the auto_weight heat
+                                         #   solve (use for root/control bones so they
+                                         #   don't steal weights from nearby meshes)
            Define parents before or alongside children (resolved in a second pass).
 
     Then bind a mesh with auto_weight(mesh, armature) and articulate with
@@ -33,6 +36,9 @@ def create_armature(name: str, bones: list, label: str = "") -> str:
     if result.get("success"):
         main = (f"Created armature '{result['object_name']}' with {result['bone_count']} "
                 f"bone(s): {result['bones']} [{result.get('op_id','')}]")
+        nd = result.get("non_deform_bones") or []
+        if nd:
+            main += f"\n  non-deform (excluded from auto_weight): {nd}"
     else:
         main = result.get("error", "failed")
     return main + _status(result)
@@ -57,10 +63,46 @@ def auto_weight(mesh: str, armature: str, label: str = "") -> str:
     if result.get("success"):
         main = (f"bound '{result['mesh']}' to '{result['armature']}' — "
                 f"{result['vertex_groups']} vertex group(s), "
-                f"{result.get('weighted_vertices', '?')} weighted vert(s), "
+                f"{result.get('weighted_vertices', '?')}/{result.get('total_vertices', '?')} "
+                f"weighted vert(s), "
                 f"modifier '{result['armature_modifier']}' [{result.get('op_id','')}]")
         for w in result.get("warnings", []):
             main += f"\n⚠ {w}"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def weight_to_bone(mesh: str, armature: str, bone: str, label: str = "") -> str:
+    """
+    Rigid-bind a whole mesh to ONE bone at 100% weight — the right tool for
+    MECHANICAL parts (wheels, doors, levers, turrets, throwing arms, gun barrels)
+    that should follow a single bone exactly, with no blending.
+
+    mesh:     mesh object to bind.
+    armature: armature that owns the bone.
+    bone:     bone name — every vertex of the mesh gets full weight to it.
+
+    Use this INSTEAD of auto_weight when a part is rigid. auto_weight's bone-heat
+    solve blends weights from bone proximity, which is correct for skin/cloth but
+    wrong for hard-surface parts: it smears geometry across a joint and orphans
+    thin detail (rings, bolts) that the heat can't reach. weight_to_bone is
+    deterministic — it strips any existing weights for this armature's other bones
+    so the named bone is the sole influence, then adds/reuses the Armature
+    modifier. Assign in the rig's rest pose.
+
+    Example — bind a catapult throwing arm (with its joined detail rings) to the
+    swing bone: weight_to_bone(mesh="throwing_arm", armature="catapult_rig",
+                               bone="arm_swing")
+    """
+    result = call_blender("weight_to_bone",
+                          {"mesh": mesh, "armature": armature, "bone": bone}, label=label)
+    if result.get("success"):
+        main = (f"rigid-bound '{result['mesh']}' → bone '{result['bone']}' on "
+                f"'{result['armature']}': {result['weighted_vertices']}/"
+                f"{result['total_vertices']} vert(s) at full weight, "
+                f"modifier '{result['armature_modifier']}' [{result.get('op_id','')}]")
     else:
         main = result.get("error", "failed")
     return main + _status(result)

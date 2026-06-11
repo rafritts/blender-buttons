@@ -1,48 +1,6 @@
 # MCP gaps
 
-## Siege-catapult build (R1–R5) — rigging a mechanical prop, 2026-06-11
-
-Source build: game-ready rigged catapult (`~/blender-designs/siege_catapult_v1.blend`).
-The armature tools work, but they're tuned for organic deformation; a mechanical
-prop (rigid parts swinging/spinning on axes) hit the same wall repeatedly:
-bone-heat is the wrong solver for rigid assemblies, and there's no rigid
-alternative.
-
-- **R1 — `weight_to_bone(mesh, bone)` rigid bind.** Assign 100% weight on every
-  vertex of a mesh to ONE named bone (creating/extending the Armature modifier
-  as `auto_weight` does). This is the standard game workflow for mechanical
-  props — wheels, doors, levers, turrets — where bone-heat's blending is
-  actively wrong. In the catapult build, heat orphaned the thin `band_around`
-  rings joined into the throwing arm (0 weights → they floated in place when
-  the arm posed), and a boolean-UNION-then-rebind repair made it worse
-  (smeared geometry). The working fix was *deleting the detail rings* — i.e.
-  the asset lost geometry because the binding verb was missing. One tool
-  closes the whole failure class.
-- **R2 — `auto_weight` coverage verdict.** It reports "96 weighted vert(s)"
-  but not the total, so 32 orphans were invisible until a pose test + 
-  screenshot. Tactile-introspection style: report
-  `96/128 weighted — 32 orphaned verts in 2 islands (near z≈1.05, z≈2.95)`
-  and WARN, the same way it already warns on zero weights. Orphan islands are
-  exactly the verdict-in-scene-vocabulary case: countable, locatable, no
-  coordinate dump.
-- **R3 — `deform: false` bone flag in `create_armature`.** Every bone competes
-  in the heat solve, so a root/control bone near the meshes steals weights.
-  Workaround that worked: bury the root bone below the floor (z=−0.5) — which
-  is exactly the kind of hack a spec flag should replace. Bone spec gains
-  `"deform": false` (maps to `bone.use_deform`).
-- **R4 — spline endpoints that follow bones/objects.** `spline_tube` resolves
-  its points once at creation, so a rope from winch drum to throwing arm
-  cannot follow the rig; the build deleted and re-created the rope per pose
-  (slack at rest, taut when cocked). General need — cables, ropes, hoses,
-  chains on any articulated machine. Cheapest viable shape: optional
-  `anchor: {"bone": "arm_swing"} / {"object": "winch_drum"}` per endpoint
-  implemented as Hook modifiers, so the tube stretches between anchors when
-  posed.
-- **R5 — `scatter_on_surface` exclusion zone.** Scattering ground rocks around
-  a hero asset has no way to keep the landing zone clear — instances can land
-  inside the asset's footprint. An `avoid` parameter (object/group name +
-  optional margin in meters, rejection-sample against its XY footprint) makes
-  set-dressing one call instead of scatter-inspect-delete.
+_No open gaps._
 
 ## Tactile introspection — the design principle
 
@@ -58,6 +16,46 @@ coordinates. BVHTree makes the proximity queries milliseconds-cheap at hobby pol
 ---
 
 # Recently closed
+
+## Siege-catapult rigging gaps (R1–R5) — mechanical-prop rigging, 2026-06-11
+
+Rigid-assembly rigging + set-dressing. Armature work in `extension/armature.py`,
+the following rope on `add_curve` (`extension/curves.py`), exclusion zone on
+`scatter_on_surface` (`extension/scatter.py`); all mirrored server-side. e2e in
+`tests/e2e_rigging.py` (25 checks).
+
+- **R1 — `weight_to_bone(mesh, armature, bone)`** — rigid bind: 100% weight on
+  every vertex to ONE bone, strips this armature's other deform groups so the
+  bone is the sole influence, creates/reuses the Armature modifier. The
+  deterministic alternative to `auto_weight`'s heat solve for hard-surface parts
+  (wheels, doors, levers, throwing arms). Added an `armature` param the gap's
+  `(mesh, bone)` shorthand omitted — a bone name alone can't say which armature
+  owns the modifier. Verified headless: posing the bone deforms the bound mesh.
+- **R2 — `auto_weight` coverage verdict** — now reports `weighted/total` and
+  clusters orphaned (unweighted) verts into connected islands by mesh edges,
+  located by region word: `96/128 weighted — 32 orphaned in 2 islands: 18 verts
+  top-front, 14 verts bottom-back`. WARNs like the zero-weight case and points at
+  `weight_to_bone` for rigid parts. (`_orphan_islands` unit-tested directly,
+  since the heat solve won't deterministically orphan a simple test mesh.)
+- **R3 — `deform: false` bone flag** — `create_armature` bone spec accepts
+  `"deform": false` → `edit_bone.use_deform`, excluding root/control bones from
+  the heat solve. Replaces the bury-the-bone-below-the-floor hack. Result lists
+  `non_deform_bones`.
+- **R4 — anchored following curve** — landed on `add_curve` (not `spline_tube`):
+  a baked mesh can only drag its endpoint vertex rings (shear/tear), so the tube
+  must stay a LIVE curve whose spline re-solves between hooked control points.
+  Any control point can carry `"anchor": {"object": "winch_drum"}` or
+  `{"bone": "rig/arm_swing"}` → a Hook modifier; the curve follows when the
+  target moves/poses (rope, cable, hose, chain). Per-point (not endpoint-only) so
+  a sag midpoint can stay in world space. `spline_tube` keeps its pure
+  bake-to-mesh contract. Traps handled: hook captures the point in the bone's
+  REST space (anchor in rest pose), and add_curve's identity object transform
+  makes `matrix_inverse = target_world⁻¹` the correct no-jump bind. Delivery:
+  pose the rig, then `apply_modifiers` to bake the curve to a game-ready mesh.
+- **R5 — `scatter_on_surface` exclusion zone** — `avoid` (object/collection) +
+  `avoid_margin` rejection-samples instances out of the avoid's world XY
+  footprint; instances that can't clear it after 20 tries are dropped and
+  reported. Set-dressing around a hero asset in one call.
 
 ## Pocket-watch gaps + tactile introspection (P1–P12)
 

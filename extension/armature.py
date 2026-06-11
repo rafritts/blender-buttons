@@ -14,8 +14,53 @@ can be layered on top later.
 import math
 
 import bpy
+import mathutils
 
-from .common import activate
+from .common import activate, world_bbox, region_words
+
+
+def _orphan_islands(obj):
+    """Cluster the mesh's unweighted (no vertex group) verts into connected
+    islands by mesh edges. Returns (total_verts, orphan_count, islands) where
+    islands is a list of (vert_count, region_word) sorted largest-first — so the
+    verdict can say WHERE the orphans are without dumping coordinates."""
+    me = obj.data
+    total = len(me.vertices)
+    orphan = {v.index for v in me.vertices if not v.groups}
+    if not orphan:
+        return total, 0, []
+
+    adj = {i: [] for i in orphan}
+    for e in me.edges:
+        a, b = e.vertices
+        if a in orphan and b in orphan:
+            adj[a].append(b)
+            adj[b].append(a)
+
+    bbox = world_bbox(obj)
+    mw = obj.matrix_world
+    seen = set()
+    islands = []
+    for start in orphan:
+        if start in seen:
+            continue
+        stack = [start]
+        seen.add(start)
+        comp = []
+        while stack:
+            n = stack.pop()
+            comp.append(n)
+            for m in adj[n]:
+                if m not in seen:
+                    seen.add(m)
+                    stack.append(m)
+        c = mathutils.Vector((0.0, 0.0, 0.0))
+        for i in comp:
+            c += mw @ me.vertices[i].co
+        c /= len(comp)
+        islands.append((len(comp), region_words(bbox, c)))
+    islands.sort(reverse=True)
+    return total, len(orphan), islands
 
 
 def create_armature(params):
@@ -65,6 +110,11 @@ def create_armature(params):
             eb = arm_data.edit_bones.new(b["name"])
             eb.head = tuple(float(c) for c in head)
             eb.tail = tuple(float(c) for c in tail)
+            # deform=false → bone.use_deform off, so this bone never competes in
+            # the auto-weight heat solve (the catapult fix: root/control bones near
+            # the meshes were stealing weights; the workaround was burying them
+            # below the floor — this flag replaces that hack).
+            eb.use_deform = bool(b.get("deform", True))
             made[b["name"]] = eb
 
         for b in bones:
@@ -85,6 +135,7 @@ def create_armature(params):
         "object_name": obj.name,
         "bones": [bn.name for bn in arm_data.bones],
         "bone_count": len(arm_data.bones),
+        "non_deform_bones": [bn.name for bn in arm_data.bones if not bn.use_deform],
     }
 
 
@@ -121,9 +172,13 @@ def auto_weight(params):
 
     # Bone-heat weighting can silently come back empty (it loses conditioning on
     # geometry far from the origin, or on non-manifold meshes) — the modifier is
-    # there but posing won't deform anything. Detect and warn rather than leave a
-    # dead rig.
-    weighted = sum(1 for v in mesh.data.vertices if v.groups)
+    # there but posing won't deform anything. It can also weight MOST of the mesh
+    # but orphan islands (e.g. thin rings the solver couldn't reach), which float
+    # in place when posed. Report coverage as N/total + locate orphan islands by
+    # region word, and WARN — the same verdict-in-scene-vocabulary contract the
+    # introspection tools use.
+    total, orphans, islands = _orphan_islands(mesh)
+    weighted = total - orphans
     warnings = []
     if weighted == 0:
         warnings.append(
@@ -132,6 +187,15 @@ def auto_weight(params):
             "or non-manifold meshes. Move the mesh+armature near the origin "
             "(apply_transform first) and retry, or weight by hand."
         )
+    elif orphans > 0:
+        where = ", ".join(f"{n} verts {region}" for n, region in islands[:4])
+        more = f" (+{len(islands) - 4} more)" if len(islands) > 4 else ""
+        warnings.append(
+            f"{weighted}/{total} weighted — {orphans} orphaned vert(s) in "
+            f"{len(islands)} island(s): {where}{more}. These float in place when "
+            f"posed. Rigid parts (rings/bolts) want weight_to_bone(); for organic "
+            f"geometry add loop cuts or weight the gaps by hand."
+        )
 
     return {
         "success": True,
@@ -139,8 +203,72 @@ def auto_weight(params):
         "armature": arm.name,
         "vertex_groups": len(vgroups),
         "weighted_vertices": weighted,
+        "total_vertices": total,
+        "orphaned_vertices": orphans,
+        "orphan_islands": [{"verts": n, "region": region} for n, region in islands],
         "armature_modifier": mod.name if mod else None,
         "warnings": warnings,
+    }
+
+
+def weight_to_bone(params):
+    """Rigid-bind every vertex of a mesh to ONE named bone at full weight.
+
+    mesh:     mesh object to bind (required).
+    armature: armature that owns the bone (required).
+    bone:     bone name — gets 100% weight on every vertex (required).
+
+    This is the standard game workflow for MECHANICAL parts (wheels, doors,
+    levers, turrets, throwing arms) where bone-heat's blending is actively wrong:
+    a rigid part should follow exactly one bone with no falloff. Creates a vertex
+    group named after the bone with weight 1.0 on all verts, strips any existing
+    weights for this armature's OTHER bones (so the named bone is the sole
+    influence), and creates/reuses the Armature modifier — the same plumbing
+    auto_weight lays down, minus the heat solve that orphans thin detail."""
+    mesh_name = params.get("mesh")
+    arm_name = params.get("armature")
+    bone = params.get("bone")
+    if not mesh_name or not arm_name or not bone:
+        return {"error": "'mesh', 'armature', and 'bone' are all required"}
+    mesh = bpy.data.objects.get(mesh_name)
+    arm = bpy.data.objects.get(arm_name)
+    if mesh is None or mesh.type != 'MESH':
+        return {"error": f"mesh '{mesh_name}' not found or not a mesh"}
+    if arm is None or arm.type != 'ARMATURE':
+        return {"error": f"armature '{arm_name}' not found or not an armature"}
+    if bone not in arm.data.bones:
+        return {"error": f"bone '{bone}' not found on '{arm_name}'. "
+                         f"Available: {[b.name for b in arm.data.bones]}"}
+
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    # Strip existing weights for THIS armature's bones so the named bone is the
+    # sole influence (true rigid bind). Non-bone vertex groups are left alone.
+    bone_names = {b.name for b in arm.data.bones}
+    for vg in list(mesh.vertex_groups):
+        if vg.name in bone_names:
+            mesh.vertex_groups.remove(vg)
+
+    vg = mesh.vertex_groups.new(name=bone)
+    all_idx = [v.index for v in mesh.data.vertices]
+    vg.add(all_idx, 1.0, 'REPLACE')
+
+    mod = next((m for m in mesh.modifiers if m.type == 'ARMATURE'), None)
+    if mod is None:
+        mod = mesh.modifiers.new(name="Armature", type='ARMATURE')
+    mod.object = arm
+    mod.use_vertex_groups = True
+
+    bpy.context.view_layer.update()
+    return {
+        "success": True,
+        "mesh": mesh.name,
+        "armature": arm.name,
+        "bone": bone,
+        "weighted_vertices": len(all_idx),
+        "total_vertices": len(mesh.data.vertices),
+        "armature_modifier": mod.name,
     }
 
 
@@ -189,5 +317,6 @@ def pose_bone(params):
 TOOLS = {
     "create_armature": create_armature,
     "auto_weight":     auto_weight,
+    "weight_to_bone":  weight_to_bone,
     "pose_bone":       pose_bone,
 }
