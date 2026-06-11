@@ -1,6 +1,8 @@
 # MCP gaps
 
-_(none open)_
+- **P1 — no radial array primitive.** Placing 12 hour markers and 17 chain links on the pocket-watch build required computing every sin/cos position + tangent rotation by hand outside Blender. Blender's native idiom is an Array modifier around an empty (or dupli-rotate about the 3D cursor). Want: `array_radial(source, count, center, axis, start_angle, end_angle, align_to_tangent)` — circular/arc duplication around a point, optionally orienting each copy along the tangent. Covers clock markers, bolt circles, chain links on an arc, spokes, petals, gear teeth.
+- **P2 — `rotate_object` has no pivot override.** It rotates around each object's own origin only, so anything that must pivot around a shared point (clock hands around the dial center, a door around its hinge) has to be created pre-rotated with the world position computed by hand. Want: optional `pivot=[x,y,z]` (or `pivot="<object>"`) on `rotate_object`. Same root cause as the known group-rotate disassembly gap.
+- **P3 — coplanar-face z-fighting is invisible until a render.** The watch caseband's solid top cap was exactly coplanar with the dial's top face; viewport + renders showed brown triangular mottling on the dial that looked exactly like a material/normal bug, and it cost three diagnostic Cycles renders + a lift-the-crystal experiment to isolate. Want: `find_coplanar_overlaps(targets?, epsilon=1e-4)` — report pairs of faces from different objects that are coplanar and XY-overlapping, so an agent can lint the scene before rendering.
 
 ---
 
