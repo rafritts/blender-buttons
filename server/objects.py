@@ -146,6 +146,63 @@ def separate_selection(new_name: str = "", label: str = "") -> str:
 
 
 @mcp.tool()
+def get_custom_properties(name: str, bone: str = None) -> str:
+    """
+    List the user-defined custom properties on an object — or on one of its pose
+    bones (bone=...). Read-only. Production rigs drive IK/FK switches and panel
+    toggles through these; addons and game-export pipelines stash metadata here too.
+
+    Examples:
+      get_custom_properties("char_rig", bone="properties_arm.L")   # IK/FK switch
+      get_custom_properties("hero_prop")                            # export metadata
+    """
+    params = {"name": name}
+    if bone is not None:
+        params["bone"] = bone
+    result = call_blender("get_custom_properties", params)
+    if not result.get("success"):
+        return result.get("error", "failed")
+    props = result.get("properties", {})
+    if not props:
+        where = f"{name}.{bone}" if bone else name
+        return f"{where}: no custom properties"
+    where = f"{name}.{bone}" if bone else name
+    lines = [f"{where}: {result['count']} custom propert(y/ies)"]
+    for k, v in props.items():
+        lines.append(f"  {k} = {v}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def set_custom_property(name: str, key: str, value, bone: str = None,
+                        label: str = "") -> str:
+    """
+    Set (or create) a custom property on an object or one of its pose bones
+    (bone=...). The way to drive a rig's IK/FK switch, a panel toggle, or any
+    addon/export metadata.
+
+    name:  object name.
+    key:   property name.
+    value: new value (number, string, or list).
+    bone:  optional pose-bone name to target instead of the object.
+
+    Example: set_custom_property("char_rig", "ik_fk_arm.L", 1.0,
+                                 bone="properties_arm.L")
+    """
+    params = {"name": name, "key": key, "value": value}
+    if bone is not None:
+        params["bone"] = bone
+    result = call_blender("set_custom_property", params, label=label)
+    if result.get("success"):
+        verb = "created" if result.get("created") else "set"
+        where = f"{name}.{bone}" if bone else name
+        main = f"{verb} {where}['{key}'] = {result['value']} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def split_by_part(label: str = "") -> str:
     """Split the active mesh into separate objects, one per connected component
     (P → By Loose Parts). Restores per-part addressability after a join_objects."""

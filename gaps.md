@@ -10,24 +10,6 @@ lattices, particle hair, linked widget meshes) tests the opposite workflow —
 introspection layer is what thins out: the toolset can author a rig but cannot
 discover one.
 
-- **U1 — armatures cannot be discovered, only authored.** `pose_bone` expects
-  bone names "from create_armature" — the toolset assumes WE built the rig.
-  Against RIG-Spring there is no way to learn a single bone name: no bone-tree
-  tool, no bone-level describe. Posing the character fails at step zero.
-  Primitive: armature introspection — a bone hierarchy tree (filterable, like
-  U4; this rig has hundreds of bones) and a per-bone describe (parent, head/tail
-  in scene vocabulary, deform flag, locks, constraints with their targets).
-  The read-side complement of `create_armature`.
-- **U2 — no custom-property access.** Production rigs are driven through custom
-  props — IK/FK switches, the whole `cs_properties_*` panel family. We have no
-  get/set for custom properties on objects, bones, or pose bones. General
-  Blender primitive (any addon/rig/game-export metadata lives there), not a
-  rig-specific one.
-- **U3 — `pose_bone` only rotates, with replace semantics.** Production rigs
-  are posed mostly by *translating* IK controls (hand/foot targets, pole
-  vectors); a rotation-only verb can't drive an IK chain at all. Primitive:
-  bone location alongside rotation (and an additive option — replace semantics
-  forces re-deriving the full pose to nudge one axis).
 - **U4 — `get_scene_tree` doesn't scale.** On Spring it dumped ~400 objects —
   300 of them `cs_*` bone-shape widgets — and the output the agent received
   cut off mid-tree (lights/cameras/world never appeared). Verified against the
@@ -37,12 +19,6 @@ discover one.
   the full dump is unreadable by the consumer regardless of who truncates it.
   Primitive: depth limit, type/name filters, and collection summarization
   ("spring.rig.widgets/ — 310 meshes") with full expansion on request.
-- **U6 — `describe()` has no vocabulary for non-mesh types.** "RIG-Spring:
-  freestanding (origin -0.435m above floor); no material" — technically true,
-  useless, and 'no material' is noise on an armature. Lattices, empties, and
-  armatures need their own relational sentences (an armature's is U1's bone
-  summary; a lattice's is what objects it deforms; an empty's is what uses it
-  as a target).
 - **U7 — particle systems are invisible and undrivable.** Spring's hair is 6+
   PARTICLE_SYSTEM modifier entries; we can see the names via `list_modifiers`
   and nothing else — can't toggle viewport display (they bury the head in
@@ -52,12 +28,6 @@ discover one.
 - **U8 — shape keys don't exist in the toolset.** No list, no get/set value.
   Any character face (and plenty of hard-surface assets) carries them;
   they're also the natural target of a future corrective-sculpt workflow.
-- **U9 — constraints and drivers are invisible.** Bone constraints (IK chains,
-  copy-transforms, the entire BlenRig control graph) and drivers can't be
-  listed on anything. Consequence for U3: `pose_bone` may silently fight a
-  constraint and report success while the bone didn't visibly move. Read-only
-  listing (constraint type + target + influence per bone/object) is the
-  primitive; mutation can wait.
 - **U10 — linked library data is undefined territory.** The scene tree marks
   dozens of objects `(linked)` but no tool knows the difference: what happens
   when `move_vertices` or `set_material` hits a linked datablock is untested —
@@ -106,6 +76,32 @@ coordinates. BVHTree makes the proximity queries milliseconds-cheap at hobby pol
 ---
 
 # Recently closed
+
+## Batch 4 — rig + metadata introspection (U1, U2, U3, U6, U9), 2026-06-11
+
+The read-side of rigging: operate on a rig someone else built, not just one we
+authored. e2e in `tests/e2e_batch4.py` (35 checks).
+
+- **U1 — armature discovery.** `get_bone_tree(armature, filter=, deform_only=,
+  max_depth=)` prints the bone hierarchy (control bones marked, ancestors kept
+  for filter context — handles hundred-bone rigs); `describe_bone(armature, bone)`
+  gives parent/children, head & tail region words, length, deform flag, pose
+  locks, constraints (type→target), and custom props. The read complement of
+  `create_armature`.
+- **U2 — custom-property access.** `get_custom_properties(name, bone=)` /
+  `set_custom_property(name, key, value, bone=)` on objects or pose bones (where
+  IK/FK switches live). General Blender metadata; bb_*/_RNA_UI internals excluded.
+- **U3 — `pose_bone` translates + accumulates.** `loc` alongside `rot` (both now
+  optional; ≥1 required) to drive IK controls, and `additive=True` to nudge one
+  axis without re-deriving the pose. Rotation-only callers unchanged.
+- **U6 — non-mesh `describe` vocabulary.** Armatures report a bone summary + what
+  they deform; empties report their display type + what references them; lattices
+  report what they deform — instead of the useless "no material".
+- **U9 — constraints/drivers visible.** `list_constraints(name, bone=)` lists
+  constraints (type + target/subtarget + influence + mute) on an object or pose
+  bone, plus object-level drivers — the BlenRig control graph `pose_bone` could
+  otherwise silently fight. (All four read tools are NON_UNDOABLE; get_bone_tree
+  is NO_STATUS like get_scene_tree.)
 
 ## Batch 3 — evaluated/posed-bounds primitive (T6, T2), 2026-06-11
 

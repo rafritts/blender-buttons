@@ -24,6 +24,52 @@ def _base_mesh_world_center(obj):
     return ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, (min(zs) + max(zs)) / 2)
 
 
+def _users_of(obj):
+    """Objects that reference obj as a constraint target or a modifier object —
+    'what uses this empty/armature/lattice'."""
+    users = []
+    for o in bpy.context.scene.objects:
+        if o == obj:
+            continue
+        hit = any(getattr(c, "target", None) == obj for c in getattr(o, "constraints", []))
+        if not hit:
+            hit = any(getattr(m, "object", None) == obj for m in getattr(o, "modifiers", []))
+        if hit:
+            users.append(o.name)
+    return users
+
+
+def _non_mesh_summary(obj):
+    """A relational sentence for a non-mesh type — armatures, empties, lattices —
+    instead of the useless 'no material' (gaps.md U6). Returns None for types that
+    legitimately carry materials (mesh, curve, font), so they keep the material line."""
+    def _trunc(names, n=6):
+        return f"{names[:n]}" + (f" +{len(names) - n} more" if len(names) > n else "")
+
+    if obj.type == 'ARMATURE':
+        bones = obj.data.bones
+        deform = sum(1 for b in bones if b.use_deform)
+        roots = sum(1 for b in bones if b.parent is None)
+        deformed = [o.name for o in bpy.context.scene.objects
+                    if any(m.type == 'ARMATURE' and m.object == obj
+                           for m in getattr(o, "modifiers", []))]
+        s = f"armature: {len(bones)} bones ({deform} deform), {roots} root(s)"
+        if deformed:
+            s += f"; deforms {_trunc(deformed)}"
+        return s
+    if obj.type == 'EMPTY':
+        users = _users_of(obj)
+        s = f"empty ({obj.empty_display_type.lower()})"
+        s += f"; used by {_trunc(users)}" if users else "; not referenced"
+        return s
+    if obj.type == 'LATTICE':
+        deformed = [o.name for o in bpy.context.scene.objects
+                    if any(m.type == 'LATTICE' and m.object == obj
+                           for m in getattr(o, "modifiers", []))]
+        return "lattice" + (f": deforms {_trunc(deformed)}" if deformed else " (deforms nothing)")
+    return None
+
+
 def describe(params):
     """Describe an object in relational terms — what it rests on, what it's beside,
     and its dimensions. No raw world coordinates in the output."""
@@ -112,7 +158,12 @@ def describe(params):
         mat_strs.append(" ".join(bits))
     mat_str = f"material: {', '.join(mat_strs)}" if mat_strs else "no material"
 
-    parts = relations + [dim_str, mat_str]
+    summary = _non_mesh_summary(obj)
+    if summary is not None:
+        # Empties have no real geometry — the 0×0×0 size line is noise.
+        parts = relations + ([summary] if obj.type == 'EMPTY' else [dim_str, summary])
+    else:
+        parts = relations + [dim_str, mat_str]
     if posed:
         parts.insert(0, f"posed (evaluated geometry; center {posed_offset_mm}mm from rest)")
 

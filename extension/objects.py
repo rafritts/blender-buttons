@@ -377,15 +377,97 @@ def duplicate_mirrored(params):
     }
 
 
+# ─────────────────────── custom properties (U2) ───────────────────────
+# Production rigs/addons/game-export pipelines store metadata in custom
+# properties — IK/FK switches, panel toggles, LOD flags. General Blender data,
+# not rig-specific, so it lives here with the other object basics.
+
+def _prop_holder(name, bone):
+    """Resolve the ID that carries custom props: a pose bone if `bone` is given
+    (where rig controls live), else the object. Returns (holder, error)."""
+    obj = bpy.data.objects.get(name)
+    if obj is None:
+        return None, f"Object '{name}' not found"
+    if bone:
+        if obj.type != 'ARMATURE':
+            return None, f"'{name}' is not an armature; 'bone' only applies to armatures"
+        pb = obj.pose.bones.get(bone)
+        if pb is None:
+            return None, f"bone '{bone}' not found on '{name}'"
+        return pb, None
+    return obj, None
+
+
+def _user_props(holder):
+    """User-defined custom properties on holder, minus Blender/addon internals
+    and this addon's own bb_* bookkeeping."""
+    out = {}
+    for k in holder.keys():
+        if k in ("_RNA_UI", "cycles") or k.startswith("bb_"):
+            continue
+        v = holder[k]
+        try:
+            if hasattr(v, "to_list"):
+                v = v.to_list()
+            elif hasattr(v, "to_dict"):
+                v = v.to_dict()
+            elif hasattr(v, "__len__") and not isinstance(v, str):
+                v = list(v)
+        except Exception:
+            v = str(v)
+        out[k] = v
+    return out
+
+
+def get_custom_properties(params):
+    """List user-defined custom properties on an object, or on one of its pose
+    bones (bone=...). Read-only."""
+    name = params.get("name")
+    bone = params.get("bone")
+    holder, err = _prop_holder(name, bone)
+    if err:
+        return {"error": err}
+    props = _user_props(holder)
+    return {"success": True, "name": name, "bone": bone,
+            "properties": props, "count": len(props)}
+
+
+def set_custom_property(params):
+    """Set (or create) a custom property on an object or pose bone — the way to
+    drive a rig's IK/FK switch or any addon/export metadata."""
+    name = params.get("name")
+    bone = params.get("bone")
+    key = params.get("key")
+    if not key:
+        return {"error": "'key' is required"}
+    if "value" not in params:
+        return {"error": "'value' is required"}
+    value = params.get("value")
+    holder, err = _prop_holder(name, bone)
+    if err:
+        return {"error": err}
+    existed = key in holder.keys()
+    try:
+        holder[key] = value
+    except (TypeError, ValueError) as e:
+        return {"error": f"could not set '{key}' = {value!r}: {e}"}
+    # Re-evaluate so any drivers/constraints reading this property update.
+    bpy.context.view_layer.update()
+    return {"success": True, "name": name, "bone": bone, "key": key,
+            "value": value, "created": not existed}
+
+
 TOOLS = {
-    "rename_object":         rename_object,
-    "select_object":         select_object,
-    "delete_object":         delete_object,
-    "duplicate_object":      duplicate_object,
-    "duplicate_mirrored":    duplicate_mirrored,
-    "join_objects":          join_objects,
-    "set_mode":              set_mode,
-    "get_object_info":       get_object_info,
-    "get_mesh_profile":      get_mesh_profile,
-    "get_current_selection": get_current_selection,
+    "rename_object":          rename_object,
+    "select_object":          select_object,
+    "delete_object":          delete_object,
+    "duplicate_object":       duplicate_object,
+    "duplicate_mirrored":     duplicate_mirrored,
+    "join_objects":           join_objects,
+    "set_mode":               set_mode,
+    "get_object_info":        get_object_info,
+    "get_mesh_profile":       get_mesh_profile,
+    "get_current_selection":  get_current_selection,
+    "get_custom_properties":  get_custom_properties,
+    "set_custom_property":    set_custom_property,
 }

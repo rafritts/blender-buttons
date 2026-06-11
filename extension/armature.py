@@ -273,20 +273,30 @@ def weight_to_bone(params):
 
 
 def pose_bone(params):
-    """Rotate a pose bone (degrees, local XYZ euler).
+    """Pose a bone — rotate and/or translate it (local bone space).
 
     armature: armature object name (required).
     bone:     bone name (required).
-    rot:      [x, y, z] rotation in degrees (required). Replaces the bone's
-              current pose rotation.
-    The pose is stored on the bone and persists; the call returns to OBJECT mode."""
+    rot:      optional [x, y, z] rotation in degrees.
+    loc:      optional [x, y, z] translation in meters — production rigs are posed
+              mostly by TRANSLATING IK controls (hand/foot targets, pole vectors),
+              which a rotation-only verb can't drive.
+    additive: if True, ADD rot/loc to the bone's CURRENT pose instead of replacing
+              it — nudge one axis without re-deriving the whole pose. Default False.
+    At least one of rot/loc is required. The pose persists; returns to OBJECT mode."""
     arm_name = params.get("armature")
     bone = params.get("bone")
     rot = params.get("rot")
+    loc = params.get("loc")
+    additive = bool(params.get("additive", False))
     if not arm_name or not bone:
         return {"error": "'armature' and 'bone' are required"}
-    if not (isinstance(rot, (list, tuple)) and len(rot) == 3):
+    if rot is None and loc is None:
+        return {"error": "at least one of 'rot' (degrees) or 'loc' (meters) is required"}
+    if rot is not None and not (isinstance(rot, (list, tuple)) and len(rot) == 3):
         return {"error": "'rot' must be [x, y, z] degrees"}
+    if loc is not None and not (isinstance(loc, (list, tuple)) and len(loc) == 3):
+        return {"error": "'loc' must be [x, y, z] meters"}
     arm = bpy.data.objects.get(arm_name)
     if arm is None or arm.type != 'ARMATURE':
         return {"error": f"armature '{arm_name}' not found or not an armature"}
@@ -301,17 +311,220 @@ def pose_bone(params):
         bpy.ops.object.mode_set(mode='OBJECT')
         return {"error": f"bone '{bone}' not found on '{arm_name}'. "
                          f"Available: {[b.name for b in arm.pose.bones]}"}
-    pbone.rotation_mode = 'XYZ'
-    pbone.rotation_euler = tuple(math.radians(float(a)) for a in rot)
+    if rot is not None:
+        pbone.rotation_mode = 'XYZ'
+        new_rot = [math.radians(float(a)) for a in rot]
+        if additive:
+            pbone.rotation_euler = tuple(c + n for c, n in zip(pbone.rotation_euler, new_rot))
+        else:
+            pbone.rotation_euler = tuple(new_rot)
+    if loc is not None:
+        new_loc = [float(a) for a in loc]
+        if additive:
+            pbone.location = tuple(c + n for c, n in zip(pbone.location, new_loc))
+        else:
+            pbone.location = tuple(new_loc)
     bpy.context.view_layer.update()
+    final_rot = [round(math.degrees(a), 2) for a in pbone.rotation_euler]
+    final_loc = [round(a, 4) for a in pbone.location]
     bpy.ops.object.mode_set(mode='OBJECT')
 
     return {
         "success": True,
         "armature": arm.name,
         "bone": bone,
-        "rot_deg": [round(float(a), 2) for a in rot],
+        "additive": additive,
+        "rot_deg": final_rot,
+        "loc": final_loc,
     }
+
+
+def get_bone_tree(params):
+    """Hierarchy tree of an armature's bones — the read-side complement of
+    create_armature. Filterable, because production rigs have hundreds of bones.
+
+    armature:    armature object name (required).
+    filter:      optional substring — show only bones whose name contains it
+                 (ancestors are kept for context).
+    deform_only: optional — show only deform bones (skip control/widget bones).
+    max_depth:   optional int — cap tree depth.
+    """
+    from .common import world_bbox  # noqa: F401  (kept symmetric with describe_bone)
+    arm_name = params.get("armature")
+    arm = bpy.data.objects.get(arm_name)
+    if arm is None or arm.type != 'ARMATURE':
+        return {"error": f"armature '{arm_name}' not found or not an armature"}
+    bones = arm.data.bones
+    total = len(bones)
+    flt = (params.get("filter") or "").lower()
+    deform_only = bool(params.get("deform_only"))
+    md = params.get("max_depth")
+    max_depth = int(md) if md is not None else None
+
+    def keep(b):
+        if deform_only and not b.use_deform:
+            return False
+        if flt and flt not in b.name.lower():
+            return False
+        return True
+
+    matched = set()
+
+    def subtree_matches(b):
+        m = keep(b)
+        for c in b.children:
+            if subtree_matches(c):
+                m = True
+        if m:
+            matched.add(b.name)
+        return m
+
+    roots = [b for b in bones if b.parent is None]
+    for r in roots:
+        subtree_matches(r)
+
+    shown = [0]
+    lines = []
+
+    def walk(b, depth):
+        if b.name not in matched:
+            return
+        if max_depth is not None and depth > max_depth:
+            return
+        shown[0] += 1
+        pad = "│   " * depth
+        marker = "" if b.use_deform else "  (control)"
+        lines.append(f"{pad}├── {b.name}{marker}")
+        for c in b.children:
+            walk(c, depth + 1)
+
+    for r in roots:
+        walk(r, 0)
+
+    header = f"{arm_name}: {total} bones"
+    if flt or deform_only or max_depth is not None:
+        bits = []
+        if flt:
+            bits.append(f"filter='{flt}'")
+        if deform_only:
+            bits.append("deform-only")
+        if max_depth is not None:
+            bits.append(f"max_depth={max_depth}")
+        header += f" ({shown[0]} shown — {', '.join(bits)})"
+    return {"success": True, "armature": arm_name, "bone_count": total,
+            "shown": shown[0], "tree": header + ("\n" + "\n".join(lines) if lines else "")}
+
+
+def _bone_constraints(holder):
+    out = []
+    for c in holder.constraints:
+        e = {"name": c.name, "type": c.type, "influence": round(c.influence, 3),
+             "mute": c.mute}
+        tgt = getattr(c, "target", None)
+        if tgt is not None:
+            e["target"] = tgt.name if tgt else None
+            sub = getattr(c, "subtarget", "")
+            if sub:
+                e["subtarget"] = sub
+        out.append(e)
+    return out
+
+
+def describe_bone(params):
+    """Per-bone description in scene vocabulary: parent/children, head & tail region
+    words, length, deform flag, pose locks, constraints (type→target), and custom
+    properties. No raw coordinates."""
+    from .common import world_bbox, region_words
+    arm_name = params.get("armature")
+    bone_name = params.get("bone")
+    arm = bpy.data.objects.get(arm_name)
+    if arm is None or arm.type != 'ARMATURE':
+        return {"error": f"armature '{arm_name}' not found or not an armature"}
+    bone = arm.data.bones.get(bone_name)
+    if bone is None:
+        avail = [b.name for b in arm.data.bones][:20]
+        return {"error": f"bone '{bone_name}' not found on '{arm_name}'. "
+                         f"First bones: {avail}"}
+    pbone = arm.pose.bones.get(bone_name)
+    mw = arm.matrix_world
+    bbox = world_bbox(arm)
+    head_region = region_words(bbox, mw @ bone.head_local)
+    tail_region = region_words(bbox, mw @ bone.tail_local)
+    length_mm = round((bone.tail_local - bone.head_local).length * 1000, 1)
+
+    locks = []
+    constraints = []
+    props = {}
+    if pbone is not None:
+        for axis, l in zip("XYZ", pbone.lock_location):
+            if l:
+                locks.append(f"loc{axis}")
+        for axis, l in zip("XYZ", pbone.lock_rotation):
+            if l:
+                locks.append(f"rot{axis}")
+        constraints = _bone_constraints(pbone)
+        from .objects import _user_props
+        props = _user_props(pbone)
+
+    kids = [c.name for c in bone.children]
+    parts = ["root bone" if bone.parent is None else f"child of {bone.parent.name}"]
+    if kids:
+        parts.append(f"{len(kids)} child(ren)")
+    parts.append(f"head {head_region}, tail {tail_region}, length {length_mm}mm")
+    parts.append("deform" if bone.use_deform else "control (no deform)")
+    if locks:
+        parts.append("locked " + ",".join(locks))
+    if constraints:
+        parts.append(f"{len(constraints)} constraint(s): " + ", ".join(
+            f"{c['type']}→{c.get('target', '?')}"
+            + (f"/{c['subtarget']}" if c.get("subtarget") else "")
+            for c in constraints))
+    if props:
+        parts.append("props: " + ", ".join(f"{k}={v}" for k, v in props.items()))
+
+    return {"success": True, "armature": arm_name, "bone": bone_name,
+            "parent": bone.parent.name if bone.parent else None, "children": kids,
+            "deform": bone.use_deform, "length_mm": length_mm,
+            "head_region": head_region, "tail_region": tail_region, "locks": locks,
+            "constraints": constraints, "custom_properties": props,
+            "description": f"{arm_name}.{bone_name}: " + "; ".join(parts)}
+
+
+def list_constraints(params):
+    """List constraints on an object, or on one of its pose bones (bone=...), plus
+    object-level drivers. Read-only. Reports type + target(+subtarget) + influence
+    + mute — the BlenRig/IK control graph an agent otherwise can't see."""
+    name = params.get("name")
+    bone = params.get("bone")
+    obj = bpy.data.objects.get(name)
+    if obj is None:
+        return {"error": f"Object '{name}' not found"}
+    if bone:
+        if obj.type != 'ARMATURE':
+            return {"error": f"'{name}' is not an armature; 'bone' only applies to armatures"}
+        holder = obj.pose.bones.get(bone)
+        if holder is None:
+            return {"error": f"bone '{bone}' not found on '{name}'"}
+    else:
+        holder = obj
+
+    constraints = _bone_constraints(holder)
+
+    drivers = []
+    if bone is None and obj.animation_data is not None:
+        for d in obj.animation_data.drivers:
+            drivers.append({
+                "data_path": d.data_path, "array_index": d.array_index,
+                "expression": d.driver.expression,
+                "variables": [v.name for v in d.driver.variables],
+            })
+
+    target = f"{name}.{bone}" if bone else name
+    summary = f"{target}: {len(constraints)} constraint(s)"
+    if drivers:
+        summary += f", {len(drivers)} driver(s) on object"
+    return {"success": True, "name": name, "bone": bone,
+            "constraints": constraints, "drivers": drivers, "summary": summary}
 
 
 TOOLS = {
@@ -319,4 +532,7 @@ TOOLS = {
     "auto_weight":     auto_weight,
     "weight_to_bone":  weight_to_bone,
     "pose_bone":       pose_bone,
+    "get_bone_tree":   get_bone_tree,
+    "describe_bone":   describe_bone,
+    "list_constraints": list_constraints,
 }

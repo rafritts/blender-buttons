@@ -78,6 +78,8 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
     # read-only introspection / lint tools (P3-P12) — pure queries, no scene mutation
     "find_coplanar_overlaps", "validate_scene", "check_mesh", "audit_asset",
     "check_contacts", "trace_profile", "check_framing", "check_resting", "diff_since",
+    # rig + metadata introspection (U1, U2, U9) — read-only
+    "get_bone_tree", "describe_bone", "list_constraints", "get_custom_properties",
     # new_scene reloads the startup file, wiping Blender's undo stack and the
     # scene; it resets the history log itself (designs.new_scene) rather than
     # pushing an undo step that would immediately be desynced.
@@ -88,7 +90,7 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
 # (read-only visual / query tools — the status block would be noise).
 NO_STATUS_TOOLS = {
     "get_blender_status", "get_viewport_screenshot", "get_viewport_collage",
-    "get_scene_tree", "get_history",
+    "get_scene_tree", "get_history", "get_bone_tree",
 }
 
 
