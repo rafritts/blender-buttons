@@ -97,12 +97,45 @@ dead modifiers, prescribes `rebind_deform`. Then the prescription itself died:
   production-tuned settings. Primitive: enable/disable toggle + the common
   scalar (factor/strength) on modify_modifier.
 
-_Live state parked on X1: pullover cut to tank shape (2039→882 verts, white
-materials applied) with MESH_DEFORM + CORRECTIVE_SMOOTH binds dead; both arms
-proportional-stretched (+8.5cm inboard, +4.5cm up, base mesh only) to fill the
-shoulder void, pinned back by CS(BIND) until rebind. The moment X1 is fixed,
-the finish is: `rebind_deform("GEO-spring_pullover")`,
-`rebind_deform("GEO_spring_arms")`, pose-test, refine armpit blend._
+- **X6 — orphan-completed ops left the object's evaluated-mesh cache WEDGED,
+  and every introspection channel then reported the stale eval as truth.**
+  After the timeout-orphaned rebinds, GEO_spring_arms stopped re-evaluating:
+  object mode kept rendering a pre-edit evaluated mesh through an unbind, a
+  global loop_cut (3288→8100 verts!), and FOUR separate remove_modifier
+  diagnostics — every screenshot identical, while edit mode showed the true
+  (stretched, dense) cage with NO surface drawn. Worse, the stale eval
+  poisoned the measuring tools too: `describe(posed=True)` returned the same
+  frozen 0.213m height through all of it, and the status-block bbox disagreed
+  with `sel_z` in the same printout (selection at z=0.9587 inside an object
+  whose "bounds" topped at 0.9275). An agent that trusts its instruments
+  burned ~10 calls chasing modifier ghosts. `undo_to` (full state rebuild)
+  flushed it. Wants: (a) after any timeout-orphaned op, force a depsgraph
+  retag of the touched object; (b) `describe(posed)`/status bounds should
+  read the depsgraph fresh, never `object.bound_box`; (c) the bbox-vs-sel_z
+  self-contradiction is detectable — the status block could flag its own
+  staleness.
+
+- **X7 — `loop_cut` ignores the selection and answers in coordinates.** With
+  154 verts selected (one shoulder segment), it cut 2302 edges across the
+  ENTIRE mesh — both arms, all fingers — doubling a production mesh
+  (3288→8100). It also returned the full list of ~2000 cut X-positions: a
+  raw coordinate dump, the exact anti-pattern the tactile-introspection
+  principle bars. Wants: respect the current selection when one exists
+  (whole mesh only as the no-selection fallback), and report "Cut N edges
+  across M loops in [region words]" instead of the dump. (Kept the global
+  cut on Spring's arms — the density was needed there anyway — but that was
+  luck, not intent.)
+
+_Resolution, same session: the X1 timeout diagnosis is CONFIRMED (timed ~35-40s
+on a real bind vs instant on introspection; pile-up explains the original
+5-crash window; ops orphan-complete AND log to history as successes). The
+orphan-completed pullover rebinds restored the tank's MESH_DEFORM +
+CORRECTIVE_SMOOTH against the final cut+snugged shape; the arms run
+Armature-only with mdef left deliberately UNBOUND (rebind refuses on the
+stretched shape — error swallowed by the orphan gap; revisit when timeouts
+report honestly). Pose-tested live: torso bend → tank follows, no clipping;
+hand_ik_ctrl_L raise → arm follows continuously through the new shoulder
+geometry. The wardrobe edit is DONE pending taste passes._
 
 ## Tactile introspection — the design principle
 
