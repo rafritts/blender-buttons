@@ -1,5 +1,63 @@
 # MCP gaps
 
+## Shape-key shadowing (Y1–Y2), tank-neckline live pass, 2026-06-11
+
+Context: carving a real scooped neckline into Spring's tank (topology cuts on the
+shirt + an attempted neck-skin extension on the head). Batch 9 fixes verified
+live along the way — see the verification note at the end of this section.
+
+- **Y1 — edit-mode vertex edits silently land on the ACTIVE SHAPE KEY and
+  vanish.** `GEO-spring_head` carries 164 shape keys. A 61-vert neck-ring edit
+  (`proportional_move` −8cm, `scale_vertices`, `move_vertices`) showed perfectly
+  in edit mode (`sel_z` tracked every step), but the evaluated mesh, the status
+  bbox, and `describe(posed=True)` never changed: the edit had been written into
+  whatever shape key was active — a key sitting at value 0. Three diagnostic
+  rounds were burned on the wrong suspects because every other system told a
+  consistent lie:
+  - the X4 exit warning fired ("EDIT SHADOWED BY A LIVE BIND") — true but
+    irrelevant; the bind was not the eraser;
+  - `rebind_deform` ran successfully against an *unchanged* effective rest shape
+    (honest success, useless work);
+  - the X5 `show_viewport` toggle on the MeshDeform changed nothing — correctly
+    ruling out the bind, but nothing pointed at the real cause.
+  Worse than invisibility: the orphaned edit is a LANDMINE. It now lives inside a
+  facial morph target; if an animator ever dials that key, the character's neck
+  ring tears 8cm out of her chest. (Undone via `undo_to` this session.)
+  Wants, as general primitives:
+  (a) any edit-mode mutation verb (`move_vertices`, `proportional_move`,
+      `scale_vertices`, sculpt verbs…) on a mesh WITH shape keys must say which
+      key layer it is writing to — "editing shape key 'mouth shape' (value 0.0,
+      NOT visible in the evaluated mesh)" — in its result, not buried;
+  (b) the edit-mode status block should carry an `active_key:` line whenever the
+      mesh has keys;
+  (c) the X4-style exit warning should check shape-key shadowing FIRST — on a
+      keyed mesh it currently blames the bind, and after a rebind the edit still
+      doesn't show, which reads as a wedged cache (X6 déjà vu) and sends the
+      session down the wrong differential;
+  (d) some way to direct the edit at Basis (or a named key) deliberately, since
+      "position-only edits are safe" is false on keyed meshes.
+
+- **Y2 — cut boundaries curl under Subsurf/CorrectiveSmooth and there is no way
+  to aim a crease at them.** Every `delete_geometry` cut (scoop, armholes,
+  collar) leaves a raw open boundary; Subsurf level 2 + CS ballooned those edges
+  into visible flaps/ruffles at the strap corners, worst in pose. The proper fix
+  is `set_edge_crease 1.0` on the boundary loop — but selecting that loop IS
+  X3B (no open-boundary selector), so the crease verb that already exists cannot
+  be aimed. Position-tucks (scale/move on sphere-selected corners) reduce but
+  don't remove the curl. X3B's priority should rise: it now blocks both rim
+  *extrusion* and post-cut *hem control*.
+
+Batch 9 verification (live, this session): **X1** — four `rebind_deform` calls
+(3× pullover after topology cuts, 1× head incl. CS(BIND)) all completed
+synchronously, no NoneType crash, no orphans. **X3A** — chained
+SELECT/DESELECT axis selections flushed correctly through VERT→face counts at
+every step (33-vert patch carried exactly its 20 faces; no whole-mesh ghosts).
+**X4** — both warning variants fired correctly and prescriptively: "BIND
+INVALIDATED" after each vert-count change (3×), "EDIT SHADOWED BY A LIVE BIND"
+after position-only edits on validly-bound meshes (2×); zero false fires.
+**X5** — `show_viewport` toggle did exactly its X6-diagnostic job (isolated the
+MeshDeform in the Y1 hunt without dismantling the stack). X2/X6 not exercised.
+
 ## Remaining from the X-series live pass (X3B, X7), 2026-06-11
 
 X1–X6 are closed (see Batch 9 below). Two deferred items remain open — both are
