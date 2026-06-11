@@ -1,6 +1,6 @@
 # MCP gaps
 
-## Presentation-pass gaps (T1–T5) — texturing/lighting the catapult for a showcase, 2026-06-11
+## Presentation-pass gaps (T1–T7) — texturing/lighting the catapult for a showcase, 2026-06-11
 
 Dressing a finished multi-material asset for hero renders. The build was done;
 every gap below is about *changing how it looks* without rebuilding it.
@@ -49,6 +49,23 @@ every gap below is about *changing how it looks* without rebuilding it.
   `set_viewport_overlays(relationship_lines=, bones=, gizmos=, ...)` verb (or
   per-object viewport visibility, e.g. hide the armature object from the
   viewport without unbinding it).
+
+- **T6 — no posed-position query for deformed meshes.** Object origins and
+  `describe`/`get_object_info` report REST placement; while the rig was cocked,
+  framing the camera on the relocated cup meant hand-deriving the bone pivot
+  from two measured point pairs and rotating the rest position by hand (the
+  exact dead-reckoning GUIDANCE_FOR_LLMS warns about). The armature object's
+  status-block bounds DO update with pose, but per-mesh evaluated bounds don't
+  exist as a query. Primitive: `describe(name, posed=True)` (or a
+  `where_is(name)`) returning evaluated-geometry bounds/center under current
+  modifiers — one call instead of trigonometry. Would also fix T2's DOF case.
+- **T7 — deleted-object names stay claimed after a boolean.** Sequence:
+  `boolean(..., hide_cutter=True)` → `delete_object(cutter)` reports deleted →
+  `add_sphere(name=<same name>)` fails with "already exists". Something (the
+  hidden-cutter bookkeeping, an undo snapshot, or an orphaned datablock) keeps
+  the name alive after a successful delete. Workaround: pick a fresh name. Fix:
+  delete should actually free the name (remove the datablock or rename the
+  orphan), or the error should say what is holding it.
 
 ## S1b-residual — lint skip-report is bypassed by GROUP expansion, 2026-06-11
 
