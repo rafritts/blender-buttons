@@ -48,12 +48,14 @@ def validate_scene(targets: str = "", epsilon: float = 0.0001) -> str:
                           {"targets": _targets(targets), "epsilon": epsilon})
     if not result.get("success"):
         return result.get("error", "failed")
+    excl = result.get("excluded_non_mesh") or []
+    skip = f"\n  (skipped {len(excl)} non-mesh: {', '.join(excl)})" if excl else ""
     if result["passed"]:
-        return f"PASS — {len(result['checked'])} object(s), no issues" + _status(result)
+        return f"PASS — {len(result['checked'])} object(s), no issues{skip}" + _status(result)
     lines = [f"{result['count']} finding(s):"]
     for f in result["findings"]:
         lines.append(f"  ⚠ {f['message']}")
-    return "\n".join(lines) + _status(result)
+    return "\n".join(lines) + skip + _status(result)
 
 
 @mcp.tool()
@@ -111,4 +113,7 @@ def audit_asset(group: str, tri_budget: int = 5000) -> str:
             lines.append(f"  ✓ {r['object']}: {r['tris']} tris{screen}")
         else:
             lines.append(f"  ⚠ {r['object']}: {r['tris']} tris{screen} — " + "; ".join(r["issues"]))
+    excl = result.get("excluded_non_mesh") or []
+    if excl:
+        lines.append(f"  (skipped {len(excl)} non-mesh: {', '.join(excl)})")
     return "\n".join(lines) + _status(result)

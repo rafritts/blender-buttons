@@ -133,10 +133,14 @@ def validate_scene(params):
     Compiler-style: PASS, or one finding per line."""
     eps = float(params.get("epsilon", 1e-4))
     targets = params.get("targets")
+    excluded = []
     if targets:
         objs, err = resolve_targets(targets)
         if err:
             return {"error": err}
+        # Curves, empties, lights etc. have no faces to lint — name what we drop
+        # rather than silently shrinking the count (no-silent-caps).
+        excluded = [o.name for o in objs if o.type != 'MESH']
         objs = [o for o in objs if o.type == 'MESH']
     else:
         objs = scene_mesh_objects()
@@ -175,7 +179,8 @@ def validate_scene(params):
         bm.free()
 
     return {"success": True, "passed": not findings, "count": len(findings),
-            "findings": findings, "checked": [o.name for o in objs]}
+            "findings": findings, "checked": [o.name for o in objs],
+            "excluded_non_mesh": excluded}
 
 
 # ─────────────────────────── check_mesh (P6) ───────────────────────────
@@ -267,6 +272,8 @@ def audit_asset(params):
     objs, err = resolve_targets(targets)
     if err:
         return {"error": err}
+    # Curves/empties carry no auditable geometry — name them, don't swallow them.
+    excluded = [o.name for o in objs if o.type != 'MESH']
     objs = [o for o in objs if o.type == 'MESH']
     if not objs:
         return {"error": "audit_asset needs at least one mesh"}
@@ -316,7 +323,8 @@ def audit_asset(params):
 
     return {"success": True, "total_tris": total_tris,
             "object_count": len(reports), "tri_budget": tri_budget,
-            "reports": reports, "passed": all(r["clean"] for r in reports)}
+            "reports": reports, "passed": all(r["clean"] for r in reports),
+            "excluded_non_mesh": excluded}
 
 
 TOOLS = {

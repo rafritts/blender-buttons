@@ -9,7 +9,7 @@ import json
 
 import bpy
 
-from .common import resolve_targets
+from .common import resolve_targets, has_material_slots
 
 
 def set_textured_material(params):
@@ -51,9 +51,9 @@ def set_textured_material(params):
     objs, err = resolve_targets(target)
     if err:
         return {"error": err}
-    meshes = [o for o in objs if o.type == 'MESH']
+    meshes = [o for o in objs if has_material_slots(o)]
     if not meshes:
-        return {"error": f"'{target}' contains no mesh objects"}
+        return {"error": f"'{target}' contains nothing that can hold a material"}
 
     mat_name = params.get("material_name") or f"{target}_tex"
     mat = bpy.data.materials.get(mat_name) or bpy.data.materials.new(mat_name)

@@ -425,6 +425,42 @@ def apply_modifiers(params):
     return {"success": True, "applied": applied, "object": obj.name}
 
 
+def convert_to_mesh(params):
+    """Bake a non-mesh object (curve / text / metaball) into a real mesh.
+
+    Object > Convert > Mesh: evaluates the full result — modifiers, the curve's
+    bevel/extrude, and any hooks — and replaces the object's data with that mesh.
+    The R4 following rope is a LIVE curve; once the rig is posed, one
+    convert_to_mesh bakes the beveled, hook-deformed tube into game-ready,
+    texturable geometry (a curve still can't take set_textured_material's UVs as
+    cleanly as a mesh, and isn't export geometry). Already-mesh objects are a
+    no-op, reported not errored.
+
+    name: object name. If omitted, the active object.
+    """
+    name = params.get("name")
+    if name:
+        obj = bpy.data.objects.get(name)
+        if obj is None:
+            return {"error": f"Object '{name}' not found"}
+    else:
+        obj = bpy.context.active_object
+    if obj is None:
+        return {"error": "No active object"}
+    if obj.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    was_type = obj.type
+    if was_type == 'MESH':
+        return {"success": True, "object": obj.name, "converted": False,
+                "from_type": "MESH", "note": "already a mesh"}
+    activate(obj)
+    bpy.ops.object.convert(target='MESH')
+    me = obj.data
+    return {"success": True, "object": obj.name, "converted": True,
+            "from_type": was_type,
+            "vertices": len(me.vertices), "faces": len(me.polygons)}
+
+
 def boolean(params):
     """Cut, fuse, or intersect two meshes via a Boolean modifier.
 
@@ -520,5 +556,6 @@ TOOLS = {
     "remove_modifier": remove_modifier,
     "list_modifiers":  list_modifiers,
     "apply_modifiers": apply_modifiers,
+    "convert_to_mesh": convert_to_mesh,
     "boolean":         boolean,
 }

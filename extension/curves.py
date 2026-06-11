@@ -289,8 +289,9 @@ def add_curve(params):
                thickness so it renders as a tube; 0 (default) is a pure path.
 
     Delivery note: an anchored curve is a LIVE rig accessory. For a game-ready
-    mesh, pose the rig, then bake it — apply_modifiers on the curve (which
-    converts it to a mesh with the hooks evaluated).
+    mesh, pose the rig, then bake it with convert_to_mesh(this curve) — one call
+    evaluates the hooks AND the bevel into actual texturable geometry. (Plain
+    apply_modifiers leaves it a CURVE, which still can't take a textured material.)
     """
     name = params.get("name")
     if not name:

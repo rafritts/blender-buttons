@@ -122,16 +122,16 @@ def set_material(params):
     emission_color: [r, g, b] glow color.
     emission_strength: glow intensity (watts/m²-ish).
     """
-    from .common import resolve_targets
+    from .common import resolve_targets, has_material_slots
     target = params.get("target")
     if not target:
         return {"error": "'target' (object or group name) is required"}
     objs, err = resolve_targets(target)
     if err:
         return {"error": err}
-    meshes = [o for o in objs if o.type == 'MESH']
+    meshes = [o for o in objs if has_material_slots(o)]
     if not meshes:
-        return {"error": f"'{target}' contains no mesh objects"}
+        return {"error": f"'{target}' contains nothing that can hold a material"}
 
     mat_name = params.get("material_name") or f"{target}_mat"
     mat = bpy.data.materials.get(mat_name) or bpy.data.materials.new(mat_name)

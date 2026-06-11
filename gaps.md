@@ -1,30 +1,6 @@
 # MCP gaps
 
-## Live-curve delivery gaps (S1–S2) — finishing the catapult rope, 2026-06-11
-
-R4 made the beveled live curve a first-class deliverable (the rig-following
-rope), but the surrounding pipeline still treats curves as second-class. Both
-gaps were hit on the first real use of the R4 rope.
-
-- **S1 — material tools reject non-mesh objects.** `set_material` and
-  `set_textured_material` filter targets to MESH ("'winch_rope' contains no
-  mesh objects"), so a beveled curve — which renders as a solid tube and has
-  ordinary material slots — cannot be materialized at all. The build had to
-  bake throwaway `spline_tube` stand-ins per pose just to render a textured
-  rope. General fix: accept any object whose data carries material slots
-  (CURVE, FONT, META), not just meshes. Related: `audit_asset` and
-  `validate_scene` silently skip curve members of a group (reported "8
-  object(s)" for a 9-part group with no mention of the skip) — per the
-  no-silent-caps principle they should at least name what they excluded.
-- **S2 — `apply_modifiers` on a curve doesn't bake it to a mesh.** The R4
-  delivery path says "pose the rig, then `apply_modifiers` to bake the curve
-  to a game-ready mesh", but in practice it applied the Hook modifiers and
-  left the object a CURVE — still untexturable (S1) and not export geometry.
-  Fix: when the target is a curve, follow the modifier-apply with
-  convert-to-mesh (`bpy.ops.object.convert(target='MESH')`), or document a
-  separate `convert_to_mesh` verb. The hook evaluation itself was correct —
-  duplicating the posed rope and applying gave the right world bounds, which
-  is how the cocked rope endpoint was measured.
+_No open gaps._
 
 ## Tactile introspection — the design principle
 
@@ -40,6 +16,39 @@ coordinates. BVHTree makes the proximity queries milliseconds-cheap at hobby pol
 ---
 
 # Recently closed
+
+## Live-curve delivery gaps (S1–S2) — finishing the catapult rope, 2026-06-11
+
+R4 made the beveled live curve a first-class deliverable (the rig-following
+rope); these two close the gap between "the curve follows the rig" and "the
+curve is a textured, exportable deliverable". e2e in `tests/e2e_curve_delivery.py`
+(19 checks).
+
+- **S1 — material tools accept any material-slot object, not just meshes.**
+  `set_material`, `set_textured_material`, and `set_toon_material` now filter on
+  `has_material_slots(obj)` (new `common.py` helper: `obj.data` carries a
+  `materials` collection — MESH, CURVE, SURFACE, FONT, META) instead of
+  `type == 'MESH'`. A beveled curve renders as a solid tube with ordinary slots,
+  so it materializes directly — no more baking throwaway `spline_tube` stand-ins
+  per pose to texture a rope. Extended to `set_toon_material` too (same
+  assign-to-slots family; leaving it mesh-only would just be the same gap one
+  tool over). `add_outline`/`remove_outline` stay mesh-only — they build an
+  inverted-hull solidify shell, which is genuine mesh geometry, not a slot
+  assignment. **S1b:** `audit_asset` and `validate_scene` genuinely can't lint a
+  curve (no faces), but they no longer *silently* drop them — both return
+  `excluded_non_mesh` and the server prints "(skipped N non-mesh: …)", per the
+  no-silent-caps principle.
+- **S2 — `convert_to_mesh(name)` bakes a live curve into a real mesh.** New
+  general verb (Object > Convert > Mesh) in `finishes.py`. `bpy.ops.object.convert(target='MESH')`
+  evaluates the FULL result — modifiers, the curve's bevel, AND the hooks — in
+  one call, so the R4 following-rope delivery is now a single
+  `convert_to_mesh("rope")` after posing (not apply-then-convert). Chose a
+  dedicated verb over auto-converting inside `apply_modifiers`: silently changing
+  an object's type would surprise callers and break "apply a hook but keep
+  editing the spline". Verified headless: a posed, hooked, beveled POLY curve
+  converts to a MESH whose baked verts keep the hook-deformed shape and then
+  takes `set_textured_material` with no complaint. R4 delivery docstrings
+  (server `add_curve`, extension `add_curve`) updated to point at it.
 
 ## Siege-catapult rigging gaps (R1–R5) — mechanical-prop rigging, 2026-06-11
 

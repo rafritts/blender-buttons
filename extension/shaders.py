@@ -16,7 +16,7 @@ import json
 
 import bpy
 
-from .common import activate, resolve_targets
+from .common import activate, resolve_targets, has_material_slots
 
 
 def _rgba(c, alpha=1.0):
@@ -161,9 +161,9 @@ def set_toon_material(params):
     objs, err = resolve_targets(target)
     if err:
         return {"error": err}
-    meshes = [o for o in objs if o.type == 'MESH']
+    meshes = [o for o in objs if has_material_slots(o)]
     if not meshes:
-        return {"error": f"'{target}' contains no mesh objects"}
+        return {"error": f"'{target}' contains nothing that can hold a material"}
 
     base = _rgba(params.get("base_color"))
     grad_top = _rgba(params.get("gradient_top"))

@@ -175,3 +175,27 @@ def apply_modifiers(name: str = "") -> str:
     else:
         main = result.get("error", "failed")
     return main + _status(result)
+
+
+@mcp.tool()
+def convert_to_mesh(name: str = "") -> str:
+    """
+    Bake a non-mesh object (curve, text, metaball) into a real mesh — Object >
+    Convert > Mesh. Evaluates the full result: modifiers, the curve's bevel, and
+    any hooks all get baked into actual geometry.
+
+    The delivery step for an R4 following rope/cable: it's a LIVE curve so it can
+    stretch with the rig, but a curve isn't export geometry and can't take a
+    textured material cleanly. Pose the rig, then convert_to_mesh("rope") bakes
+    the posed, beveled, hook-deformed tube into a game-ready, texturable mesh in
+    one call. Already-mesh objects are a no-op.
+
+    name: object name — if omitted, the active object. Must be in Object Mode.
+    """
+    result = call_blender("convert_to_mesh", {"name": name})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    if not result.get("converted"):
+        return f"'{result['object']}' is already a mesh — nothing to convert" + _status(result)
+    return (f"Converted '{result['object']}' from {result['from_type']} → mesh "
+            f"({result['vertices']} verts, {result['faces']} faces)" + _status(result))

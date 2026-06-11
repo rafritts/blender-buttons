@@ -305,8 +305,9 @@ def add_curve(name: str, points: list, type: str = "BEZIER", cyclic: bool = Fals
                  renders as a solid tube; 0 (default) leaves a zero-width path.
 
     An anchored curve is a LIVE rig accessory. For a game-ready mesh, pose the rig
-    then bake it with apply_modifiers(this curve) — that evaluates the hooks and
-    converts to a mesh.
+    then bake it with convert_to_mesh(this curve) — one call evaluates the hooks
+    AND the bevel into texturable geometry. (apply_modifiers alone leaves it a
+    CURVE, which set_textured_material still can't UV cleanly.)
 
     Example — camera dolly arc: add_curve("dolly", points=[[6,-6,3],[0,-8,3],[-6,-6,3]],
                                           type="BEZIER")

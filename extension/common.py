@@ -73,6 +73,14 @@ def resolve_targets(targets):
     return objs, None
 
 
+def has_material_slots(obj):
+    """True if obj's data can carry material slots — i.e. it renders with a
+    material. MESH, CURVE, SURFACE, FONT, and META all qualify; a beveled curve
+    renders as a solid tube with ordinary material slots, so material tools must
+    accept it, not just meshes."""
+    return obj.data is not None and hasattr(obj.data, "materials")
+
+
 def material_summary(obj):
     """Readable summary of an object's material slots — name plus the Principled
     BSDF values set_material writes. Setters need matching getters: this is what
