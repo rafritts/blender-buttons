@@ -5,6 +5,7 @@ Kept in one place so any module can read/append without circular imports.
 
 import hashlib
 import json
+import math
 import queue
 import time
 
@@ -19,6 +20,43 @@ _running = False
 _history = []
 _redo_stack = []        # entries undone and available to redo (cleared on any new op)
 _undo_baseline = None   # scene object-name set captured before the first mutating op
+_snapshots = {}         # op_id -> {obj_name: geometry signature} for diff_since (P11)
+
+_VSAMPLE_CAP = 150      # max per-object vertices stored per snapshot (downsampled)
+
+
+def _object_signature(obj):
+    """Compact, cheap geometry signature for diff_since. Transform (loc/rot/scale)
+    is stored separately from a LOCAL-space vertex sample, so rigid motion and
+    actual mesh deformation can be told apart later. Local verts mean a translate
+    or rotate doesn't masquerade as a deformation."""
+    sig = {
+        "type": obj.type,
+        "loc": [round(v, 6) for v in obj.location],
+        "rot": [round(math.degrees(v), 4) for v in obj.rotation_euler],
+        "scale": [round(v, 6) for v in obj.scale],
+    }
+    me = getattr(obj, "data", None)
+    if obj.type == 'MESH' and me is not None and hasattr(me, "vertices"):
+        verts = me.vertices
+        n = len(verts)
+        sig["vcount"] = n
+        step = max(1, n // _VSAMPLE_CAP)
+        sig["vstep"] = step
+        sig["vsample"] = [[round(c, 6) for c in verts[i].co] for i in range(0, n, step)]
+    return sig
+
+
+def capture_geometry_snapshot():
+    """Signature of every current mesh/object — the per-op checkpoint diff_since
+    rewinds to. Wrapped defensively: a snapshot must never break a tool."""
+    snap = {}
+    try:
+        for o in bpy.context.scene.objects:
+            snap[o.name] = _object_signature(o)
+    except Exception:
+        pass
+    return snap
 
 # Tools whose invocation should NOT be recorded in the history log.
 NO_LOG_TOOLS = {
@@ -37,6 +75,9 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
     "get_mesh_profile", "get_rings", "parts_in", "list_modifiers", "list_designs",
     "set_viewport_angle", "set_viewport_shading", "frame_scene",
     "zoom_to_selected", "orbit_viewport",
+    # read-only introspection / lint tools (P3-P12) — pure queries, no scene mutation
+    "find_coplanar_overlaps", "validate_scene", "check_mesh", "audit_asset",
+    "check_contacts", "trace_profile", "check_framing", "check_resting", "diff_since",
     # new_scene reloads the startup file, wiping Blender's undo stack and the
     # scene; it resets the history log itself (designs.new_scene) rather than
     # pushing an undo step that would immediately be desynced.
@@ -94,6 +135,7 @@ def log_operation(tool, params, label=""):
     ).hexdigest()[:8]
     _history.append({"id": op_id, "label": label or tool, "tool": tool,
                      "params": params, "objects": scene_object_names()})
+    _snapshots[op_id] = capture_geometry_snapshot()  # diff_since (P11) checkpoint
     _redo_stack.clear()  # a new operation forks history; old redo branch is dead
     return op_id
 

@@ -40,6 +40,8 @@ from server import (  # noqa: F401
     scene,
     designs,
     sculpt,
+    lint,
+    introspect,
 )
 
 

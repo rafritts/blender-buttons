@@ -4,7 +4,8 @@ import math
 
 import bpy
 
-from .common import material_summary, world_bbox, world_center
+from .common import (eval_world_bmesh, material_summary, region_words,
+                     world_bbox, world_center)
 
 
 def describe(params):
@@ -178,24 +179,69 @@ def is_aligned(params):
             "aligned": abs(va - vb) < tolerance, "difference": round(va - vb, 5)}
 
 
+def _mesh_symmetry(obj, axis_idx, axis, plane, tol):
+    """Mesh-level symmetry: mirror every vertex across the plane and measure the
+    distance to the nearest surface point of the same mesh. Reports max/mean
+    deviation and WHERE the worst asymmetry sits. The first thing human eyes catch
+    on character work and the agent's screenshots reliably miss."""
+    from mathutils.bvhtree import BVHTree
+    bm = eval_world_bmesh(obj)
+    if bm is None or not bm.verts:
+        if bm:
+            bm.free()
+        return {"error": f"'{obj.name}' has no usable geometry"}
+    bvh = BVHTree.FromBMesh(bm)
+    devs = []
+    worst_d, worst_p = 0.0, None
+    for v in bm.verts:
+        m = v.co.copy()
+        m[axis_idx] = 2 * plane - m[axis_idx]
+        loc, normal, idx, dist = bvh.find_nearest(m)
+        if loc is None:
+            continue
+        devs.append(dist)
+        if dist > worst_d:
+            worst_d, worst_p = dist, v.co.copy()
+    bb = world_bbox(obj)
+    bm.free()
+    if not devs:
+        return {"error": "no vertices to compare"}
+    maxd, meand = max(devs), sum(devs) / len(devs)
+    is_sym = maxd <= tol
+    region = region_words(bb, worst_p) if worst_p is not None else None
+    return {
+        "success": True, "level": "mesh", "object": obj.name, "axis": axis,
+        "plane": plane, "tolerance": tol, "is_symmetric": is_sym,
+        "max_deviation_mm": round(maxd * 1000, 2),
+        "mean_deviation_mm": round(meand * 1000, 2),
+        "worst_region": region,
+        "summary": (f"{obj.name}: symmetric across {axis} (max dev {round(maxd * 1000, 2)}mm)"
+                    if is_sym else
+                    f"{obj.name}: asymmetric across {axis} — max {round(maxd * 1000, 2)}mm "
+                    f"at {region}, mean {round(meand * 1000, 2)}mm"),
+    }
+
+
 def check_symmetry(params):
-    """Object-level symmetry check across a world-space plane.
+    """Symmetry check across a world-space plane, at two zoom levels.
 
-    For each mesh object on the positive side of the plane, tries to find a
-    counterpart on the negative side at the mirrored centre with similar bbox
-    dimensions. Reports unmatched objects on each side and objects sitting on
-    the plane.
+    Single mesh target → MESH-LEVEL: mirror the geometry and measure per-vertex
+    deviation (max/mean + where the worst asymmetry is) — for character/sculpt work.
 
-    axis:      X|Y|Z — the axis the plane is perpendicular to. Default X
-               (the most common mirror plane).
+    Multiple objects / a collection / the whole scene → OBJECT-LEVEL: pair each
+    object on the +side with a mirrored counterpart on the −side and report
+    unmatched objects — for symmetric assemblies.
+
+    axis:      X|Y|Z — axis the plane is perpendicular to. Default X.
     plane:     world coordinate of the mirror plane on `axis`. Default 0.
-    tolerance: how close mirrored centres and bbox dims must match. Default 0.01 m.
-    targets:   optional — restrict to specific objects/collections instead of all meshes.
+    epsilon /
+    tolerance: match tolerance (m). Defaults: 0.5mm mesh-level, 10mm object-level.
+    targets:   optional — restrict to specific objects/collections.
     """
     axis = params.get("axis", "X").upper()
     plane = float(params.get("plane", 0.0))
-    tol = float(params.get("tolerance", 0.01))
     targets = params.get("targets")
+    explicit_tol = params.get("epsilon", params.get("tolerance"))
 
     axis_idx = {"X": 0, "Y": 1, "Z": 2}.get(axis)
     if axis_idx is None:
@@ -210,6 +256,11 @@ def check_symmetry(params):
     else:
         mesh_objs = [o for o in bpy.context.scene.objects if o.type == 'MESH']
 
+    if len(mesh_objs) == 1:
+        tol = float(explicit_tol) if explicit_tol is not None else 0.0005
+        return _mesh_symmetry(mesh_objs[0], axis_idx, axis, plane, tol)
+
+    tol = float(explicit_tol) if explicit_tol is not None else 0.01
     pos_side, neg_side, on_plane = [], [], []
     for o in mesh_objs:
         c = world_center(o)

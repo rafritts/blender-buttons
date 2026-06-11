@@ -25,6 +25,8 @@ module whose name matches the tool family:
   history.py      get_history / undo_steps / redo_steps / undo_to
   designs.py      save_design / open_design / list_designs
   status.py       get_scene_tree / get_blender_status
+  lint.py         find_coplanar_overlaps / validate_scene / check_mesh / audit_asset
+  introspect.py   check_contacts / check_resting / check_framing / trace_profile / diff_since
 
 Shared support:
   state.py        port, server flags, request queue, history log, NO_LOG/NO_STATUS sets

@@ -126,6 +126,100 @@ def material_summary(obj):
     return out
 
 
+def eval_world_bmesh(obj):
+    """Return a NEW bmesh of obj's EVALUATED mesh (modifiers applied) with verts
+    in WORLD space. Caller owns it and must call .free(). Returns None for objects
+    that yield no mesh (empties, cameras, lights). This is the analysis primitive
+    behind the tactile-introspection tools — they reason about final rendered
+    geometry, so modifiers must be applied and the transform baked in."""
+    import bmesh
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    obj_eval = obj.evaluated_get(depsgraph)
+    try:
+        me = obj_eval.to_mesh()
+    except (RuntimeError, AttributeError):
+        return None
+    if me is None:
+        return None
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bm.transform(obj.matrix_world)
+    bm.verts.ensure_lookup_table()
+    bm.faces.ensure_lookup_table()
+    obj_eval.to_mesh_clear()
+    return bm
+
+
+def object_bvh(obj):
+    """World-space BVHTree for obj's evaluated mesh, or None if it has no mesh.
+    BVH nearest-point / ray queries are milliseconds-cheap at hobby poly counts —
+    the workhorse for contacts, resting, symmetry, and intersection checks."""
+    from mathutils.bvhtree import BVHTree
+    bm = eval_world_bmesh(obj)
+    if bm is None:
+        return None
+    tree = BVHTree.FromBMesh(bm)
+    bm.free()
+    return tree
+
+
+def scene_mesh_objects():
+    """All visible MESH objects in the active scene."""
+    return [o for o in bpy.context.scene.objects if o.type == 'MESH']
+
+
+def world_bbox_corners(obj):
+    """The 8 world-space corners of obj's local bounding box."""
+    return [obj.matrix_world @ mathutils.Vector(c) for c in obj.bound_box]
+
+
+def region_words(bbox, p):
+    """Name where a world point sits inside a bbox — e.g. 'top-left-front'. Lets
+    introspection tools say WHERE something happened without leaking coordinates."""
+    xmin, ymin, zmin, xmax, ymax, zmax = bbox
+
+    def frac(v, lo, hi):
+        return (v - lo) / (hi - lo) if (hi - lo) > 1e-9 else 0.5
+    fx, fy, fz = frac(p.x, xmin, xmax), frac(p.y, ymin, ymax), frac(p.z, zmin, zmax)
+    w = []
+    if fz > 0.66: w.append("top")
+    elif fz < 0.33: w.append("bottom")
+    if fx > 0.66: w.append("right")
+    elif fx < 0.33: w.append("left")
+    if fy > 0.66: w.append("back")
+    elif fy < 0.33: w.append("front")
+    return "-".join(w) if w else "center"
+
+
+def camera_coverage(scene, cam, obj):
+    """Project obj's world bbox into camera view. Returns a dict:
+      frac_w / frac_h : fraction of the frame width/height the bbox spans (0..1+),
+      u_range / v_range : normalised frame extents (0..1 is on-frame),
+      depth_range     : near/far corner depth (>0 is in front of the camera),
+      in_front        : any corner is in front of the camera,
+      clipped         : list of frame edges the bbox spills past (left/right/top/bottom).
+    Pure matrix math — the deterministic answer to "is it framed?" without a render."""
+    from bpy_extras.object_utils import world_to_camera_view
+    us, vs, depths = [], [], []
+    for c in world_bbox_corners(obj):
+        co = world_to_camera_view(scene, cam, c)
+        us.append(co.x); vs.append(co.y); depths.append(co.z)
+    umin, umax = min(us), max(us)
+    vmin, vmax = min(vs), max(vs)
+    clipped = []
+    if umin < 0.0: clipped.append("left")
+    if umax > 1.0: clipped.append("right")
+    if vmin < 0.0: clipped.append("bottom")
+    if vmax > 1.0: clipped.append("top")
+    return {
+        "frac_w": umax - umin, "frac_h": vmax - vmin,
+        "u_range": (umin, umax), "v_range": (vmin, vmax),
+        "depth_range": (min(depths), max(depths)),
+        "in_front": any(d > 0 for d in depths),
+        "clipped": clipped,
+    }
+
+
 def activate(obj):
     """Make obj the sole selected + active object."""
     if bpy.context.mode != 'OBJECT':

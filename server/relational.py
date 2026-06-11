@@ -119,6 +119,61 @@ def array_along(prototype: str, count: int, between: list, axis: str = "X",
 
 
 @mcp.tool()
+def array_radial(prototype: str, count: int, center: list = None, center_object: str = "",
+                 axis: str = "Z", start_angle: float = 0.0, end_angle: float = 360.0,
+                 radius: float = None, align_to_tangent: bool = False,
+                 keep_original: bool = False, name_prefix: str = "", label: str = "") -> str:
+    """
+    Duplicate a prototype in a circle or arc around a center — the native idiom for
+    clock markers, bolt circles, spokes, gear teeth, chain links on an arc, petals.
+    No hand-computed sin/cos: give a center, a count, and (optionally) an arc.
+
+    center / center_object: the ring's center. Pass center=[x,y,z] for a world point,
+                            OR center_object="Dial" to orbit an object's bbox center.
+                            Default world origin.
+    axis:             X | Y | Z — axis the ring spins around (ring lies in the other
+                      two). Default Z (a ring lying flat in the XY plane).
+    start_angle/end_angle: degrees. Default 0→360 = a full evenly-spaced circle with no
+                      overlapping seam. Any other span is an ARC, spread inclusive of
+                      both ends (e.g. 0→180 with count=5 gives copies at 0,45,90,135,180).
+    radius:           force every copy onto this distance from center. Omit to keep the
+                      prototype's current distance.
+    align_to_tangent: True = each copy also spins to face along the arc (gear teeth,
+                      chain links). False = orientation preserved (upright numerals).
+    keep_original:    keep the prototype too (default False — it's consumed like array_*).
+    name_prefix:      copies are "<prefix>_1".."_N" (default = prototype name).
+
+    Examples:
+      array_radial("marker", count=12, center_object="dial")          # 12 clock markers
+      array_radial("tooth", count=24, radius=0.5, align_to_tangent=True)  # gear teeth
+      array_radial("link", count=6, start_angle=0, end_angle=120, align_to_tangent=True)
+    """
+    params = {
+        "prototype": prototype, "count": count, "axis": axis,
+        "start_angle": start_angle, "end_angle": end_angle,
+        "align_to_tangent": align_to_tangent, "keep_original": keep_original,
+        "name_prefix": name_prefix or prototype,
+    }
+    if center_object:
+        params["center"] = center_object
+    elif center is not None:
+        params["center"] = center
+    if radius is not None:
+        params["radius"] = radius
+    result = call_blender("array_radial", params, label=label)
+    if result.get("success"):
+        arc = ("full circle" if result.get("full_circle")
+               else f"arc {result['start_angle']}→{result['end_angle']}°")
+        tan = " +tangent" if result["align_to_tangent"] else ""
+        main = (f"radial array: {len(result['placed'])} copies of '{prototype}' around "
+                f"{result['center']} on {result['axis']} ({arc}, r={result['radius']}, "
+                f"step {result['step_deg']}°){tan} [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def scatter_on_surface(target: str, source: str, count: int = 100,
                        scale_min: float = 0.8, scale_max: float = 1.2,
                        align_normal: bool = True, rotate_z: bool = True,

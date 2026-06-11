@@ -1,5 +1,5 @@
 import json
-from server._core import mcp, call_blender, _status
+from server._core import mcp, call_blender, _status, _targets
 
 
 @mcp.tool()
@@ -166,6 +166,34 @@ def gap_between(a: str, b: str) -> str:
     main = (f"gap {a} ↔ {b}: x={result['gap_x']}  y={result['gap_y']}  z={result['gap_z']}"
             f"{touching_str}")
     return main + _status(result)
+
+
+@mcp.tool()
+def check_symmetry(target: str = "", axis: str = "X", plane: float = 0.0,
+                   epsilon: float = None) -> str:
+    """
+    Check symmetry across a world-space plane, at the right zoom level automatically:
+
+    • A single mesh → MESH-LEVEL: mirrors the geometry and reports max/mean vertex
+      deviation and WHERE the worst asymmetry is ("asymmetric across X — max 8mm at
+      top-left"). The first thing eyes catch on character/sculpt work.
+    • Multiple objects / a collection / the whole scene → OBJECT-LEVEL: pairs each
+      part with its mirrored counterpart and reports any unmatched parts.
+
+    target:  object, collection, or comma-separated list. Empty = whole scene.
+    axis:    X | Y | Z — axis the mirror plane is perpendicular to (default X).
+    plane:   world coordinate of the plane on that axis (default 0).
+    epsilon: match tolerance in meters (defaults: 0.5mm mesh-level, 10mm object-level).
+    """
+    params = {"axis": axis, "plane": plane}
+    if target:
+        params["targets"] = _targets(target)
+    if epsilon is not None:
+        params["epsilon"] = epsilon
+    result = call_blender("check_symmetry", params)
+    if not result.get("success"):
+        return result.get("error", "failed")
+    return result["summary"] + _status(result)
 
 
 @mcp.tool()

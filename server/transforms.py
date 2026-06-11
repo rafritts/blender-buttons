@@ -107,16 +107,28 @@ def apply_transform(targets: str = "", scale: bool = True,
 
 
 @mcp.tool()
-def rotate_object(angle: float, axis: str = "Z", targets: str = "", label: str = "") -> str:
+def rotate_object(angle: float, axis: str = "Z", targets: str = "",
+                  pivot: list = None, pivot_object: str = "", label: str = "") -> str:
     """
     Rotate objects by `angle` degrees around `axis` (X | Y | Z).
     targets: single object name, group name, or comma-separated list. Empty = active object.
+
+    pivot / pivot_object: rotate about a SHARED external point instead of each object's
+    own origin — a rigid swing where both position and orientation turn. Pass
+    pivot=[x,y,z] for a world point, or pivot_object="dial" to pivot about an object's
+    bbox center. Use this for clock hands turning about the dial center or a door about
+    its hinge, instead of pre-rotating with hand-computed positions. Omit both to spin
+    each object about its own origin (the default, unchanged behavior).
     """
-    result = call_blender("rotate_object", {
-        "angle": angle, "axis": axis, "targets": _targets(targets),
-    }, label=label)
+    params = {"angle": angle, "axis": axis, "targets": _targets(targets)}
+    if pivot_object:
+        params["pivot"] = pivot_object
+    elif pivot is not None:
+        params["pivot"] = pivot
+    result = call_blender("rotate_object", params, label=label)
     if result.get("success"):
-        main = f"rotated {result['rotated']} by {angle}° on {axis} [{result.get('op_id','')}]"
+        about = f" about {result['pivot']}" if result.get("pivot") else ""
+        main = f"rotated {result['rotated']} by {angle}° on {axis}{about} [{result.get('op_id','')}]"
     else:
         main = result.get("error", "failed")
     return main + _status(result)

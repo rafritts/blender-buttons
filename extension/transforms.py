@@ -201,21 +201,52 @@ def apply_transform(params):
 
 
 def rotate_object(params):
-    """Rotate one or more objects by an angle around an axis."""
+    """Rotate one or more objects by an angle around an axis.
+
+    pivot (optional): rotate about a SHARED external point instead of each object's
+    own origin. [x,y,z] world point, or an object name (its bbox centre). This is a
+    rigid rotation — both position and orientation swing — so clock hands turn about
+    the dial centre and a door turns about its hinge without pre-computing the arc.
+    Without pivot, behaviour is unchanged: each object spins about its own origin."""
+    from mathutils import Matrix, Vector
+
     targets = params.get("targets")
     angle = params.get("angle", 0.0)
     axis = params.get("axis", "Z").upper()
+    pivot_spec = params.get("pivot")
     objs, err = resolve_targets(targets)
     if err:
         return {"error": err}
 
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
     rad = math.radians(angle)
+
+    if pivot_spec is None:
+        for o in objs:
+            o.rotation_euler[axis_idx] += rad
+        bpy.context.view_layer.update()
+        return {"success": True, "rotated": [o.name for o in objs],
+                "angle_deg": angle, "axis": axis, "pivot": None}
+
+    if isinstance(pivot_spec, str):
+        p_obj = bpy.data.objects.get(pivot_spec)
+        if p_obj is None:
+            return {"error": f"pivot object '{pivot_spec}' not found"}
+        pivot = Vector(world_center(p_obj))
+    elif isinstance(pivot_spec, (list, tuple)) and len(pivot_spec) == 3:
+        pivot = Vector([float(v) for v in pivot_spec])
+    else:
+        return {"error": "pivot must be [x,y,z] or an object name"}
+
+    # Rigid rotation about the pivot: world' = T(pivot) · R · T(-pivot) · world.
+    T = (Matrix.Translation(pivot) @ Matrix.Rotation(rad, 4, axis)
+         @ Matrix.Translation(-pivot))
     for o in objs:
-        o.rotation_euler[axis_idx] += rad
+        o.matrix_world = T @ o.matrix_world
     bpy.context.view_layer.update()
     return {"success": True, "rotated": [o.name for o in objs],
-            "angle_deg": angle, "axis": axis}
+            "angle_deg": angle, "axis": axis,
+            "pivot": [round(v, 5) for v in pivot]}
 
 
 def snap_to(params):

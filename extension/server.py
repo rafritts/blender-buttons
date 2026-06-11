@@ -20,7 +20,9 @@ from . import (
     finishes,
     groups,
     history,
+    introspect,
     lighting,
+    lint,
     objects,
     primitives,
     queries,
@@ -64,6 +66,8 @@ _TOOL_MODULES = (
     scatter,
     sculpt,
     designs,
+    lint,
+    introspect,
 )
 
 TOOLS = {}

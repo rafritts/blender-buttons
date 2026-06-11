@@ -80,6 +80,7 @@ def new_scene(params):
     state._history.clear()
     state._redo_stack.clear()
     state._undo_baseline = None
+    state._snapshots.clear()
 
     # Defensive: persistent=True timers survive file loads, but if a future
     # Blender ever drops it, re-arm so the server keeps draining the queue.
