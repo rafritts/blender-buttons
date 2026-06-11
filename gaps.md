@@ -1,6 +1,6 @@
 # MCP gaps
 
-## Presentation-pass gaps (T1–T4) — texturing/lighting the catapult for a showcase, 2026-06-11
+## Presentation-pass gaps (T1–T5) — texturing/lighting the catapult for a showcase, 2026-06-11
 
 Dressing a finished multi-material asset for hero renders. The build was done;
 every gap below is about *changing how it looks* without rebuilding it.
@@ -38,6 +38,17 @@ every gap below is about *changing how it looks* without rebuilding it.
   but the status block (the instrument panel every mutating call returns) does
   not. One `viewport: SOLID` line in the status block would have flagged the
   mismatch at the first `set_textured_material` call.
+
+- **T5 — viewport overlays are screenshot-only configurable.**
+  `get_viewport_screenshot(hide_overlays=True)` cleans up the agent's view, but
+  nothing can clean up the USER's live viewport: with a rigged, scattered scene
+  the armature draws white octahedral bones over the meshes and every linked
+  instance draws a dashed relationship line — the textured model reads as gray
+  blockout to the person watching. T4's other half: the agent could *see* the
+  problem (after T4 lands) but still can't *fix* it. Primitive: a
+  `set_viewport_overlays(relationship_lines=, bones=, gizmos=, ...)` verb (or
+  per-object viewport visibility, e.g. hide the armature object from the
+  viewport without unbinding it).
 
 ## S1b-residual — lint skip-report is bypassed by GROUP expansion, 2026-06-11
 
