@@ -1,37 +1,6 @@
 # MCP gaps
 
-## Wardrobe-edit gaps (V1–V2) — re-dressing Spring (bandana off, tunic → tank top), 2026-06-11
-
-First real *destructive* edit of a production asset: delete the scarf + jacket,
-cut the pullover's sleeves/collar off to make a tank top. The edit verbs all
-worked (delete, mask removal, select_by_axis factor cuts with exact world
-thresholds, symmetric 471-vert sleeve selections). The gaps are in what happens
-to a production deform stack *after* you edit:
-
-- **V1 — mesh-deform bind is unreachable: no bind, no rebind.** Spring's cloth
-  is driven by `MESH_DEFORM` against BlenRig cages. After any topology edit the
-  bind is dead (see V2) and the toolset has NO recovery path: `add_modifier`
-  supports only 7 types (no MESH_DEFORM, no ARMATURE, no LATTICE), and nothing
-  wraps `bpy.ops.object.meshdeform_bind`. Workaround that worked: strip the
-  dead modifier and `auto_weight` straight to the armature — the heat solve
-  handled a 792-deform-bone production rig (713/713 verts weighted), but
-  direct skinning is a quality downgrade from cage deformation for cloth.
-  Primitive: `add_modifier(type="MESH_DEFORM", target=<cage>)` + a
-  `bind_mesh_deform(mesh, cage)` verb (bind/unbind/rebind); same door opens
-  ARMATURE/LATTICE modifier types, which are equally missing.
-- **V2 — topology edits silently kill deform binds.** `delete_geometry` on the
-  mesh-deform-bound pullover reported plain success; the bind data's vert count
-  no longer matched, so the modifier went dead with no signal anywhere. The
-  shirt LOOKED fine at rest — only a deliberate pose test (torso bend:
-  pants moved 5.4mm, shirt 1.4mm ≈ noise) exposed that it had stopped
-  following the rig. A user would discover this mid-animation. Tactile
-  principle: topology-changing edit verbs (the `_enter_edit_for_target`
-  family, U10's hook point) should check the target's modifiers for
-  vert-count-dependent bind data (MESH_DEFORM bound, CORRECTIVE_SMOOTH
-  bind_coords, SURFACE_DEFORM) and append a loud warning to the result:
-  "MeshDeform bind invalidated — rebind required (V1)".
-
-_All earlier gaps (P, R, S, T, U series) are closed — see "Recently closed" below.
+_All gaps (P, R, S, T, U, V series) are closed — see "Recently closed" below.
 New gaps from future builds go above this line._
 
 ## Tactile introspection — the design principle
@@ -46,6 +15,34 @@ coordinates. BVHTree makes the proximity queries milliseconds-cheap at hobby pol
 ---
 
 # Recently closed
+
+## Batch 7 — deform-bind recovery (V1, V2), 2026-06-11
+
+Closes the V-series — re-dressing Spring exposed that a production deform stack
+was unrecoverable after a destructive edit. e2e in `tests/e2e_batch7.py` (28 checks).
+
+- **V1 — the mesh-deform bind is reachable: add, bind, rebind, unbind.**
+  `add_modifier` now opens the deform-modifier door it was missing —
+  `MESH_DEFORM` / `ARMATURE` / `LATTICE`, each wired to its driving object via a
+  required `target` (cage mesh / armature / lattice; wrong-type targets fail
+  loudly). `bind_mesh_deform(mesh, cage, action=bind|unbind|rebind)` wraps
+  `bpy.ops.object.meshdeform_bind` (the operator nothing reached before): it
+  creates the MESH_DEFORM modifier when only a `cage` is given, drives the
+  bind/unbind toggle deterministically per `action`, and runs through
+  `state.ui_override()` so it works live, not just headless. A bind that comes
+  back unbound is reported as an error, not a false success. This is the
+  cage-deformation recovery path — higher cloth/skin quality than the
+  `auto_weight`-straight-to-armature downgrade the edit session fell back to.
+- **V2 — topology edits no longer silently kill deform binds.** The dispatch
+  hook every edit verb routes through (`_enter_edit_for_target`, U10's hook
+  point) now snapshots a target's vert-count-dependent bound modifiers
+  (MESH_DEFORM / SURFACE_DEFORM / CORRECTIVE_SMOOTH — `common.deform_binds`)
+  before the edit and, if the edit actually changed the vertex count, injects a
+  loud `bind_invalidated` + `bind_warning` onto the result ("DEFORM BIND
+  INVALIDATED … rebind required"). Surfaced generically in `server/_core._status`
+  so it rides every edit verb's output. Keyed on the real cause — a vert-count
+  delta — so a position-only edit (`move_vertices`, which leaves a MESH_DEFORM
+  bind valid) stays silent and an unbound mesh-deform mesh never warns.
 
 ## Batch 6 — presentation pass (T1, T5), 2026-06-11
 

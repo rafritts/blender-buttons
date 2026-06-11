@@ -156,6 +156,36 @@ def linked_guard_any(objs):
     return None
 
 
+def deform_binds(obj):
+    """Vert-count-dependent BOUND modifiers on obj — (name, type) tuples.
+
+    MESH_DEFORM / SURFACE_DEFORM / CORRECTIVE_SMOOTH store bind data keyed to the
+    base mesh's vertex count + order. A topology edit that changes the vert count
+    silently invalidates the bind: the modifier keeps reporting is_bound True but
+    stops deforming, with no error anywhere (gaps.md V2). We can't see the dead
+    bind directly, so callers detect the CAUSE — a vert-count change on a mesh
+    carrying one of these. Empty list if none are bound."""
+    binds = []
+    for m in getattr(obj, "modifiers", ()):
+        if m.type in ('MESH_DEFORM', 'SURFACE_DEFORM') and getattr(m, "is_bound", False):
+            binds.append((m.name, m.type))
+        elif m.type == 'CORRECTIVE_SMOOTH' and getattr(m, "is_bind", False):
+            binds.append((m.name, m.type))
+    return binds
+
+
+def deform_bind_warning(binds):
+    """Loud warning string for a topology edit that invalidated bound modifiers."""
+    names = ", ".join(f"{n} ({t})" for n, t in binds)
+    has_meshdeform = any(t == 'MESH_DEFORM' for _, t in binds)
+    rebind = ("Rebind required: bind_mesh_deform(mesh, cage, action='rebind') "
+              if has_meshdeform else "Rebind required: re-run the modifier's bind ")
+    return (f"⚠ DEFORM BIND INVALIDATED — this topology edit changed the vertex "
+            f"count, so the bound modifier(s) [{names}] no longer match the mesh and "
+            f"have silently stopped deforming. The mesh looks fine at rest but won't "
+            f"follow the rig when posed. {rebind}(gaps.md V1/V2).")
+
+
 def has_material_slots(obj):
     """True if obj's data can carry material slots — i.e. it renders with a
     material. MESH, CURVE, SURFACE, FONT, and META all qualify; a beveled curve

@@ -7,19 +7,28 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
                  target: str = "", offset: float = None,
                  wrap_method: str = "NEAREST_SURFACEPOINT",
                  axis: str = "X", merge_threshold: float = None,
-                 mirror_object: str = "",
+                 mirror_object: str = "", precision: int = None,
                  label: str = "") -> str:
     """
     Add a modifier to the active object.
     type: SUBSURF | BEVEL | SOLIDIFY | MIRROR | ARRAY | SCREW | SHRINKWRAP
+          | MESH_DEFORM | ARMATURE | LATTICE
     levels: subdivision levels (SUBSURF)  |  width/segments: bevel params
-    target: required for SHRINKWRAP — the object to wrap onto.
+    target: the partner object. Required for —
+      SHRINKWRAP  : the surface to wrap onto.
+      MESH_DEFORM : the cage mesh that drives the deform (added UNBOUND — then
+                    call bind_mesh_deform to bind it; the recovery path for a
+                    production cloth/skin deform stack).
+      ARMATURE    : the armature that deforms this mesh (needs vertex groups /
+                    weights — see auto_weight / weight_to_bone).
+      LATTICE     : the lattice cage that deforms this mesh.
     offset: SHRINKWRAP only — surface offset in meters (skin distance).
     wrap_method: SHRINKWRAP only —
                  NEAREST_SURFACEPOINT (default) | PROJECT | NEAREST_VERTEX | TARGET_PROJECT.
     axis: MIRROR only — any combination of X, Y, Z (default "X"). E.g. "XY" mirrors on both.
     merge_threshold: MIRROR only — weld coincident verts at the mirror plane (typical 0.001).
     mirror_object: MIRROR only — use this object's local axes as the mirror plane (defaults to self).
+    precision: MESH_DEFORM only — bind precision 2–10 (higher = sharper, slower bind).
     """
     params = {
         "type": type, "name": name or type.capitalize(),
@@ -36,9 +45,56 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
         params["merge_threshold"] = merge_threshold
     if mirror_object:
         params["mirror_object"] = mirror_object
+    if precision is not None:
+        params["precision"] = precision
     result = call_blender("add_modifier", params, label=label)
     if result.get("success"):
         main = f"{result['modifier']} [{result.get('op_id','')}]"
+        if result.get("note"):
+            main += f"\n  {result['note']}"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def bind_mesh_deform(mesh: str, cage: str = "", action: str = "bind",
+                     modifier: str = "", precision: int = None,
+                     label: str = "") -> str:
+    """
+    Bind / unbind / rebind a Mesh Deform modifier — the recovery path for a
+    production cloth/skin deform stack (gaps.md V1).
+
+    MESH_DEFORM drives a high-res mesh from a low-res cage (better cloth/skin
+    deformation than direct armature skinning). The bind is computed once and is
+    keyed to the mesh's vertex count — so ANY topology edit silently invalidates
+    it (the modifier stops deforming with no error), and rebinding is the fix.
+
+    mesh:      the mesh carrying (or to carry) the MESH_DEFORM modifier.
+    cage:      the cage object that drives the deform. If the mesh has no
+               MESH_DEFORM modifier yet, one is created against this cage; if it
+               already has one, cage is optional (re-points it when given).
+    action:    bind (default — bind if currently unbound) | unbind | rebind
+               (unbind then bind, after a cage edit or topology change).
+    modifier:  name of a specific MESH_DEFORM modifier (when several exist).
+    precision: bind precision 2–10 (higher = sharper, slower bind).
+
+    The cage must fully ENCLOSE the mesh or the bind silently refuses — this
+    reports that as an error rather than a false success.
+    """
+    params = {"mesh": mesh, "action": action}
+    if cage:
+        params["cage"] = cage
+    if modifier:
+        params["modifier"] = modifier
+    if precision is not None:
+        params["precision"] = precision
+    result = call_blender("bind_mesh_deform", params, label=label)
+    if result.get("success"):
+        state = "bound" if result.get("bound") else "unbound"
+        main = (f"mesh-deform {result['action']}: '{result['modifier']}' on "
+                f"'{result['mesh']}' (cage '{result['cage']}') → {state} "
+                f"[{result.get('op_id','')}]")
     else:
         main = result.get("error", "failed")
     return main + _status(result)

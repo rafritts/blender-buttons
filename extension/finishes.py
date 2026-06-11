@@ -4,8 +4,8 @@ import math
 
 import bpy
 
-from .common import activate, resolve_targets, world_bbox
-from .state import push_undo
+from .common import activate, linked_guard, resolve_targets, world_bbox
+from .state import push_undo, ui_override
 
 
 def smooth_edges(params):
@@ -258,7 +258,136 @@ def add_modifier(params):
         wrap_method = params.get("wrap_method", "NEAREST_SURFACEPOINT").upper()
         if hasattr(mod, 'wrap_method'):
             mod.wrap_method = wrap_method
+    # Deform modifiers that bind/track another object. All three drive obj's
+    # geometry from a partner via mod.object (a cage mesh, an armature, a lattice)
+    # — the recovery door for production deform stacks (gaps.md V1). MESH_DEFORM is
+    # added unbound; bind it with bind_mesh_deform.
+    if mod_type in ("MESH_DEFORM", "ARMATURE", "LATTICE"):
+        target_name = params.get("target")
+        if not target_name:
+            obj.modifiers.remove(mod)
+            return {"error": f"{mod_type} requires 'target' "
+                             f"(the {'cage mesh' if mod_type == 'MESH_DEFORM' else mod_type.lower()} that drives the deform)"}
+        tgt = bpy.data.objects.get(target_name)
+        if tgt is None:
+            obj.modifiers.remove(mod)
+            return {"error": f"target '{target_name}' not found"}
+        expected = {"MESH_DEFORM": "MESH", "ARMATURE": "ARMATURE", "LATTICE": "LATTICE"}[mod_type]
+        if tgt.type != expected:
+            obj.modifiers.remove(mod)
+            return {"error": f"{mod_type} target '{target_name}' must be a {expected}, "
+                             f"got {tgt.type}"}
+        mod.object = tgt
+        if mod_type == "MESH_DEFORM":
+            precision = params.get("precision")
+            if precision is not None and hasattr(mod, "precision"):
+                mod.precision = int(precision)
+            return {"success": True, "modifier": mod.name, "bound": False,
+                    "note": f"MESH_DEFORM added against cage '{target_name}' (unbound) — "
+                            f"call bind_mesh_deform('{obj.name}') to bind it."}
     return {"success": True, "modifier": mod.name}
+
+
+def bind_mesh_deform(params):
+    """Bind / unbind / rebind a Mesh Deform modifier (gaps.md V1).
+
+    MESH_DEFORM drives a mesh from a low-res cage — higher-quality cloth/skin
+    deformation than direct skinning. The bind is computed once and is keyed to
+    the mesh's vertex count, so any topology edit invalidates it (gaps.md V2) and
+    a rebind is the recovery. Nothing in the toolset reached the bind operator
+    before this; the deform stack was unrecoverable after an edit.
+
+    mesh:      mesh carrying (or to carry) the MESH_DEFORM modifier (required).
+    cage:      cage object that drives the deform. If the mesh has no MESH_DEFORM
+               modifier yet, one is created against this cage; if it already has
+               one, cage is optional (re-points it when given).
+    modifier:  name of a specific MESH_DEFORM modifier (when the mesh has several);
+               defaults to the first one on the mesh.
+    action:    'bind' (default — bind if currently unbound) |
+               'unbind' (drop the bind data) |
+               'rebind' (unbind then bind — after a cage edit or topology change).
+    precision: optional bind precision 2–10 (higher = sharper, slower bind).
+    """
+    mesh_name = params.get("mesh")
+    if not mesh_name:
+        return {"error": "'mesh' is required"}
+    mesh = bpy.data.objects.get(mesh_name)
+    if mesh is None or mesh.type != 'MESH':
+        return {"error": f"mesh '{mesh_name}' not found or not a mesh"}
+    err = linked_guard(mesh)
+    if err:
+        return {"error": err}
+
+    action = (params.get("action") or "bind").lower()
+    if action not in ("bind", "unbind", "rebind"):
+        return {"error": "action must be 'bind', 'unbind', or 'rebind'"}
+
+    mod_name = params.get("modifier")
+    if mod_name:
+        mod = mesh.modifiers.get(mod_name)
+        if mod is None or mod.type != 'MESH_DEFORM':
+            return {"error": f"no MESH_DEFORM modifier '{mod_name}' on '{mesh_name}'"}
+    else:
+        mod = next((m for m in mesh.modifiers if m.type == 'MESH_DEFORM'), None)
+
+    cage_name = params.get("cage")
+    cage = None
+    if cage_name:
+        cage = bpy.data.objects.get(cage_name)
+        if cage is None or cage.type != 'MESH':
+            return {"error": f"cage '{cage_name}' not found or not a mesh"}
+
+    if mod is None:
+        if cage is None:
+            return {"error": f"'{mesh_name}' has no MESH_DEFORM modifier — pass "
+                             f"'cage' to create one (or add_modifier type=MESH_DEFORM first)"}
+        mod = mesh.modifiers.new(name="MeshDeform", type='MESH_DEFORM')
+        mod.object = cage
+    elif cage is not None:
+        mod.object = cage
+    if mod.object is None:
+        return {"error": f"MESH_DEFORM '{mod.name}' has no cage object — pass 'cage'"}
+
+    precision = params.get("precision")
+    if precision is not None and hasattr(mod, "precision"):
+        mod.precision = max(2, min(10, int(precision)))
+
+    activate(mesh)
+    override = ui_override()
+
+    def _toggle():
+        # meshdeform_bind is a toggle: binds when unbound, unbinds when bound.
+        if override:
+            with bpy.context.temp_override(**override):
+                bpy.ops.object.meshdeform_bind(modifier=mod.name)
+        else:
+            bpy.ops.object.meshdeform_bind(modifier=mod.name)
+
+    was_bound = bool(mod.is_bound)
+    if action == "unbind":
+        if was_bound:
+            _toggle()
+    elif action == "rebind":
+        if was_bound:
+            _toggle()  # unbind first
+        _toggle()       # then bind fresh
+    else:  # bind
+        if not was_bound:
+            _toggle()
+
+    bound = bool(mod.is_bound)
+    # A 'bind' that comes back unbound means the operator silently refused (cage
+    # doesn't enclose the mesh is the usual cause) — surface it, don't claim success.
+    if action in ("bind", "rebind") and not bound:
+        return {"error": f"bind failed — '{mod.name}' is still unbound after the bind. "
+                         f"The cage '{mod.object.name}' must be a closed volume that "
+                         f"wraps '{mesh_name}' (a flat/open or zero-volume cage won't "
+                         f"bind). Fix the cage, then bind again."}
+
+    push_undo(f"{action} mesh-deform '{mod.name}' on {mesh_name}")
+    return {"success": True, "mesh": mesh_name, "modifier": mod.name,
+            "cage": mod.object.name, "action": action, "bound": bound,
+            "was_bound": was_bound}
 
 
 _MODIFIER_PROPS = {
@@ -577,6 +706,7 @@ TOOLS = {
     "round_corners":   round_corners,
     "bend":            bend,
     "add_modifier":    add_modifier,
+    "bind_mesh_deform": bind_mesh_deform,
     "modify_modifier": modify_modifier,
     "remove_modifier": remove_modifier,
     "list_modifiers":  list_modifiers,

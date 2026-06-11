@@ -120,10 +120,19 @@ def execute_command(command):
 
     target = params.pop("target", "") if tool in EDIT_MODE_TOOLS else ""
     auto_switched = False
+    bind_snapshot = None  # (target_name, [(mod, type)…], pre-edit vert count) — V2
     if target:
         auto_switched, err = _enter_edit_for_target(target)
         if err:
             return {"error": err}
+        # V2: snapshot any vert-count-dependent deform binds before the edit, so we
+        # can warn loudly if this topology edit silently invalidated them.
+        from .common import deform_binds
+        _tobj = bpy.data.objects.get(target)
+        if _tobj is not None and getattr(_tobj, "data", None) is not None:
+            binds = deform_binds(_tobj)
+            if binds and hasattr(_tobj.data, "vertices"):
+                bind_snapshot = (target, binds, len(_tobj.data.vertices))
 
     is_mutating = tool not in state.NON_UNDOABLE_TOOLS
     # Snapshot the scene once, before the very first mutating op, so an undo that
@@ -141,6 +150,20 @@ def execute_command(command):
                 bpy.ops.object.mode_set(mode='OBJECT')
             except Exception:
                 pass
+
+    # V2: after the edit verb returned to OBJECT mode (mesh data resynced), check
+    # whether the topology actually changed under a bound modifier. A vert-count
+    # delta is the documented bind-killer; a position-only edit (move_vertices …)
+    # leaves the count — and the bind — intact, so it never warns.
+    if bind_snapshot and isinstance(result, dict) and result.get("success"):
+        from .common import deform_bind_warning
+        tname, binds, before = bind_snapshot
+        tobj = bpy.data.objects.get(tname)
+        if (tobj is not None and getattr(tobj, "data", None) is not None
+                and hasattr(tobj.data, "vertices")
+                and len(tobj.data.vertices) != before):
+            result["bind_invalidated"] = True
+            result["bind_warning"] = deform_bind_warning(binds)
 
     # Log + push the undo step AFTER edit-mode tools have returned to OBJECT mode,
     # so each step is an object-mode checkpoint (undoable from object mode) and

@@ -34,9 +34,13 @@ def call_blender(tool: str, params: dict = None, label: str = "", timeout: float
 
 def _status(result: dict) -> str:
     """Format the blender_status block that every tool response now carries."""
+    # A bind-invalidation warning (gaps.md V2) is injected generically onto any
+    # edit-mode result whose topology change killed a deform bind. Surface it ahead
+    # of the status block so it's never lost regardless of which edit verb ran.
+    bind = "\n" + result["bind_warning"] if result.get("bind_warning") else ""
     s = result.get("blender_status")
     if not s:
-        return ""
+        return bind
     wb = s.get("world_bounds") or {}
     lines = [
         "",
@@ -67,7 +71,7 @@ def _status(result: dict) -> str:
             f"  sel_z:       {e.get('selection_z_range', '—')}",
         ]
     lines.append("────────────────────────────────────────────────")
-    return "\n".join(lines)
+    return bind + "\n".join(lines)
 
 
 def _add_result(ptype: str, result: dict) -> str:
