@@ -1,5 +1,64 @@
 # MCP gaps
 
+## Built-anatomy pass (Z1–Z3): shoulders/neck shaped, arms socketed, 2026-06-11
+
+Context: extending the chest plug into a real bust — neck column, clavicle
+surface, trapezius slope, and shoulder stubs that plug into the arm meshes'
+open tube mouths (Spring's arms are hollow tubes, open at the shoulder). The
+construction worked: at rest the figure reads neck → shoulders → arms as
+continuous skin, symmetric to 0.87mm mean / 7.1mm max (`check_symmetry`).
+Three weighting strategies were tested live to make the junction survive
+posing; the winner was binding the bust to the production `BlenRig_mdef_cage`
+(same stack as the pullover: `add_modifier MESH_DEFORM` → `move_modifier`
+before Subsurf → `bind_mesh_deform`, all three verbs behaving exactly as
+documented — W1's move verb earned its keep). Remaining pose slip under a 15°
+torso bend is ~1cm at the stub tips, and it is NOT a bind defect: the arms
+reorient under IK (hand targets are children of `master_body_pivot`, not
+`master_torso`, so a torso bend pivots the whole arm relative to the torso)
+and their CorrectiveSmooth(BIND) displaces the arm surface in ways no
+separate-object bind can mirror.
+
+- **Z1 — no selective vertex weighting; binding verbs are all-or-nothing.**
+  `weight_to_bone` rigid-binds the WHOLE mesh to one bone (and strips other
+  groups by design); `auto_weight` heat-solves the WHOLE mesh against the
+  WHOLE rig (792 groups landed on a 166-vert bust). There is no way to say
+  "these selected verts → this bone (or this cage), blended N%" — which is
+  exactly what a built shoulder stub needs: torso-bound at its root,
+  arm-bound at its tip. Without it, any geometry that BRIDGES two
+  differently-driven production meshes will shear at whichever end it isn't
+  bound to. Want, as a general primitive: a weight-assignment verb scoped to
+  the current edit-mode selection (bone name + weight + ADD/REPLACE/blend),
+  the deform-side sibling of `select_by_axis`/`select_in_sphere`.
+
+- **Z2 — `loop_cut` has no region scope, so adding support loops to one limb
+  of an object ribs the entire mesh.** The shoulder bridge needed 1–2 support
+  loops so Subsurf would stop sagging a 9cm quad span (the sag read as a
+  detached arm for three diagnostic rounds). `loop_cut(axis=X)` cut ALL
+  X-running edges — 110 edges across the whole bust — and the irregular new
+  loops rippled the torso into corduroy (undone via `undo_to`). The workable
+  fallback was topology surgery by hand: retract the cap cluster, re-extrude
+  a second segment, taper it — four verbs and two coordinate recomputations
+  per side, where one scoped loop cut would have done. Want: `loop_cut`
+  honoring the current selection (cut only edges within it), or an explicit
+  region parameter.
+
+- **Z3 — `get_mesh_profile` has no windowing and blows the tool-result
+  budget on production meshes.** Profiling the arms (8100 base verts) along X
+  returned 4140 rings / 261KB — past the harness limit, requiring a jq
+  sidecar file to read at all. The query that was actually needed was "y/z
+  extents near x ∈ [0.08, 0.20]". Want: optional `min/max` range on the
+  profile axis and/or a `max_rings` cap with even resampling.
+
+Working notes for the same junction problem, no new verb needed: the
+decisive diagnostic was hiding the occluding shirt with
+`set_object_visibility` — the bare-bust view exposed in one frame what five
+dressed close-ups had hidden (the arm tubes are open, and the bridge was
+sagging, not short). And the arm meshes carry 9 finger shape keys, so
+creasing/closing their open rims directly is double-blocked: X3B (cannot
+select a boundary loop) AND Y1 (any edit-mode touch on a keyed production
+mesh lands on the active key). The arms' rim-curl line at the shoulder seam
+is therefore currently untreatable — same flesh as Y2, new host.
+
 ## Shape-key shadowing (Y1–Y2), tank-neckline live pass, 2026-06-11
 
 Context: carving a real scooped neckline into Spring's tank (topology cuts on the
