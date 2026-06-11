@@ -29,6 +29,24 @@ dead modifiers, prescribes `rebind_deform`. Then the prescription itself died:
   - Repro state preserved live: jacket deleted, Mask removed, sleeves cut at
     |x|=0.15 + collar removed (2039→882 verts), stack still
     MESH_DEFORM@0 / CORRECTIVE_SMOOTH@1 / SUBSURF / DISPLACE / PARTICLE×2.
+  - **LIVE CONFIRMATION of the timeout root cause (added after the
+    implementing session's diagnosis).** Timed brackets around fresh calls:
+    `rebind_deform(arms, modifier="CorrectiveSmooth")` — introspection-only
+    (arms CS turns out to be rest_source=ORCO, "nothing to rebind") — returns
+    INSTANTLY with a clean report. `rebind_deform(pullover)` — a real
+    meshdeform_bind against the BlenRig cage — errors after ~30-40s wall
+    clock. Timeout, exactly as diagnosed. The original 5-call crash window
+    is explained by queue pile-up: call #1 (slow pullover bind) hogged the
+    main thread; calls #2–5, INCLUDING the trivial CS introspection, timed
+    out queued behind it — which is why the same introspection call is
+    instant today.
+  - **The orphan hazard, observed live:** after the ~30s timeout error, the
+    bind op KEPT RUNNING and COMPLETED — `get_blender_status` minutes later
+    shows `last_action: rebind tank top deforms... (rebind_deform)` in
+    history. Error-then-silent-success. The honest-timeout error message
+    should say the operation was NOT cancelled and may still land — "check
+    get_history / get_blender_status before retrying" — or a retry will
+    queue a SECOND bind behind the first.
 
 - **X2 — `frame_scene` fails when the scene is in POSE mode** (production
   files open that way): `Operator bpy.ops.object.select_all.poll() failed,
@@ -48,16 +66,28 @@ dead modifiers, prescribes `rebind_deform`. Then the prescription itself died:
   always dragged in 10 adjacent faces), which is what pushed me off extrude
   entirely.
 
-- **X4 — CORRECTIVE_SMOOTH(rest_source=BIND) silently nullifies rest-shape
-  edits.** Position-only edits keep the vert count, so the V2/W2 topology
-  guard is rightly silent — but the CS bind stores the rest SHAPE, and the
-  modifier then treats the edit as deformation to smooth away. Measured live:
-  proportional-stretched the arm rim 8.5cm inboard (base rim now x=0.13);
-  hid the shirt and the EVALUATED arm still ends at x≈0.21 — ~94% of the edit
-  erased, no warning anywhere. The guard family should warn on position edits
-  too when a CS(BIND) is in the stack ("this modifier is fighting your edit —
-  rebind to accept the new rest shape"). Cure is `rebind_deform` → blocked by
-  X1; until then rest-shape editing on production meshes is silently impossible.
+- **X4 — a VALID deform bind silently nullifies rest-shape edits.**
+  **(MECHANISM CORRECTED after live differential — the original filing blamed
+  CORRECTIVE_SMOOTH(BIND); that was wrong.)** The arms' CorrectiveSmooth turns
+  out to be rest_source=ORCO ("nothing to rebind", per rebind_deform's own
+  report) — it never fought anything. The eraser is **MESH_DEFORM with a
+  valid bind**: mdef RECONSTRUCTS bound-vert positions from the cage via its
+  bind-time mapping, so the modifier output ignores base-mesh positions
+  entirely. Edit the rest shape all you want — bound verts come out at their
+  bind-time positions until the cage moves or the bind is redone. Measured
+  live: proportional-stretched the arm rim 8.5cm inboard (base rim now
+  x=0.13); hid the shirt and the EVALUATED arm still ends at x≈0.21 — the
+  edit fully erased for bound verts, no warning anywhere. Trigger for the
+  guard: position-only edit on a mesh carrying a VALID MESH_DEFORM bind (or
+  a CS(rest_source=BIND) — same class of hazard, untested live since Spring
+  has none) → "this modifier reconstructs vertex positions from its bind —
+  your edit won't show until you rebind_deform". Gate it on the bind being
+  VALID: the pullover (bind dead from the vert-count change) took my
+  neckline edits 1:1 — warning there would be false. Conversely this is why
+  the pullover cuts LOOKED fine pre-rebind: dead bind = modifier inert =
+  base mesh shows. Valid bind = base mesh invisible. Both states mislead in
+  opposite directions, which is exactly why the guard has to know which
+  state it's in.
 
 - **X5 — no verb can neutralize a modifier.** `modify_modifier` exposes only
   count/levels/offset/thickness/width/segments/angle_limit — no `factor`
@@ -73,8 +103,6 @@ proportional-stretched (+8.5cm inboard, +4.5cm up, base mesh only) to fill the
 shoulder void, pinned back by CS(BIND) until rebind. The moment X1 is fixed,
 the finish is: `rebind_deform("GEO-spring_pullover")`,
 `rebind_deform("GEO_spring_arms")`, pose-test, refine armpit blend._
-
-## Tactile introspection — the design principle
 
 ## Tactile introspection — the design principle
 
