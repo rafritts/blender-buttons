@@ -1,6 +1,41 @@
 # MCP gaps
 
-_All gaps (P, R, S, T, U, V series) are closed — see "Recently closed" below.
+## Deform-stack aftermath gaps (W1–W3) — cage-rebinding Spring's tank top, 2026-06-11
+
+V1/V2 verified live: `bind_mesh_deform` restored cage deformation to the edited
+pullover (bend test: 31.8mm follow, vs 1.4mm dead / 31.6mm auto_weight), and the
+hooked edit path printed the loud "DEFORM BIND INVALIDATED" warning with the
+exact rebind call to run. Using them surfaced the next layer:
+
+- **W1 — modifier stack ORDER is unaddressable.** `bind_mesh_deform` created the
+  MESH_DEFORM at the BOTTOM of the stack (index 5); the production original had
+  it at index 0, before CorrectiveSmooth/Subsurf/Displace/particles. Order is
+  semantics: corrective-smooth now runs pre-deform (inert), subsurf binds 4×
+  the verts (slower bind), and hair particles emit pre-deform. Nothing can fix
+  it: `modify_modifier` tweaks values only, and rebuild-by-hand is impossible
+  because `add_modifier` can't create DISPLACE or CORRECTIVE_SMOOTH. Primitive:
+  a stack-order verb (`move_modifier(target, modifier, before=|after=|index=)`),
+  and/or bind-family verbs inserting where the convention wants them (deform
+  modifiers above generators).
+- **W2 — the V2 bind-invalidation warning is bypassed by the manual edit-mode
+  path.** `select_object → set_mode(EDIT) → select_by_axis → delete_geometry`
+  (no `target=`) deleted 13 verts from the bound pullover with NO warning — the
+  snapshot hook lives in `_enter_edit_for_target`, which only the `target=` form
+  routes through. The same edit via `delete_geometry(target=…)` warned loudly.
+  S1b's lesson again: a guard on one path is a guard on no path. Fix: snapshot
+  bound-modifier state when EDIT mode is entered (set_mode / wherever
+  `_enter_edit_for_target` ends up), compare on exit or after any
+  topology-changing verb, regardless of how edit mode was reached.
+- **W3 — CORRECTIVE_SMOOTH / SURFACE_DEFORM binds have no rebind verb.** The V2
+  warning correctly listed BOTH dead binds ("[CorrectiveSmooth (CORRECTIVE_SMOOTH),
+  MeshDeform (MESH_DEFORM)]") but the recovery tool it points at only fixes
+  MESH_DEFORM. Spring's pullover CorrectiveSmooth (rest_source=BIND, bound at
+  2039 verts) is now permanently dead — the warning prescribes a fix that can't
+  treat one of the two patients it diagnosed. Primitive: extend the bind verb
+  family to `object.correctivesmooth_bind` / `object.surfacedeform_bind` (one
+  `rebind_deform(mesh, modifier=)` umbrella or per-type verbs).
+
+_All earlier gaps (P, R, S, T, U, V series) are closed — see "Recently closed" below.
 New gaps from future builds go above this line._
 
 ## Tactile introspection — the design principle
