@@ -37,14 +37,6 @@ discover one.
   the full dump is unreadable by the consumer regardless of who truncates it.
   Primitive: depth limit, type/name filters, and collection summarization
   ("spring.rig.widgets/ — 310 meshes") with full expansion on request.
-- **U5 — Principled-slot material summaries are actively WRONG on node-graph
-  materials.** `MAT_spring.head` — the skin — reports base_color black,
-  emission_strength 1.0: the real shading lives in the node tree and the
-  unused Principled defaults get reported as truth. An agent would conclude
-  the face is black and glowing. T3's big sibling (T3: overrides invisible;
-  U5: values misleading). Minimum fix: detect that the summarized sockets are
-  link-driven and say `nodegraph-driven (summary unreliable)` instead of
-  reporting numbers; the full fix is the long-term node-graph item.
 - **U6 — `describe()` has no vocabulary for non-mesh types.** "RIG-Spring:
   freestanding (origin -0.435m above floor); no material" — technically true,
   useless, and 'no material' is noise on an armature. Lattices, empties, and
@@ -96,14 +88,6 @@ every gap below is about *changing how it looks* without rebuilding it.
   boulder (riding the cocked arm, ~1m from where its origin says it is) needed
   hand-computed `focus_distance`. The fix mirrors R4's lesson: evaluate the
   posed geometry — focus on the evaluated-bbox center, not the object origin.
-- **T3 — texture tint/override values are invisible to introspection.**
-  `describe` lists each slot's material with base color + roughness +
-  `texture(asset@res)`, but a `tint`/`base_color` override applied by
-  `set_textured_material` lives inside the node tree and is not reported — after
-  retinting the shared `rope_mat`, nothing deterministic could confirm the
-  change propagated (describe still showed the unused BSDF default
-  `[0.8, 0.8, 0.8]`); only a render could. Tactile-introspection hole: the
-  material line should read `texture(cotton_jersey@1k tint=[0.45,0.33,0.2])`.
 - **T5 — viewport overlays are screenshot-only configurable.**
   `get_viewport_screenshot(hide_overlays=True)` cleans up the agent's view, but
   nothing can clean up the USER's live viewport: with a rigged, scattered scene
@@ -137,6 +121,28 @@ coordinates. BVHTree makes the proximity queries milliseconds-cheap at hobby pol
 ---
 
 # Recently closed
+
+## Batch 2 — material introspection (U5, T3), 2026-06-11
+
+Both live in `common.material_summary` (read by `describe`/`get_object_info`) +
+`describe`'s formatting. e2e in `tests/e2e_batch2.py` (17 checks).
+
+- **U5 — node-graph materials no longer summarized as their stale defaults.**
+  `material_summary` now checks each Principled socket's `is_linked`: a
+  link-driven Base Color/Roughness/Metallic is reported as `*_driven: nodegraph`
+  (describe prints `color=nodegraph-driven (summary unreliable)` / `rough=
+  nodegraph`) instead of the meaningless default — so Spring's node-graph skin no
+  longer reads "black". Emission is only reported when strength>0 AND the
+  emission color is non-black, killing the false "glow=1.0" off the Principled
+  default (black emission renders nothing).
+- **T3 — tint is read back from the live node, not echoed from a stored dict.**
+  When Base Color is driven by `set_textured_material`'s diffuse→MULTIPLY(B=tint)
+  graph, `material_summary` reads the mix node's B socket and reports
+  `base_color_tint`; describe renders `texture(cotton_jersey@1k
+  tint=[0.45,0.33,0.2])`. Reading the socket (not the `bb_texture` write-time
+  record) means a later hand-edit of the tint is reflected — the honest
+  instrument the authoring session asked for. `base_color` overrides already set
+  the BSDF socket directly, so they were and remain reported verbatim.
 
 ## Batch 1 — independent quick wins (T4, T7, T8, U11, S1b), 2026-06-11
 

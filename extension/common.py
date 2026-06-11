@@ -117,24 +117,47 @@ def material_summary(obj):
         if mat.use_nodes:
             bsdf = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
             if bsdf is not None:
-                def _inp(key):
-                    return bsdf.inputs[key].default_value if key in bsdf.inputs else None
-                bc = _inp("Base Color")
+                def _sock(label):
+                    return bsdf.inputs[label] if label in bsdf.inputs else None
+
+                # A LINK-DRIVEN socket's default_value is meaningless — it's whatever
+                # was last typed, not what renders. Reporting it as truth is how the
+                # summary called Spring's node-graph skin "black and glowing"
+                # (gaps.md U5). So trace links instead of trusting defaults.
+                bc = _sock("Base Color")
                 if bc is not None:
-                    entry["base_color"] = [round(c, 3) for c in tuple(bc)[:4]]
+                    if bc.is_linked:
+                        src = bc.links[0].from_node
+                        if (src.type == 'MIX' and getattr(src, "blend_type", "") == 'MULTIPLY'
+                                and "B" in src.inputs):
+                            # set_textured_material wires diffuse → MULTIPLY(B=tint) →
+                            # Base Color; read the live tint back, the honest
+                            # instrument for "did the tint land?" (gaps.md T3).
+                            entry["base_color_tint"] = [
+                                round(c, 3) for c in tuple(src.inputs["B"].default_value)[:4]]
+                        else:
+                            entry["base_color_driven"] = "nodegraph"
+                    else:
+                        entry["base_color"] = [round(c, 3) for c in tuple(bc.default_value)[:4]]
                 for key, label in (("metallic", "Metallic"), ("roughness", "Roughness"),
                                    ("alpha", "Alpha")):
-                    v = _inp(label)
-                    if v is not None:
-                        entry[key] = round(float(v), 3)
-                es = _inp("Emission Strength")
-                if es is not None and float(es) > 0:
-                    entry["emission_strength"] = round(float(es), 3)
-                    ec = _inp("Emission Color")
-                    if ec is None:
-                        ec = _inp("Emission")
-                    if ec is not None:
-                        entry["emission_color"] = [round(c, 3) for c in tuple(ec)[:4]]
+                    s = _sock(label)
+                    if s is None:
+                        continue
+                    if s.is_linked:
+                        entry[f"{key}_driven"] = "nodegraph"
+                    else:
+                        entry[key] = round(float(s.default_value), 3)
+                # Only a real (non-black) emission counts. The Principled default is
+                # strength 1.0 with a BLACK emission color — which renders no glow, so
+                # reporting "glow=1.0" off the default is the U5 misread again.
+                es = _sock("Emission Strength")
+                ec = _sock("Emission Color") or _sock("Emission")
+                if (es is not None and not es.is_linked and float(es.default_value) > 0
+                        and ec is not None and not ec.is_linked
+                        and any(c > 1e-4 for c in tuple(ec.default_value)[:3])):
+                    entry["emission_strength"] = round(float(es.default_value), 3)
+                    entry["emission_color"] = [round(c, 3) for c in tuple(ec.default_value)[:4]]
         out.append(entry)
     return out
 

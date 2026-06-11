@@ -61,10 +61,16 @@ def describe(params):
         bits = [m["name"]]
         if "base_color" in m:
             bits.append(f"color={m['base_color'][:3]}")
-        if "roughness" in m:
+        elif m.get("base_color_driven"):
+            bits.append("color=nodegraph-driven (summary unreliable)")
+        if m.get("roughness_driven"):
+            bits.append("rough=nodegraph")
+        elif "roughness" in m:
             bits.append(f"rough={m['roughness']}")
         if m.get("metallic"):
             bits.append(f"metal={m['metallic']}")
+        elif m.get("metallic_driven"):
+            bits.append("metal=nodegraph")
         if m.get("emission_strength"):
             bits.append(f"glow={m['emission_strength']}")
         if "toon" in m:
@@ -73,7 +79,11 @@ def describe(params):
                         + (", rim" if t.get("rim_color") else "")
                         + (", gradient" if t.get("gradient_top") else "") + ")")
         if "texture" in m:
-            bits.append(f"texture({m['texture'].get('asset_id')}@{m['texture'].get('resolution')})")
+            tint = m.get("base_color_tint")
+            tint_str = f" tint={tint[:3]}" if tint else ""
+            bits.append(f"texture({m['texture'].get('asset_id')}@{m['texture'].get('resolution')}{tint_str})")
+        elif m.get("base_color_tint"):
+            bits.append(f"tint={m['base_color_tint'][:3]}")
         mat_strs.append(" ".join(bits))
     mat_str = f"material: {', '.join(mat_strs)}" if mat_strs else "no material"
 
