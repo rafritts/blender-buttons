@@ -1,6 +1,30 @@
 # MCP gaps
 
-_No open gaps._
+## Live-curve delivery gaps (S1–S2) — finishing the catapult rope, 2026-06-11
+
+R4 made the beveled live curve a first-class deliverable (the rig-following
+rope), but the surrounding pipeline still treats curves as second-class. Both
+gaps were hit on the first real use of the R4 rope.
+
+- **S1 — material tools reject non-mesh objects.** `set_material` and
+  `set_textured_material` filter targets to MESH ("'winch_rope' contains no
+  mesh objects"), so a beveled curve — which renders as a solid tube and has
+  ordinary material slots — cannot be materialized at all. The build had to
+  bake throwaway `spline_tube` stand-ins per pose just to render a textured
+  rope. General fix: accept any object whose data carries material slots
+  (CURVE, FONT, META), not just meshes. Related: `audit_asset` and
+  `validate_scene` silently skip curve members of a group (reported "8
+  object(s)" for a 9-part group with no mention of the skip) — per the
+  no-silent-caps principle they should at least name what they excluded.
+- **S2 — `apply_modifiers` on a curve doesn't bake it to a mesh.** The R4
+  delivery path says "pose the rig, then `apply_modifiers` to bake the curve
+  to a game-ready mesh", but in practice it applied the Hook modifiers and
+  left the object a CURVE — still untexturable (S1) and not export geometry.
+  Fix: when the target is a curve, follow the modifier-apply with
+  convert-to-mesh (`bpy.ops.object.convert(target='MESH')`), or document a
+  separate `convert_to_mesh` verb. The hook evaluation itself was correct —
+  duplicating the posed rope and applying gave the right world bounds, which
+  is how the cocked rope endpoint was measured.
 
 ## Tactile introspection — the design principle
 
