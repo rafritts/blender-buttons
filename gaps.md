@@ -1,42 +1,7 @@
 # MCP gaps
 
-## Deform-stack aftermath gaps (W1–W3) — cage-rebinding Spring's tank top, 2026-06-11
-
-V1/V2 verified live: `bind_mesh_deform` restored cage deformation to the edited
-pullover (bend test: 31.8mm follow, vs 1.4mm dead / 31.6mm auto_weight), and the
-hooked edit path printed the loud "DEFORM BIND INVALIDATED" warning with the
-exact rebind call to run. Using them surfaced the next layer:
-
-- **W1 — modifier stack ORDER is unaddressable.** `bind_mesh_deform` created the
-  MESH_DEFORM at the BOTTOM of the stack (index 5); the production original had
-  it at index 0, before CorrectiveSmooth/Subsurf/Displace/particles. Order is
-  semantics: corrective-smooth now runs pre-deform (inert), subsurf binds 4×
-  the verts (slower bind), and hair particles emit pre-deform. Nothing can fix
-  it: `modify_modifier` tweaks values only, and rebuild-by-hand is impossible
-  because `add_modifier` can't create DISPLACE or CORRECTIVE_SMOOTH. Primitive:
-  a stack-order verb (`move_modifier(target, modifier, before=|after=|index=)`),
-  and/or bind-family verbs inserting where the convention wants them (deform
-  modifiers above generators).
-- **W2 — the V2 bind-invalidation warning is bypassed by the manual edit-mode
-  path.** `select_object → set_mode(EDIT) → select_by_axis → delete_geometry`
-  (no `target=`) deleted 13 verts from the bound pullover with NO warning — the
-  snapshot hook lives in `_enter_edit_for_target`, which only the `target=` form
-  routes through. The same edit via `delete_geometry(target=…)` warned loudly.
-  S1b's lesson again: a guard on one path is a guard on no path. Fix: snapshot
-  bound-modifier state when EDIT mode is entered (set_mode / wherever
-  `_enter_edit_for_target` ends up), compare on exit or after any
-  topology-changing verb, regardless of how edit mode was reached.
-- **W3 — CORRECTIVE_SMOOTH / SURFACE_DEFORM binds have no rebind verb.** The V2
-  warning correctly listed BOTH dead binds ("[CorrectiveSmooth (CORRECTIVE_SMOOTH),
-  MeshDeform (MESH_DEFORM)]") but the recovery tool it points at only fixes
-  MESH_DEFORM. Spring's pullover CorrectiveSmooth (rest_source=BIND, bound at
-  2039 verts) is now permanently dead — the warning prescribes a fix that can't
-  treat one of the two patients it diagnosed. Primitive: extend the bind verb
-  family to `object.correctivesmooth_bind` / `object.surfacedeform_bind` (one
-  `rebind_deform(mesh, modifier=)` umbrella or per-type verbs).
-
-_All earlier gaps (P, R, S, T, U, V series) are closed — see "Recently closed" below.
-New gaps from future builds go above this line._
+_No open gaps. All logged gaps (P, R, S, T, U, V, W series) are closed — see
+"Recently closed" below. New gaps from future builds go above this line._
 
 ## Tactile introspection — the design principle
 
@@ -50,6 +15,60 @@ coordinates. BVHTree makes the proximity queries milliseconds-cheap at hobby pol
 ---
 
 # Recently closed
+
+## Batch 8 — deform-stack aftermath (W1, W2, W3), 2026-06-11
+
+Closes the W-series — the layer exposed by cage-rebinding Spring's tank top: once
+a deform bind is recoverable (V1/V2), the stack AROUND it (order, the bind guard's
+blind spots, the other bind types) becomes the gap. e2e in `tests/e2e_batch8.py`
+(42 checks). Verified headless only — the live Blender went unreachable mid-session
+(see re-stage recipe below); W2's manual-path repro and the MESH_DEFORM +
+CORRECTIVE_SMOOTH rebinds are the production-equivalent cases under headless cover.
+
+- **W1 — modifier stack ORDER is addressable.** New `move_modifier(target,
+  modifier, index=|before=|after=)` (wraps `modifier_move_to_index`) — `index` is
+  absolute, `before`/`after` place relative to a named modifier (the vacated-slot
+  shift is handled so "after Subsurf" always lands directly below it). Chose the
+  explicit primitive over any auto-placement heuristic ("deform modifiers above
+  generators") — that's the bespoke magic the project bars; the agent places
+  legibly. **The trap:** a bind is computed against the modifier's evaluated INPUT,
+  so moving a bound deform modifier silently kills the bind — and WITHOUT a
+  vert-count change, so the V2/W2 guard is blind to it. `move_modifier` therefore
+  returns its own `bind_invalidated` + `bind_warning` (cause=`stackmove`) whenever
+  it moves a bound MESH_DEFORM/SURFACE_DEFORM/CORRECTIVE_SMOOTH; the recipe is
+  move → `rebind_deform`. Also added **CORRECTIVE_SMOOTH** to `add_modifier`
+  (rest_source BIND default / ORCO, factor, iterations) — the stack staple it
+  couldn't recreate before. DISPLACE deferred: it's inert without a texture
+  datablock and there's no texture-creation verb yet — half-shipping a dead
+  modifier with our name on it isn't worth it.
+- **W2 — the bind-invalidation guard is no longer bypassed by the manual edit
+  path.** The V2 snapshot was request-scoped (`server.execute_command`, one
+  `target=` verb), so the four-command manual path (`set_mode(EDIT)` → `select_…`
+  → `delete_geometry` no-target → `set_mode(OBJECT)`) slipped through. The snapshot
+  is now **edit-session-scoped** (`state.snapshot_edit_binds` / `check_edit_binds`):
+  taken when EDIT is entered (in `objects.set_mode`), compared when EDIT is exited
+  — one warning per session, on the `set_mode(OBJECT)` that ends it. The
+  request-scoped `target=` path still warns immediately (unchanged; verified no
+  regression), and `_enter_edit_for_target` drops any pending manual snapshot so
+  the two paths don't cross-contaminate. A position-only manual edit (no
+  vert-count delta) and an unbound mesh both stay silent. Accepted limit: exiting
+  EDIT via the Blender UI bypasses the compare; the next MCP edit-enter reconciles
+  the stale snapshot by replacing it (S1b: a guard on one path is a guard on none).
+- **W3 — every bind type has a rebind verb.** New umbrella `rebind_deform(mesh,
+  modifier=)` dispatches by type to `meshdeform_bind` / `surfacedeform_bind` /
+  `correctivesmooth_bind` — one concept ("this bind is stale"), one verb, so the
+  invalidation warning prescribes a single cure regardless of which patient is
+  dying. Default rebinds every bound deform modifier on the mesh; `modifier=` names
+  one. RE-BINDS existing modifiers only (never creates — `bind_mesh_deform` stays
+  the MESH_DEFORM cage-setup verb). A CORRECTIVE_SMOOTH at rest_source=ORCO has no
+  stored bind, so it's reported as skipped, not toggled blind. `deform_bind_warning`
+  now points every diagnosis at `rebind_deform`.
+
+_Re-stage the W1/W3 live repro (Spring): delete the jacket, remove the pullover's
+Mask, cut verts, `bind_mesh_deform` to `BlenRig_mdef_cage_sweater`; or just verify
+on a synthetic cage stack headless (what `e2e_batch8.py` does). Side note logged by
+the authoring session: `check_contacts` timed out on Spring's heavy evaluated
+meshes right before the server dropped — worth a look as its own gap._
 
 ## Batch 7 — deform-bind recovery (V1, V2), 2026-06-11
 

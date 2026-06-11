@@ -104,11 +104,12 @@ def reset_history_state():
     calls this — otherwise history, diff_since snapshots, and undo verification all
     describe a scene that no longer exists, and undo() would check against a
     snapshot from another file (gaps.md U11)."""
-    global _undo_baseline
+    global _undo_baseline, _pending_edit_bind
     _history.clear()
     _redo_stack.clear()
     _snapshots.clear()
     _undo_baseline = None
+    _pending_edit_bind = None
 
 
 def scene_object_names():
@@ -182,3 +183,61 @@ def push_undo(label):
     (extension/server.py) after every mutating tool — one tool call == one undo
     step. Kept so existing in-tool callers don't double-push or break imports."""
     return
+
+
+# ── W2: edit-session-scoped deform-bind guard ────────────────────────────────
+# The V2 bind-invalidation check in server.execute_command is REQUEST-scoped: it
+# snapshots before an edit verb and compares after that same verb. But the manual
+# path is several socket commands — set_mode(EDIT) → select_… → delete_geometry
+# (no target=) → set_mode(OBJECT) — and no single request spans the topology
+# change, so nothing fired (gaps.md W2). This snapshot lives across commands: it's
+# stashed when EDIT mode is entered and compared when EDIT mode is exited.
+_pending_edit_bind = None  # (object_name, [(mod_name, type)…], vert_count) | None
+
+
+def snapshot_edit_binds(obj):
+    """Stash an object's deform-bind state as it enters EDIT mode, so a topology
+    edit made across separate socket commands is still caught on exit (W2).
+
+    Overwrites any prior pending snapshot — if a previous edit session was
+    abandoned (e.g. the user exited edit mode via the Blender UI, which bypasses
+    every tool), entering edit again via the MCP simply replaces the stale one
+    rather than leaking it onto an unrelated object."""
+    global _pending_edit_bind
+    _pending_edit_bind = None
+    from .common import deform_binds
+    if obj is None or getattr(obj, "data", None) is None:
+        return
+    if not hasattr(obj.data, "vertices"):
+        return
+    binds = deform_binds(obj)
+    if binds:
+        _pending_edit_bind = (obj.name, binds, len(obj.data.vertices))
+
+
+def clear_edit_binds():
+    """Drop any pending edit-bind snapshot without comparing — used when the
+    request-scoped path (target= edit verbs) takes over, since it does its own
+    snapshot/compare and must not be cross-contaminated by a manual-path one."""
+    global _pending_edit_bind
+    _pending_edit_bind = None
+
+
+def check_edit_binds(obj):
+    """On EDIT exit, compare the live vert count against the snapshot. Returns a
+    {bind_invalidated, bind_warning} dict if a bound modifier's vert count changed
+    under it, else None. Consumes the snapshot either way."""
+    global _pending_edit_bind
+    snap = _pending_edit_bind
+    _pending_edit_bind = None
+    if snap is None or obj is None:
+        return None
+    name, binds, before = snap
+    if obj.name != name or getattr(obj, "data", None) is None:
+        return None
+    if not hasattr(obj.data, "vertices"):
+        return None
+    if len(obj.data.vertices) == before:
+        return None
+    from .common import deform_bind_warning
+    return {"bind_invalidated": True, "bind_warning": deform_bind_warning(binds)}

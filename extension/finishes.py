@@ -285,6 +285,26 @@ def add_modifier(params):
             return {"success": True, "modifier": mod.name, "bound": False,
                     "note": f"MESH_DEFORM added against cage '{target_name}' (unbound) — "
                             f"call bind_mesh_deform('{obj.name}') to bind it."}
+    # CORRECTIVE_SMOOTH: corrects deform-skinning collapse on bends. Two rest
+    # sources — ORCO (smooth toward the base mesh, no bind) and BIND (smooth toward
+    # a captured pose, vertex-keyed like mesh-deform). Created unbound here; default
+    # rest_source=BIND so rebind_deform can capture it (gaps.md W1 — the stack piece
+    # the production original carried that add_modifier couldn't recreate).
+    if mod_type == "CORRECTIVE_SMOOTH":
+        rest_source = (params.get("rest_source") or "BIND").upper()
+        if hasattr(mod, "rest_source"):
+            mod.rest_source = rest_source
+        factor = params.get("factor")
+        if factor is not None and hasattr(mod, "factor"):
+            mod.factor = float(factor)
+        iterations = params.get("iterations")
+        if iterations is not None and hasattr(mod, "iterations"):
+            mod.iterations = int(iterations)
+        note = (f"CORRECTIVE_SMOOTH added (rest_source={rest_source}, unbound) — "
+                f"call rebind_deform('{obj.name}') to capture the bind."
+                if rest_source == "BIND" else
+                f"CORRECTIVE_SMOOTH added (rest_source=ORCO — smooths toward the base mesh).")
+        return {"success": True, "modifier": mod.name, "note": note}
     return {"success": True, "modifier": mod.name}
 
 
@@ -388,6 +408,114 @@ def bind_mesh_deform(params):
     return {"success": True, "mesh": mesh_name, "modifier": mod.name,
             "cage": mod.object.name, "action": action, "bound": bound,
             "was_bound": was_bound}
+
+
+# The three deform modifiers that store vertex-keyed bind data, each with the
+# is-bound flag to read, the operator to (re)bind it, and the attribute holding
+# its driving object (None for corrective-smooth, which binds the mesh to its own
+# captured pose). rebind_deform dispatches on type so one verb cures whichever the
+# bind-invalidation warning diagnosed.
+_BIND_TYPES = {
+    'MESH_DEFORM':       ("is_bound", "meshdeform_bind",       "object"),
+    'SURFACE_DEFORM':    ("is_bound", "surfacedeform_bind",    "target"),
+    'CORRECTIVE_SMOOTH': ("is_bind",  "correctivesmooth_bind", None),
+}
+
+
+def rebind_deform(params):
+    """Rebind stale deform binds after a topology edit or a stack-order move (gaps.md W3).
+
+    The recovery verb the DEFORM BIND INVALIDATED warning points at. MESH_DEFORM,
+    SURFACE_DEFORM, and CORRECTIVE_SMOOTH(rest_source=BIND) each store bind data
+    keyed to the mesh's vertex count + order; a topology edit (V2) or a
+    move_modifier that changes the modifier's evaluated input (W1) leaves the flag
+    reading bound while the bind is silently dead. Rebinding (unbind → bind)
+    recomputes it against the current geometry.
+
+    This RE-BINDS existing modifiers only — it never creates one (use add_modifier
+    / bind_mesh_deform for that). bind_mesh_deform stays the MESH_DEFORM setup verb
+    (it manages the cage); rebind_deform is the type-agnostic recovery verb.
+
+    mesh:     mesh carrying the bound deform modifier(s) (required).
+    modifier: name of one specific modifier; default rebinds EVERY bindable deform
+              modifier on the mesh.
+
+    A CORRECTIVE_SMOOTH set to rest_source=ORCO has no stored bind (it smooths
+    toward Original Coordinates), so it is reported as such, not toggled blind.
+    """
+    mesh_name = params.get("mesh")
+    if not mesh_name:
+        return {"error": "'mesh' is required"}
+    mesh = bpy.data.objects.get(mesh_name)
+    if mesh is None or mesh.type != 'MESH':
+        return {"error": f"mesh '{mesh_name}' not found or not a mesh"}
+    err = linked_guard(mesh)
+    if err:
+        return {"error": err}
+
+    mod_name = params.get("modifier")
+    if mod_name:
+        mod = mesh.modifiers.get(mod_name)
+        if mod is None:
+            return {"error": f"no modifier '{mod_name}' on '{mesh_name}'"}
+        if mod.type not in _BIND_TYPES:
+            return {"error": f"modifier '{mod_name}' is {mod.type}, not a bindable deform "
+                             f"modifier (MESH_DEFORM / SURFACE_DEFORM / CORRECTIVE_SMOOTH)"}
+        targets = [mod]
+    else:
+        targets = [m for m in mesh.modifiers if m.type in _BIND_TYPES]
+        if not targets:
+            return {"error": f"'{mesh_name}' has no MESH_DEFORM / SURFACE_DEFORM / "
+                             f"CORRECTIVE_SMOOTH modifier to rebind"}
+
+    activate(mesh)
+    override = ui_override()
+
+    def _bind_op(mod):
+        op = getattr(bpy.ops.object, _BIND_TYPES[mod.type][1])
+        if override:
+            with bpy.context.temp_override(**override):
+                op(modifier=mod.name)
+        else:
+            op(modifier=mod.name)
+
+    rebound, skipped = [], []
+    for mod in targets:
+        flag = _BIND_TYPES[mod.type][0]
+        # A corrective-smooth bind only exists when rest_source=BIND; with ORCO
+        # there is no bind data to recompute — toggling the operator would just
+        # create one, which is a different (unrequested) intent. Report, skip.
+        if mod.type == 'CORRECTIVE_SMOOTH' and getattr(mod, "rest_source", "ORCO") != 'BIND':
+            skipped.append({"modifier": mod.name, "type": mod.type,
+                            "reason": "no bind data (rest source is Original Coords, not Bind)"})
+            continue
+        # MESH_DEFORM / SURFACE_DEFORM need their driving object to bind against
+        # (the cage / surface, on different attributes — .object vs .target).
+        driver_attr = _BIND_TYPES[mod.type][2]
+        if driver_attr and getattr(mod, driver_attr, None) is None:
+            skipped.append({"modifier": mod.name, "type": mod.type,
+                            "reason": f"no {'cage' if mod.type == 'MESH_DEFORM' else 'target'} object set"})
+            continue
+        was_bound = bool(getattr(mod, flag, False))
+        if was_bound:
+            _bind_op(mod)   # unbind (toggle off the stale bind)
+        _bind_op(mod)       # bind fresh against current geometry
+        if not bool(getattr(mod, flag, False)):
+            return {"error": f"rebind failed — '{mod.name}' ({mod.type}) is still unbound "
+                             f"after rebinding. For MESH_DEFORM/SURFACE_DEFORM the driving "
+                             f"object must enclose/cover the mesh; check it, then retry.",
+                    "rebound": rebound, "skipped": skipped}
+        rebound.append({"modifier": mod.name, "type": mod.type})
+
+    if not rebound:
+        # Nothing was actually rebound — every candidate was a no-bind skip. Surface
+        # it as a clear (non-success) result rather than a hollow success.
+        return {"error": f"nothing to rebind on '{mesh_name}' — "
+                         + "; ".join(f"{s['modifier']}: {s['reason']}" for s in skipped),
+                "skipped": skipped}
+
+    push_undo(f"rebind {len(rebound)} deform modifier(s) on {mesh_name}")
+    return {"success": True, "mesh": mesh_name, "rebound": rebound, "skipped": skipped}
 
 
 _MODIFIER_PROPS = {
@@ -526,6 +654,96 @@ def list_modifiers(params):
             entry["wrap_method"] = m.wrap_method
         stack.append(entry)
     return {"success": True, "target": target, "modifiers": stack}
+
+
+def move_modifier(params):
+    """Reorder a modifier in the object's stack (gaps.md W1).
+
+    Stack ORDER is semantics, not cosmetics: a deform modifier ABOVE a Subsurf
+    binds against the base mesh; below it, against the 4×-denser subdivided
+    result. add_modifier / bind_mesh_deform append to the BOTTOM, and nothing
+    could move them before this — so a production stack whose MeshDeform belongs
+    at index 0 (before Subsurf/Displace) was unrebuildable.
+
+    target:   object name (required).
+    modifier: name of the modifier to move (required).
+    Exactly one destination:
+      index:  absolute target index (0 = top of the stack).
+      before: move it directly ABOVE this modifier (by name).
+      after:  move it directly BELOW this modifier (by name).
+
+    TRAP (handled): moving a BOUND deform modifier changes its evaluated input, so
+    the bind computed at the old position dies — silently, and WITHOUT a vert-count
+    change, so the V2 guard can't see it. This returns a DEFORM BIND INVALIDATED
+    warning whenever it moves a bound deform modifier; the recipe is move → then
+    rebind_deform.
+    """
+    target = params.get("target")
+    if not target:
+        return {"error": "'target' (object name) is required"}
+    obj = bpy.data.objects.get(target)
+    if obj is None:
+        return {"error": f"Object '{target}' not found"}
+    err = linked_guard(obj)
+    if err:
+        return {"error": err}
+    mod_name = params.get("modifier")
+    if not mod_name:
+        return {"error": "'modifier' (name of the modifier to move) is required"}
+    mods = obj.modifiers
+    mod = mods.get(mod_name)
+    if mod is None:
+        return {"error": f"Modifier '{mod_name}' not found on '{target}'. "
+                          f"Available: {[m.name for m in mods]}"}
+
+    n = len(mods)
+    index, before, after = params.get("index"), params.get("before"), params.get("after")
+    given = [k for k, v in (("index", index), ("before", before), ("after", after)) if v is not None]
+    if len(given) != 1:
+        return {"error": "pass exactly one destination: index=, before=, or after="}
+
+    cur = list(mods).index(mod)
+    if index is not None:
+        dest = int(index)
+        if dest < 0 or dest >= n:
+            return {"error": f"index {dest} out of range 0..{n - 1}"}
+    else:
+        ref_name = before if before is not None else after
+        ref = mods.get(ref_name)
+        if ref is None:
+            return {"error": f"reference modifier '{ref_name}' not found on '{target}'. "
+                             f"Available: {[m.name for m in mods]}"}
+        if ref.name == mod.name:
+            return {"error": f"'{mod_name}' can't be placed relative to itself"}
+        ref_idx = list(mods).index(ref)
+        # Land directly above (before) or below (after) the reference. Account for
+        # the modifier vacating its current slot when it sits above the reference.
+        dest = ref_idx if before is not None else ref_idx + 1
+        if cur < ref_idx:
+            dest -= 1
+        dest = max(0, min(n - 1, dest))
+
+    # Read bind state BEFORE the move — the move itself doesn't flip is_bound, but
+    # the bind is dead against the new evaluated input (W1 trap).
+    from .common import deform_bind_warning
+    was_bound = (mod.type in _BIND_TYPES
+                 and bool(getattr(mod, _BIND_TYPES[mod.type][0], False)))
+
+    activate(obj)
+    override = ui_override()
+    if override:
+        with bpy.context.temp_override(**override):
+            bpy.ops.object.modifier_move_to_index(modifier=mod.name, index=dest)
+    else:
+        bpy.ops.object.modifier_move_to_index(modifier=mod.name, index=dest)
+
+    result = {"success": True, "target": target, "modifier": mod.name,
+              "from_index": cur, "to_index": list(mods).index(mod)}
+    if was_bound:
+        result["bind_invalidated"] = True
+        result["bind_warning"] = deform_bind_warning([(mod.name, mod.type)], cause="stackmove")
+    push_undo(f"move modifier '{mod.name}' on {target} to index {dest}")
+    return result
 
 
 def apply_modifiers(params):
@@ -707,9 +925,11 @@ TOOLS = {
     "bend":            bend,
     "add_modifier":    add_modifier,
     "bind_mesh_deform": bind_mesh_deform,
+    "rebind_deform":   rebind_deform,
     "modify_modifier": modify_modifier,
     "remove_modifier": remove_modifier,
     "list_modifiers":  list_modifiers,
+    "move_modifier":   move_modifier,
     "apply_modifiers": apply_modifiers,
     "convert_to_mesh": convert_to_mesh,
     "boolean":         boolean,

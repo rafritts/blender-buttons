@@ -5,6 +5,7 @@ import math
 import bpy
 import mathutils
 
+from . import state
 from .common import world_bbox, world_center, activate
 
 
@@ -153,8 +154,21 @@ def join_objects(params):
 
 def set_mode(params):
     mode = params.get("mode", "OBJECT").upper()
+    active = bpy.context.active_object
+    prev_mode = active.mode if active is not None else None
+    # W2: snapshot deform binds when EDIT is entered, so a topology edit spread
+    # across separate socket commands (set_mode EDIT → select → delete_geometry →
+    # set_mode OBJECT) is still caught when edit mode is exited. The request-scoped
+    # V2 guard only spans a single target= edit verb and misses this manual path.
+    if mode == 'EDIT' and prev_mode != 'EDIT':
+        state.snapshot_edit_binds(active)
     bpy.ops.object.mode_set(mode=mode)
-    return {"success": True, "mode": mode}
+    result = {"success": True, "mode": mode}
+    if mode == 'OBJECT' and prev_mode == 'EDIT':
+        warn = state.check_edit_binds(bpy.context.active_object)
+        if warn:
+            result.update(warn)
+    return result
 
 
 def get_object_info(params):

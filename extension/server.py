@@ -103,6 +103,10 @@ def _enter_edit_for_target(target_name):
     err = linked_guard(obj)
     if err:
         return False, err
+    # W2: the request-scoped path below does its own bind snapshot/compare around
+    # this single verb. Drop any pending manual-path snapshot so a stale one (from
+    # an edit session abandoned via the Blender UI) can't bleed onto this edit.
+    state.clear_edit_binds()
     bpy.ops.object.select_all(action='DESELECT')
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj

@@ -8,11 +8,12 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
                  wrap_method: str = "NEAREST_SURFACEPOINT",
                  axis: str = "X", merge_threshold: float = None,
                  mirror_object: str = "", precision: int = None,
+                 rest_source: str = "", factor: float = None, iterations: int = None,
                  label: str = "") -> str:
     """
     Add a modifier to the active object.
     type: SUBSURF | BEVEL | SOLIDIFY | MIRROR | ARRAY | SCREW | SHRINKWRAP
-          | MESH_DEFORM | ARMATURE | LATTICE
+          | MESH_DEFORM | ARMATURE | LATTICE | CORRECTIVE_SMOOTH
     levels: subdivision levels (SUBSURF)  |  width/segments: bevel params
     target: the partner object. Required for —
       SHRINKWRAP  : the surface to wrap onto.
@@ -29,6 +30,11 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
     merge_threshold: MIRROR only — weld coincident verts at the mirror plane (typical 0.001).
     mirror_object: MIRROR only — use this object's local axes as the mirror plane (defaults to self).
     precision: MESH_DEFORM only — bind precision 2–10 (higher = sharper, slower bind).
+    CORRECTIVE_SMOOTH — fixes skinning collapse on bends (a deform-stack staple):
+      rest_source: BIND (default — smooth toward a captured pose, vertex-keyed;
+                   added UNBOUND, then call rebind_deform to capture) |
+                   ORCO (smooth toward the base mesh, no bind).
+      factor: smoothing strength 0..1. iterations: smoothing passes.
     """
     params = {
         "type": type, "name": name or type.capitalize(),
@@ -47,6 +53,12 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
         params["mirror_object"] = mirror_object
     if precision is not None:
         params["precision"] = precision
+    if rest_source:
+        params["rest_source"] = rest_source
+    if factor is not None:
+        params["factor"] = factor
+    if iterations is not None:
+        params["iterations"] = iterations
     result = call_blender("add_modifier", params, label=label)
     if result.get("success"):
         main = f"{result['modifier']} [{result.get('op_id','')}]"
@@ -95,6 +107,80 @@ def bind_mesh_deform(mesh: str, cage: str = "", action: str = "bind",
         main = (f"mesh-deform {result['action']}: '{result['modifier']}' on "
                 f"'{result['mesh']}' (cage '{result['cage']}') → {state} "
                 f"[{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def rebind_deform(mesh: str, modifier: str = "", label: str = "") -> str:
+    """
+    Rebind stale deform binds after a topology edit or a stack-order move — the
+    recovery verb the "DEFORM BIND INVALIDATED" warning points at (gaps.md W3).
+
+    MESH_DEFORM, SURFACE_DEFORM, and CORRECTIVE_SMOOTH(rest_source=BIND) each store
+    bind data keyed to the mesh's vertex count + order. A topology edit (vert-count
+    change) or a move_modifier that changes the modifier's evaluated input leaves
+    the bind flag reading True while the bind is silently DEAD. This rebinds it
+    (unbind → bind) against the current geometry. RE-BINDS existing modifiers only
+    — it never creates one (use add_modifier / bind_mesh_deform for setup).
+
+    mesh:     the mesh carrying the bound deform modifier(s).
+    modifier: name of ONE specific modifier; omit to rebind EVERY bindable deform
+              modifier on the mesh.
+
+    A CORRECTIVE_SMOOTH set to rest_source=ORCO has no stored bind (it smooths
+    toward Original Coordinates) and is reported as skipped, not toggled blind.
+    """
+    params = {"mesh": mesh}
+    if modifier:
+        params["modifier"] = modifier
+    result = call_blender("rebind_deform", params, label=label)
+    if result.get("success"):
+        rebound = ", ".join(f"{r['modifier']}({r['type']})" for r in result.get("rebound", []))
+        main = f"rebound on '{result['mesh']}': {rebound} [{result.get('op_id','')}]"
+        for s in result.get("skipped", []):
+            main += f"\n  skipped {s['modifier']} ({s['type']}): {s['reason']}"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def move_modifier(target: str, modifier: str, index: int = None,
+                  before: str = "", after: str = "", label: str = "") -> str:
+    """
+    Reorder a modifier in the object's stack (gaps.md W1). Stack ORDER is
+    semantics: a deform modifier ABOVE a Subsurf binds against the base mesh;
+    below it, against the denser subdivided result. add_modifier / bind_mesh_deform
+    append to the BOTTOM and nothing could move them before this.
+
+    target:   object name.
+    modifier: name of the modifier to move.
+    Pass exactly ONE destination:
+      index:  absolute target index (0 = top of the stack).
+      before: move it directly ABOVE this modifier (by name).
+      after:  move it directly BELOW this modifier (by name).
+
+    TRAP (handled): moving a BOUND deform modifier changes its evaluated input, so
+    the bind dies — silently and WITHOUT a vert-count change, so the topology guard
+    can't see it. This returns a DEFORM BIND INVALIDATED warning when it moves a
+    bound deform modifier; the recipe is move → rebind_deform.
+    """
+    params = {"target": target, "modifier": modifier}
+    if index is not None:
+        params["index"] = index
+    if before:
+        params["before"] = before
+    if after:
+        params["after"] = after
+    result = call_blender("move_modifier", params, label=label)
+    if result.get("success"):
+        main = (f"moved '{result['modifier']}' on '{result['target']}': "
+                f"index {result['from_index']} → {result['to_index']} "
+                f"[{result.get('op_id','')}]")
+        if result.get("bind_warning"):
+            main += f"\n{result['bind_warning']}"
     else:
         main = result.get("error", "failed")
     return main + _status(result)

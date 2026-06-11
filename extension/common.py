@@ -174,16 +174,31 @@ def deform_binds(obj):
     return binds
 
 
-def deform_bind_warning(binds):
-    """Loud warning string for a topology edit that invalidated bound modifiers."""
+def deform_bind_warning(binds, cause="topology"):
+    """Loud warning string for an action that invalidated bound deform modifiers.
+
+    cause='topology' — a vertex-count change from an edit (V2): the bind is keyed
+    to the vert count, so the count delta is the documented bind-killer.
+    cause='stackmove' — a stack-order move changed the modifier's evaluated input
+    (a different stack position feeds it different geometry), so the bind computed
+    at the old position no longer matches (W1). The mesh vert-count is UNCHANGED
+    here, so the V2 count check can't catch it — move_modifier raises this itself.
+
+    Both prescribe the SAME cure: rebind_deform (W3), which rebinds whichever of
+    MESH_DEFORM / CORRECTIVE_SMOOTH / SURFACE_DEFORM are bound."""
     names = ", ".join(f"{n} ({t})" for n, t in binds)
-    has_meshdeform = any(t == 'MESH_DEFORM' for _, t in binds)
-    rebind = ("Rebind required: bind_mesh_deform(mesh, cage, action='rebind') "
-              if has_meshdeform else "Rebind required: re-run the modifier's bind ")
-    return (f"⚠ DEFORM BIND INVALIDATED — this topology edit changed the vertex "
-            f"count, so the bound modifier(s) [{names}] no longer match the mesh and "
-            f"have silently stopped deforming. The mesh looks fine at rest but won't "
-            f"follow the rig when posed. {rebind}(gaps.md V1/V2).")
+    if cause == "stackmove":
+        lead = ("this stack-order move changed the modifier's evaluated input "
+                "(a different position in the stack feeds it different geometry), "
+                "so the bind data computed at the old position no longer matches")
+    else:
+        lead = ("this topology edit changed the vertex count, so the bound "
+                "modifier(s) no longer match the mesh")
+    return (f"⚠ DEFORM BIND INVALIDATED — {lead}: [{names}] have silently stopped "
+            f"deforming. The mesh looks fine at rest but won't follow the rig when "
+            f"posed. Rebind required: rebind_deform('<mesh>') rebinds every bound "
+            f"deform modifier, or rebind_deform('<mesh>', modifier='<name>') for one "
+            f"(gaps.md V2/W1/W3).")
 
 
 def has_material_slots(obj):
