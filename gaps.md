@@ -1,6 +1,6 @@
 # MCP gaps
 
-## Presentation-pass gaps (T1–T7) — texturing/lighting the catapult for a showcase, 2026-06-11
+## Presentation-pass gaps (T1–T8) — texturing/lighting the catapult for a showcase, 2026-06-11
 
 Dressing a finished multi-material asset for hero renders. The build was done;
 every gap below is about *changing how it looks* without rebuilding it.
@@ -66,6 +66,18 @@ every gap below is about *changing how it looks* without rebuilding it.
   the name alive after a successful delete. Workaround: pick a fresh name. Fix:
   delete should actually free the name (remove the datablock or rename the
   orphan), or the error should say what is holding it.
+
+- **T8 — `boolean` reports success when the result is an empty mesh.** A
+  DIFFERENCE slab cut against a joined mesh whose islands interpenetrate (arm
+  shaft poking into the bowl shell) returned "applied (baked)" — and the target
+  collapsed to zero verts. Only the status-block bounds (`dims: [0,0,0]`)
+  betrayed it; one render later it would have been "where did the throw arm
+  go". `undo()` recovered (E1's full-context fix verified in real anger), and
+  cutting the SPLIT-OFF island alone worked, so the rule is "split before you
+  boolean a multi-island mesh" — but the tool should catch the catastrophic
+  outcome itself: if the result has 0 verts (or loses >X% of input verts on a
+  DIFFERENCE), fail loudly and leave the modifier unapplied, the same way
+  apply-failure already does.
 
 ## S1b-residual — lint skip-report is bypassed by GROUP expansion, 2026-06-11
 
