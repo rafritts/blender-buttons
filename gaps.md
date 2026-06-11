@@ -1,7 +1,41 @@
 # MCP gaps
 
-_No open gaps. All logged gaps (P, R, S, T, U, V, W series) are closed — see
-"Recently closed" below. New gaps from future builds go above this line._
+## Live-verify regressions in Batch 8 (X1–X2), 2026-06-11
+
+Re-staged the tank-top edit on a fresh Spring file (Blender crashed; original
+scene reloaded). W2 verified live immediately — the manual path
+(`set_mode(EDIT)` → 3 cuts → `set_mode(OBJECT)`) now warns on exit, names both
+dead modifiers, prescribes `rebind_deform`. Then the prescription itself died:
+
+- **X1 — the entire bind family crashes live: `'NoneType' object has no
+  attribute 'get'`.** Every call, identical error, clearly before type
+  dispatch:
+  - `rebind_deform("GEO-spring_pullover")` (all-modifiers path)
+  - `rebind_deform("GEO-spring_pullover", modifier="MeshDeform")`
+  - `rebind_deform("GEO-spring_pullover", modifier="CorrectiveSmooth")`
+  - `rebind_deform("GEO_spring_arms", modifier="CorrectiveSmooth")` —
+    differential on an UNTOUCHED mesh (no pending W2 warning, no topology
+    edit), same crash → not the pending-warning stash content.
+  - `bind_mesh_deform("GEO-spring_pullover", action="rebind")` — same crash,
+    and this verb WORKED in the previous build (it cage-bound this very mesh
+    live). So the regression is in code shared across the bind family —
+    prime suspect is whatever Batch 8 touched in all of them (the
+    `deform_bind_warning` re-pointing / `state.snapshot_edit_binds` plumbing),
+    reading `.get` off something that is None in a LIVE session but present
+    headless (e2e_batch8's 42 checks are green; every live call dies).
+  - Impact: the W2 guard now fires correctly and points at a cure that
+    crashes. The wardrobe edit is stalled exactly at the rebind step — the
+    pullover sits with both binds dead (mesh fine at rest, won't follow rig).
+  - Repro state preserved live: jacket deleted, Mask removed, sleeves cut at
+    |x|=0.15 + collar removed (2039→882 verts), stack still
+    MESH_DEFORM@0 / CORRECTIVE_SMOOTH@1 / SUBSURF / DISPLACE / PARTICLE×2.
+
+- **X2 — `frame_scene` fails when the scene is in POSE mode** (production
+  files open that way): `Operator bpy.ops.object.select_all.poll() failed,
+  context is incorrect`. Other verbs mode-guard or switch; this one should
+  too. Workaround: `set_mode(OBJECT)` first.
+
+## Tactile introspection — the design principle
 
 ## Tactile introspection — the design principle
 
