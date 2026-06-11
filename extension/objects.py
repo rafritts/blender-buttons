@@ -457,6 +457,77 @@ def set_custom_property(params):
             "value": value, "created": not existed}
 
 
+# ─────────────────────── particle systems (U7) ───────────────────────
+
+def _particle_systems(obj):
+    """(name, type, count) per particle system, or [] if none."""
+    out = []
+    for ps in getattr(obj, "particle_systems", []) or []:
+        st = ps.settings
+        out.append((ps.name, st.type, st.count))
+    return out
+
+
+def set_particle_visibility(params):
+    """Show or hide an object's particle systems in the viewport. Hair/fur often
+    buries the mesh under strands; this toggles show_viewport on every
+    PARTICLE_SYSTEM modifier so the underlying object is workable."""
+    name = params.get("name")
+    show = bool(params.get("show", False))
+    obj = bpy.data.objects.get(name)
+    if obj is None:
+        return {"error": f"Object '{name}' not found"}
+    mods = [m for m in obj.modifiers if m.type == 'PARTICLE_SYSTEM']
+    if not mods:
+        return {"error": f"'{name}' has no particle systems"}
+    for m in mods:
+        m.show_viewport = show
+    return {"success": True, "name": name, "show": show,
+            "particle_systems": [m.name for m in mods]}
+
+
+# ─────────────────────── shape keys (U8) ───────────────────────
+
+def list_shape_keys(params):
+    """List an object's shape keys (morph targets) and their current values."""
+    name = params.get("name")
+    obj = bpy.data.objects.get(name)
+    if obj is None:
+        return {"error": f"Object '{name}' not found"}
+    data = getattr(obj, "data", None)
+    sk = getattr(data, "shape_keys", None) if data is not None else None
+    if sk is None:
+        return {"success": True, "name": name, "shape_keys": [], "count": 0}
+    keys = [{"name": k.name, "value": round(k.value, 4),
+             "min": round(k.slider_min, 4), "max": round(k.slider_max, 4)}
+            for k in sk.key_blocks]
+    return {"success": True, "name": name, "shape_keys": keys, "count": len(keys)}
+
+
+def set_shape_key(params):
+    """Set a shape key's value (0..1 typical) — drive a morph/corrective."""
+    name = params.get("name")
+    key = params.get("key")
+    if not key:
+        return {"error": "'key' is required"}
+    if "value" not in params:
+        return {"error": "'value' is required"}
+    obj = bpy.data.objects.get(name)
+    if obj is None:
+        return {"error": f"Object '{name}' not found"}
+    data = getattr(obj, "data", None)
+    sk = getattr(data, "shape_keys", None) if data is not None else None
+    if sk is None:
+        return {"error": f"'{name}' has no shape keys"}
+    kb = sk.key_blocks.get(key)
+    if kb is None:
+        return {"error": f"shape key '{key}' not found on '{name}'. "
+                         f"Available: {[k.name for k in sk.key_blocks]}"}
+    kb.value = float(params.get("value"))
+    bpy.context.view_layer.update()
+    return {"success": True, "name": name, "key": key, "value": round(kb.value, 4)}
+
+
 TOOLS = {
     "rename_object":          rename_object,
     "select_object":          select_object,
@@ -470,4 +541,7 @@ TOOLS = {
     "get_current_selection":  get_current_selection,
     "get_custom_properties":  get_custom_properties,
     "set_custom_property":    set_custom_property,
+    "set_particle_visibility": set_particle_visibility,
+    "list_shape_keys":        list_shape_keys,
+    "set_shape_key":          set_shape_key,
 }

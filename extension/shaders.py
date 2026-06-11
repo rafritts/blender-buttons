@@ -164,6 +164,10 @@ def set_toon_material(params):
     meshes = [o for o in objs if has_material_slots(o)]
     if not meshes:
         return {"error": f"'{target}' contains nothing that can hold a material"}
+    from .common import linked_guard_any
+    blocked = linked_guard_any(meshes)
+    if blocked:
+        return {"error": blocked}
 
     base = _rgba(params.get("base_color"))
     grad_top = _rgba(params.get("gradient_top"))

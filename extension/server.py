@@ -96,6 +96,13 @@ def _enter_edit_for_target(target_name):
     obj = bpy.data.objects.get(target_name)
     if obj is None:
         return False, f"target '{target_name}' not found"
+    # Editing the geometry of library-linked data fails or silently no-ops in
+    # Blender — block it loudly (gaps.md U10). Every edit-mode tool routes through
+    # here, so this one hook guards the whole geometry-edit family.
+    from .common import linked_guard
+    err = linked_guard(obj)
+    if err:
+        return False, err
     bpy.ops.object.select_all(action='DESELECT')
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj

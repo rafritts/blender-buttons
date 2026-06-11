@@ -1,40 +1,5 @@
 # MCP gaps
 
-## Production-asset gaps (U1–U11) — driving the Blender Studio "Spring" rig, 2026-06-11
-
-Everything before this series was authoring: build the asset, then introspect
-what we built. Spring (BlenRig character, ~400 objects, mesh-deform cages, face
-lattices, particle hair, linked widget meshes) tests the opposite workflow —
-*operate on a complex asset someone else made*. The creation verbs held up
-(nothing crashed; `get_object_info` listed a 32-modifier stack cleanly). The
-introspection layer is what thins out: the toolset can author a rig but cannot
-discover one.
-
-- **U4 — `get_scene_tree` doesn't scale.** On Spring it dumped ~400 objects —
-  300 of them `cs_*` bone-shape widgets — and the output the agent received
-  cut off mid-tree (lights/cameras/world never appeared). Verified against the
-  code: there is NO cap or truncation in `get_scene_tree` itself — the clamp
-  happened in the agent harness swallowing a payload that size. So this is an
-  output-volume/scalability gap, not a no-silent-caps bug: at production scale
-  the full dump is unreadable by the consumer regardless of who truncates it.
-  Primitive: depth limit, type/name filters, and collection summarization
-  ("spring.rig.widgets/ — 310 meshes") with full expansion on request.
-- **U7 — particle systems are invisible and undrivable.** Spring's hair is 6+
-  PARTICLE_SYSTEM modifier entries; we can see the names via `list_modifiers`
-  and nothing else — can't toggle viewport display (they bury the head in
-  strands), can't read counts/types, can't convert to mesh (`convert_to_mesh`
-  bakes curves, not particles). Even just display-toggle + a describe line
-  would make hair-bearing assets workable.
-- **U8 — shape keys don't exist in the toolset.** No list, no get/set value.
-  Any character face (and plenty of hard-surface assets) carries them;
-  they're also the natural target of a future corrective-sculpt workflow.
-- **U10 — linked library data is undefined territory.** The scene tree marks
-  dozens of objects `(linked)` but no tool knows the difference: what happens
-  when `move_vertices` or `set_material` hits a linked datablock is untested —
-  likely an opaque error, possibly a silent no-op. Primitive: surface
-  linked/override status in describe + scene tree, and fail loudly with a
-  "linked data — needs a library override" message on mutation attempts.
-
 ## Presentation-pass gaps (T1–T8) — texturing/lighting the catapult for a showcase, 2026-06-11
 
 Dressing a finished multi-material asset for hero renders. The build was done;
@@ -76,6 +41,28 @@ coordinates. BVHTree makes the proximity queries milliseconds-cheap at hobby pol
 ---
 
 # Recently closed
+
+## Batch 5 — production-asset access (U4, U7, U8, U10), 2026-06-11
+
+Closes the U-series. e2e in `tests/e2e_batch5.py` (23 checks, incl. a real
+library-link round-trip).
+
+- **U4 — `get_scene_tree` scales.** New `filter` (name substring), `type`
+  (MESH/ARMATURE/…), `max_depth`, and `summarize` (collapse any collection over N
+  objects to per-type counts; default 20, 0 = full). Filtering disables
+  summarization so matches are listed. A ~400-object rig reads as a handful of
+  lines; drill in with filter/type.
+- **U7 — particle systems workable.** `set_particle_visibility(name, show)`
+  toggles show_viewport on every particle-system modifier (hair buries the mesh);
+  `describe` gains a `N particle system(s): name(hair, 500)` line.
+- **U8 — shape keys exist.** `list_shape_keys(name)` (names + values + ranges) and
+  `set_shape_key(name, key, value)` to drive morphs/correctives.
+- **U10 — linked library data is defined.** `common.linked_status` /
+  `is_linked_data` / `linked_guard`; `describe` and `get_scene_tree` tag objects
+  `[lib:File.blend]` / `[override:File.blend]`; and geometry edits (via the shared
+  `_enter_edit_for_target` hook — covers the whole edit-mode family) and the three
+  material setters fail loudly on read-only linked data instead of opaque
+  no-ops/errors. Local overrides stay editable; local objects are unaffected.
 
 ## Batch 4 — rig + metadata introspection (U1, U2, U3, U6, U9), 2026-06-11
 

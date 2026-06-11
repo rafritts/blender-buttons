@@ -8,34 +8,89 @@ from . import state
 from .common import world_bbox
 
 
-def get_scene_tree():
+def get_scene_tree(params=None):
+    """Scene hierarchy. On production scenes (Spring: ~400 objects, 300 of them
+    bone-shape widgets) the full dump is unreadable, so big collections collapse
+    to per-type counts and the tree is filterable (gaps.md U4).
+
+    filter:    substring — show only objects whose name contains it.
+    type:      object type (MESH/ARMATURE/EMPTY/…) — show only that type.
+    max_depth: cap collection nesting depth.
+    summarize: collapse any collection holding more than this many objects into a
+               per-type count line (default 20; 0 disables). Filtering disables it
+               (you asked for specific objects).
+    """
     from collections import Counter
+    params = params or {}
+    flt = (params.get("filter") or "").lower()
+    type_filter = (params.get("type") or "").upper()
+    md = params.get("max_depth")
+    max_depth = int(md) if md is not None else None
+    try:
+        summarize = int(params.get("summarize", 20))
+    except (TypeError, ValueError):
+        summarize = 20
+    filtering = bool(flt or type_filter)
+
     mesh_count = Counter(
         obj.data.name for obj in bpy.context.scene.objects
         if obj.type == 'MESH' and obj.data
     )
+    from .common import linked_status
+
+    def matches(obj):
+        if flt and flt not in obj.name.lower():
+            return False
+        if type_filter and obj.type != type_filter:
+            return False
+        return True
 
     def obj_line(obj, pad=""):
         active = " ● active" if obj == bpy.context.active_object else ""
         sel = " ◆" if obj.select_get() else ""
-        linked = " (linked)" if obj.type == 'MESH' and obj.data and mesh_count[obj.data.name] > 1 else ""
-        return f"{pad}├── {obj.name} [{obj.type}]{linked}{active}{sel}"
+        instanced = " (instanced)" if obj.type == 'MESH' and obj.data and mesh_count[obj.data.name] > 1 else ""
+        lib = linked_status(obj)
+        lib_tag = f" [{lib}]" if lib else ""
+        return f"{pad}├── {obj.name} [{obj.type}]{instanced}{lib_tag}{active}{sel}"
+
+    shown = [0]
+    hidden = [0]
+
+    def emit_objects(objs, pad, lines):
+        # Summarize a big collection to per-type counts — unless filtering (then the
+        # caller wants the matching objects listed).
+        if not filtering and summarize and len(objs) > summarize:
+            counts = Counter(o.type for o in objs)
+            summary = ", ".join(f"{n} {t}" for t, n in counts.most_common())
+            lines.append(f"{pad}├── … {len(objs)} objects ({summary}) — "
+                         f"filter=/type= to drill in, summarize=0 to expand")
+            hidden[0] += len(objs)
+        else:
+            for obj in objs:
+                if matches(obj):
+                    lines.append(obj_line(obj, pad))
+                    shown[0] += 1
 
     def fmt_collection(col, depth=0):
         pad = "│   " * depth
         lines = [f"{pad}├── {col.name}/"]
-        for obj in col.objects:
-            lines.append(obj_line(obj, pad + "│   "))
-        for child in col.children:
-            lines += fmt_collection(child, depth + 1)
+        emit_objects(list(col.objects), pad + "│   ", lines)
+        if max_depth is None or depth < max_depth:
+            for child in col.children:
+                lines += fmt_collection(child, depth + 1)
+        elif col.children:
+            lines.append(f"{pad}│   ├── … {len(col.children)} sub-collection(s) (max_depth={max_depth})")
         return lines
 
     lines = ["Scene Collection"]
     for col in bpy.context.scene.collection.children:
         lines += fmt_collection(col)
-    for obj in bpy.context.scene.collection.objects:
-        lines.append(obj_line(obj))
-    return {"tree": "\n".join(lines)}
+    emit_objects(list(bpy.context.scene.collection.objects), "", lines)
+
+    result = {"tree": "\n".join(lines), "shown": shown[0]}
+    if hidden[0]:
+        result["summarized"] = hidden[0]
+    return result
 
 
 def _viewport_shading():
@@ -138,6 +193,6 @@ def get_blender_status(params):
 
 
 TOOLS = {
-    "get_scene_tree":     lambda p: get_scene_tree(),
+    "get_scene_tree":     get_scene_tree,
     "get_blender_status": get_blender_status,
 }

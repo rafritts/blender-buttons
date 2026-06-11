@@ -80,6 +80,8 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
     "check_contacts", "trace_profile", "check_framing", "check_resting", "diff_since",
     # rig + metadata introspection (U1, U2, U9) — read-only
     "get_bone_tree", "describe_bone", "list_constraints", "get_custom_properties",
+    # mesh-data introspection (U8) — read-only
+    "list_shape_keys",
     # new_scene reloads the startup file, wiping Blender's undo stack and the
     # scene; it resets the history log itself (designs.new_scene) rather than
     # pushing an undo step that would immediately be desynced.

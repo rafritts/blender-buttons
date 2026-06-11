@@ -110,6 +110,52 @@ def resolve_targets(targets, include_non_mesh=False):
     return objs, None
 
 
+def linked_status(obj):
+    """Library-link status of an object, or None if it's local. Returns a short
+    tag like 'lib:Spring.blend' (linked, read-only) or 'override:Spring.blend'
+    (a local library override, editable). Library-linked DATA can't be edited in
+    place without an override (gaps.md U10)."""
+    import os
+    data = getattr(obj, "data", None)
+    lib = obj.library or (data.library if data is not None else None)
+    if lib is None:
+        return None
+    fname = os.path.basename(lib.filepath) if lib.filepath else "?"
+    tag = "override" if obj.override_library is not None else "lib"
+    return f"{tag}:{fname}"
+
+
+def is_linked_data(obj):
+    """True if obj's data is library-linked and NOT locally overridden — i.e. it
+    cannot be edited in place. A library override makes it writable, so overrides
+    return False."""
+    if obj.override_library is not None:
+        return False
+    data = getattr(obj, "data", None)
+    return obj.library is not None or (data is not None and data.library is not None)
+
+
+def linked_guard(obj):
+    """Error string if obj is read-only library-linked data, else None. The shared
+    'you can't edit this in place' check for the geometry/material mutators."""
+    if not is_linked_data(obj):
+        return None
+    status = linked_status(obj) or "linked"
+    return (f"'{obj.name}' is linked library data ({status}) and can't be edited in "
+            f"place. Make a library override first (Object > Library Override > "
+            f"Make Local), then edit the override.")
+
+
+def linked_guard_any(objs):
+    """First linked_guard error across objs, or None — for tools that act on a
+    resolved list of objects (material setters)."""
+    for o in objs:
+        err = linked_guard(o)
+        if err:
+            return err
+    return None
+
+
 def has_material_slots(obj):
     """True if obj's data can carry material slots — i.e. it renders with a
     material. MESH, CURVE, SURFACE, FONT, and META all qualify; a beveled curve

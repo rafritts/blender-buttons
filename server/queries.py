@@ -3,9 +3,30 @@ from server._core import mcp, call_blender, _status, _targets
 
 
 @mcp.tool()
-def get_scene_tree() -> str:
-    """List all objects in the Blender scene as a tree. Call this first to know what exists."""
-    result = call_blender("get_scene_tree")
+def get_scene_tree(filter: str = "", type: str = "", max_depth: int = None,
+                   summarize: int = 20) -> str:
+    """List the Blender scene as a tree. Call this first to know what exists.
+
+    On big production scenes the full dump is unreadable, so it scales:
+    filter:    substring — show only objects whose name contains it.
+    type:      object type (MESH/ARMATURE/EMPTY/LIGHT/CAMERA/…) — show only that type.
+    max_depth: cap collection nesting depth.
+    summarize: collapse any collection holding more than this many objects into a
+               per-type count line (default 20; pass 0 to force a full listing).
+               Setting filter/type disables summarization so matches are listed.
+
+    Objects carry tags: (instanced) for shared mesh data, [lib:File.blend] for
+    library-linked (read-only) data, [override:File.blend] for a local override.
+
+    Examples:
+      get_scene_tree()                       # overview, big collections summarized
+      get_scene_tree(filter="hand")          # drill into matching objects
+      get_scene_tree(type="ARMATURE")        # just the rigs
+    """
+    params = {"filter": filter, "type": type, "summarize": summarize}
+    if max_depth is not None:
+        params["max_depth"] = max_depth
+    result = call_blender("get_scene_tree", params)
     return result.get("tree", result.get("error", "unknown error"))
 
 

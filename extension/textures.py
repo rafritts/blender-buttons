@@ -54,6 +54,10 @@ def set_textured_material(params):
     meshes = [o for o in objs if has_material_slots(o)]
     if not meshes:
         return {"error": f"'{target}' contains nothing that can hold a material"}
+    from .common import linked_guard_any
+    blocked = linked_guard_any(meshes)
+    if blocked:
+        return {"error": blocked}
 
     mat_name = params.get("material_name") or f"{target}_tex"
     mat = bpy.data.materials.get(mat_name) or bpy.data.materials.new(mat_name)

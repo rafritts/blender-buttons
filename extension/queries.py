@@ -167,6 +167,17 @@ def describe(params):
     if posed:
         parts.insert(0, f"posed (evaluated geometry; center {posed_offset_mm}mm from rest)")
 
+    from .objects import _particle_systems
+    psys = _particle_systems(obj)
+    if psys:
+        parts.append(f"{len(psys)} particle system(s): "
+                     + ", ".join(f"{n}({t.lower()}, {c})" for n, t, c in psys))
+
+    from .common import linked_status
+    lib = linked_status(obj)
+    if lib:
+        parts.append(lib)
+
     spline_pts = obj.get("bb_spline_points")
     if spline_pts:
         parts.append(f"spline tube through {spline_pts}")

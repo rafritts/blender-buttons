@@ -203,6 +203,62 @@ def set_custom_property(name: str, key: str, value, bone: str = None,
 
 
 @mcp.tool()
+def set_particle_visibility(name: str, show: bool = False, label: str = "") -> str:
+    """
+    Show or hide an object's particle systems (hair/fur) in the viewport. Strands
+    often bury the underlying mesh, making a hair-bearing asset hard to work on;
+    this toggles show_viewport on every particle-system modifier.
+
+    Example: set_particle_visibility("spring_body", show=False)   # hide the hair
+    """
+    result = call_blender("set_particle_visibility", {"name": name, "show": show},
+                          label=label)
+    if result.get("success"):
+        state = "shown" if result["show"] else "hidden"
+        main = (f"{state} {len(result['particle_systems'])} particle system(s) on "
+                f"'{result['name']}' [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def list_shape_keys(name: str) -> str:
+    """
+    List an object's shape keys (morph targets) and their current values — facial
+    expressions, correctives, blendshapes. Read-only.
+
+    Example: list_shape_keys("face_mesh")
+    """
+    result = call_blender("list_shape_keys", {"name": name})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    keys = result.get("shape_keys", [])
+    if not keys:
+        return f"{name}: no shape keys"
+    lines = [f"{name}: {result['count']} shape key(s)"]
+    for k in keys:
+        lines.append(f"  {k['name']} = {k['value']}  (range {k['min']}..{k['max']})")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def set_shape_key(name: str, key: str, value: float, label: str = "") -> str:
+    """
+    Set a shape key's value (0..1 typical) to drive a morph/corrective.
+
+    Example: set_shape_key("face_mesh", "smile", 0.8)
+    """
+    result = call_blender("set_shape_key", {"name": name, "key": key, "value": value},
+                          label=label)
+    if result.get("success"):
+        main = f"set {name} shape key '{result['key']}' = {result['value']} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def split_by_part(label: str = "") -> str:
     """Split the active mesh into separate objects, one per connected component
     (P → By Loose Parts). Restores per-part addressability after a join_objects."""
