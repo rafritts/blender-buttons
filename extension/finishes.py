@@ -404,6 +404,10 @@ def bind_mesh_deform(params):
                          f"wraps '{mesh_name}' (a flat/open or zero-volume cage won't "
                          f"bind). Fix the cage, then bind again."}
 
+    if bound:
+        # X4: a fresh valid bind — record the vert count it's keyed to, so a later
+        # position-only edit can be flagged as shadowed (and a topology edit as dead).
+        mesh["bb_bind_vcount"] = len(mesh.data.vertices)
     push_undo(f"{action} mesh-deform '{mod.name}' on {mesh_name}")
     return {"success": True, "mesh": mesh_name, "modifier": mod.name,
             "cage": mod.object.name, "action": action, "bound": bound,
@@ -514,6 +518,7 @@ def rebind_deform(params):
                          + "; ".join(f"{s['modifier']}: {s['reason']}" for s in skipped),
                 "skipped": skipped}
 
+    mesh["bb_bind_vcount"] = len(mesh.data.vertices)  # X4: bind valid at this count
     push_undo(f"rebind {len(rebound)} deform modifier(s) on {mesh_name}")
     return {"success": True, "mesh": mesh_name, "rebound": rebound, "skipped": skipped}
 
@@ -529,6 +534,9 @@ _MODIFIER_PROPS = {
     "count":         ("count",        int),    # ARRAY
     "wrap_method":   ("wrap_method",  str),    # SHRINKWRAP
     "use_clamp":     ("use_clamp_overlap", bool),
+    "factor":        ("factor",       float),  # CORRECTIVE_SMOOTH / SMOOTH strength
+    "strength":      ("strength",     float),  # DISPLACE strength
+    "iterations":    ("iterations",   int),    # CORRECTIVE_SMOOTH / SMOOTH passes
 }
 
 
@@ -541,7 +549,9 @@ def modify_modifier(params):
 
     Plus any of these keyword props (only ones that apply to the modifier type take effect):
       levels, render_levels, width, segments, thickness, offset,
-      angle_limit (degrees), count, wrap_method, use_clamp.
+      angle_limit (degrees), count, wrap_method, use_clamp,
+      factor (CORRECTIVE_SMOOTH/SMOOTH strength), strength (DISPLACE), iterations,
+      show_viewport / show_render (enable-disable the modifier without removing it).
 
     Returns which props were actually applied vs. skipped (didn't exist on this modifier type).
     """
@@ -561,6 +571,15 @@ def modify_modifier(params):
 
     applied = []
     skipped = []
+
+    # X5: enable/disable toggles live on EVERY modifier (not in the prop table). The
+    # escape hatch for a modifier that's actively harmful mid-edit (e.g. a deform
+    # bind shadowing a rest-shape edit) — disable it without remove_modifier throwing
+    # away production-tuned settings.
+    for flag in ("show_viewport", "show_render"):
+        if flag in params:
+            setattr(mod, flag, bool(params[flag]))
+            applied.append(f"{flag}={bool(params[flag])}")
 
     target_object = params.get("target_object")
     if target_object is not None:

@@ -72,7 +72,7 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
 @mcp.tool()
 def bind_mesh_deform(mesh: str, cage: str = "", action: str = "bind",
                      modifier: str = "", precision: int = None,
-                     label: str = "") -> str:
+                     timeout: float = 120, label: str = "") -> str:
     """
     Bind / unbind / rebind a Mesh Deform modifier — the recovery path for a
     production cloth/skin deform stack (gaps.md V1).
@@ -90,6 +90,9 @@ def bind_mesh_deform(mesh: str, cage: str = "", action: str = "bind",
                (unbind then bind, after a cage edit or topology change).
     modifier:  name of a specific MESH_DEFORM modifier (when several exist).
     precision: bind precision 2–10 (higher = sharper, slower bind).
+    timeout:   seconds to allow the bind to run (default 120). A mesh-deform bind on
+               a production cage is genuinely slow — well past the default 30s — so
+               this is generous; raise it for very dense meshes.
 
     The cage must fully ENCLOSE the mesh or the bind silently refuses — this
     reports that as an error rather than a false success.
@@ -101,7 +104,7 @@ def bind_mesh_deform(mesh: str, cage: str = "", action: str = "bind",
         params["modifier"] = modifier
     if precision is not None:
         params["precision"] = precision
-    result = call_blender("bind_mesh_deform", params, label=label)
+    result = call_blender("bind_mesh_deform", params, label=label, timeout=timeout)
     if result.get("success"):
         state = "bound" if result.get("bound") else "unbound"
         main = (f"mesh-deform {result['action']}: '{result['modifier']}' on "
@@ -113,7 +116,8 @@ def bind_mesh_deform(mesh: str, cage: str = "", action: str = "bind",
 
 
 @mcp.tool()
-def rebind_deform(mesh: str, modifier: str = "", label: str = "") -> str:
+def rebind_deform(mesh: str, modifier: str = "", timeout: float = 120,
+                  label: str = "") -> str:
     """
     Rebind stale deform binds after a topology edit or a stack-order move — the
     recovery verb the "DEFORM BIND INVALIDATED" warning points at (gaps.md W3).
@@ -131,11 +135,15 @@ def rebind_deform(mesh: str, modifier: str = "", label: str = "") -> str:
 
     A CORRECTIVE_SMOOTH set to rest_source=ORCO has no stored bind (it smooths
     toward Original Coordinates) and is reported as skipped, not toggled blind.
+
+    timeout: seconds to allow the rebind (default 120) — a mesh-deform rebind on a
+             production cage runs well past the default 30s. If it DOES time out the
+             op is not cancelled and may still land; check get_history before retry.
     """
     params = {"mesh": mesh}
     if modifier:
         params["modifier"] = modifier
-    result = call_blender("rebind_deform", params, label=label)
+    result = call_blender("rebind_deform", params, label=label, timeout=timeout)
     if result.get("success"):
         rebound = ", ".join(f"{r['modifier']}({r['type']})" for r in result.get("rebound", []))
         main = f"rebound on '{result['mesh']}': {rebound} [{result.get('op_id','')}]"
@@ -192,6 +200,9 @@ def modify_modifier(target: str, modifier_name: str,
                     width: float = None, segments: int = None,
                     thickness: float = None, offset: float = None,
                     angle_limit: float = None, count: int = None,
+                    factor: float = None, strength: float = None,
+                    iterations: int = None,
+                    show_viewport: bool = None, show_render: bool = None,
                     wrap_method: str = "", target_object: str = "",
                     label: str = "") -> str:
     """
@@ -202,12 +213,21 @@ def modify_modifier(target: str, modifier_name: str,
     Each numeric param is optional — pass only the ones you want to change.
     angle_limit is in degrees (BEVEL). target_object re-points SHRINKWRAP/ARRAY to a different object.
     wrap_method (SHRINKWRAP): NEAREST_SURFACEPOINT | PROJECT | NEAREST_VERTEX | TARGET_PROJECT.
+    factor: CORRECTIVE_SMOOTH / SMOOTH strength. strength: DISPLACE. iterations: smoothing passes.
+    show_viewport / show_render: enable-disable the modifier WITHOUT removing it — the
+      escape hatch when a modifier is fighting an edit (e.g. a deform bind shadowing a
+      rest-shape change), so you keep its production-tuned settings.
     """
     params = {"target": target, "modifier_name": modifier_name}
     for key, val in (("levels", levels), ("render_levels", render_levels),
                      ("width", width), ("segments", segments),
                      ("thickness", thickness), ("offset", offset),
-                     ("angle_limit", angle_limit), ("count", count)):
+                     ("angle_limit", angle_limit), ("count", count),
+                     ("factor", factor), ("strength", strength),
+                     ("iterations", iterations)):
+        if val is not None:
+            params[key] = val
+    for key, val in (("show_viewport", show_viewport), ("show_render", show_render)):
         if val is not None:
             params[key] = val
     if wrap_method:

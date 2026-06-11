@@ -104,12 +104,13 @@ def reset_history_state():
     calls this — otherwise history, diff_since snapshots, and undo verification all
     describe a scene that no longer exists, and undo() would check against a
     snapshot from another file (gaps.md U11)."""
-    global _undo_baseline, _pending_edit_bind
+    global _undo_baseline, _pending_edit_bind, _eval_dirty
     _history.clear()
     _redo_stack.clear()
     _snapshots.clear()
     _undo_baseline = None
     _pending_edit_bind = None
+    _eval_dirty = set()
 
 
 def scene_object_names():
@@ -212,7 +213,14 @@ def snapshot_edit_binds(obj):
         return
     binds = deform_binds(obj)
     if binds:
-        _pending_edit_bind = (obj.name, binds, len(obj.data.vertices))
+        vcount = len(obj.data.vertices)
+        # X4: seed the bind's valid vert-count on first observation. A reconstruct
+        # bind (mesh-deform / surface-deform / corrective-smooth-BIND) is "valid"
+        # while this count holds; a topology edit later makes it mismatch → dead.
+        # Seed only if absent so an already-recorded (post-rebind) count survives.
+        if "bb_bind_vcount" not in obj:
+            obj["bb_bind_vcount"] = vcount
+        _pending_edit_bind = (obj.name, binds, vcount)
 
 
 def clear_edit_binds():
@@ -225,8 +233,11 @@ def clear_edit_binds():
 
 def check_edit_binds(obj):
     """On EDIT exit, compare the live vert count against the snapshot. Returns a
-    {bind_invalidated, bind_warning} dict if a bound modifier's vert count changed
-    under it, else None. Consumes the snapshot either way."""
+    warning dict (or None), consuming the snapshot either way. Two cases:
+
+    - vert count CHANGED → the bind is dead (V2/W2 topology kill): bind_invalidated.
+    - vert count UNCHANGED but a VALID reconstruct-bind is present → the rest-shape
+      edit is shadowed: it won't show until rebind (X4): bind_shadowed."""
     global _pending_edit_bind
     snap = _pending_edit_bind
     _pending_edit_bind = None
@@ -237,7 +248,50 @@ def check_edit_binds(obj):
         return None
     if not hasattr(obj.data, "vertices"):
         return None
-    if len(obj.data.vertices) == before:
-        return None
-    from .common import deform_bind_warning
-    return {"bind_invalidated": True, "bind_warning": deform_bind_warning(binds)}
+    after = len(obj.data.vertices)
+    if after != before:
+        from .common import deform_bind_warning
+        return {"bind_invalidated": True, "bind_warning": deform_bind_warning(binds)}
+    # Position-only edit. Warn only if the bind is still VALID (count matches the
+    # recorded valid count) — a dead bind is inert and shows base-mesh edits 1:1,
+    # so warning there would be false (gaps.md X4).
+    if obj.get("bb_bind_vcount") == after:
+        from .common import rest_shadow_warning
+        return {"bind_shadowed": True, "bind_warning": rest_shadow_warning(binds)}
+    return None
+
+
+# ── X6: recover from a wedged evaluated-mesh cache after a timed-out op ───────
+# A socket request that exceeds its timeout returns an error, but the op it queued
+# is NOT cancelled — it keeps running on the main thread and completes later (X1),
+# and on completion can leave the touched object's evaluated mesh WEDGED: object
+# mode renders a stale eval and every introspection channel reports the ghost as
+# truth (gaps.md X6). When a timeout is detected we record the touched object here;
+# the next command force-retags it so reads see the real geometry, not the ghost.
+_eval_dirty = set()  # object names whose eval cache may be stale after an orphaned op
+
+
+def mark_eval_dirty(name):
+    """Record an object whose evaluated mesh may have wedged behind a timed-out op."""
+    if name:
+        _eval_dirty.add(name)
+
+
+def flush_eval_dirty():
+    """Force a depsgraph re-evaluation of objects touched by a timed-out (orphaned)
+    op, before the next command reads anything. Cheap no-op when nothing is dirty."""
+    global _eval_dirty
+    if not _eval_dirty:
+        return
+    for nm in _eval_dirty:
+        o = bpy.data.objects.get(nm)
+        if o is not None:
+            try:
+                o.update_tag()
+            except Exception:
+                pass
+    _eval_dirty = set()
+    try:
+        bpy.context.view_layer.update()
+    except Exception:
+        pass

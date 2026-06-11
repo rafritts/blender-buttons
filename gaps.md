@@ -1,141 +1,32 @@
 # MCP gaps
 
-## Live-verify regressions in Batch 8 (X1–X2), 2026-06-11
+## Remaining from the X-series live pass (X3B, X7), 2026-06-11
 
-Re-staged the tank-top edit on a fresh Spring file (Blender crashed; original
-scene reloaded). W2 verified live immediately — the manual path
-(`set_mode(EDIT)` → 3 cuts → `set_mode(OBJECT)`) now warns on exit, names both
-dead modifiers, prescribes `rebind_deform`. Then the prescription itself died:
+X1–X6 are closed (see Batch 9 below). Two deferred items remain open — both are
+selection/edit verbs that ignore an existing selection; filed together because
+they live in the same neighborhood and the authoring session hit both in one
+rim-edit attempt:
 
-- **X1 — the entire bind family crashes live: `'NoneType' object has no
-  attribute 'get'`.** Every call, identical error, clearly before type
-  dispatch:
-  - `rebind_deform("GEO-spring_pullover")` (all-modifiers path)
-  - `rebind_deform("GEO-spring_pullover", modifier="MeshDeform")`
-  - `rebind_deform("GEO-spring_pullover", modifier="CorrectiveSmooth")`
-  - `rebind_deform("GEO_spring_arms", modifier="CorrectiveSmooth")` —
-    differential on an UNTOUCHED mesh (no pending W2 warning, no topology
-    edit), same crash → not the pending-warning stash content.
-  - `bind_mesh_deform("GEO-spring_pullover", action="rebind")` — same crash,
-    and this verb WORKED in the previous build (it cage-bound this very mesh
-    live). So the regression is in code shared across the bind family —
-    prime suspect is whatever Batch 8 touched in all of them (the
-    `deform_bind_warning` re-pointing / `state.snapshot_edit_binds` plumbing),
-    reading `.get` off something that is None in a LIVE session but present
-    headless (e2e_batch8's 42 checks are green; every live call dies).
-  - Impact: the W2 guard now fires correctly and points at a cure that
-    crashes. The wardrobe edit is stalled exactly at the rebind step — the
-    pullover sits with both binds dead (mesh fine at rest, won't follow rig).
-  - Repro state preserved live: jacket deleted, Mask removed, sleeves cut at
-    |x|=0.15 + collar removed (2039→882 verts), stack still
-    MESH_DEFORM@0 / CORRECTIVE_SMOOTH@1 / SUBSURF / DISPLACE / PARTICLE×2.
-  - **LIVE CONFIRMATION of the timeout root cause (added after the
-    implementing session's diagnosis).** Timed brackets around fresh calls:
-    `rebind_deform(arms, modifier="CorrectiveSmooth")` — introspection-only
-    (arms CS turns out to be rest_source=ORCO, "nothing to rebind") — returns
-    INSTANTLY with a clean report. `rebind_deform(pullover)` — a real
-    meshdeform_bind against the BlenRig cage — errors after ~30-40s wall
-    clock. Timeout, exactly as diagnosed. The original 5-call crash window
-    is explained by queue pile-up: call #1 (slow pullover bind) hogged the
-    main thread; calls #2–5, INCLUDING the trivial CS introspection, timed
-    out queued behind it — which is why the same introspection call is
-    instant today.
-  - **The orphan hazard, observed live:** after the ~30s timeout error, the
-    bind op KEPT RUNNING and COMPLETED — `get_blender_status` minutes later
-    shows `last_action: rebind tank top deforms... (rebind_deform)` in
-    history. Error-then-silent-success. The honest-timeout error message
-    should say the operation was NOT cancelled and may still land — "check
-    get_history / get_blender_status before retrying" — or a retry will
-    queue a SECOND bind behind the first.
+- **X3B — no primitive selects an OPEN BOUNDARY loop (a mesh rim).** Batch 9's
+  selection-flush fix (X3A) turned "catastrophic whole-mesh duplicate" into
+  "merely wrong for rim work" — but it did NOT unblock the actual task. A tilted
+  rim ring can't be isolated by axis bands (a 24-vert band always drags in ~10
+  adjacent faces), which is what pushed the authoring session off `extrude`
+  entirely. Wants a `select_boundary` / open-edge-loop verb: select the edges
+  that border a hole (edges with exactly one face), optionally grown from a seed
+  region. The real unblock for rim insets, collar re-shaping, sleeve hems.
 
-- **X2 — `frame_scene` fails when the scene is in POSE mode** (production
-  files open that way): `Operator bpy.ops.object.select_all.poll() failed,
-  context is incorrect`. Other verbs mode-guard or switch; this one should
-  too. Workaround: `set_mode(OBJECT)` first.
+- **X7 — `loop_cut` ignores the selection and answers in coordinates.** With 154
+  verts selected (one shoulder segment) it cut 2302 edges across the ENTIRE mesh
+  — both arms, all fingers — doubling a production mesh (3288→8100). It also
+  returned the full list of ~2000 cut X-positions: a raw coordinate dump, the
+  exact anti-pattern the tactile-introspection principle bars. Wants: respect the
+  current selection when one exists (whole mesh only as the no-selection
+  fallback), and report "Cut N edges across M loops in [region words]" instead of
+  the dump. (The global cut happened to suit Spring's arms — density was needed
+  there — but that was luck, not intent.)
 
-- **X3 — `select_by_axis` doesn't flush vert selection to edge/face domains.**
-  In EDGE component mode it set my 24 target verts but the status block showed
-  ALL 6554 edges + 3268 faces still selected — the next `extrude` (region
-  extrude honors face selection) duplicated the ENTIRE arms mesh (3288→6576
-  verts) and translated the copy. Caught only because the status block prints
-  per-domain counts; `undo(1)` restored clean (snapshot verified). Fix:
-  selection verbs should flush to the active component domains (or force VERT
-  mode) so the selection the agent just made is the selection the next verb
-  acts on. Related missing primitive: no way to select an OPEN BOUNDARY loop
-  (mesh rim) — a tilted rim ring can't be isolated by axis bands (24-vert band
-  always dragged in 10 adjacent faces), which is what pushed me off extrude
-  entirely.
-
-- **X4 — a VALID deform bind silently nullifies rest-shape edits.**
-  **(MECHANISM CORRECTED after live differential — the original filing blamed
-  CORRECTIVE_SMOOTH(BIND); that was wrong.)** The arms' CorrectiveSmooth turns
-  out to be rest_source=ORCO ("nothing to rebind", per rebind_deform's own
-  report) — it never fought anything. The eraser is **MESH_DEFORM with a
-  valid bind**: mdef RECONSTRUCTS bound-vert positions from the cage via its
-  bind-time mapping, so the modifier output ignores base-mesh positions
-  entirely. Edit the rest shape all you want — bound verts come out at their
-  bind-time positions until the cage moves or the bind is redone. Measured
-  live: proportional-stretched the arm rim 8.5cm inboard (base rim now
-  x=0.13); hid the shirt and the EVALUATED arm still ends at x≈0.21 — the
-  edit fully erased for bound verts, no warning anywhere. Trigger for the
-  guard: position-only edit on a mesh carrying a VALID MESH_DEFORM bind (or
-  a CS(rest_source=BIND) — same class of hazard, untested live since Spring
-  has none) → "this modifier reconstructs vertex positions from its bind —
-  your edit won't show until you rebind_deform". Gate it on the bind being
-  VALID: the pullover (bind dead from the vert-count change) took my
-  neckline edits 1:1 — warning there would be false. Conversely this is why
-  the pullover cuts LOOKED fine pre-rebind: dead bind = modifier inert =
-  base mesh shows. Valid bind = base mesh invisible. Both states mislead in
-  opposite directions, which is exactly why the guard has to know which
-  state it's in.
-
-- **X5 — no verb can neutralize a modifier.** `modify_modifier` exposes only
-  count/levels/offset/thickness/width/segments/angle_limit — no `factor`
-  (CORRECTIVE_SMOOTH, SMOOTH, DISPLACE strength), no viewport/render
-  enable-disable. When a modifier is actively harmful mid-edit (X4's CS) the
-  agent has no escape hatch short of `remove_modifier`, which throws away
-  production-tuned settings. Primitive: enable/disable toggle + the common
-  scalar (factor/strength) on modify_modifier.
-
-- **X6 — orphan-completed ops left the object's evaluated-mesh cache WEDGED,
-  and every introspection channel then reported the stale eval as truth.**
-  After the timeout-orphaned rebinds, GEO_spring_arms stopped re-evaluating:
-  object mode kept rendering a pre-edit evaluated mesh through an unbind, a
-  global loop_cut (3288→8100 verts!), and FOUR separate remove_modifier
-  diagnostics — every screenshot identical, while edit mode showed the true
-  (stretched, dense) cage with NO surface drawn. Worse, the stale eval
-  poisoned the measuring tools too: `describe(posed=True)` returned the same
-  frozen 0.213m height through all of it, and the status-block bbox disagreed
-  with `sel_z` in the same printout (selection at z=0.9587 inside an object
-  whose "bounds" topped at 0.9275). An agent that trusts its instruments
-  burned ~10 calls chasing modifier ghosts. `undo_to` (full state rebuild)
-  flushed it. Wants: (a) after any timeout-orphaned op, force a depsgraph
-  retag of the touched object; (b) `describe(posed)`/status bounds should
-  read the depsgraph fresh, never `object.bound_box`; (c) the bbox-vs-sel_z
-  self-contradiction is detectable — the status block could flag its own
-  staleness.
-
-- **X7 — `loop_cut` ignores the selection and answers in coordinates.** With
-  154 verts selected (one shoulder segment), it cut 2302 edges across the
-  ENTIRE mesh — both arms, all fingers — doubling a production mesh
-  (3288→8100). It also returned the full list of ~2000 cut X-positions: a
-  raw coordinate dump, the exact anti-pattern the tactile-introspection
-  principle bars. Wants: respect the current selection when one exists
-  (whole mesh only as the no-selection fallback), and report "Cut N edges
-  across M loops in [region words]" instead of the dump. (Kept the global
-  cut on Spring's arms — the density was needed there anyway — but that was
-  luck, not intent.)
-
-_Resolution, same session: the X1 timeout diagnosis is CONFIRMED (timed ~35-40s
-on a real bind vs instant on introspection; pile-up explains the original
-5-crash window; ops orphan-complete AND log to history as successes). The
-orphan-completed pullover rebinds restored the tank's MESH_DEFORM +
-CORRECTIVE_SMOOTH against the final cut+snugged shape; the arms run
-Armature-only with mdef left deliberately UNBOUND (rebind refuses on the
-stretched shape — error swallowed by the orphan gap; revisit when timeouts
-report honestly). Pose-tested live: torso bend → tank follows, no clipping;
-hand_ik_ctrl_L raise → arm follows continuously through the new shoulder
-geometry. The wardrobe edit is DONE pending taste passes._
+_New gaps from future builds go above this line._
 
 ## Tactile introspection — the design principle
 
@@ -149,6 +40,71 @@ coordinates. BVHTree makes the proximity queries milliseconds-cheap at hobby pol
 ---
 
 # Recently closed
+
+## Batch 9 — X-series live regressions (X1, X2, X4, X5, X6; X3A), 2026-06-11
+
+Closes everything the live re-stage of the tank-top edit exposed except the two
+deferred selection primitives (X3B, X7, still open above). e2e in
+`tests/e2e_batch9.py` (25 checks); all 12 prior suites still green. X1/X6/X2 are
+socket / live-depsgraph / viewport phenomena the headless harness can't fully
+reproduce — X1's null-on-timeout guard is tested at the socket level (undrained
+queue = a too-slow op), the rest verified by reasoning + the live diagnosis the
+authoring session recorded.
+
+- **X1 — the bind family's `'NoneType' object has no attribute 'get'` was a
+  timeout, not a logic bug.** `handle_client` runs the tool on the main thread and
+  `result_event.wait(timeout=30)`; a mesh-deform bind on a production cage takes
+  ~35–40s, so the wait expired with `result_box[0]` still `None`, the server sent
+  `json.dumps(None)` = `"null"`, and every MCP wrapper's `result.get(...)` threw
+  that error. Live-only because headless calls `execute_command` directly (no
+  socket). Fix: (a) `handle_client` NEVER serializes `None` — on timeout it returns
+  an honest error that says the op was NOT cancelled, may still complete and log
+  itself as a success, and to check `get_history` before retrying (a blind retry
+  stacks a second bind behind the first); (b) `bind_mesh_deform` / `rebind_deform`
+  default to a 120s timeout (plumbed like `render_to_file`) so the bind actually
+  finishes. The original 5-call crash was a pile-up: call #1 hogged the main
+  thread, #2–5 (incl. a trivial introspection) timed out queued behind it.
+- **X2 — `frame_scene` failed in POSE mode** (production files open posed):
+  `select_all.poll()` fails in any non-OBJECT mode. It already dropped EDIT→OBJECT
+  for framing; generalized to save ANY non-OBJECT mode (POSE included), frame in
+  OBJECT, then restore the user's mode — framing is no longer a silent mode switch.
+- **X3A — selectors now flush the vert selection up to the active edge/face
+  domains.** In EDGE/FACE component mode, `select_flush_mode` re-derived verts FROM
+  a stale higher selection and clobbered the just-set verts — so a 24-vert band
+  left all 6554 edges + 3268 faces lit and the next region-`extrude` cloned the
+  whole mesh. New `_flush_vert_selection` (used by select_by_axis / select_between /
+  random_select / select_in_sphere): capture the wanted verts, clear every domain,
+  re-set the verts, `select_flush(True)` to promote — so an edge/face is selected
+  iff all its verts are. (Capture-first matters: `edge.select=False` flushes DOWN
+  and would deselect the verts.) Flushes up to the current mode; doesn't force VERT.
+  NB: this turns "catastrophic" into "merely wrong for rim work" — the real rim
+  unblock is the X3B boundary selector, still open.
+- **X4 — a VALID deform bind silently shadows a rest-shape edit, and now warns.**
+  MESH_DEFORM / SURFACE_DEFORM / CS(BIND) reconstruct bound-vert positions from
+  their driver, so a position-only base-mesh edit (no vert-count change → topology
+  guard silent) is invisible until rebind. The edit guard now also fires on
+  position-only edits when a reconstruct-bind is present AND still VALID, emitting
+  `bind_shadowed` + a rebind prescription. Validity is gated on a `bb_bind_vcount`
+  custom prop (seeded on first observation, set on every bind/rebind): a DEAD bind
+  (count mismatch from an earlier topology edit) is inert and shows edits 1:1, so
+  it correctly stays silent — the false-positive the authoring session warned
+  about. Known limit: a file imported with an already-dead bind we never observed
+  valid gets one false "rebind to show" once (harmless advice). Both the manual
+  (`check_edit_binds`) and request-scoped (`execute_command`) paths covered.
+- **X5 — `modify_modifier` can now neutralize a modifier without removing it.**
+  Added `factor` (CORRECTIVE_SMOOTH / SMOOTH strength), `strength` (DISPLACE),
+  `iterations`, and the universal `show_viewport` / `show_render` enable-disable
+  toggles. The escape hatch when a modifier is fighting an edit (X4's shadowing
+  bind), short of `remove_modifier` throwing away production-tuned settings.
+- **X6 — an orphan-completed op no longer poisons introspection.** A timed-out op
+  (X1) keeps running and on completion can wedge the touched object's evaluated
+  mesh, after which `describe(posed)` / status bounds report the stale ghost as
+  truth. Fix: (a) on timeout, `handle_client` records the touched object as
+  eval-dirty (`state.mark_eval_dirty`) and the next command force-retags it
+  (`flush_eval_dirty` at the top of `execute_command`); (b) `eval_world_bbox`
+  force-retags + updates the depsgraph before reading, so the evaluated measuring
+  tools can't be served a stale cache. (X6c — the bbox-vs-sel_z self-contradiction
+  flag — left as a nice-to-have.)
 
 ## Batch 8 — deform-stack aftermath (W1, W2, W3), 2026-06-11
 

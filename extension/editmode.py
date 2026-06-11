@@ -6,6 +6,35 @@ import bpy
 from .state import push_undo
 
 
+def _flush_vert_selection(bm):
+    """Make a per-vertex selection authoritative across the edge/face domains
+    (gaps.md X3). A selector that writes vert flags must not leave a stale prior
+    edge/face selection live: in EDGE/FACE component mode, `select_flush_mode`
+    re-derives verts FROM those stale higher elements and clobbers the verts just
+    set — which is how a 24-vert band left all 6554 edges + 3268 faces selected and
+    the next region-extrude cloned the whole mesh. Clear the higher domains, then
+    flush UP so an edge/face is selected iff ALL its verts are — exactly the
+    just-chosen verts drive what the next verb acts on. Flushes up to the current
+    component mode (doesn't force VERT).
+
+    The sequence matters: capture the wanted verts FIRST, then clear every domain,
+    then re-set the verts, then `select_flush(True)` to promote. Clearing can't come
+    after the selector's own flag-setting, because `edge.select = False` flushes
+    DOWN and would deselect the very verts we want — capturing first sidesteps that.
+    `select_flush(True)` then lights edges/faces fully enclosed by the verts and is
+    what survives `update_edit_mesh`'s re-flush in EDGE/FACE component mode."""
+    want = [v for v in bm.verts if v.select]
+    for f in bm.faces:
+        f.select = False
+    for e in bm.edges:
+        e.select = False
+    for v in bm.verts:
+        v.select = False
+    for v in want:
+        v.select = True
+    bm.select_flush(True)
+
+
 def bevel(params):
     factor   = params.get("factor", 0.05)
     segments = params.get("segments", 1)
@@ -67,7 +96,7 @@ def select_by_axis(params):
         else:
             vert.select = matches
 
-    bm.select_flush_mode()
+    _flush_vert_selection(bm)
     bmesh.update_edit_mesh(obj.data)
     return {"success": True, "threshold_world": round(threshold, 4)}
 
@@ -98,7 +127,7 @@ def select_between(params):
             vert.select = in_range
         if vert.select:
             count += 1
-    bm.select_flush_mode()
+    _flush_vert_selection(bm)
     bmesh.update_edit_mesh(obj.data)
     return {
         "success": True,
@@ -360,7 +389,7 @@ def random_select(params):
     for i, v in enumerate(selected):
         if i not in keep:
             v.select = False
-    bm.select_flush_mode()
+    _flush_vert_selection(bm)
     bmesh.update_edit_mesh(obj.data)
     push_undo(f"random_select {fraction}")
     return {"success": True, "kept": keep_count, "from": len(selected), "seed": seed}
@@ -647,7 +676,7 @@ def select_in_sphere(params):
             v.select = inside
             if inside:
                 count += 1
-    bm.select_flush_mode()
+    _flush_vert_selection(bm)
     bmesh.update_edit_mesh(obj.data)
     return {"success": True, "selected": count, "center": [cx, cy, cz], "radius": radius,
             "action": action}

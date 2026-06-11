@@ -26,6 +26,15 @@ def eval_world_bbox(obj):
     posed part actually?' (gaps.md T6, also fixes the T2 DOF case). Computed from
     the evaluated mesh verts (correct under deform, where `bound_box` can lag).
     Falls back to `world_bbox` for objects with no evaluable mesh."""
+    # X6: force a fresh re-evaluation of this object. An orphaned (timed-out) op can
+    # leave the evaluated-mesh cache wedged so `evaluated_depsgraph_get()` hands back
+    # a stale eval; retagging + updating makes the measured bounds reflect the real
+    # geometry, never the ghost. Cheap at hobby poly counts.
+    try:
+        obj.update_tag()
+        bpy.context.view_layer.update()
+    except Exception:
+        pass
     depsgraph = bpy.context.evaluated_depsgraph_get()
     obj_eval = obj.evaluated_get(depsgraph)
     try:
@@ -199,6 +208,25 @@ def deform_bind_warning(binds, cause="topology"):
             f"posed. Rebind required: rebind_deform('<mesh>') rebinds every bound "
             f"deform modifier, or rebind_deform('<mesh>', modifier='<name>') for one "
             f"(gaps.md V2/W1/W3).")
+
+
+def rest_shadow_warning(binds):
+    """Warning when a VALID reconstruct-from-bind modifier makes a position-only
+    rest-shape edit invisible (gaps.md X4).
+
+    MESH_DEFORM / SURFACE_DEFORM reconstruct each bound vertex's position from their
+    driver (cage / surface) via the bind-time mapping; CORRECTIVE_SMOOTH(BIND)
+    smooths toward the captured rest. So editing the BASE mesh moves nothing in the
+    evaluated output — the bind pins it — until the bind is recomputed. There's no
+    vert-count change, so the topology guard stays (correctly) silent; this is the
+    one that catches it. Only fires when the bind is still valid: a dead bind is
+    inert and shows base-mesh edits 1:1."""
+    names = ", ".join(f"{n} ({t})" for n, t in binds)
+    return (f"⚠ EDIT SHADOWED BY A LIVE BIND — [{names}] reconstruct vertex positions "
+            f"from their bind, so this rest-shape edit will NOT show in the posed / "
+            f"evaluated mesh (the base mesh moved, but the modifier output is pinned "
+            f"to the bind). Run rebind_deform('<mesh>') to recompute the bind against "
+            f"the new rest shape (gaps.md X4).")
 
 
 def has_material_slots(obj):

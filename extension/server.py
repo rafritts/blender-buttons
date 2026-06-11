@@ -122,6 +122,10 @@ def execute_command(command):
     if fn is None:
         return {"error": f"Unknown tool: {tool}. Available: {list(TOOLS.keys())}"}
 
+    # X6: if a prior op timed out and orphaned, force-retag the object it touched
+    # before this command reads anything, so introspection sees real geometry.
+    state.flush_eval_dirty()
+
     target = params.pop("target", "") if tool in EDIT_MODE_TOOLS else ""
     auto_switched = False
     bind_snapshot = None  # (target_name, [(mod, type)…], pre-edit vert count) — V2
@@ -136,7 +140,10 @@ def execute_command(command):
         if _tobj is not None and getattr(_tobj, "data", None) is not None:
             binds = deform_binds(_tobj)
             if binds and hasattr(_tobj.data, "vertices"):
-                bind_snapshot = (target, binds, len(_tobj.data.vertices))
+                _vc = len(_tobj.data.vertices)
+                if "bb_bind_vcount" not in _tobj:  # X4: seed valid count on first sight
+                    _tobj["bb_bind_vcount"] = _vc
+                bind_snapshot = (target, binds, _vc)
 
     is_mutating = tool not in state.NON_UNDOABLE_TOOLS
     # Snapshot the scene once, before the very first mutating op, so an undo that
@@ -160,14 +167,20 @@ def execute_command(command):
     # delta is the documented bind-killer; a position-only edit (move_vertices …)
     # leaves the count — and the bind — intact, so it never warns.
     if bind_snapshot and isinstance(result, dict) and result.get("success"):
-        from .common import deform_bind_warning
+        from .common import deform_bind_warning, rest_shadow_warning
         tname, binds, before = bind_snapshot
         tobj = bpy.data.objects.get(tname)
         if (tobj is not None and getattr(tobj, "data", None) is not None
-                and hasattr(tobj.data, "vertices")
-                and len(tobj.data.vertices) != before):
-            result["bind_invalidated"] = True
-            result["bind_warning"] = deform_bind_warning(binds)
+                and hasattr(tobj.data, "vertices")):
+            after = len(tobj.data.vertices)
+            if after != before:
+                result["bind_invalidated"] = True
+                result["bind_warning"] = deform_bind_warning(binds)
+            elif tobj.get("bb_bind_vcount") == after:
+                # X4: position-only edit under a still-valid reconstruct bind — the
+                # rest-shape change is shadowed until rebind.
+                result["bind_shadowed"] = True
+                result["bind_warning"] = rest_shadow_warning(binds)
 
     # Log + push the undo step AFTER edit-mode tools have returned to OBJECT mode,
     # so each step is an object-mode checkpoint (undoable from object mode) and
@@ -210,7 +223,29 @@ def handle_client(conn):
         state._request_queue.put(on_main_thread)
         result_event.wait(timeout=timeout)
 
-        conn.sendall((json.dumps(result_box[0]) + "\n").encode())
+        if result_box[0] is None:
+            # The op didn't finish within `timeout`. CRITICAL: never serialize None
+            # here — `json.dumps(None)` is "null", which the MCP-side wrapper then
+            # crashes on with `'NoneType' object has no attribute 'get'` (gaps.md X1).
+            # Return an honest, actionable timeout error instead. The op was NOT
+            # cancelled: it keeps running on the main thread, may complete, and logs
+            # itself as a success — so retrying blindly stacks a second op behind it.
+            tool = command.get("tool")
+            p = command.get("params") or {}
+            tname = p.get("target") or p.get("mesh") or p.get("name") or p.get("targets")
+            if isinstance(tname, str) and tname:
+                # The orphan completion can wedge this object's eval cache (X6) —
+                # mark it so the next command force-retags before reading.
+                state.mark_eval_dirty(tname.split(",")[0].strip())
+            conn.sendall((json.dumps({"error":
+                f"'{tool}' did not finish within {timeout}s. IMPORTANT: it was NOT "
+                f"cancelled — a heavy bind/build keeps running on the main thread and "
+                f"may COMPLETE and log itself as a success shortly. Do NOT blindly "
+                f"retry (that queues a SECOND op behind the first). Check get_history "
+                f"/ get_blender_status first; if it landed, you're done. For a "
+                f"genuinely slow bind, retry with a larger timeout."}) + "\n").encode())
+        else:
+            conn.sendall((json.dumps(result_box[0]) + "\n").encode())
     except Exception as e:
         try:
             conn.sendall((json.dumps({"error": str(e)}) + "\n").encode())

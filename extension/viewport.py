@@ -373,8 +373,11 @@ def frame_scene(params):
             return {"error": "No objects to frame"}
 
         active = bpy.context.view_layer.objects.active
-        was_edit = active is not None and active.mode == 'EDIT'
-        if was_edit:
+        # select_all's poll fails in any non-OBJECT mode — EDIT and also POSE, which
+        # production rigs open in (gaps.md X2). Drop to OBJECT for the framing, then
+        # restore the user's mode so framing isn't a silent mode-switch side effect.
+        prev_mode = active.mode if active is not None else None
+        if prev_mode is not None and prev_mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
         saved_active = bpy.context.view_layer.objects.active
         saved_selected = list(bpy.context.selected_objects)
@@ -398,8 +401,11 @@ def frame_scene(params):
                 pass
         if saved_active:
             bpy.context.view_layer.objects.active = saved_active
-        if was_edit and saved_active:
-            bpy.ops.object.mode_set(mode='EDIT')
+        if prev_mode not in (None, 'OBJECT') and saved_active:
+            try:
+                bpy.ops.object.mode_set(mode=prev_mode)
+            except Exception:
+                pass
 
         return {"success": True, "framed": [o.name for o in objs],
                 "include_lights": include_lights}
