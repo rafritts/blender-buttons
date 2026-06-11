@@ -1,6 +1,50 @@
 # MCP gaps
 
-_No open gaps._ (P1–P12 shipped — see Recently closed.)
+## Siege-catapult build (R1–R5) — rigging a mechanical prop, 2026-06-11
+
+Source build: game-ready rigged catapult (`~/blender-designs/siege_catapult_v1.blend`).
+The armature tools work, but they're tuned for organic deformation; a mechanical
+prop (rigid parts swinging/spinning on axes) hit the same wall repeatedly:
+bone-heat is the wrong solver for rigid assemblies, and there's no rigid
+alternative.
+
+- **R1 — `weight_to_bone(mesh, bone)` rigid bind.** Assign 100% weight on every
+  vertex of a mesh to ONE named bone (creating/extending the Armature modifier
+  as `auto_weight` does). This is the standard game workflow for mechanical
+  props — wheels, doors, levers, turrets — where bone-heat's blending is
+  actively wrong. In the catapult build, heat orphaned the thin `band_around`
+  rings joined into the throwing arm (0 weights → they floated in place when
+  the arm posed), and a boolean-UNION-then-rebind repair made it worse
+  (smeared geometry). The working fix was *deleting the detail rings* — i.e.
+  the asset lost geometry because the binding verb was missing. One tool
+  closes the whole failure class.
+- **R2 — `auto_weight` coverage verdict.** It reports "96 weighted vert(s)"
+  but not the total, so 32 orphans were invisible until a pose test + 
+  screenshot. Tactile-introspection style: report
+  `96/128 weighted — 32 orphaned verts in 2 islands (near z≈1.05, z≈2.95)`
+  and WARN, the same way it already warns on zero weights. Orphan islands are
+  exactly the verdict-in-scene-vocabulary case: countable, locatable, no
+  coordinate dump.
+- **R3 — `deform: false` bone flag in `create_armature`.** Every bone competes
+  in the heat solve, so a root/control bone near the meshes steals weights.
+  Workaround that worked: bury the root bone below the floor (z=−0.5) — which
+  is exactly the kind of hack a spec flag should replace. Bone spec gains
+  `"deform": false` (maps to `bone.use_deform`).
+- **R4 — spline endpoints that follow bones/objects.** `spline_tube` resolves
+  its points once at creation, so a rope from winch drum to throwing arm
+  cannot follow the rig; the build deleted and re-created the rope per pose
+  (slack at rest, taut when cocked). General need — cables, ropes, hoses,
+  chains on any articulated machine. Cheapest viable shape: optional
+  `anchor: {"bone": "arm_swing"} / {"object": "winch_drum"}` per endpoint
+  implemented as Hook modifiers, so the tube stretches between anchors when
+  posed.
+- **R5 — `scatter_on_surface` exclusion zone.** Scattering ground rocks around
+  a hero asset has no way to keep the landing zone clear — instances can land
+  inside the asset's footprint. An `avoid` parameter (object/group name +
+  optional margin in meters, rejection-sample against its XY footprint) makes
+  set-dressing one call instead of scatter-inspect-delete.
+
+## Tactile introspection — the design principle
 
 ## Tactile introspection — the design principle
 
