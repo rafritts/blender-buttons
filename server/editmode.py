@@ -70,6 +70,52 @@ def extrude(out: float = 0.0, inward: float = 0.0,
 
 
 @mcp.tool()
+def extrude_along_curve(curve: str, segments: int = 8, taper: float = 1.0,
+                        label: str = "") -> str:
+    """Sweep the current edit-mode FACE selection along a curve in ONE call — the
+    classic SWEEP. spline_tube sweeps a circle into a NEW object; this aims the same
+    idea at the selection, in-mesh. A curved horn, a duct, a tentacle: sweep + taper
+    in one call instead of N hand-rotated extrude/taper pairs.
+
+    Must already be in edit mode with at least one FACE selected (the cross-section
+    cap — e.g. a single quad). The result leaves the final cap selected so you can
+    continue or close it.
+
+    curve:    name of an existing curve object (author it with add_curve; pass a pure
+              PATH — bevel_depth=0). The curve gives the SHAPE of the path, not its
+              world placement: it's re-rooted so its start sits at the selection's
+              centroid with its initial tangent aligned to the selection's `out`
+              normal (the F1 frame — same convention as extrude(out=)).
+    segments: number of arc-length-EQUIDISTANT steps along the curve (one extruded
+              ring each). Equidistant rings double as bend-ready topology. Default 8.
+    taper:    end-scale factor applied per-step in the cross-section's tangent plane
+              (reuses scale_vertices in_plane). 1.0 = no taper (default), 0.3 = tip
+              shrinks to 30%. A horn is sweep + taper together.
+
+    Frames are carried by PARALLEL TRANSPORT (minimal twist), so the cross-section
+    doesn't candy-wrap at bends. Guards (refuse, with numbers, rather than ship
+    broken geometry):
+      • closed-band selection (normals cancel) → no `out` to align the curve to.
+      • self-intersection — where the curve's bend radius drops below the profile
+        radius, the inner wall folds through itself.
+    Reports steps placed, total path length (m), the F1 frame line for the initial
+    direction, the profile radius, and the tightest bend radius along the path.
+    """
+    result = call_blender("extrude_along_curve",
+                          {"curve": curve, "segments": segments, "taper": taper},
+                          label=label)
+    if result.get("success"):
+        frame = f" ({result['frame']})" if result.get("frame") else ""
+        bend = result.get("min_bend_radius")
+        bend_str = f", tightest bend {bend}m" if bend is not None else ""
+        main = (f"swept {result['steps']} steps along '{curve}', "
+                f"path {result['path_length']}m{frame}{bend_str} [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def select_all(action: str = "SELECT") -> str:
     """
     Select/deselect geometry in edit mode.

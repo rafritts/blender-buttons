@@ -4,7 +4,7 @@ move/scale vertices. Prefer the relational verbs in `relational.py` when possibl
 import math
 
 import bpy
-from mathutils import Vector
+from mathutils import Quaternion, Vector
 
 from .state import push_undo
 
@@ -242,6 +242,245 @@ def _contact_distance(bm, obj, unit, target_name):
         return None, {"error": f"until_contact: no surface of '{target_name}' lies "
                                "along the extrude direction"}
     return best, None
+
+
+# ───────────────────────── sweep the selection along a curve (G1) ────────────
+# extrude_along_curve: the classic SWEEP — extrude the current edit-mode face
+# selection along a curve in ONE call (spline_tube sweeps a circle into a NEW
+# object; this aims the same idea at the in-mesh selection). Reuses the F1 frame:
+# the curve describes the SHAPE of the path, re-rooted so its start sits at the
+# selection's centroid with its initial tangent aligned to the selection's `out`
+# normal. Frames are carried by PARALLEL TRANSPORT (minimal twist), never Frenet
+# (which flips 180° at inflections and candy-wraps the mesh).
+
+
+def _order_curve_chain(verts, edges):
+    """Order an evaluated curve's polyline verts into a single walk. `verts` is a
+    list of world Vectors, `edges` a list of (i, j) index pairs. Walks from an
+    open endpoint (degree-1); falls back to index order if the graph is cyclic or
+    disconnected. Returns the ordered list of Vectors for the chain containing the
+    start endpoint."""
+    adj = {i: [] for i in range(len(verts))}
+    for a, b in edges:
+        adj[a].append(b)
+        adj[b].append(a)
+    ends = [i for i, nb in adj.items() if len(nb) == 1]
+    if not ends:
+        return list(verts)  # cyclic / no clear endpoint — trust index order
+    start = ends[0]
+    order = [start]
+    prev, cur = -1, start
+    while True:
+        nxt = [x for x in adj[cur] if x != prev]
+        if not nxt or nxt[0] == start:
+            break
+        prev, cur = cur, nxt[0]
+        order.append(cur)
+    return [verts[i] for i in order]
+
+
+def _resample_polyline(pts, n):
+    """Resample a dense world-space polyline into n+1 ARC-LENGTH-EQUIDISTANT
+    points (one extrude step per segment). Returns (points, total_length)."""
+    cum = [0.0]
+    for i in range(len(pts) - 1):
+        cum.append(cum[-1] + (pts[i + 1] - pts[i]).length)
+    total = cum[-1]
+    if total == 0:
+        return None, 0.0
+    out = [pts[0].copy()]
+    j = 0
+    for k in range(1, n):
+        d = total * k / n
+        while j < len(cum) - 2 and cum[j + 1] < d:
+            j += 1
+        seg = cum[j + 1] - cum[j]
+        t = 0.0 if seg == 0 else (d - cum[j]) / seg
+        out.append(pts[j].lerp(pts[j + 1], t))
+    out.append(pts[-1].copy())
+    return out, total
+
+
+def _sweep_path(curve_obj, n, centroid, out):
+    """Build the n+1 world-space path points for the sweep. Samples the curve's
+    evaluated shape, resamples to arc-length-equidistant, then re-roots it so the
+    start sits at `centroid` with its initial tangent rotated onto `out` (the F1
+    frame). Returns (points, total_length, err)."""
+    deps = bpy.context.evaluated_depsgraph_get()
+    ce = curve_obj.evaluated_get(deps)
+    me = ce.to_mesh()
+    try:
+        if len(me.polygons) > 0:
+            return None, 0.0, {"error":
+                f"curve '{curve_obj.name}' has thickness (a bevel/tube surface) — pass a "
+                "pure PATH curve (add_curve with bevel_depth=0). The sweep needs the "
+                "centerline, not a solid."}
+        cmat = curve_obj.matrix_world
+        world = [cmat @ v.co.copy() for v in me.vertices]
+        edges = [(e.vertices[0], e.vertices[1]) for e in me.edges]
+    finally:
+        ce.to_mesh_clear()
+    if len(world) < 2:
+        return None, 0.0, {"error": f"curve '{curve_obj.name}' has no usable path "
+                                    "(need at least 2 evaluated points)"}
+    ordered = _order_curve_chain(world, edges)
+    resampled, total = _resample_polyline(ordered, n)
+    if resampled is None:
+        return None, 0.0, {"error": f"curve '{curve_obj.name}' has zero length"}
+    init_tan = (resampled[1] - resampled[0])
+    if init_tan.length == 0:
+        return None, 0.0, {"error": "curve start is degenerate (first two points coincide)"}
+    rc = init_tan.normalized().rotation_difference(out)
+    p0 = resampled[0]
+    path = [centroid + (rc @ (p - p0)) for p in resampled]
+    return path, total, None
+
+
+def extrude_along_curve(params):
+    """Sweep the current edit-mode FACE selection along a curve in one call (G1)."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.type != 'MESH':
+        return {"error": "No active mesh object"}
+    if obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode with a face selected"}
+
+    curve_name = (params.get("curve") or "").strip()
+    if not curve_name:
+        return {"error": "'curve' (an existing curve object's name) is required"}
+    curve_obj = bpy.data.objects.get(curve_name)
+    if curve_obj is None:
+        return {"error": f"curve '{curve_name}' not found"}
+    if curve_obj.type != 'CURVE':
+        return {"error": f"'{curve_name}' is a {curve_obj.type.lower()}, not a curve "
+                         "(author the path with add_curve)"}
+
+    segments = max(1, min(int(params.get("segments", 8)), 256))
+    taper = float(params.get("taper", 1.0))
+    if taper <= 0:
+        return {"error": "'taper' must be > 0 (1.0 = no taper, 0.3 = tip at 30%)"}
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.normal_update()
+    cap_faces = [f for f in bm.faces if f.select]
+    if not cap_faces:
+        return {"error": "select at least one FACE to sweep (extrude_along_curve sweeps "
+                         "a face region into a tube — like a horn cap)"}
+
+    # F1 frame: the curve's start aligns to the selection's area-weighted 'out'.
+    out, ratio = _avg_normal_world(bm, obj)
+    if out is None or ratio < _NORMAL_DEGENERATE:
+        return {"error":
+            "selection normals cancel (closed ring / band / full loop) — there's no "
+            "well-defined 'out' to align the curve's start to. Sweep an open cap "
+            "(a single face or a contiguous face patch that points somewhere)."}
+
+    mat = obj.matrix_world
+    inv = mat.inverted()
+    cap_verts = list({v for f in cap_faces for v in f.verts})
+    centroid = Vector((0.0, 0.0, 0.0))
+    for v in cap_verts:
+        centroid += mat @ v.co
+    centroid /= len(cap_verts)
+
+    # Per-vert profile offset, split into the along-normal (depth) and in-plane
+    # (cross-section) parts — taper scales only the in-plane part (F3 in_plane).
+    profile = {}
+    profile_radius = 0.0
+    for v in cap_verts:
+        o = (mat @ v.co) - centroid
+        nc = out * o.dot(out)
+        ip = o - nc
+        profile[v] = (nc, ip)
+        profile_radius = max(profile_radius, ip.length)
+
+    path, total, err = _sweep_path(curve_obj, segments, centroid, out)
+    if err:
+        return err
+
+    # Self-intersection guard (same spirit as F1's degeneracy guard): where the
+    # path's bend radius drops below the profile radius, the inner wall folds
+    # through itself. Estimate bend radius per interior sample as ds/dθ.
+    min_bend = float("inf")
+    for i in range(1, segments):
+        d1 = path[i] - path[i - 1]
+        d2 = path[i + 1] - path[i]
+        if d1.length == 0 or d2.length == 0:
+            continue
+        phi = d1.angle(d2, 0.0)
+        if phi < 1e-4:
+            continue
+        ds = (d1.length + d2.length) * 0.5
+        min_bend = min(min_bend, ds / phi)
+    if profile_radius > 0 and min_bend < profile_radius:
+        return {"error":
+            f"sweep would self-intersect: tightest bend radius {round(min_bend, 4)}m is "
+            f"smaller than the profile radius {round(profile_radius, 4)}m, so the inner "
+            "wall folds through itself. Use a gentler curve, more spacing, or scale the "
+            "selection down (scale_vertices in_plane=) before sweeping."}
+
+    # Sweep: one extrude_face_region per sample, repositioning each new cap vert
+    # into the parallel-transported, taper-scaled frame at that sample.
+    current = dict(profile)            # live cap vert -> (normal_comp, in_plane)
+    cur_faces = cap_faces
+    prev_tan = out
+    q = Quaternion()                   # accumulated parallel-transport rotation
+    steps = 0
+    for i in range(1, segments + 1):
+        seg = path[i] - path[i - 1]
+        seg_tan = seg.normalized() if seg.length > 0 else prev_tan
+        q = prev_tan.rotation_difference(seg_tan) @ q
+        prev_tan = seg_tan
+        rot = q.to_matrix()
+        s = 1.0 + (taper - 1.0) * (i / segments)
+
+        ret = bmesh.ops.extrude_face_region(bm, geom=cur_faces)
+        new_verts = [g for g in ret["geom"] if isinstance(g, bmesh.types.BMVert)]
+        new_set = set(new_verts)
+        top_faces = [g for g in ret["geom"]
+                     if isinstance(g, bmesh.types.BMFace) and all(fv in new_set for fv in g.verts)]
+        old_set = set(current.keys())
+        old_to_new = {}
+        for nv in new_verts:
+            for e in nv.link_edges:
+                ov = e.other_vert(nv)
+                if ov in old_set:
+                    old_to_new[ov] = nv
+                    break
+
+        nxt = {}
+        for ov, (nc, ip) in current.items():
+            nv = old_to_new.get(ov)
+            if nv is None:
+                continue
+            nv.co = inv @ (path[i] + (rot @ (nc + ip * s)))
+            nxt[nv] = (nc, ip)
+        current = nxt
+        cur_faces = top_faces
+        steps += 1
+
+    # Leave the final cap selected so the sweep can be continued / capped.
+    for f in bm.faces:
+        f.select = False
+    for e in bm.edges:
+        e.select = False
+    for v in bm.verts:
+        v.select = False
+    for v in current:
+        v.select = True
+    bm.select_flush(True)
+
+    bmesh.update_edit_mesh(obj.data)
+    push_undo(f"extrude_along_curve {curve_name} x{segments}")
+    return {
+        "success": True,
+        "steps": steps,
+        "path_length": round(total, 4),
+        "frame": "out ≈ " + _describe_dir(out),
+        "profile_radius": round(profile_radius, 4),
+        "min_bend_radius": (round(min_bend, 4) if min_bend != float("inf") else None),
+        "taper": taper,
+    }
 
 
 def select_all(params):
@@ -1106,6 +1345,7 @@ def split_by_part(params):
 TOOLS = {
     "bevel":              bevel,
     "extrude":            extrude,
+    "extrude_along_curve": extrude_along_curve,
     "loop_cut":           loop_cut,
     "set_component_mode": set_component_mode,
     "select_all":         select_all,

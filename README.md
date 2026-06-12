@@ -255,6 +255,7 @@ Use when ring macros don't fit — non-axis-aligned topology, arbitrary band sel
 | `move_vertices(out, inward, up/down/left/right/forward/back, …, label)` | Move selected verts by a distance in METERS. `out`/`inward` = rigid translation along the selection's average normal; the rest are world axes. Legacy `x/y/z` (bbox fractions) still accepted. |
 | `scale_vertices(in_plane, x, y, z, pivot, label)` | Scale selected verts. `in_plane` = uniform scale in the selection's tangent plane (for tilted patches). Else per-world-axis `x/y/z`. `pivot`: `SELECTION` \| `ORIGIN`. |
 | `extrude(out, inward, up/down/…, until_contact, until_length, …, label)` | Extrude and translate in METERS along the direction words. `until_contact="floor"` raycasts to a named surface; `until_length=0.3` stops at a distance. Legacy `x/y/z` fractions still accepted. |
+| `extrude_along_curve(curve, segments=8, taper=1.0, label)` | Sweep the selected face(s) along a curve in one call (the classic SWEEP). The curve is re-rooted to the selection's centroid with its start tangent on the `out` normal; rings are arc-length-equidistant; frames carried by parallel transport. `taper` shrinks the cross-section toward the tip (0.3 = 30%). Refuses closed-band selections and self-intersecting bends. A curved horn = sweep + taper in one call. |
 | `bevel(width, factor, segments, affect, label)` | `width` = bevel size in meters (primary). `factor` = legacy fraction of smallest dimension. `affect`: `EDGES \| VERTICES`. |
 
 ### History / undo

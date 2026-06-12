@@ -93,7 +93,8 @@ EDIT_MODE_TOOLS = {
 # strokes write to the active key too, so they're in here despite not being EDIT.
 SHAPE_KEY_SHADOW_TOOLS = {
     "move_vertices", "scale_vertices", "proportional_move", "inflate_selection",
-    "jitter_vertices", "bevel", "extrude", "scale_rings", "taper_end", "taper_section",
+    "jitter_vertices", "bevel", "extrude", "extrude_along_curve", "scale_rings",
+    "taper_end", "taper_section",
     "sculpt_grab", "sculpt_inflate", "sculpt_draw", "sculpt_smooth", "sculpt_crease",
     "sculpt_pinch", "sculpt_flatten",
 }
