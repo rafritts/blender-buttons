@@ -1,5 +1,73 @@
 # MCP gaps
 
+## I1 — tool-surface consolidation: ~155 tools → ~95, name-as-namespace
+
+The server has ~155 registered tools (count: `grep -c "@mcp.tool" server/*.py`).
+MCP is a flat protocol — no folders, no paths; most clients inject every schema
+into context (~20–30k tokens) and the only namespace a tool has is its own name
+string. A weak-driver floor test (Grok 4.3) found 6 of 155 tools. The bloat is
+not a long tail of weird tools — it's families of near-duplicate siblings that
+collide in the driver's head.
+
+**Cost model — judge every tool by this, not by usage frequency:**
+1. context tokens (every schema rides along),
+2. collision (a sibling similar enough that drivers pick the wrong one),
+3. maintenance.
+Niche-but-isolated (`set_camera_dof`) is nearly free. Common-but-colliding
+(11 selection tools) is expensive even for strong drivers. Cut/merge by
+collision, never by frequency alone.
+
+**Phase 1 — audit table (its own commit, before any code changes).**
+Produce `docs/tool-consolidation.md`: every tool, one row —
+`name | verdict (keep / merge→target / cut) | rationale (one line)`.
+Known collision families to resolve (pre-identified, verify and complete):
+- selection (11): `select_all/object/ring/rings/between/boundary/by_axis/
+  in_sphere`, `grow_selection`, `inflate_selection`, `random_select`
+- scaling (5): `resize`, `scale_group`, `scale_vertices`, `scale_rings`,
+  `match_dimension` — note these span three naming patterns, so the family is
+  invisible to the driver today
+- edge finish (5): `shade_smooth`, `shade_flat`, `mark_sharp`,
+  `set_edge_crease`, `smooth_edges`
+- info/list (6): `list_modifiers/constraints/shape_keys/designs`,
+  `get_object_info` → fold into `describe`
+- viewport/camera (8): `orbit_viewport`, `set_viewport_angle/shading/overlays`,
+  `frame_scene`, `zoom_to_selected`, screenshot, collage
+- mid-level shape verbs: `band_around`, `taper_end`, `taper_section`,
+  `round_corners` vs `bevel`/`scale_rings` overlap
+- pure twins: `snap_to_grid`→`snap_to`, `set_mode`+`set_component_mode`,
+  `add_primitives` vs the ten `add_*`
+Ultra-niche cut candidates (verify nothing in tests/ or saved designs depends):
+`set_particle_visibility`, `set/get_custom_properties`, `set_color_management`,
+`add_outline`/`remove_outline`, `jitter_vertices`, `move_modifier`.
+
+**Merge rules:**
+- Merge SAME VERB, DIFFERENT SCOPE into one tool with a scope enum:
+  `select(scope="ring"|"boundary"|"by_axis"|...)`. The enum is the namespace —
+  the docstring must list every scope value with a one-line description, since
+  that listing replaces eleven separate schemas as the driver's directory.
+- NEVER merge distinct verbs (`extrude` and `bevel` stay separate forever).
+- No mega-tools: if a merge forces unrelated params into one schema or pushes
+  it past ~8 params, don't merge.
+- Server-side only where possible: a merged server tool dispatches to the
+  existing extension handlers over the socket — extension code and the
+  1-tool-call-=-1-undo-step invariant untouched. Cuts remove both sides.
+
+**Prefix discipline for the residual flat list:** read-only starts `get_`/
+`check_`, creation starts `add_`. Break up the `set_*` junk drawer (19 tools,
+nothing in common but the verb) only where a rename fixes a real findability
+problem — renames churn tests and priors, so no cosmetic renames.
+
+**Do NOT cut:** the tactile-introspection suite (`check_resting`, `is_aligned`,
+`gap_between`, `parts_in`, ...) — low frequency but zero collision, and it's
+the project thesis. Likewise history/undo.
+
+**Acceptance:** tool count ≤ ~100; the audit table proves every removed
+capability is reachable on the new surface (old name → new call mapping);
+merged docstrings enumerate their scopes; e2e suite asserts each scope value
+routes to the right handler and the legacy e2e batches still pass.
+Implementation will likely take several batches — audit table first, then
+merges, then cuts, then renames. Get the table reviewed before writing code.
+
 ## H1 — overlap warning on object creation
 
 Floor-test finding (weak-driver sword session): four primitives spawned at the
