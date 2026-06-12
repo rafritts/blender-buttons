@@ -2,17 +2,19 @@ from server._core import mcp, call_blender, _status
 
 
 @mcp.tool()
-def bevel(factor: float = 0.05, segments: int = 1, affect: str = "EDGES", label: str = "",
-          target: str = "") -> str:
+def bevel(width: float = 0.0, factor: float = 0.05, segments: int = 1, affect: str = "EDGES",
+          label: str = "", target: str = "") -> str:
     """
     Bevel selected edges or vertices in edit mode.
-    factor: bevel size as a fraction of the object's smallest dimension (0.05 = 5%)
+    width: bevel size in METERS (the documented-primary unit). When > 0 this wins.
+    factor: legacy — bevel size as a fraction of the object's smallest dimension (0.05 = 5%).
+            Used only when width is left at 0.
     segments: edge loops added (more = smoother curve)
     affect: EDGES | VERTICES
     target: optional object name — auto-selects it, enters edit mode, exits after.
     """
-    result = call_blender("bevel", {"factor": factor, "segments": segments, "affect": affect,
-                                    "target": target}, label=label)
+    result = call_blender("bevel", {"width": width, "factor": factor, "segments": segments,
+                                    "affect": affect, "target": target}, label=label)
     if result.get("success"):
         main = f"ok (offset={result.get('offset_world')}) [{result.get('op_id','')}]"
     else:
@@ -21,17 +23,47 @@ def bevel(factor: float = 0.05, segments: int = 1, affect: str = "EDGES", label:
 
 
 @mcp.tool()
-def extrude(x: float = 0.0, y: float = 0.0, z: float = 0.0, label: str = "",
-            target: str = "") -> str:
+def extrude(out: float = 0.0, inward: float = 0.0,
+            up: float = 0.0, down: float = 0.0, left: float = 0.0, right: float = 0.0,
+            forward: float = 0.0, back: float = 0.0,
+            until_contact: str = "", until_length: float = 0.0,
+            x: float = 0.0, y: float = 0.0, z: float = 0.0,
+            label: str = "", target: str = "") -> str:
     """
-    Extrude selected geometry in edit mode and translate by a fraction of the object's dimensions.
-    x/y/z: fraction of object dimension along that axis (0.5 = 50% of width/depth/height).
-    Returns the actual world-space translation applied.
+    Extrude the selected geometry and translate it. Distances are in METERS.
+
+    Direction vocabulary (all composable in one call, e.g. extrude(out=0.05, down=0.01)):
+      out / inward            — along the selection's area-weighted average normal,
+                                recomputed fresh from the current selection (the ~90%
+                                case: "push this face out along where it points"). Works
+                                on a tilted face; no need to know the world orientation.
+      up/down/left/right/     — world axes (±Z / ±X / ±Y), same words as nudge.
+        forward/back
+    The result names the resolved 'out' direction in world-semantic words (e.g.
+    "out ≈ forward, 15° above level") so you can cross-check your mental model.
+    If the selection's normals cancel (a closed ring / band / full loop), 'out' is
+    refused — use inflate_selection for a radial puff, or a world direction.
+
+    Closed-loop termination (F2) — stop by a condition instead of dead reckoning:
+      until_contact="floor"   — raycast along the direction and stop where the new
+                                geometry first touches that object's surface.
+      until_length=0.3        — extrude until the moved geometry is 0.3 m from start.
+    With a termination set the distance is optional; direction still applies (default out).
+
+    Legacy: x/y/z are a fraction of the object's bbox dimensions (pre-F1 API; prefer
+    the meter-based words above).
     target: optional object name — auto-selects it, enters edit mode, exits after.
     """
-    result = call_blender("extrude", {"x": x, "y": y, "z": z, "target": target}, label=label)
+    result = call_blender("extrude", {
+        "out": out, "inward": inward, "up": up, "down": down, "left": left,
+        "right": right, "forward": forward, "back": back,
+        "until_contact": until_contact, "until_length": until_length,
+        "x": x, "y": y, "z": z, "target": target}, label=label)
     if result.get("success"):
-        main = f"ok translation={result.get('translation_world')} [{result.get('op_id','')}]"
+        frame = f" ({result['frame']})" if result.get("frame") else ""
+        term = f" — stopped at {result['terminated_at']}" if result.get("terminated_at") else ""
+        main = (f"ok translation={result.get('translation_world')}{frame}{term} "
+                f"[{result.get('op_id','')}]")
     else:
         main = result.get("error", "failed")
     return main + _status(result)
@@ -71,63 +103,102 @@ def select_by_axis(axis: str = "Z", factor: float = 0.5, comparison: str = "GREA
 
 
 @mcp.tool()
-def move_vertices(x: float = 0.0, y: float = 0.0, z: float = 0.0, label: str = "",
-                  target: str = "") -> str:
+def move_vertices(out: float = 0.0, inward: float = 0.0,
+                  up: float = 0.0, down: float = 0.0, left: float = 0.0, right: float = 0.0,
+                  forward: float = 0.0, back: float = 0.0,
+                  x: float = 0.0, y: float = 0.0, z: float = 0.0,
+                  label: str = "", target: str = "") -> str:
     """
-    Translate selected vertices in edit mode using bmesh.
-    x/y/z: fraction of object dimension along that axis (0.1 = 10% of width/depth/height).
-    Negative values move in the opposite direction.
+    Translate the selected vertices in edit mode. Distances are in METERS.
+
+    Direction vocabulary (composable, e.g. move_vertices(out=0.02, up=0.01)):
+      out / inward            — a RIGID translation along the selection's area-weighted
+                                average normal (every selected vert moves by the SAME
+                                delta). Distinct from inflate_selection, which moves each
+                                vert along its OWN normal (puffs/spreads the patch).
+      up/down/left/right/     — world axes (±Z / ±X / ±Y), same words as nudge.
+        forward/back
+    The result names the resolved 'out' direction in world-semantic words. If the
+    selection's normals cancel (closed ring/band), 'out' is refused.
+
+    Legacy: x/y/z are a fraction of the object's bbox dimensions (pre-F1 API).
     target: optional object name — auto-selects it, enters edit mode, exits after.
     Must be in edit mode with vertices selected (or provide target).
     """
-    result = call_blender("move_vertices", {"x": x, "y": y, "z": z, "target": target}, label=label)
+    result = call_blender("move_vertices", {
+        "out": out, "inward": inward, "up": up, "down": down, "left": left,
+        "right": right, "forward": forward, "back": back,
+        "x": x, "y": y, "z": z, "target": target}, label=label)
     if result.get("success"):
-        main = f"Moved {result['verts_moved']} verts by {result['delta_world']} [{result.get('op_id','')}]"
+        frame = f" ({result['frame']})" if result.get("frame") else ""
+        main = (f"Moved {result['verts_moved']} verts by {result['delta_world']}{frame} "
+                f"[{result.get('op_id','')}]")
     else:
         main = result.get("error", "failed")
     return main + _status(result)
 
 
 @mcp.tool()
-def scale_vertices(x: float = 1.0, y: float = 1.0, z: float = 1.0,
+def scale_vertices(in_plane: float = 0.0, x: float = 1.0, y: float = 1.0, z: float = 1.0,
                    pivot: str = "SELECTION", label: str = "", target: str = "") -> str:
     """
     Scale selected vertices in edit mode using bmesh.
-    x/y/z: scale multipliers per axis (0.5 = half, 2.0 = double)
+
+    in_plane: uniform scale IN the selection's tangent plane (perpendicular to its
+              average normal). 1.0 = no change, 0.5 = half, 2.0 = double. Use this on a
+              tilted-surface selection where per-axis x/y/z multipliers are meaningless
+              — it dilates/contracts the patch within its own surface and leaves the
+              depth (normal) component untouched. Refused if the normals cancel.
+              When > 0 this path is taken (ignores x/y/z).
+    x/y/z: per-WORLD-axis scale multipliers (0.5 = half, 2.0 = double). Used when
+           in_plane is 0.
     pivot: SELECTION (around selection center) | ORIGIN (around object origin)
     target: optional object name — auto-selects it, enters edit mode, exits after.
     Must be in edit mode with vertices selected (or provide target).
     """
-    result = call_blender("scale_vertices", {"x": x, "y": y, "z": z, "pivot": pivot,
+    result = call_blender("scale_vertices", {"in_plane": (in_plane or None),
+                                             "x": x, "y": y, "z": z, "pivot": pivot,
                                              "target": target}, label=label)
     if result.get("success"):
-        main = f"Scaled {result['verts_scaled']} verts [{result.get('op_id','')}]"
+        frame = f" ({result['frame']})" if result.get("frame") else ""
+        main = f"Scaled {result['verts_scaled']} verts{frame} [{result.get('op_id','')}]"
     else:
         main = result.get("error", "failed")
     return main + _status(result)
 
 
 @mcp.tool()
-def proportional_move(x: float = 0.0, y: float = 0.0, z: float = 0.0,
+def proportional_move(out: float = 0.0, inward: float = 0.0,
+                      up: float = 0.0, down: float = 0.0, left: float = 0.0, right: float = 0.0,
+                      forward: float = 0.0, back: float = 0.0,
+                      x: float = 0.0, y: float = 0.0, z: float = 0.0,
                       radius: float = 0.01, falloff: str = "SMOOTH",
                       label: str = "") -> str:
     """
     Move selected verts with a falloff — drags nearby verts along (proportional editing).
     Selected verts move full amount; verts at radius edge don't move at all.
 
-    x/y/z: translation as a fraction of object dims (same as move_vertices).
+    Direction vocabulary (METERS, composable — same words as move_vertices/extrude):
+      out / inward            — along the selection's area-weighted average normal.
+      up/down/left/right/     — world axes (±Z / ±X / ±Y).
+        forward/back
+    Legacy: x/y/z are a fraction of object dims (pre-F1 API).
+
     radius: falloff radius in meters (default 1cm).
     falloff: SMOOTH (default — rounded shape) | LINEAR | SPHERE | SHARP | ROOT | CONSTANT.
 
-    For icing drips: select sparse boundary verts, proportional_move(z=-0.5, radius=0.005)
+    For icing drips: select sparse boundary verts, proportional_move(down=0.01, radius=0.005)
     gives bulbous rounded drops instead of triangular spikes.
     """
     result = call_blender("proportional_move", {
+        "out": out, "inward": inward, "up": up, "down": down, "left": left,
+        "right": right, "forward": forward, "back": back,
         "x": x, "y": y, "z": z, "radius": radius, "falloff": falloff,
     }, label=label)
     if result.get("success"):
+        frame = f" ({result['frame']})" if result.get("frame") else ""
         main = (f"pulled {result['handles']} handles, dragged {result['affected']} verts "
-                f"r={result['radius']}m {result['falloff']} delta_world={result['delta_world']} "
+                f"r={result['radius']}m {result['falloff']} delta_world={result['delta_world']}{frame} "
                 f"[{result.get('op_id','')}]")
     else:
         main = result.get("error", "failed")

@@ -31,6 +31,7 @@ import bmesh
 import mathutils
 
 from .state import push_undo
+from .editmode import _has_dir_words, _describe_dir, _NORMAL_DEGENERATE
 
 
 _FALLOFFS = {"SMOOTH", "LINEAR", "SPHERE", "SHARP", "ROOT", "CONSTANT"}
@@ -153,6 +154,38 @@ def _world_to_local_dir(obj, world_dir):
     return obj.matrix_world.inverted().to_3x3() @ world_dir
 
 
+def _grab_offset_from_words(obj, hits, params):
+    """F3: resolve sculpt_grab's offset from the F1 direction words (meters, world).
+    'out' follows the average normal of the brushed verts. Returns
+    (offset_vec, frame_str | None, err_dict | None)."""
+    nmat = obj.matrix_world.to_3x3()
+    vec = mathutils.Vector((0.0, 0.0, 0.0))
+    vec.x += float(params.get("right", 0.0) or 0.0) - float(params.get("left", 0.0) or 0.0)
+    vec.y += float(params.get("back", 0.0) or 0.0) - float(params.get("forward", 0.0) or 0.0)
+    vec.z += float(params.get("up", 0.0) or 0.0) - float(params.get("down", 0.0) or 0.0)
+    frame = None
+    nrm_amt = float(params.get("out", 0.0) or 0.0) - float(params.get("inward", 0.0) or 0.0)
+    if nrm_amt != 0.0:
+        acc = mathutils.Vector((0.0, 0.0, 0.0))
+        total = 0
+        for v, _t in hits:
+            wn = nmat @ v.normal
+            if wn.length == 0:
+                continue
+            acc += wn.normalized()
+            total += 1
+        if total == 0 or acc.length == 0 or acc.length / total < _NORMAL_DEGENERATE:
+            return None, None, {"error":
+                "brushed region's normals cancel — 'out'/'inward' has no direction here. "
+                "Pass a world direction (up/down/left/right/forward/back) or a 'to' point."}
+        n = acc.normalized()
+        vec += n * nrm_amt
+        frame = "out ≈ " + _describe_dir(n)
+    if vec.length == 0:
+        return None, None, {"error": "no offset resolved from direction words"}
+    return vec, frame, None
+
+
 def sculpt_grab(params):
     """Pull a region toward a world-space target point.
 
@@ -169,15 +202,31 @@ def sculpt_grab(params):
     if err:
         return err
     to = params.get("to")
-    if not (isinstance(to, list) and len(to) == 3):
-        return {"error": "'to' must be a [x, y, z] world-space list"}
-    target_world = mathutils.Vector((float(to[0]), float(to[1]), float(to[2])))
-    offset_world = target_world - center
-    offset_local = _world_to_local_dir(obj, offset_world)
+    has_to = isinstance(to, list) and len(to) == 3
+    has_dir = _has_dir_words(params)
+    if not has_to and not has_dir:
+        return {"error": "give a destination: 'to' [x,y,z] world point, OR direction "
+                         "words (out=, up=, left=… in meters)"}
 
     bm = _enter_edit(obj)
     subdivided = _maybe_subdivide(bm, obj, center, radius, params.get("subdivide", False))
+    bm.normal_update()
     hits = _verts_in_radius(bm, obj, center, radius)
+
+    frame = None
+    if has_to:
+        target_world = mathutils.Vector((float(to[0]), float(to[1]), float(to[2])))
+        offset_world = target_world - center
+    else:
+        # F3: the offset is the part that wants to be local. 'out' follows the
+        # region's average normal (the brushed verts); the world words are the
+        # nudge axes — all in meters.
+        offset_world, frame, derr = _grab_offset_from_words(obj, hits, params)
+        if derr:
+            _exit_edit(obj)
+            return derr
+    offset_local = _world_to_local_dir(obj, offset_world)
+
     for v, t in hits:
         v.co += offset_local * _falloff_weight(t, falloff)
     _exit_edit(obj)
@@ -185,6 +234,8 @@ def sculpt_grab(params):
     result = {"success": True, "verts_affected": len(hits),
               "offset_world": [round(c, 4) for c in offset_world],
               "subdivided_edges": subdivided}
+    if frame:
+        result["frame"] = frame
     warn = _affected_warning(len(hits), subdivided, "sculpt_grab")
     if warn:
         result["warning"] = warn

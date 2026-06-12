@@ -252,10 +252,10 @@ Use when ring macros don't fit — non-axis-aligned topology, arbitrary band sel
 |------|-------------|
 | `select_by_axis(axis, factor, comparison, action)` | Select/deselect verts by world-space position. `factor` maps 0.0→min extent, 1.0→max extent. |
 | `select_between(axis, lo, hi, action)` | Select verts whose position on `axis` falls between `lo` and `hi` (both 0.0–1.0 factors). |
-| `move_vertices(x, y, z, label)` | Move selected verts. x/y/z are fractions of the object's world-space dimension on that axis. |
-| `scale_vertices(x, y, z, pivot, label)` | Scale selected verts. `pivot`: `SELECTION` (around centroid) \| `ORIGIN` (around object origin at local 0,0,0). |
-| `extrude(x, y, z, label)` | Extrude and translate. x/y/z are fractions of object dimension. |
-| `bevel(factor, segments, affect, label)` | `affect`: `EDGES \| VERTICES`. `factor` is a fraction of the object's smallest dimension. |
+| `move_vertices(out, inward, up/down/left/right/forward/back, …, label)` | Move selected verts by a distance in METERS. `out`/`inward` = rigid translation along the selection's average normal; the rest are world axes. Legacy `x/y/z` (bbox fractions) still accepted. |
+| `scale_vertices(in_plane, x, y, z, pivot, label)` | Scale selected verts. `in_plane` = uniform scale in the selection's tangent plane (for tilted patches). Else per-world-axis `x/y/z`. `pivot`: `SELECTION` \| `ORIGIN`. |
+| `extrude(out, inward, up/down/…, until_contact, until_length, …, label)` | Extrude and translate in METERS along the direction words. `until_contact="floor"` raycasts to a named surface; `until_length=0.3` stops at a distance. Legacy `x/y/z` fractions still accepted. |
+| `bevel(width, factor, segments, affect, label)` | `width` = bevel size in meters (primary). `factor` = legacy fraction of smallest dimension. `affect`: `EDGES \| VERTICES`. |
 
 ### History / undo
 
@@ -353,7 +353,7 @@ snap_to_grid(size=0.5, axes="XY")                                # snap WallA to
 
 **`taper_end` reports neighbors** — the result includes nearby mesh objects and their distance to the collapsed point. If you collapsed the wrong end, the report will surface that ("collapsed at z=1.4, nearby: Crossguard@0.02u") before you commit further work.
 
-**Vertex move units** — `move_vertices` takes fractions of the object's world dimensions, not absolute units. `z=0.1` moves 10% of the object's total height. The returned `delta_world` is the actual world-space translation applied.
+**Vertex move units** — prefer the meter-based direction words: `move_vertices(out=0.02)` moves 2 cm along the selection's average normal, `move_vertices(up=0.05)` moves 5 cm in world +Z. The result names the resolved `out` direction (e.g. "out ≈ forward, 15° above level") so you can cross-check it. The legacy `x/y/z` params are still accepted as fractions of the object's world dimensions. The returned `delta_world` is the actual world-space translation applied.
 
 **loop_cut on tapered meshes** — cuts are placed at edge midpoints, not at uniform Z intervals. On a tapered cone/blade, new rings will already inherit the taper proportionally. To push rings to a specific width, select the ring after cutting and use `scale_vertices`.
 

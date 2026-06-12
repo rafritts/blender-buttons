@@ -1,3 +1,5 @@
+from typing import Optional
+
 from server._core import mcp, call_blender, _status
 
 
@@ -16,6 +18,8 @@ def _sculpt_result(brush: str, result: dict) -> str:
             head = f"{brush}: {result['iterations']} iterations × {verts} verts{sub_note}"
         else:
             head = f"{brush}: affected {verts} verts{sub_note}"
+        if result.get("frame"):
+            head += f" ({result['frame']})"
         warn = result.get("warning")
         if warn:
             head += f"\n  ⚠ {warn}"
@@ -25,24 +29,40 @@ def _sculpt_result(brush: str, result: dict) -> str:
 
 @mcp.tool()
 def sculpt_grab(target: str, at_x: float, at_y: float, at_z: float, radius: float,
-                to_x: float, to_y: float, to_z: float,
+                to_x: Optional[float] = None, to_y: Optional[float] = None,
+                to_z: Optional[float] = None,
+                out: float = 0.0, inward: float = 0.0,
+                up: float = 0.0, down: float = 0.0, left: float = 0.0, right: float = 0.0,
+                forward: float = 0.0, back: float = 0.0,
                 falloff: str = "SMOOTH", subdivide: bool = False,
                 label: str = "") -> str:
-    """Pull a region of `target` toward a world-space point.
+    """Pull a region of `target` by an offset. Verts at the brush center
+    (at_x, at_y, at_z) move the full offset; verts at the radius edge don't move;
+    everything between interpolates by falloff. Drag clay from one spot to another —
+    bulge a cheekbone, pull a handle outward, lift a brow.
 
-    Verts at the brush center (at_x, at_y, at_z) move by the full offset (to - at);
-    verts at radius edge don't move; everything between interpolates by falloff.
-    Use this to drag clay from one point to another — bulge a cheekbone, pull a
-    handle outward, lift a brow.
+    Give the offset ONE of two ways:
+      to_x/to_y/to_z          — a world-space destination point; offset = (to - at).
+                                The coordinate ripcord (hand-compute the point).
+      direction words (F3)    — the offset in METERS, which is the part that wants to
+                                be local: out/inward (along the brushed region's average
+                                normal), up/down/left/right/forward/back (world axes).
+                                Composable, e.g. sculpt_grab(..., out=0.02, up=0.01).
+    The result names the resolved 'out' direction in world-semantic words.
 
     falloff: SMOOTH | LINEAR | SPHERE | SHARP | ROOT | CONSTANT.
     subdivide: if the mesh is too coarse in the brush region, set True to locally
                subdivide edges before sculpting.
     """
-    result = call_blender("sculpt_grab", {
-        "target": target, "at": [at_x, at_y, at_z], "to": [to_x, to_y, to_z],
+    params = {
+        "target": target, "at": [at_x, at_y, at_z],
         "radius": radius, "falloff": falloff, "subdivide": subdivide,
-    }, label=label)
+        "out": out, "inward": inward, "up": up, "down": down, "left": left,
+        "right": right, "forward": forward, "back": back,
+    }
+    if to_x is not None and to_y is not None and to_z is not None:
+        params["to"] = [to_x, to_y, to_z]
+    result = call_blender("sculpt_grab", params, label=label)
     return _sculpt_result("grab", result) + _status(result)
 
 

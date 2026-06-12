@@ -1,9 +1,106 @@
 """Edit-mode ripcord: bevel, extrude, loop_cut, component mode, selection ops,
 move/scale vertices. Prefer the relational verbs in `relational.py` when possible."""
 
+import math
+
 import bpy
+from mathutils import Vector
 
 from .state import push_undo
+
+
+# ───────────────────────── local-frame direction vocabulary (F1) ─────────────
+# Shared by the vertex-moving verbs (extrude / move_vertices / proportional_move)
+# and sculpt_grab. All distances are METERS in WORLD space. The words:
+#   out / inward            — along the selection's area-weighted average normal
+#                             (recomputed fresh each call, so no bbox-unit drift)
+#   up/down/left/right/      — the nudge words: world ±Z / ±X / ±Y
+#     forward/back
+# 'in' is a Python keyword, so the inward word is spelled `inward` at the API.
+
+_DIR_WORDS = ("out", "inward", "up", "down", "left", "right", "forward", "back")
+
+# Below this ratio (|Σnormals| / Σweights) the selection's normals substantially
+# cancel — a closed ring / sphere band / full loop — and 'out' has no meaningful
+# direction. Refuse rather than move along a garbage average.
+_NORMAL_DEGENERATE = 0.2
+
+
+def _has_dir_words(params):
+    return any(abs(float(params.get(w, 0.0) or 0.0)) > 0 for w in _DIR_WORDS)
+
+
+def _avg_normal_world(bm, obj):
+    """Area-weighted average WORLD normal of the current selection.
+
+    Returns (unit_vec | None, ratio) where ratio = |Σ| / Σweights in [0, 1].
+    A low ratio means the normals cancel (closed band) — the caller refuses.
+    Prefers selected faces (area-weighted); falls back to selected vert normals
+    when no whole face is selected (a bare rim/edge loop)."""
+    nmat = obj.matrix_world.to_3x3()
+    acc = Vector((0.0, 0.0, 0.0))
+    total = 0.0
+    sel_faces = [f for f in bm.faces if f.select]
+    if sel_faces:
+        for f in sel_faces:
+            wn = nmat @ f.normal
+            if wn.length == 0:
+                continue
+            w = f.calc_area()
+            acc += wn.normalized() * w
+            total += w
+    else:
+        for v in bm.verts:
+            if not v.select:
+                continue
+            wn = nmat @ v.normal
+            if wn.length == 0:
+                continue
+            acc += wn.normalized()
+            total += 1.0
+    if total == 0 or acc.length == 0:
+        return None, 0.0
+    return acc.normalized(), acc.length / total
+
+
+def _describe_dir(n):
+    """Name a world unit vector in scene-semantic words so the agent can
+    cross-check its mental model — e.g. 'forward, 15° above level'."""
+    n = n.normalized()
+    elev = math.degrees(math.asin(max(-1.0, min(1.0, n.z))))
+    if math.hypot(n.x, n.y) < 1e-4:
+        return "straight up" if n.z >= 0 else "straight down"
+    if abs(n.x) >= abs(n.y):
+        word = "right" if n.x > 0 else "left"
+    else:
+        word = "back" if n.y > 0 else "forward"
+    if abs(elev) < 5:
+        return f"{word}, level"
+    return f"{word}, {round(abs(elev))}° {'above' if elev > 0 else 'below'} level"
+
+
+def _resolve_world_delta(bm, obj, params):
+    """Resolve the F1 direction words into a world-space translation (meters).
+
+    Returns (Vector, frame_str | None, err_dict | None). `frame_str` is set only
+    when out/inward is used (the normal direction the agent can't see)."""
+    vec = Vector((0.0, 0.0, 0.0))
+    vec.x += float(params.get("right", 0.0) or 0.0) - float(params.get("left", 0.0) or 0.0)
+    vec.y += float(params.get("back", 0.0) or 0.0) - float(params.get("forward", 0.0) or 0.0)
+    vec.z += float(params.get("up", 0.0) or 0.0) - float(params.get("down", 0.0) or 0.0)
+    frame = None
+    nrm_amt = float(params.get("out", 0.0) or 0.0) - float(params.get("inward", 0.0) or 0.0)
+    if nrm_amt != 0.0:
+        bm.normal_update()
+        n, ratio = _avg_normal_world(bm, obj)
+        if n is None or ratio < _NORMAL_DEGENERATE:
+            return None, None, {"error":
+                "selection normals cancel (closed ring / band / full loop) — 'out'/'inward' "
+                "has no well-defined direction here. For a radial puff use inflate_selection; "
+                "otherwise move along a world direction (up/down/left/right/forward/back)."}
+        vec = vec + n * nrm_amt
+        frame = "out ≈ " + _describe_dir(n)
+    return vec, frame, None
 
 
 def _flush_vert_selection(bm):
@@ -36,12 +133,16 @@ def _flush_vert_selection(bm):
 
 
 def bevel(params):
+    width    = params.get("width")
     factor   = params.get("factor", 0.05)
     segments = params.get("segments", 1)
     affect   = params.get("affect", "EDGES").upper()
     obj = bpy.context.active_object
     dims = obj.dimensions if obj and obj.type == 'MESH' else None
-    if dims:
+    if width is not None and float(width) > 0:
+        # F3: width is a world-space offset in METERS (documented-primary).
+        offset = float(width)
+    elif dims:
         min_dim = min(d for d in [dims.x, dims.y, dims.z] if d > 0) if any(d > 0 for d in [dims.x, dims.y, dims.z]) else 1.0
         offset = factor * min_dim
     else:
@@ -51,16 +152,96 @@ def bevel(params):
 
 
 def extrude(params):
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.type != 'MESH':
+        return {"error": "No active mesh object"}
+    if obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+
+    until_contact = (params.get("until_contact") or "").strip()
+    until_length = float(params.get("until_length", 0.0) or 0.0)
+    has_dir = _has_dir_words(params)
+
+    # F1/F2 path: meter-based direction words and/or a closed-loop termination.
+    if has_dir or until_contact or until_length > 0:
+        bm = bmesh.from_edit_mesh(obj.data)
+        # When a termination is given the magnitude is supplied by it, so default
+        # the direction to `out` if the caller named none.
+        dir_params = params if has_dir else {"out": 1.0}
+        wv, frame, err = _resolve_world_delta(bm, obj, dir_params)
+        if err:
+            return err
+        if wv.length == 0:
+            return {"error": "No direction given (e.g. out=, up=, until_length=…)"}
+
+        if until_contact or until_length > 0:
+            unit = wv.normalized()
+            if until_contact:
+                dist, hit_err = _contact_distance(bm, obj, unit, until_contact)
+                if hit_err:
+                    return hit_err
+                term = f"contact with '{until_contact}'"
+            else:
+                dist = until_length
+                term = f"length {until_length}m"
+            translate = unit * dist
+        else:
+            translate = wv
+            term = None
+
+        bpy.ops.mesh.extrude_region_move(
+            TRANSFORM_OT_translate={"value": tuple(translate), "orient_type": "GLOBAL"})
+        result = {"success": True,
+                  "translation_world": [round(c, 4) for c in translate]}
+        if frame:
+            result["frame"] = frame
+        if term:
+            result["terminated_at"] = term
+            result["distance_world"] = round(translate.length, 4)
+        return result
+
+    # Legacy fraction-of-bbox path (kept for old tests/transcripts).
     fx = params.get("x", 0.0)
     fy = params.get("y", 0.0)
     fz = params.get("z", 0.0)
-    obj = bpy.context.active_object
-    dims = obj.dimensions if obj and obj.type == 'MESH' else None
-    x = fx * (dims.x if dims else 1.0)
-    y = fy * (dims.y if dims else 1.0)
-    z = fz * (dims.z if dims else 1.0)
+    dims = obj.dimensions
+    x = fx * dims.x
+    y = fy * dims.y
+    z = fz * dims.z
     bpy.ops.mesh.extrude_region_move(TRANSFORM_OT_translate={"value": (x, y, z)})
     return {"success": True, "translation_world": [round(x, 4), round(y, 4), round(z, 4)]}
+
+
+def _contact_distance(bm, obj, unit, target_name):
+    """First-contact distance (meters) along `unit` from the selected geometry to
+    the named object's evaluated surface. Returns (dist, None) or (None, err)."""
+    from .common import object_bvh
+    target = bpy.data.objects.get(target_name)
+    if target is None:
+        return None, {"error": f"until_contact: object '{target_name}' not found"}
+    if target.name == obj.name:
+        return None, {"error": "until_contact: target must be a different object"}
+    bvh = object_bvh(target)
+    if bvh is None:
+        return None, {"error": f"until_contact: '{target_name}' has no evaluable mesh"}
+    mat = obj.matrix_world
+    sel = [v for v in bm.verts if v.select]
+    if not sel:
+        return None, {"error": "No geometry selected to extrude"}
+    eps = 1e-5
+    best = None
+    for v in sel:
+        origin = (mat @ v.co) + unit * eps
+        hit = bvh.ray_cast(origin, unit)
+        if hit and hit[0] is not None:
+            d = hit[3] + eps
+            if d > eps and (best is None or d < best):
+                best = d
+    if best is None:
+        return None, {"error": f"until_contact: no surface of '{target_name}' lies "
+                               "along the extrude direction"}
+    return best, None
 
 
 def select_all(params):
@@ -232,29 +413,41 @@ def move_vertices(params):
         return {"error": "No active object"}
     if obj.mode != 'EDIT':
         return {"error": "Must be in edit mode"}
-    fx = params.get("x", 0.0)
-    fy = params.get("y", 0.0)
-    fz = params.get("z", 0.0)
-    dims = obj.dimensions
-    scale = obj.scale
-    sx = abs(scale.x) or 1.0
-    sy = abs(scale.y) or 1.0
-    sz = abs(scale.z) or 1.0
-    dx = fx * dims.x / sx
-    dy = fy * dims.y / sy
-    dz = fz * dims.z / sz
     bm = bmesh.from_edit_mesh(obj.data)
     selected = [v for v in bm.verts if v.select]
     if not selected:
         return {"error": "No vertices selected"}
+
+    frame = None
+    if _has_dir_words(params):
+        # F1: meter-based RIGID translation — every selected vert moves by the same
+        # world delta along the resolved direction (distinct from inflate_selection,
+        # which moves each vert along its OWN normal).
+        wv, frame, err = _resolve_world_delta(bm, obj, params)
+        if err:
+            return err
+        local = obj.matrix_world.inverted().to_3x3() @ wv
+        world_delta = [round(c, 5) for c in wv]
+    else:
+        # Legacy fraction-of-bbox path.
+        fx = params.get("x", 0.0)
+        fy = params.get("y", 0.0)
+        fz = params.get("z", 0.0)
+        dims = obj.dimensions
+        scale = obj.scale
+        local = Vector((fx * dims.x / (abs(scale.x) or 1.0),
+                        fy * dims.y / (abs(scale.y) or 1.0),
+                        fz * dims.z / (abs(scale.z) or 1.0)))
+        world_delta = [round(fx * dims.x, 5), round(fy * dims.y, 5), round(fz * dims.z, 5)]
+
     for v in selected:
-        v.co.x += dx
-        v.co.y += dy
-        v.co.z += dz
+        v.co += local
     bmesh.update_edit_mesh(obj.data)
     push_undo("move_vertices")
-    world_delta = [round(fx * dims.x, 5), round(fy * dims.y, 5), round(fz * dims.z, 5)]
-    return {"success": True, "verts_moved": len(selected), "delta_world": world_delta}
+    result = {"success": True, "verts_moved": len(selected), "delta_world": world_delta}
+    if frame:
+        result["frame"] = frame
+    return result
 
 
 def scale_vertices(params):
@@ -264,14 +457,44 @@ def scale_vertices(params):
         return {"error": "No active object"}
     if obj.mode != 'EDIT':
         return {"error": "Must be in edit mode"}
-    sx = params.get("x", 1.0)
-    sy = params.get("y", 1.0)
-    sz = params.get("z", 1.0)
-    pivot = params.get("pivot", "SELECTION")  # SELECTION | CURSOR | ORIGIN
+    in_plane = params.get("in_plane")
+    pivot = params.get("pivot", "SELECTION")  # SELECTION | ORIGIN
     bm = bmesh.from_edit_mesh(obj.data)
     selected = [v for v in bm.verts if v.select]
     if not selected:
         return {"error": "No vertices selected"}
+
+    if in_plane is not None:
+        # F3: uniform scale IN the selection's tangent plane (perpendicular to the
+        # average normal). World-axis multipliers are meaningless on a tilted patch;
+        # this dilates/contracts the patch within its own surface, leaving the
+        # normal (depth) component untouched — widen a collar, shrink an iris.
+        f = float(in_plane)
+        n, ratio = _avg_normal_world(bm, obj)
+        if n is None or ratio < _NORMAL_DEGENERATE:
+            return {"error":
+                "selection normals cancel — no well-defined tangent plane for in_plane "
+                "scaling. Use per-axis x/y/z multipliers, or scale_rings for a closed loop."}
+        n_local = (obj.matrix_world.inverted().to_3x3() @ n)
+        if n_local.length == 0:
+            return {"error": "degenerate normal in local space"}
+        n_local.normalize()
+        c = Vector((sum(v.co.x for v in selected) / len(selected),
+                    sum(v.co.y for v in selected) / len(selected),
+                    sum(v.co.z for v in selected) / len(selected)))
+        for v in selected:
+            offset = v.co - c
+            normal_comp = n_local * offset.dot(n_local)
+            tangent = offset - normal_comp
+            v.co = c + normal_comp + tangent * f
+        bmesh.update_edit_mesh(obj.data)
+        push_undo(f"scale_vertices in_plane={f}")
+        return {"success": True, "verts_scaled": len(selected),
+                "frame": "in-plane ⟂ " + _describe_dir(n)}
+
+    sx = params.get("x", 1.0)
+    sy = params.get("y", 1.0)
+    sz = params.get("z", 1.0)
     if pivot == "SELECTION":
         cx = sum(v.co.x for v in selected) / len(selected)
         cy = sum(v.co.y for v in selected) / len(selected)
@@ -314,9 +537,6 @@ def proportional_move(params):
     if obj is None or obj.mode != 'EDIT':
         return {"error": "Must be in edit mode"}
 
-    fx = float(params.get("x", 0.0))
-    fy = float(params.get("y", 0.0))
-    fz = float(params.get("z", 0.0))
     radius = float(params.get("radius", 0.01))
     if radius <= 0:
         return {"error": "'radius' must be > 0"}
@@ -324,15 +544,33 @@ def proportional_move(params):
     if falloff not in _FALLOFFS:
         return {"error": f"Invalid falloff '{falloff}'. Use {sorted(_FALLOFFS)}"}
 
-    dims = obj.dimensions
     scale = obj.scale
     sx = abs(scale.x) or 1.0
     sy = abs(scale.y) or 1.0
     sz = abs(scale.z) or 1.0
-    # Local-space deltas (mirrors move_vertices).
-    dx = fx * dims.x / sx
-    dy = fy * dims.y / sy
-    dz = fz * dims.z / sz
+
+    frame = None
+    if _has_dir_words(params):
+        # F1: meter-based direction words. _bm is built below for the handles, but
+        # the average normal only depends on the current selection — build a read
+        # handle now.
+        _bm0 = bmesh.from_edit_mesh(obj.data)
+        wv, frame, err = _resolve_world_delta(_bm0, obj, params)
+        if err:
+            return err
+        local = obj.matrix_world.inverted().to_3x3() @ wv
+        dx, dy, dz = local.x, local.y, local.z
+        delta_world = [round(c, 5) for c in wv]
+    else:
+        fx = float(params.get("x", 0.0))
+        fy = float(params.get("y", 0.0))
+        fz = float(params.get("z", 0.0))
+        dims = obj.dimensions
+        # Local-space deltas (mirrors move_vertices).
+        dx = fx * dims.x / sx
+        dy = fy * dims.y / sy
+        dz = fz * dims.z / sz
+        delta_world = [round(fx * dims.x, 5), round(fy * dims.y, 5), round(fz * dims.z, 5)]
     # Radius is in world meters; convert to local space (approx — pick the
     # smallest scale so we err on the side of a larger local radius).
     inv_scale_min = 1.0 / min(sx, sy, sz)
@@ -377,14 +615,17 @@ def proportional_move(params):
 
     bmesh.update_edit_mesh(obj.data)
     push_undo(f"proportional_move r={radius} {falloff}")
-    return {
+    result = {
         "success": True,
         "handles": len(handles),
         "affected": affected,
         "radius": radius,
         "falloff": falloff,
-        "delta_world": [round(fx * dims.x, 5), round(fy * dims.y, 5), round(fz * dims.z, 5)],
+        "delta_world": delta_world,
     }
+    if frame:
+        result["frame"] = frame
+    return result
 
 
 def random_select(params):
