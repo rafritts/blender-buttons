@@ -188,6 +188,17 @@ def get_blender_status(params):
                 round(min(v.z for v in world_sel), 4),
                 round(max(v.z for v in world_sel), 4),
             ]
+        # Y1b: on a keyed mesh, surface which shape key is ACTIVE — edit-mode moves
+        # write there, not to the displayed mesh. A non-Basis key at value 0 is the
+        # silent-edit landmine (gaps.md Y1).
+        sk = getattr(obj.data, "shape_keys", None)
+        if sk is not None and obj.active_shape_key is not None:
+            kb = obj.active_shape_key
+            status["edit"]["active_key"] = {
+                "name": kb.name, "value": round(kb.value, 4),
+                "index": obj.active_shape_key_index,
+                "is_basis": obj.active_shape_key_index == 0 or kb == sk.reference_key,
+            }
 
     return {"success": True, "status": status}
 

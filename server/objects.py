@@ -284,6 +284,31 @@ def set_shape_key(name: str, key: str, value: float, label: str = "") -> str:
 
 
 @mcp.tool()
+def set_active_shape_key(name: str, key: str, label: str = "") -> str:
+    """
+    Aim subsequent edit-mode / sculpt edits at a chosen shape key.
+
+    On a keyed mesh, vertex edits write to the ACTIVE shape key, not the displayed
+    mesh — so a position edit silently vanishes (and becomes a landmine that fires
+    when the morph is dialed up) if the wrong key is active. Call this first to
+    target edits deliberately. "position-only edits are safe" is FALSE on keyed
+    meshes (gaps.md Y1).
+
+    key: shape-key name, or 'Basis' to edit the rest shape (the usual intent).
+
+    Example: set_active_shape_key("GEO-spring_head", key="Basis")  # then reshape the neck
+    """
+    result = call_blender("set_active_shape_key", {"name": name, "key": key}, label=label)
+    if result.get("success"):
+        tag = " (Basis — edits show in the rest mesh)" if result.get("is_basis") \
+              else f" (NON-BASIS, value={result['value']} — edits write to this morph)"
+        main = f"active shape key of '{name}' → '{result['key']}'{tag} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def split_by_part(label: str = "") -> str:
     """Split the active mesh into separate objects, one per connected component
     (P → By Loose Parts). Restores per-part addressability after a join_objects."""

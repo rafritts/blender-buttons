@@ -139,6 +139,7 @@ def select_between(params):
 
 def loop_cut(params):
     import bmesh
+    import mathutils
     obj = bpy.context.active_object
     if obj is None or obj.mode != 'EDIT':
         return {"error": "Must be in edit mode"}
@@ -150,23 +151,50 @@ def loop_cut(params):
     bm = bmesh.from_edit_mesh(obj.data)
     mat = obj.matrix_world
 
+    # Z2/X7: honor the current selection — cut only edges whose BOTH ends are
+    # selected, so a support loop can be added to ONE limb without ribbing the whole
+    # mesh. Whole-mesh is the fallback ONLY when nothing is selected (the case the
+    # target= auto-switch produces, since it deselects on entry).
+    selected = {v.index for v in bm.verts if v.select}
+    scoped = len(selected) > 0
+    bm.verts.ensure_lookup_table()
+
+    def along_axis(e):
+        return abs(((mat @ e.verts[1].co) - (mat @ e.verts[0].co))
+                   .normalized()[axis_idx]) > 0.7
+
     edges_to_cut = [
         e for e in bm.edges
-        if abs(((mat @ e.verts[1].co) - (mat @ e.verts[0].co)).normalized()[axis_idx]) > 0.7
+        if along_axis(e)
+        and (not scoped or (e.verts[0].index in selected and e.verts[1].index in selected))
     ]
 
     if not edges_to_cut:
-        return {"error": f"No edges found running along {axis} axis"}
+        where = "within the selection " if scoped else ""
+        return {"error": f"No edges {where}run along the {axis} axis. "
+                         + ("Try a different axis, or widen the selection."
+                            if scoped else f"Try a different axis.")}
 
     geom = bmesh.ops.subdivide_edges(bm, edges=edges_to_cut, cuts=cuts, use_grid_fill=True)
     bmesh.update_edit_mesh(obj.data)
     push_undo(f"loop_cut {axis} x{cuts}")
 
-    # World-space positions of the new loops along the cut axis (midpoints of subdivided edges).
+    # Report in scene vocabulary, NOT a coordinate dump (X7): how many loops, where
+    # they landed (region word + axis span), and whether the cut was scoped.
     new_verts = [g for g in geom["geom_inner"] if isinstance(g, bmesh.types.BMVert)]
-    positions = sorted(set(round((mat @ v.co)[axis_idx], 4) for v in new_verts))
+    loop_keys = sorted(set(round((mat @ v.co)[axis_idx], 4) for v in new_verts))
+    loops = len(loop_keys)
+    span = [loop_keys[0], loop_keys[-1]] if loop_keys else None
+    centroid = mathutils.Vector((0.0, 0.0, 0.0))
+    for v in new_verts:
+        centroid += mat @ v.co
+    if new_verts:
+        centroid /= len(new_verts)
+    from .common import world_bbox, region_words
+    region = region_words(world_bbox(obj), centroid) if new_verts else "center"
     return {"success": True, "cuts": cuts, "edges_subdivided": len(edges_to_cut),
-            "loop_positions": positions}
+            "loops": loops, "axis": axis, "span_world": span, "region": region,
+            "scoped_to_selection": scoped}
 
 
 def set_component_mode(params):
@@ -597,11 +625,15 @@ def set_edge_crease(params):
     weight = float(params.get("weight", 1.0))
     weight = max(0.0, min(1.0, weight))
     bm = bmesh.from_edit_mesh(obj.data)
+    # Blender 4.0+/5.1 store edge crease as the generic float attribute "crease_edge"
+    # (the legacy bm.edges.layers.crease accessor was removed). Verify/create the
+    # layer BEFORE collecting edge refs — adding a layer reallocates and invalidates
+    # any held BMEdge.
+    cl = bm.edges.layers.float
+    crease_layer = cl.get("crease_edge") or cl.new("crease_edge")
     sel = [e for e in bm.edges if e.select]
     if not sel:
         return {"error": "No edges selected"}
-    crease_layer = bm.edges.layers.crease.verify() if hasattr(bm.edges.layers.crease, "verify") \
-                    else (bm.edges.layers.crease.active or bm.edges.layers.crease.new())
     for e in sel:
         e[crease_layer] = weight
     bmesh.update_edit_mesh(obj.data)
@@ -682,6 +714,136 @@ def select_in_sphere(params):
             "action": action}
 
 
+def select_boundary(params):
+    """Select the OPEN-BOUNDARY edges of a mesh — the edges of a hole/rim (X3B).
+
+    An open boundary edge borders exactly one face. This is the only way to grab a
+    mesh rim: a tilted collar/sleeve/armhole loop can't be isolated by axis bands
+    (a band always drags in adjacent faces). With a rim selected, set_edge_crease /
+    mark_sharp can finally be AIMED at it — which is what fixes cut boundaries
+    curling under SubSurf (Y2), and what rim insets / sleeve hems need.
+
+    Switches to EDGE component mode (a boundary IS an edge set).
+
+    from_selection: if True (default) and verts are already selected, restrict to
+                    boundary edges touching that selection — grow a rim from a seed
+                    region. With nothing selected, selects EVERY open boundary on the
+                    mesh.
+    action: SELECT (replace) | ADD | DESELECT. Default SELECT.
+    """
+    import bmesh
+    import mathutils
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    action = (params.get("action") or "SELECT").upper()
+    if action not in ("SELECT", "ADD", "DESELECT"):
+        return {"error": f"Invalid action '{action}'. Use SELECT | ADD | DESELECT"}
+    from_selection = bool(params.get("from_selection", True))
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    seed = {v.index for v in bm.verts if v.select} if from_selection else set()
+    boundary = [e for e in bm.edges if len(e.link_faces) == 1]
+    if not boundary:
+        return {"error": "No open boundary found — the mesh is closed/watertight "
+                         "(every edge borders 2+ faces). Nothing to select."}
+    if seed:
+        boundary = [e for e in boundary
+                    if e.verts[0].index in seed or e.verts[1].index in seed]
+        if not boundary:
+            return {"error": "No open boundary edges touch the current selection. "
+                             "Deselect (select_all DESELECT) to grab all rims, or "
+                             "seed nearer the hole."}
+
+    # A boundary is an edge set — switch to EDGE component mode so the selection is
+    # usable by set_edge_crease / mark_sharp.
+    bpy.context.tool_settings.mesh_select_mode = (False, True, False)
+    if action == "SELECT":
+        for f in bm.faces:
+            f.select = False
+        for e in bm.edges:
+            e.select = False
+        for v in bm.verts:
+            v.select = False
+    target = set(boundary)
+    for e in bm.edges:
+        if e in target:
+            e.select = (action != "DESELECT")
+    bm.select_flush_mode()
+    bmesh.update_edit_mesh(obj.data)
+
+    mat = obj.matrix_world
+    centroid = mathutils.Vector((0.0, 0.0, 0.0))
+    for e in boundary:
+        centroid += mat @ ((e.verts[0].co + e.verts[1].co) * 0.5)
+    centroid /= len(boundary)
+    from .common import world_bbox, region_words
+    region = region_words(world_bbox(obj), centroid)
+    push_undo(f"select_boundary {action}")
+    return {"success": True, "action": action, "boundary_edges": len(boundary),
+            "from_seed": bool(seed), "region": region}
+
+
+def assign_weight(params):
+    """Assign a vertex-group weight to the CURRENT edit-mode selection (Z1).
+
+    The deform-side sibling of select_by_axis / select_in_sphere: select the verts
+    (by axis band, sphere, ring…), then bind just those to a named group at a chosen
+    weight. The general primitive the all-or-nothing binders lacked — weight_to_bone
+    rigid-binds the WHOLE mesh to one bone, auto_weight heat-solves the WHOLE mesh;
+    neither can say "these verts → this group, blended N%". A group named after a
+    bone is read by an Armature modifier as that bone's influence; an arbitrary group
+    is read by a MeshDeform / mask modifier's vertex_group slot — so this stays a
+    general weight verb, not a bespoke 'bind the shoulder' tool.
+
+    group:  vertex-group name (created on the mesh if absent). Required.
+    weight: 0..1 weight to write. Default 1.0.
+    mode:   REPLACE (set selected verts to `weight`) | ADD (add `weight`, clamped to
+            1) | SUBTRACT (subtract `weight`, clamped to 0). Default REPLACE. Other
+            groups are left untouched — assign partial weights to two groups to blend
+            a bridge between two differently-driven meshes.
+    """
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    group = params.get("group")
+    if not group:
+        return {"error": "'group' (vertex-group / bone name) is required"}
+    weight = float(params.get("weight", 1.0))
+    weight = max(0.0, min(1.0, weight))
+    mode = (params.get("mode") or "REPLACE").upper()
+    if mode not in ("REPLACE", "ADD", "SUBTRACT"):
+        return {"error": f"Invalid mode '{mode}'. Use REPLACE | ADD | SUBTRACT"}
+
+    vg = obj.vertex_groups.get(group)
+    created = vg is None
+    if vg is None:
+        vg = obj.vertex_groups.new(name=group)
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    # Verify the deform layer BEFORE collecting vert refs — verify() can create the
+    # layer and reallocate, invalidating any held BMVert ("BMesh data … removed").
+    deform = bm.verts.layers.deform.verify()
+    selected = [v for v in bm.verts if v.select]
+    if not selected:
+        return {"error": "No vertices selected"}
+    gi = vg.index
+    for v in selected:
+        cur = v[deform].get(gi, 0.0)
+        if mode == "REPLACE":
+            new = weight
+        elif mode == "ADD":
+            new = min(1.0, cur + weight)
+        else:  # SUBTRACT
+            new = max(0.0, cur - weight)
+        v[deform][gi] = new
+    bmesh.update_edit_mesh(obj.data)
+    push_undo(f"assign_weight {group} {mode} {weight}")
+    return {"success": True, "group": group, "group_created": created, "mode": mode,
+            "weight": weight, "verts_assigned": len(selected)}
+
+
 def split_by_part(params):
     """Split the active mesh into separate objects, one per connected component (P → By Loose Parts).
 
@@ -722,4 +884,6 @@ TOOLS = {
     "merge_by_distance":  merge_by_distance,
     "select_in_sphere":   select_in_sphere,
     "split_by_part":      split_by_part,
+    "assign_weight":      assign_weight,
+    "select_boundary":    select_boundary,
 }

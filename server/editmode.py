@@ -215,18 +215,92 @@ def delete_geometry(mode: str = "VERT", label: str = "", target: str = "") -> st
 def loop_cut(axis: str = "Z", cuts: int = 1, label: str = "", target: str = "") -> str:
     """
     Add edge loop cuts perpendicular to the given axis using bmesh.
-    Finds all edges running along that axis and inserts loops crossing it.
+    Finds edges running along that axis and inserts loops crossing it.
     axis: X | Y | Z — edges running along this axis are subdivided,
           producing loops that sit at fixed positions on that axis.
           e.g. axis=Z → horizontal loops; axis=X → vertical loops at constant X.
+
+    SELECTION-SCOPED: if you are already in edit mode with verts selected, only edges
+    inside that selection are cut — add a support loop to ONE limb/region without
+    ribbing the whole mesh. With nothing selected (incl. the target= path, which
+    deselects on entry) it cuts the whole mesh, as before.
+
     target: optional object name — auto-selects it, enters edit mode, exits after.
+            (Note: this clears the selection, so it cuts the WHOLE mesh. To scope a
+            cut, enter edit mode yourself and select the region first.)
     Must be in edit mode (or provide target).
     """
     result = call_blender("loop_cut", {"axis": axis, "cuts": cuts, "target": target}, label=label)
     if result.get("success"):
-        positions = result.get("loop_positions", [])
-        pos_str = f"  {axis}={positions}" if positions else ""
-        main = f"Cut {result['edges_subdivided']} edges x{result['cuts']}{pos_str} [{result.get('op_id','')}]"
+        scope = "in selection" if result.get("scoped_to_selection") else "whole mesh"
+        region = result.get("region", "")
+        span = result.get("span_world")
+        span_str = f", {axis} span {span}" if span else ""
+        main = (f"Cut {result['edges_subdivided']} edges across {result.get('loops','?')} "
+                f"loop(s) — {region} ({scope}){span_str} [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def assign_weight(group: str, weight: float = 1.0, mode: str = "REPLACE",
+                  label: str = "") -> str:
+    """Assign a vertex-group weight to the CURRENT edit-mode selection — the
+    deform-side sibling of select_by_axis / select_in_sphere.
+
+    Select verts (axis band, sphere, ring), then bind just those to a named group at
+    a chosen weight. The general primitive the all-or-nothing binders lacked:
+    weight_to_bone rigid-binds the WHOLE mesh, auto_weight heat-solves the WHOLE mesh;
+    neither can say "these verts → this group, blended N%". A group named after a bone
+    is read by an Armature modifier as that bone's influence; an arbitrary group feeds
+    a MeshDeform / mask modifier's vertex_group slot.
+
+    group:  vertex-group / bone name (created on the mesh if absent).
+    weight: 0..1 (default 1.0).
+    mode:   REPLACE (set to weight) | ADD (add, clamp 1) | SUBTRACT (subtract, clamp 0).
+            Other groups are untouched — assign partial weights to two groups to blend
+            a bridge between two differently-driven meshes (e.g. a shoulder stub
+            torso-bound at the root, arm-bound at the tip).
+
+    Must already be in edit mode with verts selected. Example, blend a bridge:
+      select_in_sphere(...root...); assign_weight("spine", 1.0)
+      select_in_sphere(...tip...);  assign_weight("upper_arm.L", 1.0)
+    """
+    result = call_blender("assign_weight",
+                          {"group": group, "weight": weight, "mode": mode}, label=label)
+    if result.get("success"):
+        made = " (new group)" if result.get("group_created") else ""
+        main = (f"{result['mode']} weight {result['weight']} → group '{result['group']}'"
+                f"{made} on {result['verts_assigned']} vert(s) [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def select_boundary(action: str = "SELECT", from_selection: bool = True) -> str:
+    """Select the OPEN-BOUNDARY edges of a mesh — the edges of a hole or rim.
+
+    The only way to grab a mesh rim: a tilted collar / sleeve / armhole loop can't be
+    isolated by axis bands (a band always drags in adjacent faces). Switches to EDGE
+    component mode, so the selected rim can then be fed to set_edge_crease(1.0) (stop a
+    cut boundary curling under SubSurf) or mark_sharp, or extruded into an inset/hem.
+
+    from_selection: if True (default) and verts are already selected, restrict to
+                    boundary edges touching that selection — grow a rim from a seed
+                    region. With nothing selected, selects EVERY open boundary.
+    action: SELECT (replace) | ADD | DESELECT.
+
+    Example — crease a freshly-cut collar so SubSurf keeps the hem crisp:
+      select_boundary(); set_edge_crease(1.0)
+    """
+    result = call_blender("select_boundary",
+                          {"action": action, "from_selection": from_selection})
+    if result.get("success"):
+        seed = "from seed selection" if result.get("from_seed") else "all rims"
+        main = (f"{result['action']} {result['boundary_edges']} boundary edge(s) "
+                f"({seed}) — {result.get('region','')}")
     else:
         main = result.get("error", "failed")
     return main + _status(result)

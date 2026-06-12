@@ -229,6 +229,54 @@ def rest_shadow_warning(binds):
             f"the new rest shape (gaps.md X4).")
 
 
+def active_shape_key_shadow(obj):
+    """Y1: if obj carries shape keys and the ACTIVE key would swallow an edit-mode
+    position edit, return a dict describing it; else None.
+
+    Edit-mode vertex moves (and sculpt strokes) write to whatever shape key is
+    ACTIVE, not to the displayed mesh. The Basis (reference) key always contributes,
+    so editing it shows in the rest mesh. A NON-basis key contributes only in
+    proportion to its `value`: at value 0 the edit is completely invisible AND a
+    landmine (it deforms the mesh the instant that key is ever dialed up); between 0
+    and 1 it shows scaled, not 1:1. Returns {name, value, index, shadowed} where
+    `shadowed` is True for the fully-invisible value-0 case."""
+    data = getattr(obj, "data", None)
+    sk = getattr(data, "shape_keys", None) if data is not None else None
+    if sk is None or len(sk.key_blocks) < 2:
+        return None
+    kb = obj.active_shape_key
+    if kb is None:
+        return None
+    # Editing the Basis (reference) key shows in the rest mesh — never shadowed.
+    if obj.active_shape_key_index == 0 or kb == sk.reference_key:
+        return None
+    return {"name": kb.name, "value": round(kb.value, 4),
+            "index": obj.active_shape_key_index, "shadowed": kb.value == 0.0}
+
+
+def shape_key_shadow_warning(shadow, mesh_name):
+    """Loud warning string for an edit landing on a non-Basis active shape key (Y1).
+
+    The value-0 case is the documented landmine: the edit is invisible in the
+    evaluated mesh now, and silently deforms the character if an animator ever dials
+    that morph. A non-zero value still means the edit shows SCALED by the key blend,
+    not 1:1. Both point at set_active_shape_key to aim the edit deliberately."""
+    nm, val = shadow["name"], shadow["value"]
+    if shadow["shadowed"]:
+        return (f"⚠ EDIT LANDING ON SHAPE KEY '{nm}' (value 0.0) — this edit-mode "
+                f"change is being written into a morph target that is NOT visible in "
+                f"the evaluated mesh, so nothing will appear to change. Worse, it is a "
+                f"LANDMINE: the deformation triggers the moment that key is dialed up. "
+                f"To edit the rest shape, aim at Basis first: "
+                f"set_active_shape_key('{mesh_name}', key='Basis'). To edit this morph "
+                f"on purpose, ignore this (gaps.md Y1).")
+    return (f"⚠ EDIT LANDING ON SHAPE KEY '{nm}' (value {val}) — this edit-mode change "
+            f"is written into a morph target, not the base mesh, and shows only SCALED "
+            f"by the key's blend, not 1:1. Aim at Basis with "
+            f"set_active_shape_key('{mesh_name}', key='Basis') to edit the rest shape "
+            f"(gaps.md Y1).")
+
+
 def has_material_slots(obj):
     """True if obj's data can carry material slots — i.e. it renders with a
     material. MESH, CURVE, SURFACE, FONT, and META all qualify; a beveled curve

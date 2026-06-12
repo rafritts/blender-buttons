@@ -252,9 +252,18 @@ def check_edit_binds(obj):
     if after != before:
         from .common import deform_bind_warning
         return {"bind_invalidated": True, "bind_warning": deform_bind_warning(binds)}
-    # Position-only edit. Warn only if the bind is still VALID (count matches the
-    # recorded valid count) — a dead bind is inert and shows base-mesh edits 1:1,
-    # so warning there would be false (gaps.md X4).
+    # Position-only edit. Y1c: check shape-key shadowing FIRST — on a keyed mesh the
+    # ACTIVE shape key is the real eraser of the edit, not the bind, and blaming the
+    # bind here sends the diagnosis down the wrong path (a rebind won't bring the
+    # edit back). The shape-key warning takes precedence over bind_shadowed.
+    from .common import active_shape_key_shadow, shape_key_shadow_warning
+    shadow = active_shape_key_shadow(obj)
+    if shadow:
+        return {"shape_key_shadowed": shadow["shadowed"], "shape_key_active": shadow,
+                "shape_key_warning": shape_key_shadow_warning(shadow, obj.name)}
+    # Warn only if the bind is still VALID (count matches the recorded valid count) —
+    # a dead bind is inert and shows base-mesh edits 1:1, so warning there would be
+    # false (gaps.md X4).
     if obj.get("bb_bind_vcount") == after:
         from .common import rest_shadow_warning
         return {"bind_shadowed": True, "bind_warning": rest_shadow_warning(binds)}

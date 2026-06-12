@@ -35,9 +35,12 @@ def call_blender(tool: str, params: dict = None, label: str = "", timeout: float
 def _status(result: dict) -> str:
     """Format the blender_status block that every tool response now carries."""
     # A bind-invalidation warning (gaps.md V2) is injected generically onto any
-    # edit-mode result whose topology change killed a deform bind. Surface it ahead
-    # of the status block so it's never lost regardless of which edit verb ran.
+    # edit-mode result whose topology change killed a deform bind. The shape-key
+    # shadow warning (gaps.md Y1) rides the same channel. Surface both ahead of the
+    # status block so they're never lost regardless of which edit verb ran.
     bind = "\n" + result["bind_warning"] if result.get("bind_warning") else ""
+    if result.get("shape_key_warning"):
+        bind += "\n" + result["shape_key_warning"]
     s = result.get("blender_status")
     if not s:
         return bind
@@ -70,6 +73,11 @@ def _status(result: dict) -> str:
             f"  selected:    {e['selected']}  /  total: {e['total']}",
             f"  sel_z:       {e.get('selection_z_range', '—')}",
         ]
+        ak = e.get("active_key")
+        if ak:
+            tag = " (Basis — edits show)" if ak.get("is_basis") else \
+                  "  ⚠ NON-BASIS — edit-mode moves write HERE, not the rest mesh"
+            lines.append(f"  active_key:  '{ak['name']}' value={ak['value']}{tag}")
     lines.append("────────────────────────────────────────────────")
     return bind + "\n".join(lines)
 

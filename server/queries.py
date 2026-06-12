@@ -72,14 +72,28 @@ def get_blender_status() -> str:
 
 
 @mcp.tool()
-def get_mesh_profile(axis: str = "Z") -> str:
+def get_mesh_profile(axis: str = "Z", min: float = None, max: float = None,
+                     max_rings: int = 200) -> str:
     """
     Slice the active mesh into rings along an axis and report the width/extent at each ring.
     axis: X | Y | Z — the axis to slice along (default Z for vertical objects like blades)
+    min, max: optional WORLD-SPACE window on the profile axis (same units as the table's
+              position column, NOT 0..1 factors). e.g. axis="X", min=0.08, max=0.20 returns
+              only the rings whose X falls in [0.08, 0.20]. Use to profile one region of a
+              production mesh without dumping the whole thing.
+    max_rings: cap the number of rings returned (default 200). If the windowed mesh has more,
+               rings are EVENLY RESAMPLED (first and last always kept) and the table notes it.
+               Pass 0 to uncap. Production meshes (thousands of rings) otherwise blow the
+               result budget.
     Returns a table: position along axis, plus min/max/width on the other two axes.
     Use this to understand actual geometry before making edits — no guessing needed.
     """
-    result = call_blender("get_mesh_profile", {"axis": axis})
+    params = {"axis": axis, "max_rings": max_rings}
+    if min is not None:
+        params["min"] = min
+    if max is not None:
+        params["max"] = max
+    result = call_blender("get_mesh_profile", params)
     if not result.get("success"):
         return result.get("error", "failed")
     profile = result["profile"]
@@ -93,7 +107,15 @@ def get_mesh_profile(axis: str = "Z") -> str:
             w = r[f"{n}_width"]
             cols.append(f"{lo:+.4f}→{hi:+.4f} ({w:.4f})")
         lines.append(f"{ax}={r[ax]:+.4f}  " + "  ".join(cols))
-    return f"{len(profile)} rings along {ax}:\n" + "\n".join(lines) + _status(result)
+    shown = len(profile)
+    total = result.get("rings_total", shown)
+    head = f"{shown} rings along {ax}"
+    if result.get("windowed"):
+        w = result.get("window", [None, None])
+        head += f" in window [{w[0]}, {w[1]}]"
+    if result.get("resampled"):
+        head += f" (resampled from {total} — even spacing, first/last kept)"
+    return f"{head}:\n" + "\n".join(lines) + _status(result)
 
 
 @mcp.tool()

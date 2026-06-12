@@ -245,6 +245,13 @@ def get_object_info(params):
     return {"success": True, "info": info}
 
 
+# Z3: profiling a production mesh whole (the arms returned 4140 rings / 261KB) blows
+# the tool-result budget. Cap the ring count by default — evenly resampled and
+# REPORTED, never silently truncated — so the tool is safe even when the caller
+# doesn't ask for a window.
+_PROFILE_MAX_RINGS = 200
+
+
 def get_mesh_profile(params):
     import bmesh
     obj = bpy.context.active_object
@@ -253,6 +260,14 @@ def get_mesh_profile(params):
     axis = params.get("axis", "Z").upper()
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
     other = [(i, n) for i, n in enumerate(['X', 'Y', 'Z']) if i != axis_idx]
+    # Z3: optional world-space window on the PROFILE axis (same units as the output),
+    # and a max-ring cap with even resampling. min/max are world coords, not 0..1.
+    win_min = params.get("min")
+    win_max = params.get("max")
+    win_min = float(win_min) if win_min is not None else None
+    win_max = float(win_max) if win_max is not None else None
+    mr = params.get("max_rings", _PROFILE_MAX_RINGS)
+    max_rings = int(mr) if mr else 0  # 0 / None → uncapped
 
     was_edit = obj.mode == 'EDIT'
     if was_edit:
@@ -264,7 +279,10 @@ def get_mesh_profile(params):
     rings = {}
     for v in bm.verts:
         wco = obj.matrix_world @ v.co
-        key = round(wco[axis_idx], 4)
+        pos = wco[axis_idx]
+        if (win_min is not None and pos < win_min) or (win_max is not None and pos > win_max):
+            continue
+        key = round(pos, 4)
         if key not in rings:
             rings[key] = {n: [] for _, n in other}
         for i, n in other:
@@ -273,8 +291,21 @@ def get_mesh_profile(params):
     if not was_edit:
         bm.free()
 
+    keys = sorted(rings.keys())
+    total = len(keys)
+    if total == 0:
+        win = f" in {axis} window [{win_min}, {win_max}]" if (win_min is not None or win_max is not None) else ""
+        return {"error": f"No geometry found{win}."}
+
+    # Even resample to the cap (always keep first + last so the extent is honest).
+    resampled = False
+    if max_rings and total > max_rings:
+        idxs = [round(i * (total - 1) / (max_rings - 1)) for i in range(max_rings)]
+        keys = [keys[i] for i in sorted(set(idxs))]
+        resampled = True
+
     profile = []
-    for pos in sorted(rings.keys()):
+    for pos in keys:
         entry = {axis: round(pos, 4)}
         for _, n in other:
             vals = rings[pos][n]
@@ -283,7 +314,10 @@ def get_mesh_profile(params):
             entry[f"{n}_width"] = round(hi - lo, 4)
         profile.append(entry)
 
-    return {"success": True, "axis": axis, "rings": len(profile), "profile": profile}
+    return {"success": True, "axis": axis, "rings": len(profile),
+            "rings_total": total, "resampled": resampled,
+            "windowed": win_min is not None or win_max is not None,
+            "window": [win_min, win_max], "profile": profile}
 
 
 def get_current_selection(params):
@@ -542,6 +576,40 @@ def set_shape_key(params):
     return {"success": True, "name": name, "key": key, "value": round(kb.value, 4)}
 
 
+def set_active_shape_key(params):
+    """Aim subsequent edit-mode / sculpt edits at a chosen shape key (Y1d).
+
+    On a mesh with shape keys, vertex edits land on the ACTIVE key, not the
+    displayed mesh — so a position edit silently vanishes (and becomes a landmine)
+    if the wrong key is active. This sets which key edits will write to.
+
+    key: shape-key name, or 'Basis' to target the rest shape (the usual intent —
+         'position-only edits are safe' is FALSE on keyed meshes, so aim at Basis
+         deliberately before reshaping the rest geometry).
+    """
+    name = params.get("name")
+    key = params.get("key")
+    if not key:
+        return {"error": "'key' is required (shape-key name, or 'Basis' for the rest shape)"}
+    obj = bpy.data.objects.get(name)
+    if obj is None:
+        return {"error": f"Object '{name}' not found"}
+    data = getattr(obj, "data", None)
+    sk = getattr(data, "shape_keys", None) if data is not None else None
+    if sk is None:
+        return {"error": f"'{name}' has no shape keys"}
+    blocks = sk.key_blocks
+    idx = blocks.find(key)
+    if idx < 0:
+        return {"error": f"shape key '{key}' not found on '{name}'. "
+                         f"Available: {[k.name for k in blocks]}"}
+    obj.active_shape_key_index = idx
+    kb = blocks[idx]
+    is_basis = idx == 0 or kb == sk.reference_key
+    return {"success": True, "name": name, "key": kb.name, "index": idx,
+            "value": round(kb.value, 4), "is_basis": is_basis}
+
+
 def set_object_visibility(params):
     """Show or hide an object in the viewport and/or render, without deleting or
     unbinding it. Hiding an armature hides its bones from the user's live view while
@@ -580,5 +648,6 @@ TOOLS = {
     "set_particle_visibility": set_particle_visibility,
     "list_shape_keys":        list_shape_keys,
     "set_shape_key":          set_shape_key,
+    "set_active_shape_key":   set_active_shape_key,
     "set_object_visibility":  set_object_visibility,
 }

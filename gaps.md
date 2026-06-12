@@ -1,148 +1,5 @@
 # MCP gaps
 
-## Built-anatomy pass (Z1–Z3): shoulders/neck shaped, arms socketed, 2026-06-11
-
-Context: extending the chest plug into a real bust — neck column, clavicle
-surface, trapezius slope, and shoulder stubs that plug into the arm meshes'
-open tube mouths (Spring's arms are hollow tubes, open at the shoulder). The
-construction worked: at rest the figure reads neck → shoulders → arms as
-continuous skin, symmetric to 0.87mm mean / 7.1mm max (`check_symmetry`).
-Three weighting strategies were tested live to make the junction survive
-posing; the winner was binding the bust to the production `BlenRig_mdef_cage`
-(same stack as the pullover: `add_modifier MESH_DEFORM` → `move_modifier`
-before Subsurf → `bind_mesh_deform`, all three verbs behaving exactly as
-documented — W1's move verb earned its keep). Remaining pose slip under a 15°
-torso bend is ~1cm at the stub tips, and it is NOT a bind defect: the arms
-reorient under IK (hand targets are children of `master_body_pivot`, not
-`master_torso`, so a torso bend pivots the whole arm relative to the torso)
-and their CorrectiveSmooth(BIND) displaces the arm surface in ways no
-separate-object bind can mirror.
-
-- **Z1 — no selective vertex weighting; binding verbs are all-or-nothing.**
-  `weight_to_bone` rigid-binds the WHOLE mesh to one bone (and strips other
-  groups by design); `auto_weight` heat-solves the WHOLE mesh against the
-  WHOLE rig (792 groups landed on a 166-vert bust). There is no way to say
-  "these selected verts → this bone (or this cage), blended N%" — which is
-  exactly what a built shoulder stub needs: torso-bound at its root,
-  arm-bound at its tip. Without it, any geometry that BRIDGES two
-  differently-driven production meshes will shear at whichever end it isn't
-  bound to. Want, as a general primitive: a weight-assignment verb scoped to
-  the current edit-mode selection (bone name + weight + ADD/REPLACE/blend),
-  the deform-side sibling of `select_by_axis`/`select_in_sphere`.
-
-- **Z2 — `loop_cut` has no region scope, so adding support loops to one limb
-  of an object ribs the entire mesh.** The shoulder bridge needed 1–2 support
-  loops so Subsurf would stop sagging a 9cm quad span (the sag read as a
-  detached arm for three diagnostic rounds). `loop_cut(axis=X)` cut ALL
-  X-running edges — 110 edges across the whole bust — and the irregular new
-  loops rippled the torso into corduroy (undone via `undo_to`). The workable
-  fallback was topology surgery by hand: retract the cap cluster, re-extrude
-  a second segment, taper it — four verbs and two coordinate recomputations
-  per side, where one scoped loop cut would have done. Want: `loop_cut`
-  honoring the current selection (cut only edges within it), or an explicit
-  region parameter.
-
-- **Z3 — `get_mesh_profile` has no windowing and blows the tool-result
-  budget on production meshes.** Profiling the arms (8100 base verts) along X
-  returned 4140 rings / 261KB — past the harness limit, requiring a jq
-  sidecar file to read at all. The query that was actually needed was "y/z
-  extents near x ∈ [0.08, 0.20]". Want: optional `min/max` range on the
-  profile axis and/or a `max_rings` cap with even resampling.
-
-Working notes for the same junction problem, no new verb needed: the
-decisive diagnostic was hiding the occluding shirt with
-`set_object_visibility` — the bare-bust view exposed in one frame what five
-dressed close-ups had hidden (the arm tubes are open, and the bridge was
-sagging, not short). And the arm meshes carry 9 finger shape keys, so
-creasing/closing their open rims directly is double-blocked: X3B (cannot
-select a boundary loop) AND Y1 (any edit-mode touch on a keyed production
-mesh lands on the active key). The arms' rim-curl line at the shoulder seam
-is therefore currently untreatable — same flesh as Y2, new host.
-
-## Shape-key shadowing (Y1–Y2), tank-neckline live pass, 2026-06-11
-
-Context: carving a real scooped neckline into Spring's tank (topology cuts on the
-shirt + an attempted neck-skin extension on the head). Batch 9 fixes verified
-live along the way — see the verification note at the end of this section.
-
-- **Y1 — edit-mode vertex edits silently land on the ACTIVE SHAPE KEY and
-  vanish.** `GEO-spring_head` carries 164 shape keys. A 61-vert neck-ring edit
-  (`proportional_move` −8cm, `scale_vertices`, `move_vertices`) showed perfectly
-  in edit mode (`sel_z` tracked every step), but the evaluated mesh, the status
-  bbox, and `describe(posed=True)` never changed: the edit had been written into
-  whatever shape key was active — a key sitting at value 0. Three diagnostic
-  rounds were burned on the wrong suspects because every other system told a
-  consistent lie:
-  - the X4 exit warning fired ("EDIT SHADOWED BY A LIVE BIND") — true but
-    irrelevant; the bind was not the eraser;
-  - `rebind_deform` ran successfully against an *unchanged* effective rest shape
-    (honest success, useless work);
-  - the X5 `show_viewport` toggle on the MeshDeform changed nothing — correctly
-    ruling out the bind, but nothing pointed at the real cause.
-  Worse than invisibility: the orphaned edit is a LANDMINE. It now lives inside a
-  facial morph target; if an animator ever dials that key, the character's neck
-  ring tears 8cm out of her chest. (Undone via `undo_to` this session.)
-  Wants, as general primitives:
-  (a) any edit-mode mutation verb (`move_vertices`, `proportional_move`,
-      `scale_vertices`, sculpt verbs…) on a mesh WITH shape keys must say which
-      key layer it is writing to — "editing shape key 'mouth shape' (value 0.0,
-      NOT visible in the evaluated mesh)" — in its result, not buried;
-  (b) the edit-mode status block should carry an `active_key:` line whenever the
-      mesh has keys;
-  (c) the X4-style exit warning should check shape-key shadowing FIRST — on a
-      keyed mesh it currently blames the bind, and after a rebind the edit still
-      doesn't show, which reads as a wedged cache (X6 déjà vu) and sends the
-      session down the wrong differential;
-  (d) some way to direct the edit at Basis (or a named key) deliberately, since
-      "position-only edits are safe" is false on keyed meshes.
-
-- **Y2 — cut boundaries curl under Subsurf/CorrectiveSmooth and there is no way
-  to aim a crease at them.** Every `delete_geometry` cut (scoop, armholes,
-  collar) leaves a raw open boundary; Subsurf level 2 + CS ballooned those edges
-  into visible flaps/ruffles at the strap corners, worst in pose. The proper fix
-  is `set_edge_crease 1.0` on the boundary loop — but selecting that loop IS
-  X3B (no open-boundary selector), so the crease verb that already exists cannot
-  be aimed. Position-tucks (scale/move on sphere-selected corners) reduce but
-  don't remove the curl. X3B's priority should rise: it now blocks both rim
-  *extrusion* and post-cut *hem control*.
-
-Batch 9 verification (live, this session): **X1** — four `rebind_deform` calls
-(3× pullover after topology cuts, 1× head incl. CS(BIND)) all completed
-synchronously, no NoneType crash, no orphans. **X3A** — chained
-SELECT/DESELECT axis selections flushed correctly through VERT→face counts at
-every step (33-vert patch carried exactly its 20 faces; no whole-mesh ghosts).
-**X4** — both warning variants fired correctly and prescriptively: "BIND
-INVALIDATED" after each vert-count change (3×), "EDIT SHADOWED BY A LIVE BIND"
-after position-only edits on validly-bound meshes (2×); zero false fires.
-**X5** — `show_viewport` toggle did exactly its X6-diagnostic job (isolated the
-MeshDeform in the Y1 hunt without dismantling the stack). X2/X6 not exercised.
-
-## Remaining from the X-series live pass (X3B, X7), 2026-06-11
-
-X1–X6 are closed (see Batch 9 below). Two deferred items remain open — both are
-selection/edit verbs that ignore an existing selection; filed together because
-they live in the same neighborhood and the authoring session hit both in one
-rim-edit attempt:
-
-- **X3B — no primitive selects an OPEN BOUNDARY loop (a mesh rim).** Batch 9's
-  selection-flush fix (X3A) turned "catastrophic whole-mesh duplicate" into
-  "merely wrong for rim work" — but it did NOT unblock the actual task. A tilted
-  rim ring can't be isolated by axis bands (a 24-vert band always drags in ~10
-  adjacent faces), which is what pushed the authoring session off `extrude`
-  entirely. Wants a `select_boundary` / open-edge-loop verb: select the edges
-  that border a hole (edges with exactly one face), optionally grown from a seed
-  region. The real unblock for rim insets, collar re-shaping, sleeve hems.
-
-- **X7 — `loop_cut` ignores the selection and answers in coordinates.** With 154
-  verts selected (one shoulder segment) it cut 2302 edges across the ENTIRE mesh
-  — both arms, all fingers — doubling a production mesh (3288→8100). It also
-  returned the full list of ~2000 cut X-positions: a raw coordinate dump, the
-  exact anti-pattern the tactile-introspection principle bars. Wants: respect the
-  current selection when one exists (whole mesh only as the no-selection
-  fallback), and report "Cut N edges across M loops in [region words]" instead of
-  the dump. (The global cut happened to suit Spring's arms — density was needed
-  there — but that was luck, not intent.)
-
 _New gaps from future builds go above this line._
 
 ## Tactile introspection — the design principle
@@ -157,6 +14,69 @@ coordinates. BVHTree makes the proximity queries milliseconds-cheap at hobby pol
 ---
 
 # Recently closed
+
+## Batch 10 — built-anatomy + shape-key + rim gaps (Z1–Z3, Y1, Y2, X3B, X7), 2026-06-11
+
+Closes the built-anatomy pass (Z1–Z3), the shape-key shadowing pair (Y1–Y2), and
+the two deferred selection/edit verbs (X3B, X7). e2e in `tests/e2e_batch10.py`
+(40 checks); all 13 prior suites still green. Verified headless (the keyed+bound
+precedence case reuses the synthetic cage stack from batch 7/9).
+
+- **Z1 — `assign_weight(group, weight, mode)`** — the deform-side sibling of
+  `select_by_axis` / `select_in_sphere`: assigns a vertex-group weight to the
+  CURRENT edit-mode vertex selection (`REPLACE` / `ADD`-clamp-1 / `SUBTRACT`-clamp-0),
+  creating the group if absent and leaving other groups untouched. The general
+  primitive the all-or-nothing binders lacked — `weight_to_bone` rigid-binds the
+  WHOLE mesh, `auto_weight` heat-solves the WHOLE mesh. A group named after a bone
+  is read by an Armature modifier as that bone's influence; an arbitrary group feeds
+  a MeshDeform / mask modifier's `vertex_group` slot — so it stays a general weight
+  verb, not a bespoke "bind the shoulder". A bridge is now blendable: select the
+  root → `assign_weight("spine", 1)`, select the tip → `assign_weight("upper_arm.L", 1)`.
+  Writes via the bmesh deform layer (verified BEFORE collecting vert refs — adding a
+  layer reallocates and invalidates held BMVerts).
+- **Z2 / X7 — `loop_cut` is selection-scoped and answers in scene vocabulary.**
+  When verts are selected it cuts ONLY axis-running edges with both ends inside the
+  selection (a support loop on one limb without ribbing the whole mesh); whole-mesh
+  is the fallback only when nothing is selected — which includes the `target=`
+  auto-switch path (it deselects on entry, so `target=` still means whole mesh; to
+  scope, enter edit and select first). The ~2000-element coordinate dump is gone:
+  it now reports `Cut N edges across M loop(s) — <region word> (in selection|whole
+  mesh), <axis> span [min,max]`.
+- **Z3 — `get_mesh_profile` windows and caps.** New `min`/`max` (WORLD-space window
+  on the profile axis, same units as the output — not 0..1 factors) and `max_rings`
+  (default **200**, even-resampled with first/last kept, `0` to uncap). The default
+  cap makes the tool budget-safe even when the caller doesn't ask — the 4140-ring /
+  261KB blowout can't happen silently; the header reports `(resampled from N)` and
+  the window when either is active. _Two ergonomic choices worth a glance: (a) the
+  default cap changes big-mesh output to resampled-but-reported rather than failing;
+  (b) min/max are world coords, chosen to match the profile's own output units._
+- **Y1 — an edit on a keyed mesh no longer vanishes silently.** A position-writing
+  verb (`move_vertices` / `scale_vertices` / `proportional_move` / `inflate_selection`
+  / `jitter_vertices` / `bevel` / `extrude` / `scale_rings` / `taper_*` / the sculpt
+  brushes) on a mesh whose ACTIVE shape key is non-Basis now emits a loud
+  `shape_key_warning` (value 0 → "invisible AND a landmine"; value>0 → "shows scaled,
+  not 1:1"), injected generically in `execute_command` so it fires on both the
+  `target=` and in-session no-target paths (Y1a). The edit-mode status block carries
+  an `active_key:` line whenever the mesh has keys, flagging NON-BASIS (Y1b). The X4
+  exit guard checks shape-key shadowing FIRST and suppresses the misleading
+  `bind_shadowed` when a shadowing key is present (Y1c — a rebind wouldn't bring the
+  edit back). New **`set_active_shape_key(name, key)`** aims edits deliberately —
+  `key="Basis"` to reshape the rest mesh — since "position-only edits are safe" is
+  false on keyed meshes (Y1d). Detection lives in `common.active_shape_key_shadow` /
+  `shape_key_shadow_warning`.
+- **Y2 — cut boundaries are now creasable.** No new verb beyond X3B: with the rim
+  selectable, the existing `set_edge_crease` can finally be aimed at it
+  (`select_boundary(); set_edge_crease(1.0)`) to stop a `delete_geometry` boundary
+  curling under SubSurf/CS. **Fixed a latent break uncovered en route:**
+  `set_edge_crease` used the removed `bm.edges.layers.crease` accessor and threw on
+  Blender 5.1 — rewritten to the generic `crease_edge` float attribute (4.0+/5.1).
+- **X3B — `select_boundary(action, from_selection)`** selects open-boundary edges
+  (those bordering exactly one face) and switches to EDGE component mode. With verts
+  already selected it grows the rim from that seed; with nothing selected it grabs
+  every rim. A watertight mesh returns an honest "no open boundary" error. The real
+  unblock for rim insets, collar reshaping, sleeve hems — and, with Y1d, the arm
+  meshes' finger-keyed open rims are no longer double-blocked (`set_active_shape_key
+  ("Basis")` → `select_boundary` → `set_edge_crease`).
 
 ## Batch 9 — X-series live regressions (X1, X2, X4, X5, X6; X3A), 2026-06-11
 

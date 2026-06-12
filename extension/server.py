@@ -83,6 +83,19 @@ EDIT_MODE_TOOLS = {
     "random_select", "proportional_move", "inflate_selection", "mark_sharp",
     "set_edge_crease", "merge_by_distance", "select_in_sphere", "split_by_part",
     "get_rings", "select_ring", "select_rings", "scale_rings", "taper_end", "taper_section",
+    "assign_weight", "select_boundary",
+}
+
+# Y1: verbs that write VERTEX POSITIONS, so on a keyed mesh they land on the active
+# shape key. A position edit on a non-Basis active key is silently swallowed (value
+# 0) or scaled (value>0) — every one of these must say which key it wrote to. Pure
+# selection / topology-flag verbs are excluded (they don't move verts). Sculpt
+# strokes write to the active key too, so they're in here despite not being EDIT.
+SHAPE_KEY_SHADOW_TOOLS = {
+    "move_vertices", "scale_vertices", "proportional_move", "inflate_selection",
+    "jitter_vertices", "bevel", "extrude", "scale_rings", "taper_end", "taper_section",
+    "sculpt_grab", "sculpt_inflate", "sculpt_draw", "sculpt_smooth", "sculpt_crease",
+    "sculpt_pinch", "sculpt_flatten",
 }
 
 
@@ -162,6 +175,20 @@ def execute_command(command):
             except Exception:
                 pass
 
+    # Y1a: a position-writing edit on a keyed mesh lands on the ACTIVE shape key, not
+    # the displayed mesh. Surface which key — generically, so it fires on the target=
+    # path AND an in-session no-target edit (both route through here). Computed before
+    # the bind check so it takes precedence over the misleading bind_shadowed (Y1c).
+    shape_shadow = None
+    if tool in SHAPE_KEY_SHADOW_TOOLS and isinstance(result, dict) and result.get("success"):
+        from .common import active_shape_key_shadow, shape_key_shadow_warning
+        edited = bpy.data.objects.get(target) if target else bpy.context.active_object
+        shape_shadow = active_shape_key_shadow(edited) if edited is not None else None
+        if shape_shadow:
+            result["shape_key_shadowed"] = shape_shadow["shadowed"]
+            result["shape_key_active"] = shape_shadow
+            result["shape_key_warning"] = shape_key_shadow_warning(shape_shadow, edited.name)
+
     # V2: after the edit verb returned to OBJECT mode (mesh data resynced), check
     # whether the topology actually changed under a bound modifier. A vert-count
     # delta is the documented bind-killer; a position-only edit (move_vertices …)
@@ -176,9 +203,10 @@ def execute_command(command):
             if after != before:
                 result["bind_invalidated"] = True
                 result["bind_warning"] = deform_bind_warning(binds)
-            elif tobj.get("bb_bind_vcount") == after:
+            elif tobj.get("bb_bind_vcount") == after and shape_shadow is None:
                 # X4: position-only edit under a still-valid reconstruct bind — the
-                # rest-shape change is shadowed until rebind.
+                # rest-shape change is shadowed until rebind. Skipped when a shape-key
+                # shadow already explained the vanished edit (Y1c precedence).
                 result["bind_shadowed"] = True
                 result["bind_warning"] = rest_shadow_warning(binds)
 
