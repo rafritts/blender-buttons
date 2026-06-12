@@ -1,5 +1,57 @@
 # MCP gaps
 
+## H1 — overlap warning on object creation
+
+Floor-test finding (weak-driver sword session): four primitives spawned at the
+origin, fully interpenetrating, and nine consecutive status blocks never said
+so. The driver blamed "unreliable positioning"; the real failure is that
+creation reports the new object but not its relationship to the scene.
+
+Spec: after any creation verb (`add_*`, `duplicate_object`, `spline_tube`, ...)
+that lands a new mesh object, check it against existing mesh objects and, when
+it materially overlaps one, say so in the result — with the fix vocabulary:
+
+    ⚠ grip overlaps blade (~100% of grip's volume) — intentional (boolean)?
+      place with on=/at=, or move with snap_to / nudge
+
+Constraints:
+- Warn, never refuse — overlap is often intentional (boolean workflows feed on
+  it). One line in the status block, no extra round trip.
+- Cheap broad phase only by default: world-AABB intersection volume as a
+  fraction of the new object's AABB volume; report above ~25%. Narrow-phase
+  (BVH) only when the AABB test fires AND both meshes are light — mind the
+  known `check_contacts` cost blow-up on dense evaluated meshes (open gap
+  below). AABB-only verdicts are fine; phrase them as "~" estimates.
+- Check even when the caller passed `at=`/`on=` — explicit placement collides
+  too. The origin pileup is just the loudest case.
+- The warning must name the verbs that fix it. A result line is where a weak
+  driver learns the vocabulary exists; this is the cheapest, most diagnostic
+  moment to teach placement.
+
+## H2 — screenshots and renders must be legible by default
+
+Same session: "MATERIAL and RENDERED shading often came back washed out, dark,
+or blank." Reproducible — an unlit scene renders near-black, and a driver that
+cannot see cannot iterate (and cannot debug lighting *before* it can see).
+
+Spec, two layers:
+- Detection (always on): after `get_viewport_screenshot` / `render_to_file`,
+  inspect the produced image; if it is near-black or near-uniform (mean
+  luminance under ~5%, or variance ≈ 0), say so in the result with likely
+  cause and fix: "image is ~97% black — scene has no lights (`add_light`) or
+  the camera is inside geometry (`frame_scene`)". Never return a blank image
+  as silent success. The uniformity check also catches camera-inside-mesh,
+  not just lighting.
+- Prevention (cheap prior): when shading is RENDERED/MATERIAL and the scene
+  has zero lights and no emissive world, warn in the screenshot result before
+  the driver burns a loop on it. Optional escape hatch:
+  `render_to_file(ensure_lit=True)` injects a neutral studio world for that
+  render only, never persisted into the scene.
+
+Both extension-side, headless-testable (assert the black-render warning fires
+on an unlit scene; assert the overlap line fires on two stacked cubes and does
+NOT fire on separated ones).
+
 _New gaps from future builds go above this line._
 
 (G1 closed in batch 12 — `extrude_along_curve`: sweep the current edit-mode face
