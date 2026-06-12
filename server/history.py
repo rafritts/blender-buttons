@@ -1,18 +1,43 @@
 from server._core import mcp, call_blender, _status
 
 
+def _fmt_val(v):
+    if isinstance(v, float):
+        return f"{v:g}"
+    return repr(v)
+
+
+def _fmt_call(tool, params):
+    """Render a history entry as the call that produced it. Zero/empty params are
+    elided (the vector verbs pass every direction word, almost all 0)."""
+    args = []
+    for k, v in (params or {}).items():
+        if v is None or v == "":
+            continue
+        if not isinstance(v, bool) and isinstance(v, (int, float)) and v == 0:
+            continue
+        args.append(f"{k}={_fmt_val(v)}")
+    return f"{tool}({', '.join(args)})"
+
+
 @mcp.tool()
 def get_history() -> str:
     """
-    Return the full operation history log. Each entry has:
-    id (8-char hash), label (human name), tool, params.
+    Return the full operation history log as the actual calls that were made —
+    one line per op: [id] tool(param=value, ...)  — label. Zero/empty params are
+    elided for readability.
     Use with undo_to(id) to roll back to any named point, or redo() to step forward.
     """
     result = call_blender("get_history")
     entries = result.get("history", [])
     if not entries:
         return "No history yet."
-    lines = [f"[{e['id']}] {e['label']}  ({e['tool']})" for e in entries]
+    lines = []
+    for e in entries:
+        line = f"[{e['id']}] {_fmt_call(e['tool'], e.get('params'))}"
+        if e.get("label") and e["label"] != e["tool"]:
+            line += f"  — {e['label']}"
+        lines.append(line)
     redo_n = result.get("redo_available", 0)
     if redo_n:
         lines.append(f"({redo_n} undone op(s) available to redo)")
