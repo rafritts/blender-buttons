@@ -19,13 +19,16 @@ def add_light(params):
     """Create a new light object.
 
     name:     required, unique.
-    type:     POINT | SUN | SPOT | AREA (default POINT).
+    type:     POINT | SUN | SPOT | AREA (default POINT). DIRECTIONAL is accepted
+              as an alias for SUN.
     x, y, z:  world position (default 0,0,5).
     energy:   light strength. Default 1000 for POINT/SPOT/AREA, 5 for SUN.
               POINT/SPOT/AREA energy is in watts; SUN is irradiance-like.
-    color:    [r, g, b] floats 0..1. Default warm white [1, 0.95, 0.9].
+    color:    [r, g, b] floats 0..1 (scene-linear). Default warm white [1, 0.95, 0.9].
+    hex:      "#RRGGBB" sRGB color, converted to scene-linear. Overrides color.
     size:     soft-shadow radius (POINT), or AREA quad side, or SPOT radius. Default 0.25.
     target:   optional object name. If given, the light is aimed at that object's center.
+    spot_angle: FULL cone (apex) angle in degrees for SPOT lights. Default 45.
     """
     name = params.get("name")
     if not name:
@@ -34,6 +37,8 @@ def add_light(params):
         return {"error": f"Object '{name}' already exists"}
 
     light_type = (params.get("type") or "POINT").upper()
+    if light_type == "DIRECTIONAL":
+        light_type = "SUN"
     if light_type not in _LIGHT_TYPES:
         return {"error": f"Invalid light type '{light_type}'. Use one of {sorted(_LIGHT_TYPES)}"}
 
@@ -41,6 +46,13 @@ def add_light(params):
     y = params.get("y", 0.0)
     z = params.get("z", 5.0)
     color = params.get("color") or [1.0, 0.95, 0.9]
+    hex_str = params.get("hex")
+    if hex_str:
+        from .shading import hex_to_linear_rgba
+        try:
+            color = hex_to_linear_rgba(hex_str)[:3]
+        except ValueError as e:
+            return {"error": str(e)}
     if len(color) != 3:
         return {"error": "'color' must be a 3-element RGB list"}
     size = params.get("size", 0.25)
@@ -89,7 +101,8 @@ def add_light(params):
 def set_world_background(params):
     """Set the scene's world environment.
 
-    color:    [r, g, b] solid background color (0..1 floats). Optional.
+    color:    [r, g, b] solid background color (0..1 scene-linear floats). Optional.
+    hex:      "#RRGGBB" sRGB solid color, converted to scene-linear (overrides color).
     strength: background light intensity. Default 1.0.
     hdri:     path to an HDRI/EXR image. If provided, overrides `color`.
               The image is loaded as an Environment Texture and connected
@@ -120,6 +133,13 @@ def set_world_background(params):
 
     hdri = params.get("hdri")
     color = params.get("color")
+    hex_str = params.get("hex")
+    if hex_str:
+        from .shading import hex_to_linear_rgba
+        try:
+            color = hex_to_linear_rgba(hex_str)
+        except ValueError as e:
+            return {"error": str(e)}
     if hdri:
         path = os.path.expanduser(hdri)
         if not os.path.isfile(path):
@@ -224,9 +244,10 @@ def modify_light(params):
 
     name:     required — light object name.
     energy:   optional new energy (watts for POINT/SPOT/AREA, irradiance for SUN).
-    color:    optional [r, g, b].
+    color:    optional [r, g, b] (scene-linear).
+    hex:      optional "#RRGGBB" sRGB color, converted to scene-linear (overrides color).
     size:     optional soft-shadow radius / AREA quad side / SPOT radius.
-    spot_angle: SPOT only, in degrees.
+    spot_angle: SPOT only — FULL cone (apex) angle in degrees.
     x, y, z:  optional new world position. Each axis independent — omitted axes stay.
     target:   optional object name to aim at (re-aims the light's -Z axis at target center).
     """
@@ -246,11 +267,18 @@ def modify_light(params):
         applied.append(f"energy={energy}")
 
     color = params.get("color")
+    hex_str = params.get("hex")
+    if hex_str:
+        from .shading import hex_to_linear_rgba
+        try:
+            color = hex_to_linear_rgba(hex_str)[:3]
+        except ValueError as e:
+            return {"error": str(e)}
     if color is not None:
         if len(color) != 3:
             return {"error": "'color' must be a 3-element RGB list"}
         light_data.color = tuple(color)
-        applied.append(f"color={list(color)}")
+        applied.append(f"hex={hex_str}→{list(color)}" if hex_str else f"color={list(color)}")
 
     size = params.get("size")
     if size is not None:

@@ -97,22 +97,28 @@ def add_plane(name: str, width: float, depth: float,
 
 @mcp.tool()
 def add_cylinder(name: str, radius: float, height: float,
-                 on: dict = None, vertices: int = 32, cap_fill: str = "NGON",
+                 on: dict = None, segments: int = None, vertices: int = 32,
+                 cap_fill: str = "NGON",
                  rot_x: float = 0, rot_y: float = 0, rot_z: float = 0,
                  label: str = "") -> str:
     """
     Add a cylinder aligned to Z. Exact radius and height in meters.
-    vertices: edge count around the circumference (more = smoother).
+    For a TAPERED cylinder (different top/bottom radii) use add_cone(radius_top=...).
+    segments: edge count around the circumference (more = smoother). Default 32.
+            `vertices` is accepted as an alias.
     cap_fill: NGON | TRIFAN | NOTHING.
     on: placement spec — see PLACEMENT DSL.
     rot_x/y/z: rotation in degrees; placement stays flush (resolved against the
             post-rotation bounding box, not the unrotated one).
     """
-    result = call_blender("add_cylinder", {
+    params = {
         "name": name, "radius": radius, "height": height,
         "on": on, "vertices": vertices, "cap_fill": cap_fill,
         "rotation_deg": [rot_x, rot_y, rot_z],
-    }, label=label)
+    }
+    if segments is not None:
+        params["segments"] = segments
+    result = call_blender("add_cylinder", params, label=label)
     return _add_result("CYLINDER", result) + _status(result)
 
 
@@ -138,22 +144,28 @@ def add_sphere(name: str, radius: float,
 
 @mcp.tool()
 def add_cone(name: str, radius_bottom: float, height: float, radius_top: float = 0.0,
-             on: dict = None, vertices: int = 32, cap_fill: str = "NGON",
+             on: dict = None, segments: int = None, vertices: int = 32,
+             cap_fill: str = "NGON",
              rot_x: float = 0, rot_y: float = 0, rot_z: float = 0,
              label: str = "") -> str:
     """
     Add a cone (or truncated cone) aligned to Z.
     radius_bottom: base radius in meters.   radius_top: top radius (0 = sharp point).
     height: total Z extent in meters.
+    segments: edge count around the circumference (more = smoother). Default 32.
+            `vertices` is accepted as an alias.
     on: placement spec — see PLACEMENT DSL.
     rot_x/y/z: rotation in degrees; placement stays flush (resolved against the
             post-rotation bounding box, not the unrotated one).
     """
-    result = call_blender("add_cone", {
+    params = {
         "name": name, "radius_bottom": radius_bottom, "radius_top": radius_top,
         "height": height, "on": on, "vertices": vertices, "cap_fill": cap_fill,
         "rotation_deg": [rot_x, rot_y, rot_z],
-    }, label=label)
+    }
+    if segments is not None:
+        params["segments"] = segments
+    result = call_blender("add_cone", params, label=label)
     return _add_result("CONE", result) + _status(result)
 
 
@@ -208,7 +220,8 @@ def add_icosphere(name: str, radius: float,
 
 @mcp.tool()
 def add_circle(name: str, radius: float,
-               on: dict = None, vertices: int = 32, fill_type: str = "NOTHING",
+               on: dict = None, segments: int = None, vertices: int = 32,
+               fill_type: str = "NOTHING",
                rot_x: float = 0, rot_y: float = 0, rot_z: float = 0,
                label: str = "") -> str:
     """
@@ -216,17 +229,21 @@ def add_circle(name: str, radius: float,
     a thin disc.
 
     radius:    in meters.
-    vertices:  edge count around the circumference.
+    segments:  edge count around the circumference. Default 32. `vertices` is
+               accepted as an alias.
     fill_type: NOTHING (open ring, vertices only) | NGON (filled disc) | TRIFAN.
     on: placement spec — see PLACEMENT DSL.
     rot_x/y/z: rotation in degrees; placement stays flush (resolved against the
             post-rotation bounding box, not the unrotated one).
     """
-    result = call_blender("add_circle", {
+    params = {
         "name": name, "radius": radius,
         "on": on, "vertices": vertices, "fill_type": fill_type,
         "rotation_deg": [rot_x, rot_y, rot_z],
-    }, label=label)
+    }
+    if segments is not None:
+        params["segments"] = segments
+    result = call_blender("add_circle", params, label=label)
     return _add_result("CIRCLE", result) + _status(result)
 
 

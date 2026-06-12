@@ -141,8 +141,10 @@ def set_toon_material(params):
     Colors are scene-linear floats 0..1 (same convention as set_material).
 
     target:          object OR group name (group expands to every mesh inside).
-    base_color:      [r,g,b(,a)] flat surface color. Required unless BOTH
+    base_color:      [r,g,b(,a)] flat surface color. Required unless `hex` or BOTH
                      gradient_top and gradient_bottom are given.
+    hex:             "#RRGGBB" sRGB surface color, converted to scene-linear.
+                     Overrides base_color.
     shadow_color:    color of the darkest band. Default: base scaled ~0.55 and
                      biased cool (anime shadows are cool, not black).
     bands:           number of hard shading steps (>=1). 2-3 reads cleanest.
@@ -170,6 +172,13 @@ def set_toon_material(params):
         return {"error": blocked}
 
     base = _rgba(params.get("base_color"))
+    hex_str = params.get("hex")
+    if hex_str:
+        from .shading import hex_to_linear_rgba
+        try:
+            base = hex_to_linear_rgba(hex_str)
+        except ValueError as e:
+            return {"error": str(e)}
     grad_top = _rgba(params.get("gradient_top"))
     grad_bottom = _rgba(params.get("gradient_bottom"))
     if base is None and not (grad_top is not None and grad_bottom is not None):

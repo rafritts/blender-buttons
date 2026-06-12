@@ -180,7 +180,8 @@ def add_cylinder(params):
         target_dims=(radius * 2, radius * 2, params.get("height", 1.0)),
         on=params.get("on"),
         rotation_deg=params.get("rotation_deg", [0, 0, 0]),
-        extra={"vertices": params.get("vertices", 32), "cap_fill": params.get("cap_fill", "NGON")},
+        extra={"vertices": params.get("segments") or params.get("vertices", 32),
+               "cap_fill": params.get("cap_fill", "NGON")},
     )
 
 
@@ -208,7 +209,7 @@ def add_cone(params):
         on=params.get("on"),
         rotation_deg=params.get("rotation_deg", [0, 0, 0]),
         extra={
-            "vertices": params.get("vertices", 32),
+            "vertices": params.get("segments") or params.get("vertices", 32),
             "cap_fill": params.get("cap_fill", "NGON"),
             "radius1_norm": (r_bottom / r_max) * 0.5,
             "radius2_norm": (r_top / r_max) * 0.5,
@@ -255,7 +256,7 @@ def add_circle(params):
         on=params.get("on"),
         rotation_deg=params.get("rotation_deg", [0, 0, 0]),
         extra={
-            "vertices":  params.get("vertices", 32),
+            "vertices":  params.get("segments") or params.get("vertices", 32),
             "fill_type": params.get("fill_type", "NOTHING"),
         },
     )

@@ -7,20 +7,24 @@ from server import polyhaven
 @mcp.tool()
 def add_light(name: str, type: str = "POINT",
               x: float = 0.0, y: float = 0.0, z: float = 5.0,
-              energy: float = None, color: list = None, size: float = 0.25,
+              energy: float = None, color: list = None, hex: str = "",
+              size: float = 0.25,
               target: str = "", spot_angle: float = 45.0,
               label: str = "") -> str:
     """
     Add a light to the scene.
 
     name:    REQUIRED — unique object name.
-    type:    POINT | SUN | SPOT | AREA  (default POINT)
+    type:    POINT | SUN | SPOT | AREA  (default POINT). DIRECTIONAL is accepted
+             as an alias for SUN.
     x, y, z: world position (meters). Default (0, 0, 5).
     energy:  light strength. Defaults: 1000 for POINT/SPOT/AREA (watts), 5 for SUN.
-    color:   [r, g, b] floats 0..1. Default warm white [1, 0.95, 0.9].
+    color:   [r, g, b] floats 0..1 (scene-linear). Default warm white [1, 0.95, 0.9].
+    hex:     "#RRGGBB" sRGB color, converted to scene-linear (same convention as
+             set_material). Overrides color.
     size:    soft-shadow radius / AREA quad side / SPOT radius. Default 0.25 m.
     target:  optional object name to aim the light at (its -Z axis points at the target).
-    spot_angle: cone angle in degrees for SPOT lights. Default 45.
+    spot_angle: FULL cone (apex) angle in degrees for SPOT lights. Default 45.
 
     Example: add_light("key", type="AREA", x=3, y=-3, z=4, size=2.0, energy=500, target="donut")
     """
@@ -28,6 +32,7 @@ def add_light(name: str, type: str = "POINT",
               "spot_angle": spot_angle}
     if energy is not None: params["energy"] = energy
     if color is not None:  params["color"] = color
+    if hex:                params["hex"] = hex
     if target:             params["target"] = target
     result = call_blender("add_light", params, label=label)
     if result.get("success"):
@@ -40,18 +45,22 @@ def add_light(name: str, type: str = "POINT",
 
 @mcp.tool()
 def modify_light(name: str, energy: float = None, color: list = None,
-                 size: float = None, spot_angle: float = None,
+                 hex: str = "", size: float = None, spot_angle: float = None,
                  x: float = None, y: float = None, z: float = None,
                  target: str = "", label: str = "") -> str:
     """
     Tweak an existing light without rebuilding it. Dial energy/color/size live.
     All params optional except `name`. x/y/z move the light; target re-aims it.
+    hex: "#RRGGBB" sRGB color, converted to scene-linear (overrides color).
+    spot_angle is the FULL cone (apex) angle in degrees.
     """
     params = {"name": name}
     for key, val in (("energy", energy), ("color", color), ("size", size),
                      ("spot_angle", spot_angle), ("x", x), ("y", y), ("z", z)):
         if val is not None:
             params[key] = val
+    if hex:
+        params["hex"] = hex
     if target:
         params["target"] = target
     result = call_blender("modify_light", params, label=label)
@@ -64,13 +73,15 @@ def modify_light(name: str, energy: float = None, color: list = None,
 
 
 @mcp.tool()
-def set_world_background(color: list = None, strength: float = None,
+def set_world_background(color: list = None, hex: str = "", strength: float = None,
                          hdri: str = "", resolution: str = "2k", label: str = "") -> str:
     """
     Set the world background. Either a solid color (cheap ambient) or an HDRI
     (image-based lighting — free realistic environment light + reflections).
 
     color:    [r, g, b] solid color, floats 0..1. Ignored if `hdri` is set.
+    hex:      "#RRGGBB" sRGB solid color, converted to scene-linear (same
+              convention as set_material). Overrides color; ignored if `hdri` is set.
     strength: light intensity from the background. Default 1.0.
     hdri:     EITHER a path to a local HDRI/EXR file, OR a Poly Haven HDRI asset id
               (from search_hdris, e.g. "studio_small_03"). If it isn't an existing
@@ -85,6 +96,7 @@ def set_world_background(color: list = None, strength: float = None,
     """
     params = {}
     if color is not None:    params["color"] = color
+    if hex:                  params["hex"] = hex
     if strength is not None: params["strength"] = strength
     if hdri:
         # A local file passes straight through; anything else is a Poly Haven id
