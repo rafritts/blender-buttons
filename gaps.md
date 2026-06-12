@@ -1,5 +1,67 @@
 # MCP gaps
 
+## J — the hatchet tier: 2D→3D creation powertools (J1–J4)
+
+The surface today is knives (primitives + boolean + placement) and scalpels
+(edit-mode verbs, recently made aimable by F/G). The missing tier is hatchets:
+one call → 80% of a shape. Design principle for all four, derived from what
+already works (`auto_weight`, `match_dimension`, `until_contact`):
+
+**A hatchet is a dimensionality reducer.** LLMs are weak at 3D vertex
+reasoning but strong at 2D outlines, profiles, and scalar lists. Every classic
+human Blender hatchet takes low-dimensional input — that's what these wrap.
+All four are bone-stock Blender primitives (spin, fill+solidify, skin
+modifier, metaballs) — no domain leakage, per the general-tools rule.
+
+Shared requirements:
+- Placement/naming params match the existing `add_*` convention; output is a
+  normal mesh object that composes with every existing verb.
+- Validate the cheap 2D input BEFORE executing; refuse with numbers, F1-style
+  (self-intersecting outline: name the two crossing segments; negative radius:
+  name the index).
+- Clean, editable topology or it's a trap — a hatchet whose output only
+  scalpels can fix is worse than no hatchet. State topology grade in the result.
+- Escalation-ladder docstrings: each hatchet ends with "refine with: <verbs>";
+  the relevant knives/scalpels gain one line pointing back up ("revolved
+  shape? `add_lathe` does it in one call"). Cheap discoverability both ways.
+
+**J1 — `add_lathe(name, profile=[[r, z], ...], segments=32)`** — surface of
+revolution: profile revolved around local Z (bmesh spin). r=0 endpoints close
+poles with merged verts. Pommels, helmets, vases, bottles, pillars, chess
+pieces. Killer synergy: lathe output IS ring topology — `get_rings`,
+`scale_rings`, `select_ring`, `taper_section` work on it immediately. Guards:
+r ≥ 0, monotonic-z self-intersection check. Test: vase profile → assert ring
+count == len(profile), dims match profile extents.
+
+**J2 — `add_silhouette(name, outline=[[x, z], ...], thickness, bevel_width=0)`**
+— flat 2D outline (front/XZ plane, the natural drawing plane), filled,
+solidified along Y to `thickness`, optional edge bevel. Blades, guards,
+plates, shields, brackets — how humans actually model swords. Outline
+auto-closes; refuse self-intersection (segment-pair check, name the segments).
+Prefer grid fill where the outline allows; report fill quality. Test: a
+non-convex outline → manifold result, `check_mesh` clean, dims match outline
+bbox × thickness.
+
+**J3 — `add_skeleton(name, joints=[[x, y, z], ...], radii=[...])`** — stick
+figure → organic mesh: edge chain + skin modifier (per-joint radii) +
+subsurf, modifiers left LIVE so the result stays editable (`convert_to_mesh`
+already exists for downstream booleans). Limbs, horns, antlers, trees,
+tentacles. The 19-call viking horn becomes one call: 4 joints, tapering
+radii. V1 is a single chain; branching is a follow-up, not v1 scope. Guards:
+len(radii) == len(joints), radii > 0, joints non-coincident. Test: horn-like
+chain → mesh dims, radii honored at each joint (measure ring diameters).
+
+**J4 — `add_blob(name, blobs=[[x, y, z, r], ...], resolution=0.05)`** —
+metaball fusion: place weighted blobs, they fuse smoothly, convert to mesh.
+The organic blockout hatchet (torso+head+muzzle in one call). Honest topology
+caveat in the result: metaball→mesh is blockout-grade tri soup — say so, and
+suggest the remesh path for sculpt-readiness. Guards: r > 0, warn when a blob
+is fully inside another (it contributes nothing).
+
+Sequencing: independent of I1, but land names under I1's prefix discipline
+(`add_*` = creates). These four are additive even against the ≤100 count
+target. Each is extension-side and headless-testable.
+
 ## I1 — tool-surface consolidation: ~155 tools → ~95, name-as-namespace
 
 The server has ~155 registered tools (count: `grep -c "@mcp.tool" server/*.py`).
