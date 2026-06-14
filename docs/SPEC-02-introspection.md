@@ -10,8 +10,11 @@ Give the blind sculptor its eyes: a faithful, holdable textual representation of
 is currently selected, in a **local frame**, that the LLM can reason over and act on
 without ever touching a world coordinate.
 
-This representation is **for the LLM, never the human.** The target user is a 3D layman;
-he never reads a pole count or a vertex label. This is the sculptor's sense of touch.
+This representation is **for the LLM, never the human.** It is the sculptor's sense of
+touch — and specifically the instrument behind **diagnose mode** (see vision.md, "How the
+Human Drives"): when the human supplies only a symptom ("her face reads wrong"), this is
+what the LLM uses to find the geometric cause. The human never reads a pole count or a
+vertex label.
 
 ## Four properties (the design criteria)
 
@@ -109,9 +112,13 @@ auto status block) vs **active exploration** (this tool, deliberate).
 
 ## Open questions
 
-- **Layman vs pro as primary target.** Recommendation: design for the layman as the floor
-  (pro comes nearly free). Affects whether a "hand-tweak the 5%" path is first-class.
-  Unconfirmed.
+- **Diagnosis routing (geometry vs appearance).** Settled: the LLM owns diagnosis from the
+  symptom down, and the layman-vs-pro question is closed — delegation span is per-request,
+  not a user type (see vision.md, "How the Human Drives"). The live question is the routing
+  step: how reliably can this representation distinguish a *geometry-caused* symptom (a
+  shading artifact from a topology pinch — the sculptor's to fix) from a pure *appearance*
+  symptom (routes back to the human as taste)? The normals case is the proving ground: an
+  appearance symptom with a touchable geometric cause.
 - **Auto patch-decomposition** (segmenting an organic mesh into clean grid-patches) is the
   hard, research-y part — deferred. v1 leans on rings (axis-aligned), explicit named
   regions, and the robustly-computable feature skeleton. Not full auto-gridding.

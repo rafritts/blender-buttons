@@ -29,6 +29,57 @@ genuinely aesthetic choice arises, the right behavior is to surface precise vari
 human. The design never depends on the LLM's taste; it depends on its precision to
 generate exact options and its touch to tell them apart. The seam is the product.
 
+## How the Human Drives: Four Delegation Modes
+
+The taste/precision split isn't a fixed line — the human slides it per request, choosing
+how much of the work to hand off. Between intent and geometry runs a pipeline:
+
+```
+symptom        →   diagnosis        →   fix          →   execution
+"looks weird"      "normals at X,       "set them        (do it)
+                    want Y"              to Y"
+```
+
+The human can enter at any point and delegate the rest. Four modes, drawn from real
+harness use:
+
+1. **Scaffold** ("go ham") — delegate the whole pipeline, broad. *"Block out an anime
+   girl, pink hair, ninja outfit."* The LLM owns the full compile from intent to geometry.
+2. **Diagnose** ("I can't be bothered to find it") — delegate the find-the-cause span.
+   *"Her face reads wrong in this light — what is it?"* The LLM localizes the cause.
+3. **Execute** ("you're faster than me") — delegate only the hands. *"Normals on the face
+   are at X, the toon shader wants ~Y — fix them."* The human pre-diagnosed; the LLM is
+   precise hands.
+4. **Deep-dive** — co-reason about the work itself. Emergent; see below.
+
+The same person moves fluidly across all four in one session — "pro" on the normals tweak,
+"layman" on the scaffold. **Delegation span is a property of the request, not the user.**
+("Design for the layman vs the pro" was therefore the wrong question — there is no fixed
+user to design for.)
+
+The load-bearing consequence: **diagnosis belongs to precision, not taste.** The human
+supplies the symptom ("weird"); turning that into "it's the normals, at X, should be Y" is
+a precision act the LLM owns. A pro can pre-supply the diagnosis (entering at mode 3); a
+layman cannot — so the LLM must own the whole pipeline from the symptom down. Diagnosis
+routes first: a *geometry-caused* symptom (a shading artifact from a topology pinch) is the
+sculptor's to feel and fix; a pure *appearance* symptom (the hair color is wrong) has
+nothing to touch and routes back to the human as taste.
+
+Each near-term mode already has a home pillar:
+
+- **Scaffold** → the generative verbs (`add_*`, build patterns).
+- **Diagnose** → the introspection / touch suite (`SPEC-02`). Active stereognosis *is* the
+  diagnostic instrument.
+- **Execute** → the action surface, with `SPEC-01`'s refuse-with-capture as its safety net:
+  mode 3 is exactly where the human asks for a specific verb the surface may not have yet,
+  so it is the mode that generates the build queue.
+
+**Deep-dive (mode 4) is deferred because it is downstream, not because it is optional.** It
+isn't a feature you build — it emerges once scaffold, diagnose, and execute are each
+frictionless and cheap to compose, so that dropping into any of them mid-thought costs
+nothing. In the modeling context it is just a tight conversational braid of the other
+three. Build the three; the fourth falls out.
+
 ## The Blind Sculptor (stereognosis)
 
 The technical name for knowing an object's form by touch alone is **stereognosis** —
@@ -153,10 +204,11 @@ never *"make something good"* (beauty isn't measurable and isn't the LLM's job).
 batch either moves that number or it doesn't.
 
 There are two floor tests, nested. The **tool** floor test above is about the *driver
-model*. The **product** floor test is about the *human*: can a person with taste but zero
-modeling craft — the actual target user — direct the LLM to a WuWa-grade character? A pro
-artist is the easy case; the layman-with-taste is the hard case and the real target. If
-the layman can drive it, everyone can.
+model*. The **product** floor test is about the *human*: can a person who supplies symptoms,
+not diagnoses, direct the LLM to a WuWa-grade character? That tests the hardest span of the
+pipeline — it forces the LLM to own *diagnosis*, not just execution (see "How the Human
+Drives"). A request that arrives pre-diagnosed (mode 3) is the easy case; *"her face looks
+weird"* (mode 1/2) is the gate. If the LLM can diagnose, it can execute for anyone.
 
 ## Model-Agnosticism Is a Law
 
