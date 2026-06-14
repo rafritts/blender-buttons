@@ -2,48 +2,196 @@
 
 ## The Idea
 
-An MCP server that exposes full Blender functionality so an LLM can use Blender the way a human would.
+A model-agnostic MCP server that lets an LLM model in Blender as a **blind sculptor** —
+working alongside a sighted director who owns the taste.
 
-The name says it all: the LLM is just a user sitting at a desk, hand on keyboard, pushing buttons.
+The LLM cannot see. It feels the model with its fingertips, more precisely than a
+human eye ever could, and shapes geometry on the director's instruction. The
+director looks, judges, and says "adjust this." Together they take a piece from
+blockout to a WuWa/Genshin-grade finished character.
 
-## The Core Principle
+## The Division of Labor
 
-Humans do not reason about vertices and edges mentally. Neither should LLMs.
+Three parties, three jobs. A capability landing in the wrong party is a defect.
 
-A human using Blender looks at the viewport, decides what they want to change, picks an operation, executes it, and looks again. The LLM should do exactly the same thing — through rendered images and named operations.
+- **The human owns taste.** Vision, intent, acceptance criteria, artistic judgment —
+  the *what* and the *is-this-right*. Especially appearance: texture, lighting,
+  material, the final look. Only the human can say "yep, perfect" or "yikes, rework it."
+- **The LLM owns precision.** It compiles the human's fuzzy, taste-laden direction
+  ("bigger, more shapely") into an exact, correct, verified sequence of operations,
+  and measures fidelity to the target. Not a source of taste — a precision instrument.
+- **The tools own the mechanics.** Math, coordinates, state, topology, sequencing.
+  None of it reaches the LLM.
 
-Precise numerical reasoning over raw geometry will fail. Visual reasoning over viewport screenshots is tractable.
+**Where precision ends and taste begins, the system asks — it never guesses.** When a
+genuinely aesthetic choice arises, the right behavior is to surface precise variants
+("here are silhouettes at +10/+20/+30% — which reads right?") and hand the call to the
+human. The design never depends on the LLM's taste; it depends on its precision to
+generate exact options and its touch to tell them apart. The seam is the product.
+
+## The Blind Sculptor (stereognosis)
+
+The technical name for knowing an object's form by touch alone is **stereognosis** —
+a subset of **haptic perception**. This project's "tactile introspection" is, almost
+exactly, *computational stereognosis*.
+
+This is not a degraded substitute for sight. In the **geometry** domain, touch is
+**superhuman**: a proximity query feels a 0.2mm asymmetry no human eyeballing a
+viewport would catch. So the boundary is clean:
+
+- **Geometry = the sculptor's domain.** Touch. Deterministic. Sub-millimeter. The LLM's.
+- **Appearance = the director's domain.** Sight *and* taste. Irreplaceably the human's.
+  The sculptor may *set* a material or light (mechanical), but the *judgment* of how it
+  looks always routes to the human — it literally cannot see it.
+
+## Why Not Sight
+
+The early design gave the LLM screenshots as its eyes. Field experience falsified it:
+**LLMs gaslight themselves.** A vision-language model weights its text prior heavily,
+so the model that just called `build_sword` reads the screenshot *through* that
+expectation and confabulates the details that confirm it. The actor grading its own
+homework is the maximum-bias configuration. The screenshot becomes anti-signal — paid
+for in tokens and latency.
+
+Touch does not gaslight. `distance_between` returns `0.30`, not "looks about right."
+
+So sight is demoted, not deleted. It keeps exactly two jobs:
+1. **The human's eyes** — real perception, real taste. Screenshots stay first-class *for the human*.
+2. **An independent cold judge** — at milestones, a separate intent-blind model call for
+   identity sanity ("is this a sword or a spoon?") and unknown-unknown anomalies. It
+   works *because* it has no prior to bias it. This is the only LLM-vision use that
+   survives the gaslighting argument.
+
+Comparison against a reference is deterministicized where possible: extract and compare
+silhouettes/profiles numerically, rather than eyeballing two images.
 
 ## The Core Iteration Loop
 
 ```
-look → decide → act → look again
+measure → decide → act → measure again
 ```
 
-The LLM picks a viewport angle(s), takes a screenshot(s), reasons over the image(s), calls an operation, and repeats.
+The LLM feels the current state, decides on the director's behalf with precision, acts
+through a named operation, and feels again. *See* is reserved for the human and the cold
+judge. The LLM always re-measures before acting — it never assumes the world matches
+what it last did. Human interventions (the director reaching in to tweak the 5%) are
+just state changes the LLM feels on the next measurement.
 
-## Human and LLM as Co-Users
+## Coordinates Never Cross the Boundary
 
-The LLM is not the owner of the Blender session. Neither is the human. Both are just users.
+LLMs are bad at carrying world-coordinates across operations. So coordinates are the
+tool's internal currency and must never become the LLM's working medium. There are two
+ways they leak; both are banned:
 
-At any point the human can take over, make changes, and hand back. The LLM always looks at current state before acting — it never assumes the world matches what it last did. Human interventions are just state changes the LLM picks up naturally from the next screenshot.
+1. **Compute** — the LLM does arithmetic to derive a number. The LLM passes quantities
+   it *knows* (a width it wants, the name of a part), never quantities it must *derive*.
+2. **Carry** — a tool hands the LLM a coordinate so it can relay it into the next call.
+   This is subtler and just as harmful: it costs working memory, risks transcription
+   error, and the held number is a stale photograph — it rots the instant a part moves.
 
-## What the MCP Server Exposes
+The LLM reasons over **quantities and relations** — "0.3m apart," "A is left of and
+above B," "they're touching." Those are *touch*; return them freely, in scene
+vocabulary. It never reasons over **coordinates**.
 
-Everything a human user would reach for:
+> **If a tool ever returns a coordinate so the LLM can pass it to another tool, that's
+> the signal to collapse the two tools into one relational verb.** "Connect A and B with
+> a spline, bowed out 10cm" — references in, mesh out, zero coordinates crossing the
+> boundary, robust if A later moves.
 
-- **Viewport navigation** — numpad 1-9 for standard angles, 0 for camera, 5 for ortho/persp toggle
-- **Screenshot** — current viewport as an image, the LLM's eyes
-- **Scene tree** — scene collection in readable tree form: names, types, hierarchy, active selection
-- **Mesh operations** — add primitive, extrude, inset, loop cut, bevel, merge, bridge, subdivide
-- **Transforms** — scale, move, rotate, per axis
-- **Selection** — objects, loops, elements, all/none
-- **Modifiers** — add, configure, apply
-- **Mode switching** — object, edit, sculpt
-- **Render** — full render output
+**Perception is the one exception, and it isn't really an exception.** A tool may *show*
+the LLM coordinates in a local frame as read-only ground truth — it helps the sculptor
+build its mental picture, and being measured truth it cannot gaslight. The rule is about
+*action*, not *sight*: the LLM may **perceive** position but may never **act** by
+specifying or dead-reckoning a coordinate, and never carries one between tools. Perceive
+in coordinates; act in labels and relational verbs.
+
+**There is no coordinate ripcord.** The old `at=[x,y,z]` / literal-height escape hatches
+are removed: dead-reckoning placement refuses with a diagnostic that captures the LLM's
+intent, so every reach becomes a logged, named gap — the build queue for the missing
+relational verb. Flag-gated and reversible per-capability. See `SPEC-01-strict-relational.md`.
+
+## Stereognosis: The Design Spec
+
+Two modes of touch, both must be effortless:
+
+- **Proprioception (ambient, always-on, free).** You always know where your own hand is
+  without looking. That's the auto status block — mode, dims, selection, where parts sit.
+  Rich and ever-present, so the LLM is never lost and never has to *ask* where it is.
+- **Active haptic exploration (deliberate, targeted).** The fingertip the LLM reaches out
+  for one specific property. One call, high-fidelity, scene-vocabulary in return.
+
+The active suite should cover the property taxonomy from haptics research
+(Lederman & Klatzky's *exploratory procedures*). Each procedure is optimal for one
+property; a gap in the table is a sense the sculptor is missing:
+
+| Exploratory procedure | Property | Tool family |
+|---|---|---|
+| **Contour following** | exact shape, precise layout | `trace_profile`, `get_rings`, `get_mesh_profile` |
+| Enclosure | global shape, volume | `describe` dims, bbox |
+| Spatial relation | part layout | `gap_between`, `distance_between`, `is_aligned`, `check_contacts` |
+| Lateral motion | surface/texture (geometry-side: density) | topology/`get_mesh_profile` |
+| Part-motion test | mobility | rig / `pose_bone` checks |
+
+**Contour following is the precision spine** — the procedure humans use for exact shape,
+and exactly where the sculptor's fingertips beat the director's eyes.
+
+The concrete representation the LLM reads — a recursive, local-frame, label-addressed
+view of any selection (group → object → element) at a chosen level of detail — is
+specified in `SPEC-02-introspection.md`. It is the LLM's eyes; the human never reads it.
+
+## Effortless Is a Measurable Gate, Not a Vibe
+
+Drive the LLM's effort to zero across all seven costs: **discovery** (how many tools
+plausibly apply), **arithmetic** (must be zero), **state-carrying**, **schema-reading**,
+**verification**, **recovery**, **sequencing**. Every tool, existing and future, is
+graded on this rubric.
+
+The objective metric is the **floor test**: *can the weakest model we'd ship with take a
+character from blockout to finish on the tool surface alone?* The gate is fidelity, not
+beauty — *"precisely execute a director's instructions and hit a supplied reference,"*
+never *"make something good"* (beauty isn't measurable and isn't the LLM's job). Every
+batch either moves that number or it doesn't.
+
+There are two floor tests, nested. The **tool** floor test above is about the *driver
+model*. The **product** floor test is about the *human*: can a person with taste but zero
+modeling craft — the actual target user — direct the LLM to a WuWa-grade character? A pro
+artist is the easy case; the layman-with-taste is the hard case and the real target. If
+the layman can drive it, everyone can.
+
+## Model-Agnosticism Is a Law
+
+Precision and touch are deterministic and portable across any model. Taste and sight are
+contested and model-locked — taste is precisely where a model's content guardrails fire
+and refuse legitimate character work. Building on touch instead of sight keeps the
+foundation on the durable, portable layer.
+
+Consequences, enforced:
+- The server is a **neutral instrument** — as content-neutral as bpy itself. It moves
+  geometry; it has no opinion about what the geometry depicts. No name-based refusals, no
+  judgment gates.
+- **No in-server LLM** (no embedded vision-summarizer). It would reintroduce both a vendor
+  dependency and a censorship surface. Every verdict computed in Python instead of by a
+  model is a verdict that survives a model swap.
+- **Multi-driver testing is an acceptance gate**, not a nice-to-have. "Works on the
+  weakest permissive driver" is a release criterion.
+
+This is also the cleanest moat against a model-locked official connector: an artist whose
+aesthetic a particular model won't engage with structurally cannot use that tool — and
+can use this one.
+
+## The North Star
+
+Let an agent complete the Blender donut tutorial **and beyond** — culminating in modeling
+a full WuWa/Genshin-quality stylized character over a multi-hour session, with a human
+director who owns taste but need not know Blender at all, and a precision sculptor owning
+the geometry. The donut is the
+smoke test, not the destination. Every tool gap hit during real modeling is a step toward
+it; default to closing the gap in the MCP rather than working around it.
 
 ## What the LLM Never Does
 
-- Reason over raw vertex coordinates
-- Perform matrix calculations
-- Assume scene state without looking first
+- Reason over raw vertex coordinates — neither computing them nor carrying them between tools
+- Perform arithmetic or matrix math
+- Assume scene state without feeling it first
+- Judge appearance (texture, lighting, the final look) — that routes to the human
+- Originate taste — where precision ends, it asks
