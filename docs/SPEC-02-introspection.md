@@ -39,6 +39,27 @@ member, drill-down handles* — applied at whatever altitude the selection sits:
 The LLM navigates coarse-to-fine: ask at the group level, drill into one member, then into
 its elements. Each summary carries the label needed for the next query down.
 
+## Two ways the map is authored: creation and adoption
+
+The self-authored namespace (`SPEC-03`'s naming contract) covers geometry the LLM *builds*.
+It falls apart the moment a premade model is loaded — an import arrives with someone else's
+object names, anonymous topology, no features, and (for a character rig) hundreds of
+irrelevant widgets burying the few parts that matter. The LLM has a scene tree but no mental
+model *inside* any object.
+
+So the namespace is authored two ways, symmetrically:
+
+- **On creation** — name as you build (`SPEC-03`).
+- **On adoption** — an onboarding *sense pass* over the import: segment islands, find
+  features, detect symmetry/repetition, collapse `.l`/`.r` and widget swarms, and **name what
+  is found**, after the fact. Same naming discipline, retroactive.
+
+Relational verbs never operate on a raw import directly — you **adopt first** (sense it into
+handles), then it behaves exactly like something authored. Import becomes "build the map by
+feeling instead of by making." This is why introspection is not optional polish: it is the
+*entry point* for every model the LLM did not create. (Live test case: the Blender Studio
+*Spring* rig.)
+
 ## Local frame
 
 - **Origin:** default = selection centroid / bbox center. Optionally a *namable* anchor
@@ -50,10 +71,20 @@ its elements. Each summary carries the label needed for the next query down.
 
 ## Labels (stable handles)
 
+**Bind handles to Blender's native namespace — don't reinvent it.** The object altitude is
+already built by Blender and the LLM should ride it: object *names* are unique stable IDs,
+*collections* + parenting are the group structure (`assemble`), *custom properties* attach
+metadata, and *mesh attributes* are typed per-element data that saves with the `.blend`. The
+payoff is a **shared namespace**: the human sees the exact handle the LLM addresses
+(`Sword.Blade`) in the outliner, so the co-working surface aligns with no translation layer.
+The build concentrates entirely on the half Blender does *not* provide: stable sub-object
+handles, derived features, and computed relations.
+
 - **Objects:** the object name *is* the label — already stable. No hashing needed.
-- **Sub-object elements:** a **persistent ID stored on the vertex** (a bmesh int
-  custom-data layer), assigned once and carried through edits. Not a hash of the index
-  (indices renumber on `loop_cut` / `merge` / `extrude` and would break).
+- **Sub-object elements:** a **persistent ID stored as a mesh `INT` attribute** on the POINT
+  domain (saves with the file, survives close/reopen — as durable as an object name),
+  assigned once and carried through edits. Not a hash of the index (indices renumber on
+  `loop_cut` / `merge` / `extrude` and would break).
 - **New geometry** from an edit gets fresh labels, announced in the proprioceptive delta
   ("loop_cut added `k7p2 m3x9`").
 - **Topology-destroying ops** (boolean, remesh, merge-by-distance) cannot preserve IDs;
