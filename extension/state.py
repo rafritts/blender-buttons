@@ -82,6 +82,8 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
     "get_bone_tree", "describe_bone", "list_constraints", "get_custom_properties",
     # mesh-data introspection (U8) — read-only
     "list_shape_keys",
+    # topology sense (SPEC-04) — read-only structural query
+    "get_topology",
     # new_scene reloads the startup file, wiping Blender's undo stack and the
     # scene; it resets the history log itself (designs.new_scene) rather than
     # pushing an undo step that would immediately be desynced.

@@ -36,6 +36,7 @@ from . import (
     state,
     status,
     textures,
+    topology,
     transforms,
     viewport,
 )
@@ -68,6 +69,7 @@ _TOOL_MODULES = (
     designs,
     lint,
     introspect,
+    topology,
 )
 
 TOOLS = {}

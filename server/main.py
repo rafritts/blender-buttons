@@ -42,6 +42,7 @@ from server import (  # noqa: F401
     sculpt,
     lint,
     introspect,
+    topology,
 )
 
 
