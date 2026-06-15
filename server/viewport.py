@@ -1,72 +1,4 @@
-import base64
-from mcp.server.fastmcp import Image
 from server._core import mcp, call_blender, _status
-
-
-@mcp.tool()
-def get_viewport_screenshot(width: int = 960, height: int = 540,
-                            hide_overlays: bool = False,
-                            format: str = "PNG",
-                            quality: int = 85,
-                            compression: int = 15) -> list:
-    """Capture the current 3D viewport. width/height default to 960x540 to keep context usage low.
-    hide_overlays: turn off selection outlines, gizmos, axis overlay etc. for clean hero shots.
-
-    format:      PNG (lossless, default) or JPEG (smaller, lossy). Use JPEG when an
-                 LLM harness truncates large image payloads.
-    quality:     1-100, JPEG only (ignored for PNG). Default 85. 60-75 is usually
-                 fine for viewport diagnostics; 40-50 if you really need small.
-    compression: 0-100, PNG only (Blender's scale; higher = smaller file, more CPU).
-                 Default 15 matches Blender's default. Ignored for JPEG.
-
-    Returns [image, metadata] where metadata includes the active shading mode so you know
-    whether materials are visible (MATERIAL/RENDERED) or hidden (SOLID/WIREFRAME).
-    """
-    result = call_blender("get_viewport_screenshot",
-                          {"width": width, "height": height, "hide_overlays": hide_overlays,
-                           "format": format, "quality": quality, "compression": compression})
-    if "error" in result:
-        raise RuntimeError(result["error"])
-    img = Image(data=base64.b64decode(result["image"]), format=result.get("format", "png"))
-    shading = result.get("shading", "UNKNOWN")
-    size_kb = result.get("bytes", 0) // 1024
-    meta = f"shading={shading}  {width}x{height}  {size_kb}KB"
-    return [img, meta]
-
-
-@mcp.tool()
-def get_viewport_collage(target: str = "ALL", zoom: float = 1.0,
-                         format: str = "PNG",
-                         quality: int = 85,
-                         compression: int = 15) -> list:
-    """
-    Capture 6 views in one image: FRONT | RIGHT | TOP (row 1), BACK | LEFT | PERSP (row 2).
-    Each panel auto-frames on the target so the subject fills the view.
-
-    target: ALL (all mesh objects, default) | SELECTED (currently selected mesh objects) | <object name>
-    zoom: panel resolution scale. Base 320x180 per panel; zoom=2 → 640x360 per panel.
-
-    format:      PNG (lossless, default) or JPEG (smaller, lossy). Use JPEG when an
-                 LLM harness truncates large image payloads.
-    quality:     1-100, JPEG only. Default 85.
-    compression: 0-100, PNG only. Default 15.
-
-    Per-panel intermediate renders are always PNG (lossless) — encoding format only
-    affects the final assembled output.
-
-    Returns the image plus a text line with the framed world-space bbox.
-    Selection state is preserved across the call.
-    """
-    result = call_blender("get_viewport_collage",
-                          {"target": target, "zoom": zoom,
-                           "format": format, "quality": quality, "compression": compression})
-    if "error" in result:
-        raise RuntimeError(result["error"])
-    img = Image(data=base64.b64decode(result["image"]), format=result.get("format", "png"))
-    size_kb = result.get("bytes", 0) // 1024
-    summary = (f"target={result['target']}  objects={result['target_objects']}  "
-               f"bbox={result['framed_bbox']}  size={size_kb}KB ({result.get('format','png')})")
-    return [img, summary]
 
 
 @mcp.tool()
@@ -88,8 +20,8 @@ def set_viewport_shading(mode: str = "MATERIAL") -> str:
       - SOLID: matcap default (no materials visible)
       - MATERIAL: previews materials with built-in studio lighting (fast)
       - RENDERED: full Eevee/Cycles preview using your scene lights + world
-    Required before get_viewport_screenshot if you want to see materials/lighting —
-    the screenshot tool captures whatever shading mode is currently active.
+    Affects the user's live viewport and render_to_file output, which capture
+    whatever shading mode is currently active.
     """
     result = call_blender("set_viewport_shading", {"mode": mode})
     main = f"shading → {mode}" if result.get("success") else result.get("error", "failed")

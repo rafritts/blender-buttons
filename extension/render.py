@@ -18,6 +18,10 @@ _FORMATS = {"PNG", "JPEG", "OPEN_EXR", "TIFF", "WEBP"}
 def render_to_file(params):
     """Render the active scene camera to an image file.
 
+    FOR THE HUMAN USER, NOT THE AGENT — produces a picture for a person to look at.
+    The agent never sees these images; to understand the model it uses the
+    introspection/topology tools (get_topology, describe, check_mesh, etc.).
+
     filepath:   output path (required). ~ is expanded. Extension is set to match
                 the format if missing.
     resolution_x / resolution_y: pixel dims (default: keep the scene's current).

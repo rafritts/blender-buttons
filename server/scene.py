@@ -265,8 +265,17 @@ def render_to_file(filepath: str,
                    format: str = "PNG", transparent: bool = None,
                    timeout: float = 300, label: str = "") -> str:
     """
-    Render the scene camera to an image file on disk (final-quality output, not
-    the quick viewport screenshot). Requires a camera — add_camera first.
+    Render the scene camera to an image file on disk. Requires a camera — add_camera first.
+
+    ⚠ THIS IS FOR THE HUMAN USER, NOT THE AGENT. It produces a picture for a person
+    to look at. The agent does NOT see these images and must NOT read them back —
+    doing so burns tokens and has repeatedly led to wrong conclusions (an image is a
+    lossy, ambiguous view of hidden state). Call this ONLY when the user explicitly
+    asks for a rendered image, then hand them the path.
+
+    To understand the model yourself, use the introspection/topology tools instead —
+    they are precise and cheap: get_topology, describe, get_object_info, check_mesh,
+    list_modifiers, get_scene_tree, diff_since. Those are almost always what you want.
 
     filepath:     output path (~ expanded; extension auto-added to match format).
     resolution_x/y: pixel dimensions (default: keep the scene's current).

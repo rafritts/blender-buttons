@@ -20,7 +20,7 @@ module whose name matches the tool family:
   lighting.py     add_light / modify_light / set_world_background / set_camera_dof
   scatter.py      scatter_on_surface (the donut-tutorial sprinkle step)
   sculpt.py       sculpt_grab / inflate / draw / smooth / crease / pinch / flatten
-  viewport.py     screenshot / collage / view angle / shading mode / framing / orbit / camera positioning
+  viewport.py     view angle / shading mode / framing / orbit / camera positioning
   shaders.py      set_toon_material (cel/anime) / add_outline / remove_outline
   history.py      get_history / undo_steps / redo_steps / undo_to
   designs.py      save_design / open_design / list_designs

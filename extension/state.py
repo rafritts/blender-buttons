@@ -60,7 +60,7 @@ def capture_geometry_snapshot():
 
 # Tools whose invocation should NOT be recorded in the history log.
 NO_LOG_TOOLS = {
-    "get_scene_tree", "get_viewport_screenshot", "get_viewport_collage",
+    "get_scene_tree",
     "get_history", "undo_steps", "undo_to", "redo_steps",
 }
 
@@ -93,7 +93,7 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
 # Tools that should NOT have blender_status appended to their result
 # (read-only visual / query tools — the status block would be noise).
 NO_STATUS_TOOLS = {
-    "get_blender_status", "get_viewport_screenshot", "get_viewport_collage",
+    "get_blender_status",
     "get_scene_tree", "get_history", "get_bone_tree",
 }
 
