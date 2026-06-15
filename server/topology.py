@@ -44,6 +44,26 @@ def _fmt_method(name: str, data: dict) -> list:
         lines.append("  frame (principal axes):")
         for k, a in enumerate(data["principal_axes"]):
             lines.append(f"    {k+1}. {a['extent_m']}m along ~{a['aligns_world']} {a['direction']}")
+    elif name == "sections":
+        lines.append("  sections (slice the mesh & read each slice's shape — "
+                     "O = closed ring/full wrap, C = open arc/partial coverage):")
+        for a in data.get("axes", []):
+            oreg = a.get("open_regions", [])
+            where = ("; open arcs at " +
+                     ", ".join(f"{o['region']}(×{o['count']})" for o in oreg)) if oreg else ""
+            lines.append(f"    {a['axis']} axis ({a['extent_cm']}cm): "
+                         f"{a['open_pct']}% open C / {a['closed_pct']}% closed O, "
+                         f"up to {a['max_contours']} contour(s){where}")
+            g = a.get("largest_gap")
+            if g:  # a genuinely empty band (no material at all) — rare; worth shouting
+                lines.append(f"      ⚠ empty band (true void): {g['span_cm']}cm @ {g['region']}")
+            if "profile" in a:
+                lines.append(f"      count/slice: {a['profile']}")
+            for s in a.get("sections", []):
+                cs = ", ".join(
+                    f"{c['length_cm']}cm{'O' if c['closed'] else 'C'}@{c['region']}"
+                    for c in s["contours"]) or "— void"
+                lines.append(f"      {s['pos_cm']}cm: {cs}")
     elif name == "curvature":
         d = data["distribution_pct"]
         lines.append(f"  curvature [{data['tagged']}]: "
@@ -76,7 +96,7 @@ def get_topology(target: str = "", method: str = "", lod: str = "low",
 
     target: mesh object name. Empty = active object.
     method: comma-separated list. Empty = the cheap bundle
-            (components,genus,boundaries,poles,symmetry,frame).
+            (components,genus,boundaries,sections,poles,symmetry,frame).
             Also: curvature, features, thickness (v1).
             v2 (needs scipy, not yet built): geodesic, skeleton, segments.
     lod:  low (summary landmarks) | medium | high (adds ordered boundary paths,
@@ -92,6 +112,8 @@ def get_topology(target: str = "", method: str = "", lod: str = "low",
       poles      — valence≠4 verts (quad-flow breaks; messy to cut through)
       symmetry   — best mirror plane + error, per axis
       frame      — intrinsic principal axes (never assumes world-up)
+      sections   — cross-section sweep: where the material IS (voids, partial wraps,
+                   branch splits). The COVERAGE sense topology is blind to.
       curvature  — flats/ridges/domes/saddles (fuzzy; v2 = exact)
       features   — hard dihedral edges in chains (the machine sense)
       thickness  — local wall/part diameter (the SDF part-segmentation cue)

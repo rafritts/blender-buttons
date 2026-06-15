@@ -7,7 +7,7 @@ never a raw vertex dump. This is the concrete tool that realizes SPEC-02's
 does not provide.
 
 v1 methods (numpy + bmesh + native BVH/KDTree, zero extra deps):
-  components  genus  boundaries  poles  symmetry  frame  curvature  features  thickness
+  components  genus  boundaries  poles  symmetry  frame  sections  curvature  features  thickness
 v2 methods (need scipy — heat-method geodesics / spectral cut):
   geodesic  skeleton  segments
 """
@@ -20,7 +20,7 @@ import numpy as np
 
 from .common import region_words
 
-_DEFAULT_METHODS = ["components", "genus", "boundaries", "poles", "symmetry", "frame"]
+_DEFAULT_METHODS = ["components", "genus", "boundaries", "sections", "poles", "symmetry", "frame"]
 _V2_METHODS = {"geodesic", "skeleton", "segments"}
 _AXES = ("X", "Y", "Z")
 
@@ -366,6 +366,166 @@ def _m_thickness(bm, lod, bbox):
             "max_mm": round(float(arr.max()) * 1000, 2)}
 
 
+def _plane_contours(bm, t, t0):
+    """Intersect the surface with the plane {axis·x = t0} and return its contour
+    curves. t is the per-vertex axis coordinate (index-aligned). Each crossed face
+    contributes a segment between its two crossing edges; segments are chained into
+    connected components. A component where every node has valence 2 is a CLOSED
+    contour (fabric fully wraps here); a component with valence-1 ends is an OPEN
+    arc (only partial coverage). No contour at all = a VOID at this station."""
+    side = t >= t0
+    edge_pt = {}
+
+    def get_pt(e):
+        p = edge_pt.get(e.index)
+        if p is not None:
+            return p
+        a, b = e.verts
+        ta, tb = t[a.index], t[b.index]
+        denom = tb - ta
+        s = 0.5 if abs(denom) < 1e-12 else (t0 - ta) / denom
+        p = a.co.lerp(b.co, min(1.0, max(0.0, s)))
+        edge_pt[e.index] = p
+        return p
+
+    adj = {}
+    seg_len = {}
+
+    def add_seg(i, j, p, q):
+        key = (i, j) if i < j else (j, i)
+        if key in seg_len:
+            return
+        seg_len[key] = (p - q).length
+        adj.setdefault(i, []).append(j)
+        adj.setdefault(j, []).append(i)
+
+    for f in bm.faces:
+        ce = [l.edge for l in f.loops
+              if side[l.edge.verts[0].index] != side[l.edge.verts[1].index]]
+        if len(ce) < 2:
+            continue
+        pts = [get_pt(e) for e in ce]
+        for m in range(0, len(ce) - 1, 2):
+            add_seg(ce[m].index, ce[m + 1].index, pts[m], pts[m + 1])
+
+    contours, seen = [], set()
+    for node in list(adj):
+        if node in seen:
+            continue
+        comp, stack = [], [node]
+        seen.add(node)
+        while stack:
+            cur = stack.pop()
+            comp.append(cur)
+            for nb in adj[cur]:
+                if nb not in seen:
+                    seen.add(nb)
+                    stack.append(nb)
+        compset = set(comp)
+        closed = len(comp) >= 3 and all(len(adj[n]) == 2 for n in comp)
+        length = sum(L for (i, j), L in seg_len.items()
+                     if i in compset and j in compset)
+        cpt = mathutils.Vector((0, 0, 0))
+        for n in comp:
+            cpt += edge_pt[n]
+        cpt /= len(comp)
+        contours.append({"closed": closed, "length_cm": round(length * 100, 1),
+                         "centroid": cpt})
+    return contours
+
+
+def _longest_zero_run(counts):
+    """(start_index, length) of the longest run of empty stations — the biggest void."""
+    best_start = best_len = cur_start = cur = 0
+    for i, c in enumerate(counts):
+        if c == 0:
+            if cur == 0:
+                cur_start = i
+            cur += 1
+            if cur > best_len:
+                best_len, best_start = cur, cur_start
+        else:
+            cur = 0
+    return best_start, best_len
+
+
+_STATIONS = {"low": 24, "medium": 48, "high": 96}
+
+
+def _m_sections(bm, lod, bbox):
+    """Cross-section sweep along the intrinsic principal axes — the COVERAGE sense.
+    Topology can't tell a full sweater from a hollow collar-with-sleeves (they're
+    homeomorphic); this can. Marching a plane down each axis, it reports per station
+    how many contours exist, their length, and whether they're CLOSED (wraps fully)
+    or OPEN (partial). Empty stations = a VOID — material that isn't there. Catches
+    coverage gaps, partial wraps, and branch splits (contour count 1→2) in one pass.
+    Pose-robust: sweeps PCA axes, never world-up."""
+    co = np.array([list(v.co) for v in bm.verts])
+    if len(co) < 4 or not bm.faces:
+        return {"error": "too few verts/faces"}
+    centroid = co.mean(0)
+    evals, evecs = np.linalg.eigh(np.cov((co - centroid).T))
+    evecs = evecs[:, np.argsort(evals)[::-1]]
+    n = _STATIONS.get(lod, 24)
+    cen = mathutils.Vector([float(x) for x in centroid])
+    axes_out = []
+    for k in range(3):
+        vec = evecs[:, k]
+        t = (co - centroid) @ vec
+        tmin, tmax = float(t.min()), float(t.max())
+        span = tmax - tmin
+        if span < 1e-9:
+            continue
+        vmv = mathutils.Vector([float(x) for x in vec])
+        counts, detail = [], []
+        closed_total = contour_total = 0
+        open_regions = {}  # where the open (C-shaped) arcs cluster — the coverage gaps
+        for s in range(n):
+            t0 = tmin + (s + 0.5) / n * span
+            contours = _plane_contours(bm, t, t0)
+            counts.append(len(contours))
+            contour_total += len(contours)
+            for c in contours:
+                if c["closed"]:
+                    closed_total += 1
+                else:
+                    r = region_words(bbox, c["centroid"])
+                    open_regions[r] = open_regions.get(r, 0) + 1
+            if lod == "high":
+                detail.append({"pos_cm": round(t0 * 100, 1),
+                               "contours": [{"length_cm": c["length_cm"],
+                                             "closed": c["closed"],
+                                             "region": region_words(bbox, c["centroid"])}
+                                            for c in contours]})
+        open_total = contour_total - closed_total
+        occupied = sum(1 for c in counts if c > 0)
+        gstart, glen = _longest_zero_run(counts)
+        gap = None
+        if glen:
+            tc = tmin + (gstart + glen / 2.0) / n * span
+            gap = {"span_cm": round(glen / n * span * 100, 1), "stations": glen,
+                   "region": region_words(bbox, cen + vmv * tc)}
+        top_open = sorted(open_regions.items(), key=lambda kv: kv[1], reverse=True)[:3]
+        axis_out = {
+            "axis": _AXES[int(np.argmax(np.abs(vec)))],
+            "direction": [round(float(x), 3) for x in vec],
+            "extent_cm": round(span * 100, 1),
+            "stations": n,
+            "occupied_pct": round(100 * occupied / n, 1),
+            "max_contours": max(counts) if counts else 0,
+            "open_pct": round(100 * open_total / contour_total, 1) if contour_total else 0.0,
+            "closed_pct": round(100 * closed_total / contour_total, 1) if contour_total else 0.0,
+            "open_regions": [{"region": r, "count": c} for r, c in top_open],
+            "largest_gap": gap,
+        }
+        if lod == "medium":
+            axis_out["profile"] = counts
+        elif lod == "high":
+            axis_out["sections"] = detail
+        axes_out.append(axis_out)
+    return {"axes": axes_out}
+
+
 _METHODS = {
     "components": _m_components,
     "genus": _m_genus,
@@ -373,6 +533,7 @@ _METHODS = {
     "poles": _m_poles,
     "symmetry": _m_symmetry,
     "frame": _m_frame,
+    "sections": _m_sections,
     "curvature": _m_curvature,
     "features": _m_features,
     "thickness": _m_thickness,
