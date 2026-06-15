@@ -246,3 +246,17 @@ Applied to all 15 verbs. `op`/`type`/`brush` emit `enum`s; every op-specific par
 `[op]`-tagged `description`; `required` is unchanged (the discriminator, plus `sculpt`'s
 targeting params). Verified live — runtime dispatch is identical (the change is annotations
 only).
+
+## Addendum B — Dogfooding buglist (2026-06-15)
+
+Found by driving the live verb set through a real task on the Spring rig (strip scarf /
+jacket / pullover-mask, prep the pullover for a tank top). Five issues surfaced; the three
+genuine code defects plus the doc fix are corrected in this same pass.
+
+| # | Severity | Symptom | Root cause | Fix |
+|---|---|---|---|---|
+| 1 | **high** | `add(type="camera", x=0, …)` lands the camera at `x=7`, not `0`. A legitimate `0` coordinate is silently replaced by a default. | `server/verbs/add.py` dispatched camera/light coords with `x or 7.0` / `z or 5.0`. `0 or 7.0 == 7.0` — falsy-zero. | Resolve coords with an `is None` sentinel (params default to `None`); `0` now passes through. Camera **x/y/z** and light **z** fixed; the `or`-default idiom is kept only for `lens`/`size`/`energy`/`segments`, where `0` is not a meaningful value. |
+| 2 | **medium** | `scene(op="tree", filter="spring.geo.clothes")` shows the collection with **no contents** — reads as empty when it's full. Every filter also dumps the whole empty collection skeleton. | `extension/status.py:get_scene_tree` matched `obj.name` only; collection names were never matched, and headers were always emitted even with zero matches inside. | A filter substring now also matches **collection names** (a match shows that collection's full contents), and when filtering, collection branches with no matching descendant are **pruned** — so a filtered tree is focused, and a collection-name filter drills in. |
+| 3 | **low** | `render(op="image", engine="BLENDER_EEVEE_NEXT")` errors `not available in this build` — but the schema/docs advertise it as a first-class choice. | Build here is Cycles-only (headless/no-Eevee). `extension/render.py` caught the `TypeError` with a dead-end message. | Pre-check the requested engine against `render.engine`'s actual `enum_items`; the error now **enumerates the engines this build has**, so the agent self-corrects to `CYCLES`. Verb docstring notes Eevee may be absent in headless builds. |
+| 4 | **doc** | The agent (me) read its own renders back to "verify" the edit — confidently narrating success it could not actually see. | The *verb-facing* `render` docstring carried only a terse "for the human" note, omitting **why**. The strong version lived in `server/scene.py`, which the agent doesn't read at call-time. | Strengthen the verb docstring (`server/verbs/render.py`) with the reasoning: **LLM vision is unreliable at this precision and self-confirms (gaslights) what it expects to see; reading renders burns tokens for a lossy view of hidden state.** Renders are for the human; the agent verifies via `feel` / structural reads. *(My original report mis-framed this as the doc "underselling" the agent — inverted: the design is correct, the doc just needed teeth where the agent reads it.)* |
+| 5 | **by design** | `scene(op="tree", summarize=0)` on the ~400-object Spring rig is a firehose and the output was truncated. | Not a defect — `summarize=0` means "expand everything," and the default (`20`) already collapses big collections. | No code change. Mitigated by **#2**: filter-first now yields a focused tree. Recommendation stands — `filter=` / `type=` before `summarize=0` on production rigs. |

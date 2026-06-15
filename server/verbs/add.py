@@ -59,9 +59,9 @@ def add(
     target: tag(str, "[light/camera] object to aim at") = "",
     spot_angle: tag(float, "[light] SPOT cone angle (deg)") = 0,
     lens: tag(float, "[camera] focal length (mm; 35 wide, 85 portrait)") = 0,
-    x: tag(float, "[light/camera] world X") = 0,
-    y: tag(float, "[light/camera] world Y") = 0,
-    z: tag(float, "[light/camera] world Z") = 0,
+    x: tag(float, "[light/camera] world X (default: light 0, camera 7)") = None,
+    y: tag(float, "[light/camera] world Y (default: light 0, camera -7)") = None,
+    z: tag(float, "[light/camera] world Z (default: light 5, camera 5)") = None,
     target_x: tag(float, "[camera] aim point X") = 0,
     target_y: tag(float, "[camera] aim point Y") = 0,
     target_z: tag(float, "[camera] aim point Z") = 0,
@@ -136,11 +136,19 @@ def add(
             name, points or [], subtype or "BEZIER", cyclic, resolution or 12,
             bevel_depth, label)
     if t == "light":
+        # `is None` sentinel, not `x or 0.0`: a light placed at 0 must stay at 0.
         return scene.add_light(
-            name, subtype or "POINT", x, y, z or 5.0, energy or None, color,
-            hex, size or 0.25, target, spot_angle or 45.0, label)
+            name, subtype or "POINT",
+            0.0 if x is None else x,
+            0.0 if y is None else y,
+            5.0 if z is None else z,
+            energy or None, color, hex, size or 0.25, target, spot_angle or 45.0, label)
     if t == "camera":
+        # `is None` sentinel, not `x or 7.0`: a camera at x=0 (dead-front) must stay at 0.
         return scene.add_camera(
-            name, x or 7.0, y or -7.0, z or 5.0, target, target_x, target_y,
-            target_z, lens or 50.0, label)
+            name,
+            7.0 if x is None else x,
+            -7.0 if y is None else y,
+            5.0 if z is None else z,
+            target, target_x, target_y, target_z, lens or 50.0, label)
     return unknown("add", "type", type, _TYPES)

@@ -269,9 +269,12 @@ def render_to_file(filepath: str,
 
     ⚠ THIS IS FOR THE HUMAN USER, NOT THE AGENT. It produces a picture for a person
     to look at. The agent does NOT see these images and must NOT read them back —
-    doing so burns tokens and has repeatedly led to wrong conclusions (an image is a
-    lossy, ambiguous view of hidden state). Call this ONLY when the user explicitly
-    asks for a rendered image, then hand them the path.
+    doing so burns tokens and has repeatedly led to wrong conclusions. LLM vision is
+    unreliable at this precision and SELF-CONFIRMS: you will see what you expected and
+    report success whether or not it's true, so the render launders your mistakes
+    instead of catching them (an image is a lossy, ambiguous view of hidden state).
+    Call this ONLY when the user explicitly asks for a rendered image, then hand them
+    the path.
 
     To understand the model yourself, use the introspection/topology tools instead —
     they are precise and cheap: get_topology, describe, get_object_info, check_mesh,

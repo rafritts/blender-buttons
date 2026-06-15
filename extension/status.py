@@ -38,10 +38,12 @@ def get_scene_tree(params=None):
     )
     from .common import linked_status
 
-    def matches(obj):
-        if flt and flt not in obj.name.lower():
-            return False
+    def matches(obj, col_match=False):
+        # type filter is always honored; a collection-name match satisfies the
+        # name-substring filter for everything inside that collection.
         if type_filter and obj.type != type_filter:
+            return False
+        if flt and not col_match and flt not in obj.name.lower():
             return False
         return True
 
@@ -56,7 +58,7 @@ def get_scene_tree(params=None):
     shown = [0]
     hidden = [0]
 
-    def emit_objects(objs, pad, lines):
+    def emit_objects(objs, pad, lines, col_match=False):
         # Summarize a big collection to per-type counts — unless filtering (then the
         # caller wants the matching objects listed).
         if not filtering and summarize and len(objs) > summarize:
@@ -67,20 +69,29 @@ def get_scene_tree(params=None):
             hidden[0] += len(objs)
         else:
             for obj in objs:
-                if matches(obj):
+                if matches(obj, col_match):
                     lines.append(obj_line(obj, pad))
                     shown[0] += 1
 
-    def fmt_collection(col, depth=0):
+    def fmt_collection(col, depth=0, inherited_match=False):
         pad = "│   " * depth
-        lines = [f"{pad}├── {col.name}/"]
-        emit_objects(list(col.objects), pad + "│   ", lines)
+        # A filter substring matches collection NAMES too — a hit shows the whole
+        # collection's contents, and the match is inherited by sub-collections.
+        col_match = inherited_match or (bool(flt) and flt in col.name.lower())
+        body = []
+        emit_objects(list(col.objects), pad + "│   ", body, col_match)
+        children = []
         if max_depth is None or depth < max_depth:
             for child in col.children:
-                lines += fmt_collection(child, depth + 1)
+                children += fmt_collection(child, depth + 1, col_match)
         elif col.children:
-            lines.append(f"{pad}│   ├── … {len(col.children)} sub-collection(s) (max_depth={max_depth})")
-        return lines
+            children.append(f"{pad}│   ├── … {len(col.children)} sub-collection(s) (max_depth={max_depth})")
+        # When filtering, prune branches that contributed nothing so the result is
+        # focused — not the full empty skeleton (which reads as "collection empty").
+        # A collection whose own name matched is always kept (it is itself a hit).
+        if filtering and not col_match and not body and not children:
+            return []
+        return [f"{pad}├── {col.name}/"] + body + children
 
     lines = ["Scene Collection"]
     for col in bpy.context.scene.collection.children:

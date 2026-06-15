@@ -43,10 +43,12 @@ def render_to_file(params):
 
     engine = params.get("engine")
     if engine:
-        try:
-            scene.render.engine = engine
-        except TypeError:
-            return {"error": f"render engine '{engine}' not available in this build"}
+        avail = [e.identifier for e in
+                 type(scene.render).bl_rna.properties["engine"].enum_items]
+        if engine not in avail:
+            return {"error": f"render engine '{engine}' not available in this build; "
+                             f"available: {avail}"}
+        scene.render.engine = engine
 
     fmt = (params.get("format") or "PNG").upper()
     if fmt not in _FORMATS:

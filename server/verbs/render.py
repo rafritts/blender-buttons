@@ -47,8 +47,21 @@ def render(
 
       image   — render the scene camera to a file (filepath, resolution_x/y, samples,
                 engine=CYCLES|BLENDER_EEVEE_NEXT, format, transparent, timeout)
-                ⚠ FOR THE HUMAN — the agent never reads these back; use `feel`/reads
-                to understand the model.
+
+                ⚠ THE IMAGE IS FOR THE HUMAN, NOT THE AGENT. Do NOT read it back.
+                Why this is a hard rule, not a style note:
+                  • LLM vision is unreliable at this level of precision, and it
+                    *self-confirms* — you will look at the render, see what you
+                    expected to see, and report success whether or not it's true.
+                    The render cannot catch your own mistake; it launders it.
+                  • A render is a lossy, ambiguous 2D view of hidden 3D state.
+                  • Reading it back lights tokens on fire for that false comfort.
+                Verify with GROUND TRUTH instead — `feel` (topology/measurements),
+                `object info`, modifier lists, the status block. Those are
+                depsgraph-exact and can't be gaslit. Render only when the user asks
+                for a picture, then hand them the path.
+                (engine: EEVEE may be absent in headless builds — if so the error
+                lists the engines this build has; fall back to CYCLES.)
       quality — Eevee quality toggles (raytracing, ao, shadows, samples)
       cycles  — Cycles controls (device=GPU|CPU, backend=OPTIX|CUDA|…, denoise,
                 denoiser, adaptive_threshold, samples)
