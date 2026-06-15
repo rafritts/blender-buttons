@@ -1,0 +1,109 @@
+"""object — Object Mode / the Object menu (SPEC-05).
+
+Object-level operations on whole objects: rename, delete, duplicate, join, group,
+visibility, custom props, convert, and reading an object's info. `op` is the
+operation; fill the params it needs. Auto-managed in Object Mode.
+"""
+
+from server._core import mcp
+from server import objects, groups, modifiers, queries, scene as _scene
+from ._common import unknown
+
+_OPS = ["info", "describe", "rename", "delete", "duplicate", "duplicate_mirrored",
+        "join", "split", "group", "ungroup", "add_to_group", "parts", "convert",
+        "visibility", "particle_visibility", "props", "set_prop", "light", "mode"]
+
+
+@mcp.tool(name="object")
+def object_verb(
+    op: str,
+    name: str = "",
+    # rename / duplicate
+    new_name: str = "",
+    old_name: str = "",
+    # join / group membership
+    names: list = None, parts: list = None,
+    merge_threshold: float = None,
+    # mirror-duplicate
+    axis: str = "X", pivot: str = "WORLD",
+    # visibility
+    viewport: bool = None, render: bool = None, show: bool = False,
+    # custom properties
+    key: str = "", value: str = "", bone: str = None,
+    # describe / info
+    posed: bool = False,
+    # explicit mode override (auto-switching usually makes this unnecessary)
+    mode: str = "",
+    # light tweaks (op=light — modify an existing light)
+    energy: float = None, color: list = None, hex: str = "",
+    size: float = None, spot_angle: float = None,
+    x: float = None, y: float = None, z: float = None, target: str = "",
+    label: str = "",
+) -> str:
+    """
+    Object-level operations — the **Object** menu / Object Mode. `op` selects:
+
+      info        — object's placement, dims, material  (name; empty=active)
+      describe    — fuller report; posed=True evaluates the rig    (name)
+      rename      — name → new_name                                (name, new_name)
+      delete      — remove the object                              (name)
+      duplicate   — copy it                                        (name, new_name)
+      duplicate_mirrored — mirrored copy   (name, axis=X|Y|Z, pivot=WORLD|.., new_name)
+      join        — weld several into one  (names=[...], merge_threshold)
+      split       — split active by loose parts into objects       (—)
+      group       — parent parts under an empty (name, parts=[...])
+      ungroup     — dissolve the group                             (name)
+      add_to_group— add parts to an existing group (name, parts=[...])
+      parts       — list a group's members                        (name)
+      convert     — convert curve/text/etc to a real mesh          (name)
+      visibility  — show/hide      (name, viewport=bool, render=bool)
+      particle_visibility — toggle particle systems  (name, show=bool)
+      props       — read custom properties           (name, bone)
+      set_prop    — write a custom property   (name, key, value, bone)
+      light       — tweak an existing light  (name, energy/color/hex/size/spot_angle/x/y/z/target)
+      mode        — explicit mode switch     (mode=OBJECT|EDIT|SCULPT|POSE)
+
+    (Object SELECTION is the `select` verb; modifiers are `modifier`; materials
+    are `material`; armature/weights/shape-keys are `pose`.)
+    """
+    o = op.lower().strip()
+    if o == "info":
+        return queries.get_object_info(name)
+    if o == "describe":
+        return queries.describe(name, posed)
+    if o == "rename":
+        return objects.rename_object(old_name or name, new_name)
+    if o == "delete":
+        return objects.delete_object(name, label)
+    if o == "duplicate":
+        return objects.duplicate_object(name, new_name)
+    if o == "duplicate_mirrored":
+        return objects.duplicate_mirrored(name, axis, pivot, new_name, label)
+    if o == "join":
+        return objects.join_objects(names or [], merge_threshold)
+    if o == "split":
+        return objects.split_by_part(label)
+    if o == "group":
+        return groups.group(name, parts or [], label)
+    if o == "ungroup":
+        return groups.ungroup(name, label)
+    if o == "add_to_group":
+        return groups.add_to_group(name, parts or [], label)
+    if o == "parts":
+        return groups.parts_in(name)
+    if o == "convert":
+        return modifiers.convert_to_mesh(name)
+    if o == "visibility":
+        return objects.set_object_visibility(name, viewport, render, label)
+    if o == "particle_visibility":
+        return objects.set_particle_visibility(name, show, label)
+    if o == "props":
+        return objects.get_custom_properties(name, bone)
+    if o == "set_prop":
+        return objects.set_custom_property(name, key, value, bone, label)
+    if o == "light":
+        return _scene.modify_light(name, energy, color, hex, size, spot_angle,
+                                   x, y, z, target, label)
+    if o == "mode":
+        return objects.set_mode(mode)
+    return unknown("object", "op", op, _OPS)

@@ -7,6 +7,11 @@ ADDON_PORT = 8765
 
 mcp = FastMCP("blender-buttons")
 
+# SPEC-05 cutover switch. When False (default) the 137 flat tools are pruned from
+# the MCP surface after the verbs register, leaving ~15 verb tools. Set True to
+# expose the flat tools alongside the verbs (debugging / staged migration).
+EXPOSE_FLAT_TOOLS = False
+
 
 def call_blender(tool: str, params: dict = None, label: str = "", timeout: float = 30) -> dict:
     payload = json.dumps({"tool": tool, "params": params or {}, "label": label,

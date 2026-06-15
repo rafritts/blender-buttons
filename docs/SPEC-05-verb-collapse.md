@@ -1,6 +1,11 @@
 # SPEC-05 — The Verb Collapse (Blender-native verbs)
 
-**Status:** proposed (design settled in dialogue; not yet built)
+**Status:** v1 implemented — the 15-verb layer is built (`server/verbs/`) and the
+137 flat tools are pruned from the MCP surface (one cutover, `main.py`). Verified
+live: reads, a full add→transform→delete round-trip, relational placement, the
+status block on every act-verb, and error paths. The four status-block
+*improvements* below (declared mutation bit, verb-aware foregrounding, before/after
+delta, generalized warning channel) are addon-side and **not yet built**.
 **Date:** 2026-06-15
 **Depends on:** `SPEC-04` (the topology sense — the already-built realization of `feel`)
 **Supersedes:** `SPEC-01`, `SPEC-02`, `SPEC-03` — set aside. This spec replaces the
