@@ -437,6 +437,130 @@ def set_render_quality(params):
     }
 
 
+def _enable_cycles_gpu(backend):
+    """Enable a Cycles GPU backend in the addon preferences and tick its devices.
+
+    Returns (ok, chosen_backend, enabled_device_names, error). Mirrors what the
+    Preferences > System > Cycles Render Devices panel does: pick a compute backend,
+    then enable the GPU device(s) of that type (and untick the CPU, for pure-GPU).
+    """
+    addon = bpy.context.preferences.addons.get("cycles")
+    if addon is None:
+        return False, "", [], "Cycles addon not enabled in this Blender build."
+    prefs = addon.preferences
+
+    # compute_device_type is a DYNAMIC enum (items come from a runtime hardware
+    # callback), so its members can't be read reliably via bl_rna.enum_items —
+    # that comes back empty. Instead, try to SELECT each candidate backend and
+    # catch the TypeError an unsupported value raises, then confirm it has a device.
+    candidates = [backend.upper()] if backend else ["OPTIX", "CUDA", "HIP", "ONEAPI", "METAL"]
+    tried = []
+    for bk in candidates:
+        try:
+            prefs.compute_device_type = bk
+        except TypeError:
+            tried.append(f"{bk}:unsupported")
+            continue
+        # Populate prefs.devices for the selected backend (API name varies by version).
+        for refresh in ("refresh_devices", "get_devices"):
+            fn = getattr(prefs, refresh, None)
+            if fn is not None:
+                try:
+                    fn()
+                    break
+                except Exception:
+                    pass
+        gpu = [d for d in prefs.devices if d.type == bk]
+        if gpu:
+            enabled = []
+            for d in prefs.devices:
+                if d.type == bk:
+                    d.use = True
+                    enabled.append(d.name)
+                elif d.type == 'CPU':
+                    d.use = False  # pure-GPU; the user can re-tick CPU for hybrid
+            return True, bk, enabled, ""
+        tried.append(f"{bk}:no-device")
+
+    label = f"backend '{backend}'" if backend else "any GPU backend"
+    return False, "", [], (f"could not enable {label} (tried: {', '.join(tried)}) — "
+                          "check GPU drivers / Preferences > System > Cycles Render Devices.")
+
+
+def set_cycles_quality(params):
+    """Cycles-specific render controls — the Cycles counterpart to set_render_quality
+    (which only touches Eevee). All settings persist on the scene.
+
+    device:   'GPU' | 'CPU'. 'GPU' also enables the card in Cycles addon prefs, so a
+              .blend saved as CPU starts using the GPU.
+    backend:  GPU backend when device='GPU': OPTIX | CUDA | HIP | ONEAPI | METAL.
+              Empty = auto-pick the best backend that has a device.
+    denoise:  True/False — denoise the final image (the main grain fix).
+    denoiser: 'OPTIX' | 'OPENIMAGEDENOISE'. Empty = leave as-is.
+    adaptive_threshold: noise floor for adaptive sampling (e.g. 0.01); enables it.
+    samples:  max render sample count.
+    """
+    scene = bpy.context.scene
+    cycles = getattr(scene, "cycles", None)
+    if cycles is None:
+        return {"error": "scene.cycles not available — switch the engine to CYCLES first "
+                         "(e.g. render_to_file(..., engine='CYCLES'))."}
+
+    applied = []
+    skipped = []
+
+    device = params.get("device")
+    if device is not None:
+        dev = str(device).upper()
+        if dev not in {"GPU", "CPU"}:
+            return {"error": "device must be 'GPU' or 'CPU'"}
+        if dev == "GPU":
+            ok, chosen, gpu_devices, err = _enable_cycles_gpu(params.get("backend") or "")
+            if not ok:
+                return {"error": err}
+            cycles.device = 'GPU'
+            applied.append(f"device=GPU({chosen}: {', '.join(gpu_devices) or 'none'})")
+        else:
+            cycles.device = 'CPU'
+            applied.append("device=CPU")
+
+    denoise = params.get("denoise")
+    if denoise is not None:
+        cycles.use_denoising = bool(denoise)
+        applied.append(f"denoise={bool(denoise)}")
+
+    denoiser = params.get("denoiser")
+    if denoiser:
+        d = str(denoiser).upper()
+        try:
+            cycles.denoiser = d
+            applied.append(f"denoiser={d}")
+        except TypeError:
+            skipped.append(f"denoiser={d} (not available in this build)")
+
+    thr = params.get("adaptive_threshold")
+    if thr is not None:
+        cycles.use_adaptive_sampling = True
+        cycles.adaptive_threshold = float(thr)
+        applied.append(f"adaptive_threshold={float(thr)}")
+
+    samples = params.get("samples")
+    if samples is not None:
+        cycles.samples = int(samples)
+        applied.append(f"samples={int(samples)}")
+
+    return {
+        "success": True,
+        "engine": scene.render.engine,
+        "device": cycles.device,
+        "denoise": cycles.use_denoising,
+        "denoiser": cycles.denoiser,
+        "samples": cycles.samples,
+        "applied": applied,
+        "skipped": skipped,
+    }
+
+
 TOOLS = {
     "add_light":            add_light,
     "modify_light":         modify_light,
@@ -444,4 +568,5 @@ TOOLS = {
     "set_camera_dof":       set_camera_dof,
     "set_color_management": set_color_management,
     "set_render_quality":   set_render_quality,
+    "set_cycles_quality":   set_cycles_quality,
 }

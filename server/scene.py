@@ -213,6 +213,52 @@ def set_render_quality(raytracing: bool = None, ao: bool = None,
 
 
 @mcp.tool()
+def set_cycles_quality(device: str = "", backend: str = "",
+                       denoise: bool = None, denoiser: str = "",
+                       adaptive_threshold: float = None, samples: int = None,
+                       label: str = "") -> str:
+    """
+    Cycles-specific render controls — the Cycles counterpart to set_render_quality
+    (which only affects Eevee). Persists on the scene, so set it once and every
+    render_to_file afterward uses it.
+
+    device:   'GPU' | 'CPU'. 'GPU' also enables the card in Cycles addon
+              preferences, so a .blend saved as CPU starts using the GPU — THE fix
+              when renders crawl on CPU.
+    backend:  GPU backend when device='GPU': 'OPTIX' (NVIDIA RTX — fastest, adds
+              hardware denoising) | 'CUDA' | 'HIP' (AMD) | 'ONEAPI' (Intel) |
+              'METAL' (Apple). Empty = auto-pick the best backend that has a device.
+    denoise:  True/False — denoise the final image. The single biggest win against
+              grain: a denoised 64-sample frame beats a noisy 512-sample one.
+    denoiser: 'OPTIX' (GPU, NVIDIA) | 'OPENIMAGEDENOISE' (works anywhere). Empty =
+              leave as-is.
+    adaptive_threshold: noise floor for adaptive sampling, e.g. 0.01. Lower =
+              cleaner + slower. Enables adaptive sampling; Cycles stops refining a
+              pixel once it converges, so a high `samples` ceiling stays cheap.
+    samples:  max render sample count.
+
+    Example: set_cycles_quality(device="GPU", backend="OPTIX", denoise=True,
+                                denoiser="OPTIX", samples=128)
+    """
+    params = {}
+    if device:                         params["device"] = device
+    if backend:                        params["backend"] = backend
+    if denoise is not None:            params["denoise"] = denoise
+    if denoiser:                       params["denoiser"] = denoiser
+    if adaptive_threshold is not None: params["adaptive_threshold"] = adaptive_threshold
+    if samples is not None:            params["samples"] = samples
+    result = call_blender("set_cycles_quality", params, label=label)
+    if result.get("success"):
+        tail = f" (skipped: {result['skipped']})" if result.get("skipped") else ""
+        main = (f"cycles quality [device={result['device']}]: {result['applied']}{tail} "
+                f"(denoise={result['denoise']}/{result['denoiser']}, samples={result['samples']}) "
+                f"[{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def render_to_file(filepath: str,
                    resolution_x: int = None, resolution_y: int = None,
                    samples: int = None, engine: str = "",
