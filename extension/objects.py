@@ -32,10 +32,23 @@ def select_object(params):
     if obj is None:
         return {"error": f"Object '{name}' not found"}
 
+    # Object-level selection requires Object Mode — from POSE/EDIT/SCULPT the
+    # select_all operator's poll() fails ("context is incorrect"). SPEC-05 makes
+    # the verb the mode context: auto-switch instead of erroring, and tell the
+    # agent it happened (it may have meant to stay in the other mode).
+    notes = []
+    if bpy.context.mode != 'OBJECT':
+        prev = bpy.context.mode
+        bpy.ops.object.mode_set(mode='OBJECT')
+        notes.append(f"auto-switched {prev} → OBJECT to select an object")
+
     bpy.ops.object.select_all(action='DESELECT')
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
-    return {"success": True, "selected": name}
+    out = {"success": True, "selected": name}
+    if notes:
+        out["notes"] = notes
+    return out
 
 
 def delete_object(params):
@@ -266,6 +279,11 @@ def get_mesh_profile(params):
     win_max = params.get("max")
     win_min = float(win_min) if win_min is not None else None
     win_max = float(win_max) if win_max is not None else None
+    full = bool(params.get("full", False))
+    try:
+        bands = int(params.get("bands") or 0)
+    except (TypeError, ValueError):
+        bands = 0
     mr = params.get("max_rings", _PROFILE_MAX_RINGS)
     max_rings = int(mr) if mr else 0  # 0 / None → uncapped
 
@@ -276,48 +294,102 @@ def get_mesh_profile(params):
         bm = bmesh.new()
         bm.from_mesh(obj.data)
 
-    rings = {}
+    # One pass: collect (pos-on-axis, [coords on the two other axes]) for every
+    # vert inside the optional window.
+    samples = []
     for v in bm.verts:
         wco = obj.matrix_world @ v.co
         pos = wco[axis_idx]
         if (win_min is not None and pos < win_min) or (win_max is not None and pos > win_max):
             continue
-        key = round(pos, 4)
-        if key not in rings:
-            rings[key] = {n: [] for _, n in other}
-        for i, n in other:
-            rings[key][n].append(wco[i])
+        samples.append((pos, [wco[i] for i, _ in other]))
 
     if not was_edit:
         bm.free()
 
-    keys = sorted(rings.keys())
-    total = len(keys)
-    if total == 0:
+    if not samples:
         win = f" in {axis} window [{win_min}, {win_max}]" if (win_min is not None or win_max is not None) else ""
         return {"error": f"No geometry found{win}."}
 
-    # Even resample to the cap (always keep first + last so the extent is honest).
-    resampled = False
-    if max_rings and total > max_rings:
-        idxs = [round(i * (total - 1) / (max_rings - 1)) for i in range(max_rings)]
-        keys = [keys[i] for i in sorted(set(idxs))]
-        resampled = True
+    pos_min = min(s[0] for s in samples)
+    pos_max = max(s[0] for s in samples)
 
-    profile = []
-    for pos in keys:
-        entry = {axis: round(pos, 4)}
-        for _, n in other:
-            vals = rings[pos][n]
-            lo, hi = min(vals), max(vals)
-            entry[f"{n}_range"] = [round(lo, 4), round(hi, 4)]
-            entry[f"{n}_width"] = round(hi - lo, 4)
-        profile.append(entry)
+    if full:
+        # SHOW_ME_EVERYTHING: one ring per distinct axis position (exact grouping),
+        # capped + evenly resampled. The raw dump — opt-in only.
+        rings = {}
+        for pos, coords in samples:
+            key = round(pos, 4)
+            rings.setdefault(key, [[] for _ in other])
+            for j, c in enumerate(coords):
+                rings[key][j].append(c)
+        keys = sorted(rings)
+        total = len(keys)
+        resampled = False
+        if max_rings and total > max_rings:
+            idxs = [round(i * (total - 1) / (max_rings - 1)) for i in range(max_rings)]
+            keys = [keys[i] for i in sorted(set(idxs))]
+            resampled = True
+        profile = []
+        for pos in keys:
+            entry = {axis: round(pos, 4)}
+            for j, (_, n) in enumerate(other):
+                vals = rings[pos][j]
+                lo, hi = min(vals), max(vals)
+                entry[f"{n}_range"] = [round(lo, 4), round(hi, 4)]
+                entry[f"{n}_width"] = round(hi - lo, 4)
+            profile.append(entry)
+        return {"success": True, "mode": "full", "axis": axis, "rings": len(profile),
+                "rings_total": total, "resampled": resampled,
+                "windowed": win_min is not None or win_max is not None,
+                "window": [win_min, win_max], "profile": profile}
 
-    return {"success": True, "axis": axis, "rings": len(profile),
-            "rings_total": total, "resampled": resampled,
+    # DEFAULT: aggregate into evenly spaced bands and report each band's real
+    # cross-section width (span across all its verts), with the narrowest band
+    # (the pinch — armpit, waist, neck) and widest band flagged. This is what the
+    # profile is actually reached for; the per-ring dump was noise.
+    if bands <= 0:
+        bands = 24
+    extent = pos_max - pos_min
+    if extent <= 1e-9:
+        bands = 1
+    band_w = (extent / bands) if bands and extent > 0 else max(extent, 1e-9)
+
+    binned = [[[] for _ in other] for _ in range(bands)]
+    bcount = [0] * bands
+    for pos, coords in samples:
+        bi = int((pos - pos_min) / band_w) if band_w > 0 else 0
+        if bi >= bands:
+            bi = bands - 1
+        for j, c in enumerate(coords):
+            binned[bi][j].append(c)
+        bcount[bi] += 1
+
+    out_bands = []
+    for bi in range(bands):
+        if bcount[bi] == 0:
+            continue
+        center = pos_min + (bi + 0.5) * band_w
+        entry = {axis: round(center, 4), "n": bcount[bi]}
+        widths = []
+        for j, (_, n) in enumerate(other):
+            vals = binned[bi][j]
+            w = max(vals) - min(vals)
+            entry[f"{n}_width"] = round(w, 4)
+            widths.append(w)
+        # girth = summed bbox span of the two cross-section axes — a single scalar
+        # for "how big is the section here", used to find the pinch/bulge.
+        entry["girth"] = round(sum(widths), 4)
+        out_bands.append(entry)
+
+    narrow = min(out_bands, key=lambda b: b["girth"])
+    wide = max(out_bands, key=lambda b: b["girth"])
+    return {"success": True, "mode": "bands", "axis": axis,
+            "bands": len(out_bands), "band_width": round(band_w, 4),
+            "extent": [round(pos_min, 4), round(pos_max, 4)],
             "windowed": win_min is not None or win_max is not None,
-            "window": [win_min, win_max], "profile": profile}
+            "window": [win_min, win_max],
+            "narrowest": narrow, "widest": wide, "profile": out_bands}
 
 
 def get_current_selection(params):

@@ -495,6 +495,7 @@ def select_by_axis(params):
     factor     = params.get("factor", 0.5)
     comparison = params.get("comparison", "GREATER").upper()
     action     = params.get("action", "SELECT").upper()
+    extend     = bool(params.get("extend", False))
 
     obj = bpy.context.active_object
     if obj is None or obj.mode != 'EDIT':
@@ -507,18 +508,27 @@ def select_by_axis(params):
     v_min, v_max = min(world_vals), max(world_vals)
     threshold = v_min + factor * (v_max - v_min)
 
+    count = 0
     for vert in bm.verts:
         val = (obj.matrix_world @ vert.co)[axis_idx]
         matches = (val > threshold) if comparison == "GREATER" else (val < threshold)
         if action == "DESELECT":
             if matches:
                 vert.select = False
+        elif extend:
+            # additive: turn matching verts ON, never clear the prior selection —
+            # so two by_axis calls can union two regions (e.g. both sleeves).
+            if matches:
+                vert.select = True
         else:
             vert.select = matches
+        if vert.select:
+            count += 1
 
     _flush_vert_selection(bm)
     bmesh.update_edit_mesh(obj.data)
-    return {"success": True, "threshold_world": round(threshold, 4)}
+    return {"success": True, "threshold_world": round(threshold, 4),
+            "selected_count": count}
 
 
 def select_between(params):
@@ -527,6 +537,7 @@ def select_between(params):
     lo         = params.get("lo", 0.0)
     hi         = params.get("hi", 1.0)
     action     = params.get("action", "SELECT").upper()
+    extend     = bool(params.get("extend", False))
     obj = bpy.context.active_object
     if obj is None or obj.mode != 'EDIT':
         return {"error": "Must be in edit mode with an active object"}
@@ -543,6 +554,9 @@ def select_between(params):
         if action == "DESELECT":
             if in_range:
                 vert.select = False
+        elif extend:
+            if in_range:
+                vert.select = True
         else:
             vert.select = in_range
         if vert.select:
@@ -1167,6 +1181,10 @@ def select_in_sphere(params):
     if radius <= 0:
         return {"error": "'radius' must be > 0"}
     action = (params.get("action") or "SELECT").upper()
+    # Unify on the `extend` flag used by by_axis/between: extend=True unions with
+    # the current selection (reuses the existing additive ADD path).
+    if bool(params.get("extend", False)) and action == "SELECT":
+        action = "ADD"
     cx, cy, cz = float(center[0]), float(center[1]), float(center[2])
     r2 = radius * radius
     bm = bmesh.from_edit_mesh(obj.data)

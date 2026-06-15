@@ -23,6 +23,7 @@ def select(
     name: tag(str, "[object] object name to select") = "",
     # generic
     action: tag(str, "[all/by_axis/between/boundary/in_sphere/ring/rings] SELECT|DESELECT|INVERT|TOGGLE") = "SELECT",
+    extend: tag(bool, "[by_axis/between/in_sphere] True = ADD to current selection (union regions across calls) instead of replacing") = False,
     axis: tag(str, "[by_axis/between/ring/rings] axis X|Y|Z") = "Z",
     target: tag(str, "[ring/rings] mesh object (empty=active)") = "",
     # by_axis
@@ -56,13 +57,14 @@ def select(
       none        — deselect everything
       object      — select an object by name (Object Mode)        (name)
       by_axis     — verts past an axis threshold  (axis, factor 0..1, comparison=
-                    GREATER|LESS, action)
-      between     — verts in an axis band         (axis, lo, hi, action)
+                    GREATER|LESS, action, extend)
+      between     — verts in an axis band         (axis, lo, hi, action, extend)
       boundary    — open-edge boundary loop        (from_selection, action)
       grow        — grow the selection             (steps)
       shrink      — shrink the selection           (steps)
       random      — a random fraction              (fraction, seed)
-      in_sphere   — verts inside a sphere   (center_x/y/z, radius, action)
+      in_sphere   — verts inside a sphere   (center_x/y/z, radius, action, extend)
+                    extend=True unions onto the current selection (vs replacing).
       ring        — one edge ring          (axis, index, action, target)
       rings       — several edge rings     (axis, indices=[...], action, target)
       component_mode — set vert/edge/face mode    (mode=VERT|EDGE|FACE)
@@ -76,9 +78,9 @@ def select(
     if o == "object":
         return objects.select_object(name)
     if o == "by_axis":
-        return editmode.select_by_axis(axis, factor, comparison, action)
+        return editmode.select_by_axis(axis, factor, comparison, action, extend)
     if o == "between":
-        return editmode.select_between(axis, lo, hi, action)
+        return editmode.select_between(axis, lo, hi, action, extend)
     if o == "boundary":
         return editmode.select_boundary(action, from_selection)
     if o == "grow":
@@ -88,7 +90,7 @@ def select(
     if o == "random":
         return editmode.random_select(fraction, seed)
     if o == "in_sphere":
-        return editmode.select_in_sphere(center_x, center_y, center_z, radius, action)
+        return editmode.select_in_sphere(center_x, center_y, center_z, radius, action, extend)
     if o == "ring":
         return rings.select_ring(axis, index, action, target)
     if o == "rings":

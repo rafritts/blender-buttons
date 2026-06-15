@@ -73,22 +73,25 @@ def get_blender_status() -> str:
 
 @mcp.tool()
 def get_mesh_profile(axis: str = "Z", min: float = None, max: float = None,
-                     max_rings: int = 200) -> str:
+                     max_rings: int = 200, bands: int = 0, full: bool = False) -> str:
     """
-    Slice the active mesh into rings along an axis and report the width/extent at each ring.
-    axis: X | Y | Z — the axis to slice along (default Z for vertical objects like blades)
-    min, max: optional WORLD-SPACE window on the profile axis (same units as the table's
-              position column, NOT 0..1 factors). e.g. axis="X", min=0.08, max=0.20 returns
-              only the rings whose X falls in [0.08, 0.20]. Use to profile one region of a
-              production mesh without dumping the whole thing.
-    max_rings: cap the number of rings returned (default 200). If the windowed mesh has more,
-               rings are EVENLY RESAMPLED (first and last always kept) and the table notes it.
-               Pass 0 to uncap. Production meshes (thousands of rings) otherwise blow the
-               result budget.
-    Returns a table: position along axis, plus min/max/width on the other two axes.
-    Use this to understand actual geometry before making edits — no guessing needed.
+    Sweep the active mesh's cross-section along an axis. BY DEFAULT this aggregates
+    into evenly spaced bands and reports each band's real cross-section width, with
+    the NARROWEST band (the pinch — armpit, waist, neck) and the widest flagged —
+    which is what you actually reach a profile for. Pass full=True for the raw
+    per-ring dump.
+
+    axis: X | Y | Z — the axis to slice along (default Z for vertical objects).
+    min, max: optional WORLD-SPACE window on the profile axis (same units as the
+              position column, NOT 0..1 factors). e.g. axis="X", min=0.08, max=0.20.
+    bands: number of aggregation bands (default 24). Ignored when full=True.
+    full: True = SHOW_ME_EVERYTHING — one ring per distinct axis position, capped by
+          max_rings (evenly resampled, first/last kept). The old raw table.
+    max_rings: cap for full mode (default 200; 0 = uncap).
+
+    Use this to find WHERE the section changes before a cut — no coordinate guessing.
     """
-    params = {"axis": axis, "max_rings": max_rings}
+    params = {"axis": axis, "max_rings": max_rings, "bands": bands, "full": full}
     if min is not None:
         params["min"] = min
     if max is not None:
@@ -96,25 +99,46 @@ def get_mesh_profile(axis: str = "Z", min: float = None, max: float = None,
     result = call_blender("get_mesh_profile", params)
     if not result.get("success"):
         return result.get("error", "failed")
-    profile = result["profile"]
     ax = result["axis"]
     other = [n for n in ['X', 'Y', 'Z'] if n != ax]
-    lines = [f"{'':>8}  " + "  ".join(f"{n:>22}" for n in other)]
-    for r in profile:
-        cols = []
-        for n in other:
-            lo, hi = r[f"{n}_range"]
-            w = r[f"{n}_width"]
-            cols.append(f"{lo:+.4f}→{hi:+.4f} ({w:.4f})")
-        lines.append(f"{ax}={r[ax]:+.4f}  " + "  ".join(cols))
-    shown = len(profile)
-    total = result.get("rings_total", shown)
-    head = f"{shown} rings along {ax}"
+
+    if result.get("mode") == "full":
+        profile = result["profile"]
+        lines = [f"{'':>8}  " + "  ".join(f"{n:>22}" for n in other)]
+        for r in profile:
+            cols = []
+            for n in other:
+                lo, hi = r[f"{n}_range"]
+                w = r[f"{n}_width"]
+                cols.append(f"{lo:+.4f}→{hi:+.4f} ({w:.4f})")
+            lines.append(f"{ax}={r[ax]:+.4f}  " + "  ".join(cols))
+        shown = len(profile)
+        total = result.get("rings_total", shown)
+        head = f"{shown} rings along {ax}"
+        if result.get("windowed"):
+            w = result.get("window", [None, None])
+            head += f" in window [{w[0]}, {w[1]}]"
+        if result.get("resampled"):
+            head += f" (resampled from {total} — even spacing, first/last kept)"
+        return f"{head}:\n" + "\n".join(lines) + _status(result)
+
+    # aggregated bands (default)
+    profile = result["profile"]
+    ext = result["extent"]
+    head = (f"{result['bands']} bands along {ax}  "
+            f"(band ≈ {result['band_width']}m, extent [{ext[0]}, {ext[1]}])")
     if result.get("windowed"):
         w = result.get("window", [None, None])
-        head += f" in window [{w[0]}, {w[1]}]"
-    if result.get("resampled"):
-        head += f" (resampled from {total} — even spacing, first/last kept)"
+        head += f"  window [{w[0]}, {w[1]}]"
+    nb, wb = result["narrowest"], result["widest"]
+    lines = [
+        f"  ← narrowest: {ax}={nb[ax]:+.4f}  girth {nb['girth']}m   (the pinch)",
+        f"  → widest:    {ax}={wb[ax]:+.4f}  girth {wb['girth']}m",
+        f"  {ax:>8}  " + "  ".join(f"{n}_width" for n in other) + "   girth     n",
+    ]
+    for b in profile:
+        ws = "  ".join(f"{b[f'{n}_width']:>7.4f}" for n in other)
+        lines.append(f"  {b[ax]:+.4f}  {ws}   {b['girth']:>7.4f}  {b['n']:>4}")
     return f"{head}:\n" + "\n".join(lines) + _status(result)
 
 

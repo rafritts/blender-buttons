@@ -117,8 +117,10 @@ check("scoped cut touched FEWER edges than whole mesh",
 run("set_mode", mode="OBJECT")
 
 
-# ───────── Z3: get_mesh_profile windowing + resample ─────────
-print("== Z3: get_mesh_profile windows by min/max and caps rings by resampling ==")
+# ───────── Z3: get_mesh_profile windowing + resample (full mode) ─────────
+# SPEC-05 Addendum C #3: the per-ring dump is now opt-in via full=True; the
+# default is aggregated bands. Windowing + max_rings resampling are full-mode.
+print("== Z3: get_mesh_profile(full=True) windows by min/max and caps rings by resampling ==")
 clean()
 run("add_box", name="col", width=1.0, depth=1.0, height=4.0)
 run("select_object", name="col")
@@ -126,11 +128,11 @@ run("set_mode", mode="EDIT")
 run("select_all", action="DESELECT")
 run("loop_cut", axis="Z", cuts=30)   # ~32 rings
 run("set_mode", mode="OBJECT")
-full = run("get_mesh_profile", axis="Z")
+full = run("get_mesh_profile", axis="Z", full=True)
 total = full["rings_total"]
 check("profile reports many rings", total >= 30, repr(total))
 check("uncapped default fits (<=200)", full["rings"] == total, repr(full["rings"]))
-capped = run("get_mesh_profile", axis="Z", max_rings=5)
+capped = run("get_mesh_profile", axis="Z", max_rings=5, full=True)
 check("max_rings caps the ring count", capped["rings"] <= 5, repr(capped["rings"]))
 check("resample is reported", capped.get("resampled") is True, repr(capped))
 check("first and last rings kept", capped["profile"][0]["Z"] == full["profile"][0]["Z"]
@@ -140,11 +142,22 @@ zmin = full["profile"][0]["Z"]
 zmax = full["profile"][-1]["Z"]
 mid_lo = zmin + 0.4 * (zmax - zmin)
 mid_hi = zmin + 0.6 * (zmax - zmin)
-win = run("get_mesh_profile", axis="Z", min=mid_lo, max=mid_hi)
+win = run("get_mesh_profile", axis="Z", min=mid_lo, max=mid_hi, full=True)
 check("windowed profile is a subset", win["rings"] < total, f"{win['rings']} vs {total}")
 check("windowed flag set", win.get("windowed") is True, repr(win.get("window")))
 check("windowed rings all inside the window",
       all(mid_lo - 1e-4 <= r["Z"] <= mid_hi + 1e-4 for r in win["profile"]), "out-of-window ring")
+
+# ───────── Z3b: default (aggregated bands) mode ─────────
+print("== Z3b: get_mesh_profile default aggregates into bands with extrema flagged ==")
+agg = run("get_mesh_profile", axis="Z")
+check("default mode is bands", agg.get("mode") == "bands", repr(agg.get("mode")))
+check("bands reported", agg.get("bands", 0) >= 2, repr(agg.get("bands")))
+check("narrowest band flagged", isinstance(agg.get("narrowest"), dict)
+      and "girth" in agg["narrowest"], repr(agg.get("narrowest")))
+check("widest girth >= narrowest girth",
+      agg["widest"]["girth"] >= agg["narrowest"]["girth"],
+      f"{agg['widest']['girth']} vs {agg['narrowest']['girth']}")
 
 
 # ───────── Y1: shape-key shadowing ─────────

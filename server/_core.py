@@ -46,6 +46,11 @@ def _status(result: dict) -> str:
     bind = "\n" + result["bind_warning"] if result.get("bind_warning") else ""
     if result.get("shape_key_warning"):
         bind += "\n" + result["shape_key_warning"]
+    # Generalized postcondition-notes channel (SPEC-05 Improvement #4): any handler
+    # can attach a `notes` list — e.g. an auto mode-switch the agent should know
+    # happened. Surfaced ahead of the block like the bind/shape-key warnings.
+    for note in (result.get("notes") or []):
+        bind += "\n⚠ " + note
     s = result.get("blender_status")
     if not s:
         return bind

@@ -23,15 +23,19 @@ def feel(
                 "resting"] = "topology",
     target: tag(str, "[topology/rings/symmetry/mesh] mesh object (empty=active)") = "",
     # topology (SPEC-04)
-    method: tag(str, "[topology] comma list (empty = cheap bundle)") = "",
+    method: tag(str, "[topology] comma list of method tokens (empty = cheap bundle: "
+                     "components,genus,boundaries,sections,poles,symmetry,frame). "
+                     "Extra: curvature,features,thickness") = "",
     lod: tag(str, "[topology] low|medium|high output verbosity") = "low",
     base: tag(str, "[topology] cage | evaluated mesh to read") = "cage",
     seed: tag(str, "[topology] handle for seeded methods (v2)") = "",
     # profile / rings
     axis: tag(str, "[profile/rings/symmetry] axis X|Y|Z (distance: X|Y for 1-axis)") = "Z",
-    min: tag(float, "[profile] sweep start (m)") = None,
-    max: tag(float, "[profile] sweep end (m)") = None,
-    max_rings: tag(int, "[profile] max sections") = 200,
+    min: tag(float, "[profile] window start on axis (m, world-space)") = None,
+    max: tag(float, "[profile] window end on axis (m, world-space)") = None,
+    bands: tag(int, "[profile] aggregation band count (default 24)") = 0,
+    full: tag(bool, "[profile] True = raw per-ring dump instead of aggregated bands") = False,
+    max_rings: tag(int, "[profile] max rings in full mode (0 = uncap)") = 200,
     # measurements
     a: tag(str, "[distance/gap/aligned] first object") = "",
     b: tag(str, "[distance/gap/aligned] second object") = "",
@@ -49,11 +53,22 @@ def feel(
     Feel a mesh — structure, measurements, correctness. Read-only (no status block).
     `op` selects:
 
-      topology — STRUCTURE (default): openings, branches, poles, symmetry,
-                 curvature, hard edges, thickness, cross-sections. `method` =
-                 comma list (empty = the cheap bundle); lod=low|medium|high;
-                 base=cage|evaluated; seed for seeded methods. (target, method, lod, base)
-      profile  — cross-section area/width sweep of the active mesh (axis, min, max, max_rings)
+      topology — STRUCTURE (default). `method` = comma list of these tokens
+                 (empty = the cheap bundle, the first seven):
+                   components — separate shells (fused vs not)
+                   genus      — sphere/tube/handled + holes through it
+                   boundaries — the open holes: size + location (the "openings")
+                   sections   — cross-section sweep: coverage, voids, branch splits
+                   poles      — valence≠4 verts (quad-flow breaks)
+                   symmetry   — best mirror plane + error, per axis
+                   frame      — intrinsic principal axes
+                   curvature  — flats/ridges/domes/saddles  (not in bundle)
+                   features   — hard dihedral edges in chains (not in bundle)
+                   thickness  — local wall/part diameter      (not in bundle)
+                 lod=low|medium|high; base=cage|evaluated. (target, method, lod, base)
+      profile  — cross-section width sweep along an axis: by default AGGREGATED into
+                 bands with the narrowest/widest flagged; full=True dumps every ring
+                 (axis, min, max, bands, full)
       rings    — edge-ring structure along an axis           (axis, target)
       distance — distance between two objects (a, b; default = straight-line,
                  or axis=X|Y for a single-axis distance)
@@ -71,7 +86,7 @@ def feel(
     if o == "topology":
         return topology.get_topology(target, method, lod, base, seed)
     if o == "profile":
-        return queries.get_mesh_profile(axis, min, max, max_rings)
+        return queries.get_mesh_profile(axis, min, max, max_rings, bands, full)
     if o == "rings":
         return rings.get_rings(axis, target)
     if o == "distance":

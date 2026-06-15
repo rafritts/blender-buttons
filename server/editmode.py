@@ -128,7 +128,7 @@ def select_all(action: str = "SELECT") -> str:
 
 @mcp.tool()
 def select_by_axis(axis: str = "Z", factor: float = 0.5, comparison: str = "GREATER",
-                   action: str = "SELECT") -> str:
+                   action: str = "SELECT", extend: bool = False) -> str:
     """
     Select or deselect vertices in edit mode by position along an axis.
     axis: X | Y | Z
@@ -137,10 +137,13 @@ def select_by_axis(axis: str = "Z", factor: float = 0.5, comparison: str = "GREA
     comparison: GREATER | LESS
     action: SELECT (replace selection) | DESELECT (remove matching verts from selection)
             Use DESELECT to select a band: select_all → deselect left → deselect right = center band.
+    extend: True = ADD to the current selection instead of replacing it, so two
+            calls union two regions (e.g. select both sleeves before one delete).
     Returns the actual world-space threshold used.
     """
     result = call_blender("select_by_axis", {"axis": axis, "factor": factor,
-                                              "comparison": comparison, "action": action})
+                                              "comparison": comparison, "action": action,
+                                              "extend": extend})
     if result.get("success"):
         main = f"ok (threshold_world={result.get('threshold_world')})"
     else:
@@ -450,17 +453,19 @@ def grow_selection(direction: str = "GROW", steps: int = 1) -> str:
 
 @mcp.tool()
 def select_between(axis: str = "Z", lo: float = 0.0, hi: float = 1.0,
-                   action: str = "SELECT") -> str:
+                   action: str = "SELECT", extend: bool = False) -> str:
     """
     Select (or deselect) vertices whose world-space position on an axis falls between lo and hi.
     axis: X | Y | Z
     lo, hi: factors from 0.0 (min extent) to 1.0 (max extent) — same scale as select_by_axis.
             e.g. lo=0.4, hi=0.6 selects the middle 20% of the mesh along the axis.
     action: SELECT | DESELECT
+    extend: True = ADD to the current selection instead of replacing it.
     Returns the actual world-space thresholds and total selected vert count.
     Replaces the verbose select_all → deselect_below → deselect_above band pattern.
     """
-    result = call_blender("select_between", {"axis": axis, "lo": lo, "hi": hi, "action": action})
+    result = call_blender("select_between", {"axis": axis, "lo": lo, "hi": hi,
+                                             "action": action, "extend": extend})
     if result.get("success"):
         main = (f"ok  {axis}:[{result['lo_world']} → {result['hi_world']}]"
                 f"  selected={result['selected_count']}")
@@ -520,15 +525,18 @@ def merge_by_distance(threshold: float = 0.001, selected_only: bool = False,
 
 @mcp.tool()
 def select_in_sphere(center_x: float, center_y: float, center_z: float, radius: float,
-                     action: str = "SELECT") -> str:
+                     action: str = "SELECT", extend: bool = False) -> str:
     """Select edit-mode vertices inside a world-space sphere. The right tool for localized
     region edits on a joined mesh (push out the bust, inflate the brow ridge, etc.) when
     ring-based addressing won't reach the area.
 
     center_x/y/z: world coords. radius: meters. action: SELECT | ADD | DESELECT.
+    extend: True = ADD to the current selection (same as action=ADD), for parity
+            with select_by_axis / select_between.
     Pair with proportional_move or inflate_selection to sculpt the region."""
     result = call_blender("select_in_sphere", {
         "center": [center_x, center_y, center_z], "radius": radius, "action": action,
+        "extend": extend,
     })
     if result.get("success"):
         main = (f"{action} {result['selected']} verts within {result['radius']}m of "

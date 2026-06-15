@@ -572,7 +572,10 @@ def get_topology(params):
                 except Exception as e:
                     report[m] = {"error": f"{type(e).__name__}: {e}"}
             else:
-                report[m] = {"error": f"unknown method '{m}'"}
+                valid = ", ".join(sorted(_METHODS))
+                v2 = ", ".join(sorted(_V2_METHODS))
+                report[m] = {"error": f"unknown method '{m}'. valid: {valid} "
+                                      f"(v2, needs scipy: {v2})"}
         result = {
             "success": True,
             "object": obj.name,
