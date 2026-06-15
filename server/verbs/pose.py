@@ -4,9 +4,11 @@ Everything rig-related: build an armature, weight a mesh to it, pose bones, bind
 mesh-deform cage, drive shape keys, and read the bone tree. `op` selects.
 """
 
+from typing import Literal
+
 from server._core import mcp
 from server import armature as _arm, editmode, modifiers, objects
-from ._common import unknown
+from ._common import tag, unknown
 
 _OPS = ["create_armature", "auto_weight", "weight_to_bone", "assign_weight",
         "pose_bone", "bone_tree", "describe_bone", "constraints", "bind", "rebind",
@@ -15,22 +17,37 @@ _OPS = ["create_armature", "auto_weight", "weight_to_bone", "assign_weight",
 
 @mcp.tool(name="pose")
 def pose(
-    op: str,
+    op: Literal["create_armature", "auto_weight", "weight_to_bone", "assign_weight",
+                "pose_bone", "bone_tree", "describe_bone", "constraints", "bind",
+                "rebind", "shape_keys", "shape_key_set", "shape_key_active"],
     # armature / mesh refs
-    name: str = "", armature: str = "", mesh: str = "", bone: str = "",
+    name: tag(str, "[create_armature/constraints/shape_*] object name") = "",
+    armature: tag(str, "[auto_weight/weight_to_bone/pose_bone/bone_tree/describe_bone] armature name") = "",
+    mesh: tag(str, "[auto_weight/weight_to_bone/bind/rebind/shape_*] mesh name") = "",
+    bone: tag(str, "[weight_to_bone/pose_bone/describe_bone/constraints] bone name") = "",
     # create_armature
-    bones: list = None,
+    bones: tag(list, "[create_armature] [{name, head, tail, parent}, …]") = None,
     # pose_bone
-    rot: list = None, loc: list = None, additive: bool = False,
+    rot: tag(list, "[pose_bone] rotation [x,y,z] degrees") = None,
+    loc: tag(list, "[pose_bone] translation [x,y,z]") = None,
+    additive: tag(bool, "[pose_bone] add to current pose") = False,
     # weights
-    group: str = "", weight: float = 1.0, mode: str = "REPLACE",
+    group: tag(str, "[assign_weight] vertex group / bone name") = "",
+    weight: tag(float, "[assign_weight] weight 0..1") = 1.0,
+    mode: tag(str, "[assign_weight] REPLACE|ADD|SUBTRACT") = "REPLACE",
     # bone_tree
-    filter: str = "", deform_only: bool = False, max_depth: int = None,
+    filter: tag(str, "[bone_tree] name-substring filter") = "",
+    deform_only: tag(bool, "[bone_tree] only deform bones") = False,
+    max_depth: tag(int, "[bone_tree] max hierarchy depth") = None,
     # bind / rebind
-    cage: str = "", action: str = "bind", modifier: str = "",
-    precision: int = None, timeout: int = 120,
+    cage: tag(str, "[bind] mesh-deform cage object") = "",
+    action: tag(str, "[bind] bind | unbind") = "bind",
+    modifier: tag(str, "[bind/rebind] modifier name") = "",
+    precision: tag(int, "[bind] bind precision") = None,
+    timeout: tag(int, "[bind/rebind] seconds before giving up") = 120,
     # shape keys
-    key: str = "", value: float = 0.0,
+    key: tag(str, "[shape_key_set/shape_key_active] shape-key name") = "",
+    value: tag(float, "[shape_key_set] key value 0..1") = 0.0,
     label: str = "",
 ) -> str:
     """

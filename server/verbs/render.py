@@ -4,28 +4,42 @@ Produce the image and control render quality / color management. `op` selects.
 render(op="image") is the only user-facing image producer (see its warning).
 """
 
+from typing import Literal
+
 from server._core import mcp
 from server import scene
-from ._common import unknown
+from ._common import tag, unknown
 
 _OPS = ["image", "quality", "cycles", "color"]
 
 
 @mcp.tool(name="render")
 def render(
-    op: str,
+    op: Literal["image", "quality", "cycles", "color"],
     # image (render_to_file)
-    filepath: str = "",
-    resolution_x: int = None, resolution_y: int = None,
-    engine: str = "", format: str = "PNG", transparent: bool = None,
-    timeout: float = 300,
+    filepath: tag(str, "[image] output path (~ expanded)") = "",
+    resolution_x: tag(int, "[image] pixel width") = None,
+    resolution_y: tag(int, "[image] pixel height") = None,
+    engine: tag(str, "[image] CYCLES | BLENDER_EEVEE_NEXT") = "",
+    format: tag(str, "[image] PNG|JPEG|OPEN_EXR|TIFF|WEBP") = "PNG",
+    transparent: tag(bool, "[image] transparent background") = None,
+    timeout: tag(float, "[image] seconds before giving up") = 300,
     # quality (Eevee) + shared
-    raytracing: bool = None, ao: bool = None, shadows: bool = None, samples: int = None,
+    raytracing: tag(bool, "[quality] Eevee screen-space ray tracing (metal reflections)") = None,
+    ao: tag(bool, "[quality] ambient occlusion") = None,
+    shadows: tag(bool, "[quality] soft shadows") = None,
+    samples: tag(int, "[image/quality/cycles] sample count") = None,
     # cycles
-    device: str = "", backend: str = "", denoise: bool = None, denoiser: str = "",
-    adaptive_threshold: float = None,
+    device: tag(str, "[cycles] GPU | CPU") = "",
+    backend: tag(str, "[cycles] OPTIX|CUDA|HIP|ONEAPI|METAL (GPU backend)") = "",
+    denoise: tag(bool, "[cycles] denoise the final image") = None,
+    denoiser: tag(str, "[cycles] OPTIX | OPENIMAGEDENOISE") = "",
+    adaptive_threshold: tag(float, "[cycles] adaptive-sampling noise floor, e.g. 0.01") = None,
     # color management
-    view_transform: str = "", look: str = "", exposure: float = None, gamma: float = None,
+    view_transform: tag(str, "[color] Standard|AgX|Filmic|Raw") = "",
+    look: tag(str, "[color] contrast look") = "",
+    exposure: tag(float, "[color] stops of exposure") = None,
+    gamma: tag(float, "[color] display gamma") = None,
     label: str = "",
 ) -> str:
     """

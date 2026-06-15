@@ -5,9 +5,11 @@ array, scatter — plus vertex-level move/scale. `op` selects the operation;
 `targets` is "" (active), one name, or "a,b,c".
 """
 
+from typing import Literal
+
 from server._core import mcp
 from server import transforms, relational, editmode
-from ._common import unknown
+from ._common import tag, unknown
 
 _OPS = ["nudge", "resize", "scale", "rotate", "apply", "snap", "snap_grid",
         "match_dim", "mirror", "distribute", "array_corners", "array_along",
@@ -16,41 +18,80 @@ _OPS = ["nudge", "resize", "scale", "rotate", "apply", "snap", "snap_grid",
 
 @mcp.tool(name="transform")
 def transform(
-    op: str,
-    targets: str = "",
+    op: Literal["nudge", "resize", "scale", "rotate", "apply", "snap", "snap_grid",
+                "match_dim", "mirror", "distribute", "array_corners", "array_along",
+                "array_radial", "scatter", "move_verts", "scale_verts"],
+    targets: tag(str, "object(s): '' active, 'name', or 'a,b,c'") = "",
     # nudge (relative meters)
-    right: float = 0.0, left: float = 0.0, up: float = 0.0, down: float = 0.0,
-    back: float = 0.0, forward: float = 0.0, inward: float = 0.0, out: float = 0.0,
+    right: tag(float, "[nudge] +X (m)") = 0.0,
+    left: tag(float, "[nudge] -X (m)") = 0.0,
+    up: tag(float, "[nudge/move_verts] +Z (m)") = 0.0,
+    down: tag(float, "[nudge/move_verts] -Z (m)") = 0.0,
+    back: tag(float, "[nudge/move_verts] +Y (m)") = 0.0,
+    forward: tag(float, "[nudge/move_verts] -Y (m)") = 0.0,
+    inward: tag(float, "[move_verts] inward along normal (m)") = 0.0,
+    out: tag(float, "[move_verts] outward along normal (m)") = 0.0,
     # resize (absolute meters)
-    width: float = None, depth: float = None, height: float = None,
+    width: tag(float, "[resize] absolute X extent (m)") = None,
+    depth: tag(float, "[resize] absolute Y extent (m)") = None,
+    height: tag(float, "[resize] absolute Z extent (m)") = None,
     # scale / rotate
-    factor: float = 1.0, pivot: str = "center", pivot_object: str = "",
-    angle: float = 0.0, axis: str = "Z",
+    factor: tag(float, "[scale] multiply size by") = 1.0,
+    pivot: tag(str, "[scale/rotate] center|cursor|… pivot") = "center",
+    pivot_object: tag(str, "[scale/rotate] object to pivot around") = "",
+    angle: tag(float, "[rotate] degrees") = 0.0,
+    axis: tag(str, "[rotate/match_dim/array_*] axis X|Y|Z") = "Z",
     # apply
-    scale: bool = True, rotation: bool = False, location: bool = False,
+    scale: tag(bool, "[apply] bake scale into mesh data") = True,
+    rotation: tag(bool, "[apply] bake rotation") = False,
+    location: tag(bool, "[apply] bake location") = False,
     # snap
-    target: str = "", side: str = "Z_MAX", source_side: str = "AUTO",
-    offset: float = 0.0,
+    target: tag(str, "[snap/match_dim] object to snap/measure against") = "",
+    side: tag(str, "[snap] target side, e.g. Z_MAX") = "Z_MAX",
+    source_side: tag(str, "[snap] moved-object side (AUTO infers)") = "AUTO",
+    offset: tag(float, "[snap] gap along the snap axis (m)") = 0.0,
     # snap_grid
-    size: float = 0.1, axes: str = "XYZ",
+    size: tag(float, "[snap_grid] grid size (m)") = 0.1,
+    axes: tag(str, "[snap_grid] axes to snap, e.g. XYZ") = "XYZ",
     # match_dim
-    reference: str = "",
+    reference: tag(str, "[match_dim] object whose extent to match") = "",
     # mirror
-    plane: str = "X", suffix: str = "_mirror", replace: bool = None,
+    plane: tag(str, "[mirror] mirror plane X|Y|Z") = "X",
+    suffix: tag(str, "[mirror] suffix for the mirrored copy") = "_mirror",
+    replace: tag(bool, "[mirror] replace existing mirror") = None,
     # distribute / array
-    between: list = None, prototype: str = "", of: str = "", count: int = 0,
-    standing_on_floor: bool = True, keep_original: bool = False, name_prefix: str = "",
-    center: list = None, center_object: str = "",
-    start_angle: float = 0.0, end_angle: float = 360.0, radius: float = None,
-    align_to_tangent: bool = False,
+    between: tag(list, "[distribute/array_along] two endpoint objects [a,b]") = None,
+    prototype: tag(str, "[array_*] object to copy") = "",
+    of: tag(str, "[array_corners] target whose 4 corners to fill") = "",
+    count: tag(int, "[array_along/array_radial] number of copies") = 0,
+    standing_on_floor: tag(bool, "[array_corners] keep copies on the floor") = True,
+    keep_original: tag(bool, "[array_*] keep the prototype") = False,
+    name_prefix: tag(str, "[array_*/scatter] name prefix for copies") = "",
+    center: tag(list, "[array_radial] ring center [x,y,z]") = None,
+    center_object: tag(str, "[array_radial] object at the ring center") = "",
+    start_angle: tag(float, "[array_radial] start angle (deg)") = 0.0,
+    end_angle: tag(float, "[array_radial] end angle (deg)") = 360.0,
+    radius: tag(float, "[array_radial] ring radius (m)") = None,
+    align_to_tangent: tag(bool, "[array_radial] rotate copies to the ring tangent") = False,
     # scatter
-    source: str = "", scale_min: float = 0.8, scale_max: float = 1.2,
-    align_normal: bool = True, rotate_z: bool = True, parent_to_target: bool = True,
-    seed: int = 0, avoid: str = "", avoid_margin: float = 0.0,
+    source: tag(str, "[scatter] surface object to scatter onto") = "",
+    scale_min: tag(float, "[scatter] min random scale") = 0.8,
+    scale_max: tag(float, "[scatter] max random scale") = 1.2,
+    align_normal: tag(bool, "[scatter] align copies to surface normal") = True,
+    rotate_z: tag(bool, "[scatter] random Z rotation") = True,
+    parent_to_target: tag(bool, "[scatter] parent copies to the surface") = True,
+    seed: tag(int, "[scatter] random seed") = 0,
+    avoid: tag(str, "[scatter] object/region to avoid") = "",
+    avoid_margin: tag(float, "[scatter] avoidance margin (m)") = 0.0,
     # move_verts / scale_verts (edit-mode component transforms)
-    x: float = 0.0, y: float = 0.0, z: float = 0.0,
-    sx: float = 1.0, sy: float = 1.0, sz: float = 1.0,
-    in_plane: float = 0.0, vert_pivot: str = "SELECTION",
+    x: tag(float, "[move_verts] explicit X amount (m)") = 0.0,
+    y: tag(float, "[move_verts] explicit Y amount (m)") = 0.0,
+    z: tag(float, "[move_verts] explicit Z amount (m)") = 0.0,
+    sx: tag(float, "[scale_verts] X scale factor") = 1.0,
+    sy: tag(float, "[scale_verts] Y scale factor") = 1.0,
+    sz: tag(float, "[scale_verts] Z scale factor") = 1.0,
+    in_plane: tag(float, "[scale_verts] in-plane scale (flatten)") = 0.0,
+    vert_pivot: tag(str, "[scale_verts] SELECTION|CURSOR|…") = "SELECTION",
     label: str = "",
 ) -> str:
     """

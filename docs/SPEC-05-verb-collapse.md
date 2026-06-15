@@ -188,10 +188,61 @@ The collapse is almost entirely a **`server/`-side** change. The addon (`extensi
 
 ## Open questions
 
-- **Subcommand schema ergonomics** — how to express conditional params (the args valid for
-  `add(mesh=…)` differ from `add(image=…)`) without a schema the model can't read. Per-verb
-  discipline (regular shared options) is the lever; the exact JSON-Schema shape is unsettled.
+- **Subcommand schema ergonomics** — RESOLVED, see **Addendum A**.
 - **Staging** — order of collapse. `feel` is effectively done (`SPEC-04`). The act-verbs can
   land one menu at a time behind the existing tools, then the flat tools retire per verb.
 - **`asset` search placement** — `search_hdris` / `search_textures` sit under `material` here;
   if asset browsing grows (models, node groups) it may deserve its own File-menu-adjacent verb.
+
+## Addendum A — Schema ergonomics (resolved)
+
+*Added after v1 shipped, in response to the lived-in friction: the fat verbs (`edit`,
+`transform`) read as "scan 50 flat params and guess which 4 are mine."*
+
+### The mechanism, stated correctly
+
+Every MCP tool carries **two** things: a structured **`inputSchema`** (JSON Schema —
+params, types, defaults, `required`) that FastMCP auto-generates from the Python
+signature, and a free-text **`description`** (the docstring). The original v1 verbs put
+the entire op→param map in the **docstring prose only**. The structured schema was flat:
+`op` was a bare `string` (not even the valid values), and all ~50 params were equal
+citizens with no machine-readable hint which subcommand each served. That flatness *is*
+the friction.
+
+### The decision: sharpen the structured schema, keep one tool per verb
+
+Two cheap, additive changes — no new authoring model, no `oneOf`:
+
+1. **The discriminator is a `Literal`**, so the schema emits an `enum` of the valid
+   ops/types/brushes. The model sees the legal subcommands structurally, not buried in prose.
+2. **Each param is wrapped in `tag(T, "[op] …")`** (`server/verbs/_common.py`), an
+   `Annotated[T, Field(description=…)]` shim. FastMCP emits the `description` per param;
+   by convention it is **prefixed with the op(s) the param serves** — `tag(float,
+   "[bevel/round/smooth_edges] bevel width (m)")`. The model can now filter the fat
+   signature down to the params for the op it picked.
+
+This keeps each verb a **single tool with a flat signature** — the SPEC-05 shape — while
+moving the op↔param coupling out of the docstring and into the schema where the model reads
+structure.
+
+### What was rejected, and why
+
+- **Discriminated union (`oneOf` via per-op Pydantic models).** Genuinely expresses
+  "if op=extrude, these params; if op=split, those." But it abandons the crisp flat
+  functions for a model-per-op authoring burden, and `oneOf` **renders inconsistently across
+  MCP clients** (some flatten it). High cost, fragile payoff. The `enum` + tagged-`description`
+  combo captures ~80% of the clarity at ~10% of the cost and risk.
+- **Separate tools (`edit_extrude`, `edit_split`, …).** The only way subcommands appear as
+  distinct selectable entries — but that is literally **re-inflating the tool count**, the
+  disease SPEC-05 cured. (Note: *this* harness defers tool schemas and loads them on demand,
+  so more tools wouldn't tax its context — but that is a Claude-Code feature, not MCP, and the
+  smaller-model targets on other hosts don't have it. Not a foundation to build on.)
+- **A native sub-tool / progressive-disclosure layer.** Base MCP has none. `tools/list` is a
+  flat list, one `inputSchema` per tool. There is no "expand this verb to reveal subcommands."
+
+### Status
+
+Applied to all 15 verbs. `op`/`type`/`brush` emit `enum`s; every op-specific param carries an
+`[op]`-tagged `description`; `required` is unchanged (the discriminator, plus `sculpt`'s
+targeting params). Verified live — runtime dispatch is identical (the change is annotations
+only).

@@ -3,19 +3,21 @@
 Time travel over the operation history. `op` selects.
 """
 
+from typing import Literal
+
 from server._core import mcp
 from server import history as _h, introspect
-from ._common import unknown
+from ._common import tag, unknown
 
 _OPS = ["log", "undo", "redo", "undo_to", "diff"]
 
 
 @mcp.tool(name="history")
 def history(
-    op: str = "log",
-    steps: int = 1,
-    id: str = "",
-    checkpoint: str = "",
+    op: Literal["log", "undo", "redo", "undo_to", "diff"] = "log",
+    steps: tag(int, "[undo/redo] number of steps") = 1,
+    id: tag(str, "[undo_to] op id to undo back to") = "",
+    checkpoint: tag(str, "[diff] checkpoint op id (empty = last)") = "",
 ) -> str:
     """
     Undo / redo / inspect the operation history — the top **Edit** menu. `op` selects:

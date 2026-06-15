@@ -3,17 +3,19 @@
 Save / open / list designs. `op` selects.
 """
 
+from typing import Literal
+
 from server._core import mcp
 from server import designs
-from ._common import unknown
+from ._common import tag, unknown
 
 _OPS = ["save", "open", "list"]
 
 
 @mcp.tool(name="file")
 def file(
-    op: str,
-    name: str = "",
+    op: Literal["save", "open", "list"],
+    name: tag(str, "[save/open] design name") = "",
 ) -> str:
     """
     Persistence — the **File** menu. `op` selects:

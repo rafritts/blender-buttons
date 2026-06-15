@@ -6,11 +6,11 @@ the shape's own params are flat, optional fields — use the ones your `type` ne
 across the dimensional primitives, exactly as in the Add menu.
 """
 
-from typing import Union
+from typing import Literal, Union
 
 from server._core import mcp
 from server import primitives, scene
-from ._common import unknown
+from ._common import tag, unknown
 
 _TYPES = ["box", "plane", "cylinder", "sphere", "cone", "torus", "icosphere",
           "circle", "tube", "curve", "floor", "light", "camera"]
@@ -18,29 +18,53 @@ _TYPES = ["box", "plane", "cylinder", "sphere", "cone", "torus", "icosphere",
 
 @mcp.tool(name="add")
 def add(
-    type: str,
-    name: str = "",
+    type: Literal["box", "plane", "cylinder", "sphere", "cone", "torus",
+                  "icosphere", "circle", "tube", "curve", "floor", "light", "camera"],
+    name: tag(str, "object name (required except floor)") = "",
     # ── placement & orientation (the dimensional primitives) ──
-    on: dict = None,
-    rot_x: float = 0, rot_y: float = 0, rot_z: float = 0,
+    on: tag(dict, "[mesh primitives] placement DSL — {\"on\":\"seat\"}, {\"on_floor\":true}, …") = None,
+    rot_x: tag(float, "[mesh primitives] rotation X (deg)") = 0,
+    rot_y: tag(float, "[mesh primitives] rotation Y (deg)") = 0,
+    rot_z: tag(float, "[mesh primitives] rotation Z (deg)") = 0,
     # ── dimensions (use the ones your `type` needs — see table) ──
-    width: float = 0, depth: float = 0, height: float = 0,
-    radius: float = 0, radius_top: float = 0, radius_bottom: float = 0,
-    major_radius: float = 0, minor_radius: float = 0,
-    size: float = 0,
+    width: tag(float, "[box/plane] X extent (m)") = 0,
+    depth: tag(float, "[box/plane] Y extent (m)") = 0,
+    height: tag(float, "[box/plane/cylinder/cone] Z extent (m)") = 0,
+    radius: tag(float, "[sphere/cylinder/icosphere/circle] radius (m)") = 0,
+    radius_top: tag(float, "[cone] top radius (0 = sharp)") = 0,
+    radius_bottom: tag(float, "[cone] base radius (m)") = 0,
+    major_radius: tag(float, "[torus] center-to-tube radius (m)") = 0,
+    minor_radius: tag(float, "[torus] tube radius (m)") = 0,
+    size: tag(float, "[floor/light] floor side length / light size (m)") = 0,
     # ── resolution / topology ──
-    segments: int = 0, rings: int = 0, subdivisions: int = 0,
-    major_segments: int = 0, minor_segments: int = 0,
-    cap_fill: str = "", fill_type: str = "",
+    segments: tag(int, "[cylinder/cone/sphere/circle] segments around") = 0,
+    rings: tag(int, "[sphere] latitudinal rings") = 0,
+    subdivisions: tag(int, "[icosphere] subdivisions 1..5") = 0,
+    major_segments: tag(int, "[torus] ring resolution") = 0,
+    minor_segments: tag(int, "[torus] tube resolution") = 0,
+    cap_fill: tag(str, "[cylinder/cone] NGON|TRIFAN|NOTHING") = "",
+    fill_type: tag(str, "[circle] NOTHING|NGON|TRIFAN") = "",
     # ── curve / tube (type=curve|tube) ──
-    points: list = None, subtype: str = "", cyclic: bool = False,
-    resolution: int = 0, sides: int = 0, bevel_depth: float = 0,
-    tube_radius: Union[float, list] = None,
+    points: tag(list, "[tube/curve] control points the curve passes through") = None,
+    subtype: tag(str, "[light] POINT|SUN|SPOT|AREA · [curve] BEZIER|NURBS|POLY") = "",
+    cyclic: tag(bool, "[curve] close the curve into a loop") = False,
+    resolution: tag(int, "[tube/curve] samples per segment") = 0,
+    sides: tag(int, "[tube] cross-section smoothness") = 0,
+    bevel_depth: tag(float, "[curve] round-bevel radius → solid tube (m)") = 0,
+    tube_radius: tag(Union[float, list], "[tube] radius float OR per-point list for taper") = None,
     # ── light / camera (type=light|camera) ──
-    energy: float = 0, color: list = None, hex: str = "",
-    target: str = "", spot_angle: float = 0, lens: float = 0,
-    x: float = 0, y: float = 0, z: float = 0,
-    target_x: float = 0, target_y: float = 0, target_z: float = 0,
+    energy: tag(float, "[light] strength (watts; SUN ~5)") = 0,
+    color: tag(list, "[light] [r,g,b] 0..1") = None,
+    hex: tag(str, "[light] #RRGGBB color") = "",
+    target: tag(str, "[light/camera] object to aim at") = "",
+    spot_angle: tag(float, "[light] SPOT cone angle (deg)") = 0,
+    lens: tag(float, "[camera] focal length (mm; 35 wide, 85 portrait)") = 0,
+    x: tag(float, "[light/camera] world X") = 0,
+    y: tag(float, "[light/camera] world Y") = 0,
+    z: tag(float, "[light/camera] world Z") = 0,
+    target_x: tag(float, "[camera] aim point X") = 0,
+    target_y: tag(float, "[camera] aim point Y") = 0,
+    target_z: tag(float, "[camera] aim point Z") = 0,
     label: str = "",
 ) -> str:
     """

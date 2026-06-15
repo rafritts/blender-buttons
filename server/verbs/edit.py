@@ -5,9 +5,11 @@ extrude, bevel, loop cut, merge, delete, mark sharp, taper, bend, boolean, … `
 selects the operation. The flat handlers manage entering Edit Mode on `target`.
 """
 
+from typing import Literal
+
 from server._core import mcp
 from server import editmode, finishes, rings, bands, introspect, modifiers
-from ._common import unknown
+from ._common import tag, unknown
 
 _OPS = ["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
         "mark_sharp", "crease", "inflate", "jitter", "proportional_move",
@@ -17,47 +19,82 @@ _OPS = ["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
 
 @mcp.tool(name="edit")
 def edit(
-    op: str,
-    target: str = "",
+    op: Literal["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
+                "mark_sharp", "crease", "inflate", "jitter", "proportional_move",
+                "extrude_along_curve", "round", "bend", "smooth_edges", "taper_end",
+                "taper_section", "scale_rings", "band", "trace", "boolean"],
+    target: tag(str, "mesh object to edit (empty=active)") = "",
     # directional amounts (extrude / move-style ops; meters, local frame)
-    out: float = 0.0, inward: float = 0.0, up: float = 0.0, down: float = 0.0,
-    left: float = 0.0, right: float = 0.0, forward: float = 0.0, back: float = 0.0,
-    until_contact: str = "", until_length: float = 0.0,
-    x: float = 0.0, y: float = 0.0, z: float = 0.0,
+    out: tag(float, "[extrude/proportional_move] push out along normal (m)") = 0.0,
+    inward: tag(float, "[extrude/proportional_move] push inward (m)") = 0.0,
+    up: tag(float, "[extrude/proportional_move] +Z (m)") = 0.0,
+    down: tag(float, "[extrude/proportional_move] -Z (m)") = 0.0,
+    left: tag(float, "[extrude/proportional_move] -X (m)") = 0.0,
+    right: tag(float, "[extrude/proportional_move] +X (m)") = 0.0,
+    forward: tag(float, "[extrude/proportional_move] -Y (m)") = 0.0,
+    back: tag(float, "[extrude/proportional_move] +Y (m)") = 0.0,
+    until_contact: tag(str, "[extrude] extrude until hitting this object") = "",
+    until_length: tag(float, "[extrude] extrude to this total length (m)") = 0.0,
+    x: tag(float, "[extrude/proportional_move] explicit X amount (m)") = 0.0,
+    y: tag(float, "[extrude/proportional_move] explicit Y amount (m)") = 0.0,
+    z: tag(float, "[extrude/proportional_move] explicit Z amount (m)") = 0.0,
     # bevel
-    width: float = 0.0, factor: float = 0.05, segments: int = 1, affect: str = "EDGES",
+    width: tag(float, "[bevel/round/smooth_edges] bevel width (m)") = 0.0,
+    factor: tag(float, "[bevel] bevel amount as a factor (alt to width)") = 0.05,
+    segments: tag(int, "[bevel/round/smooth_edges] bevel segments") = 1,
+    affect: tag(str, "[bevel] EDGES | VERTICES") = "EDGES",
     # loop_cut / axis-based
-    axis: str = "Z", cuts: int = 1,
+    axis: tag(str, "[loop_cut/taper_end/taper_section/scale_rings/band/trace] axis X|Y|Z") = "Z",
+    cuts: tag(int, "[loop_cut] number of loops to add") = 1,
     # merge / delete / sharp / crease
-    threshold: float = 0.001, selected_only: bool = False,
-    mode: str = "VERT", clear: bool = False, weight: float = 1.0,
+    threshold: tag(float, "[merge] merge-by-distance threshold (m)") = 0.001,
+    selected_only: tag(bool, "[merge] merge only within the selection") = False,
+    mode: tag(str, "[delete] VERT|EDGE|FACE|ONLY_FACE|EDGE_FACE") = "VERT",
+    clear: tag(bool, "[mark_sharp] clear instead of mark") = False,
+    weight: tag(float, "[crease] crease weight 0..1") = 1.0,
     # inflate / jitter / proportional
-    amount: float = 0.003, seed: int = 0, only_positive: bool = False,
-    radius: float = 0.01, falloff: str = "SMOOTH",
+    amount: tag(float, "[inflate/jitter] displacement amount (m)") = 0.003,
+    seed: tag(int, "[jitter] random seed") = 0,
+    only_positive: tag(bool, "[jitter] jitter outward only") = False,
+    radius: tag(float, "[proportional_move] falloff radius (m)") = 0.01,
+    falloff: tag(str, "[proportional_move] SMOOTH|SHARP|…") = "SMOOTH",
     # separate
-    new_name: str = "",
+    new_name: tag(str, "[separate] name for the split-off object") = "",
     # extrude_along_curve
-    curve: str = "", taper: float = 1.0,
+    curve: tag(str, "[extrude_along_curve] curve to sweep along") = "",
+    taper: tag(float, "[extrude_along_curve] end scale (taper)") = 1.0,
     # round_corners
-    corners: list = None,
+    corners: tag(list, "[round] named corners to round") = None,
     # bend
-    angle: float = 0.0, apply: bool = True,
+    angle: tag(float, "[bend] bend angle (deg)") = 0.0,
+    apply: tag(bool, "[bend] apply the bend modifier") = True,
     # smooth_edges
-    angle_limit: float = 30.0,
+    angle_limit: tag(float, "[smooth_edges] shade-smooth angle limit (deg)") = 30.0,
     # taper / rings
-    end: str = "MAX", scale: float = 0.0, indices: list = None,
-    from_ring: int = 0, to_ring: int = -1,
-    x_start: float = 1.0, x_end: float = 1.0, y_start: float = 1.0, y_end: float = 1.0,
-    curve_shape: str = "linear",
+    end: tag(str, "[taper_end] which end MAX|MIN") = "MAX",
+    scale: tag(float, "[taper_end] end scale factor") = 0.0,
+    indices: tag(list, "[scale_rings] ring indices to scale") = None,
+    from_ring: tag(int, "[taper_section] first ring") = 0,
+    to_ring: tag(int, "[taper_section] last ring (-1 = end)") = -1,
+    x_start: tag(float, "[taper_section] X scale at from_ring") = 1.0,
+    x_end: tag(float, "[taper_section] X scale at to_ring") = 1.0,
+    y_start: tag(float, "[taper_section] Y scale at from_ring") = 1.0,
+    y_end: tag(float, "[taper_section] Y scale at to_ring") = 1.0,
+    curve_shape: tag(str, "[taper_section] linear|smooth interpolation") = "linear",
     # ring scale (op=scale_rings uses x/y as ring-plane scale factors)
-    ring_x: float = 1.0, ring_y: float = 1.0,
+    ring_x: tag(float, "[scale_rings] X scale of the rings") = 1.0,
+    ring_y: tag(float, "[scale_rings] Y scale of the rings") = 1.0,
     # band_around
-    name: str = "", at: float = None, thickness: float = 0.02,
+    name: tag(str, "[band] name for the new band object") = "",
+    at: tag(float, "[band] position along axis (0..1)") = None,
+    thickness: tag(float, "[band] band thickness (m)") = 0.02,
     # trace_profile
-    sections: int = 24,
+    sections: tag(int, "[trace] number of cross-sections") = 24,
     # boolean
-    cutter: str = "", bool_op: str = "DIFFERENCE", solver: str = "EXACT",
-    hide_cutter: bool = True,
+    cutter: tag(str, "[boolean] cutter object") = "",
+    bool_op: tag(str, "[boolean] DIFFERENCE|UNION|INTERSECT") = "DIFFERENCE",
+    solver: tag(str, "[boolean] EXACT|FAST") = "EXACT",
+    hide_cutter: tag(bool, "[boolean] hide the cutter afterward") = True,
     label: str = "",
 ) -> str:
     """

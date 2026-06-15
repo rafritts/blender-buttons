@@ -4,9 +4,11 @@ How the scene is looked at: viewport shading/angle/overlays, orbit, zoom, frame,
 and the scene camera as a viewpoint. `op` selects.
 """
 
+from typing import Literal
+
 from server._core import mcp
 from server import viewport, introspect, scene
-from ._common import unknown
+from ._common import tag, unknown
 
 _OPS = ["shading", "angle", "overlays", "orbit", "zoom", "frame", "check_framing",
         "camera_position", "camera_dof"]
@@ -14,23 +16,39 @@ _OPS = ["shading", "angle", "overlays", "orbit", "zoom", "frame", "check_framing
 
 @mcp.tool(name="view")
 def view(
-    op: str,
+    op: Literal["shading", "angle", "overlays", "orbit", "zoom", "frame",
+                "check_framing", "camera_position", "camera_dof"],
     # shading / angle
-    mode: str = "MATERIAL", angle: str = "",
+    mode: tag(str, "[shading] WIREFRAME|SOLID|MATERIAL|RENDERED") = "MATERIAL",
+    angle: tag(str, "[angle] FRONT|BACK|TOP|… or persp/ortho") = "",
     # overlays
-    relationship_lines: bool = None, floor: bool = None, cursor: bool = None,
-    wireframes: bool = None, text_info: bool = None, axes: bool = None,
-    overlays: bool = None,
+    relationship_lines: tag(bool, "[overlays] show relationship lines") = None,
+    floor: tag(bool, "[overlays] show the floor grid") = None,
+    cursor: tag(bool, "[overlays] show the 3D cursor") = None,
+    wireframes: tag(bool, "[overlays] show wireframes") = None,
+    text_info: tag(bool, "[overlays] show text info") = None,
+    axes: tag(bool, "[overlays] show axes") = None,
+    overlays: tag(bool, "[overlays] master toggle (False hides all)") = None,
     # orbit
-    azimuth: float = 45.0, elevation: float = 25.0, distance: float = 8.0,
-    target_x: float = 0.0, target_y: float = 0.0, target_z: float = 1.0,
-    auto_frame: bool = False,
+    azimuth: tag(float, "[orbit] horizontal angle (deg)") = 45.0,
+    elevation: tag(float, "[orbit] vertical angle (deg)") = 25.0,
+    distance: tag(float, "[orbit] camera distance (m)") = 8.0,
+    target_x: tag(float, "[orbit/camera_position] look-at X") = 0.0,
+    target_y: tag(float, "[orbit/camera_position] look-at Y") = 0.0,
+    target_z: tag(float, "[orbit/camera_position] look-at Z") = 1.0,
+    auto_frame: tag(bool, "[orbit] auto-fit the scene") = False,
     # frame / check_framing
-    targets: str = "", include_lights: bool = False, camera: str = "",
+    targets: tag(str, "[frame/check_framing] objects to frame/check") = "",
+    include_lights: tag(bool, "[frame] include lights in the frame") = False,
+    camera: tag(str, "[check_framing/camera_dof] camera name (empty=scene cam)") = "",
     # camera_position
-    x: float = 0.0, y: float = 0.0, z: float = 0.0,
+    x: tag(float, "[camera_position] camera X") = 0.0,
+    y: tag(float, "[camera_position] camera Y") = 0.0,
+    z: tag(float, "[camera_position] camera Z") = 0.0,
     # camera_dof
-    focus_distance: float = None, aperture: float = None, focus_object: str = "",
+    focus_distance: tag(float, "[camera_dof] focus distance (m)") = None,
+    aperture: tag(float, "[camera_dof] f-stop (lower = shallower)") = None,
+    focus_object: tag(str, "[camera_dof] object to focus on") = "",
 ) -> str:
     """
     Look at the scene — the **View** menu + camera viewpoint. `op` selects:

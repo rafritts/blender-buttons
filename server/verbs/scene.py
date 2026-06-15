@@ -5,23 +5,31 @@ new scene. Per-object Properties (modifier/material/object data) belong to their
 own verbs; producing the image is `render`.
 """
 
+from typing import Literal
+
 from server._core import mcp
 from server import queries, scene as _scene, designs
-from ._common import unknown
+from ._common import tag, unknown
 
 _OPS = ["tree", "world", "new"]
 
 
 @mcp.tool(name="scene")
 def scene(
-    op: str,
+    op: Literal["tree", "world", "new"],
     # tree
-    filter: str = "", type: str = "", max_depth: int = None, summarize: int = 20,
+    filter: tag(str, "[tree] name-substring filter") = "",
+    type: tag(str, "[tree] type filter, e.g. MESH") = "",
+    max_depth: tag(int, "[tree] max tree depth") = None,
+    summarize: tag(int, "[tree] collapse collections over N objects (0 = expand all)") = 20,
     # world
-    color: list = None, hex: str = "", strength: float = None,
-    hdri: str = "", resolution: str = "2k",
+    color: tag(list, "[world] solid background [r,g,b] 0..1") = None,
+    hex: tag(str, "[world] solid background #RRGGBB") = "",
+    strength: tag(float, "[world] background light strength") = None,
+    hdri: tag(str, "[world] HDRI id or path (image-based lighting)") = "",
+    resolution: tag(str, "[world] HDRI fetch resolution (1k|2k|4k|8k)") = "2k",
     # new
-    empty: bool = False,
+    empty: tag(bool, "[new] True = a truly empty scene") = False,
     label: str = "",
 ) -> str:
     """

@@ -6,9 +6,11 @@ Understanding a mesh's STRUCTURE, not its bounding box — plus geometric truth
 feel; op="topology" (default) is the structural sense.
 """
 
+from typing import Literal
+
 from server._core import mcp
 from server import topology, queries, rings, introspect, lint
-from ._common import unknown
+from ._common import tag, unknown
 
 _OPS = ["topology", "profile", "rings", "distance", "gap", "aligned", "symmetry",
         "mesh", "overlaps", "validate", "audit", "contacts", "resting"]
@@ -16,18 +18,32 @@ _OPS = ["topology", "profile", "rings", "distance", "gap", "aligned", "symmetry"
 
 @mcp.tool(name="feel")
 def feel(
-    op: str = "topology",
-    target: str = "",
+    op: Literal["topology", "profile", "rings", "distance", "gap", "aligned",
+                "symmetry", "mesh", "overlaps", "validate", "audit", "contacts",
+                "resting"] = "topology",
+    target: tag(str, "[topology/rings/symmetry/mesh] mesh object (empty=active)") = "",
     # topology (SPEC-04)
-    method: str = "", lod: str = "low", base: str = "cage", seed: str = "",
+    method: tag(str, "[topology] comma list (empty = cheap bundle)") = "",
+    lod: tag(str, "[topology] low|medium|high output verbosity") = "low",
+    base: tag(str, "[topology] cage | evaluated mesh to read") = "cage",
+    seed: tag(str, "[topology] handle for seeded methods (v2)") = "",
     # profile / rings
-    axis: str = "Z", min: float = None, max: float = None, max_rings: int = 200,
+    axis: tag(str, "[profile/rings/symmetry] axis X|Y|Z (distance: X|Y for 1-axis)") = "Z",
+    min: tag(float, "[profile] sweep start (m)") = None,
+    max: tag(float, "[profile] sweep end (m)") = None,
+    max_rings: tag(int, "[profile] max sections") = 200,
     # measurements
-    a: str = "", b: str = "", side: str = "TOP", tolerance: float = 0.001,
+    a: tag(str, "[distance/gap/aligned] first object") = "",
+    b: tag(str, "[distance/gap/aligned] second object") = "",
+    side: tag(str, "[aligned] TOP|BOTTOM|… side to compare") = "TOP",
+    tolerance: tag(float, "[aligned] alignment tolerance (m)") = 0.001,
     # symmetry
-    plane: float = 0.0, epsilon: float = None,
+    plane: tag(float, "[symmetry] mirror plane offset") = 0.0,
+    epsilon: tag(float, "[symmetry/overlaps/validate] tolerance") = None,
     # lint / check
-    targets: str = "", group: str = "", tri_budget: int = 5000,
+    targets: tag(str, "[overlaps/validate/contacts/resting] object(s) to check") = "",
+    group: tag(str, "[audit] group/collection to audit") = "",
+    tri_budget: tag(int, "[audit] triangle budget") = 5000,
 ) -> str:
     """
     Feel a mesh — structure, measurements, correctness. Read-only (no status block).

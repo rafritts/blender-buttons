@@ -4,9 +4,11 @@ Selecting objects (Object Mode) and components (Edit Mode). `op` selects the
 selection method. Component ops run in Edit Mode (handled by the flat handlers).
 """
 
+from typing import Literal
+
 from server._core import mcp
 from server import editmode, objects, rings, queries
-from ._common import unknown
+from ._common import tag, unknown
 
 _OPS = ["all", "none", "object", "by_axis", "between", "boundary", "grow",
         "shrink", "random", "in_sphere", "ring", "rings", "component_mode", "current"]
@@ -14,30 +16,38 @@ _OPS = ["all", "none", "object", "by_axis", "between", "boundary", "grow",
 
 @mcp.tool(name="select")
 def select(
-    op: str,
+    op: Literal["all", "none", "object", "by_axis", "between", "boundary", "grow",
+                "shrink", "random", "in_sphere", "ring", "rings", "component_mode",
+                "current"],
     # object selection
-    name: str = "",
+    name: tag(str, "[object] object name to select") = "",
     # generic
-    action: str = "SELECT",
-    axis: str = "Z",
-    target: str = "",
+    action: tag(str, "[all/by_axis/between/boundary/in_sphere/ring/rings] SELECT|DESELECT|INVERT|TOGGLE") = "SELECT",
+    axis: tag(str, "[by_axis/between/ring/rings] axis X|Y|Z") = "Z",
+    target: tag(str, "[ring/rings] mesh object (empty=active)") = "",
     # by_axis
-    factor: float = 0.5, comparison: str = "GREATER",
+    factor: tag(float, "[by_axis] threshold 0..1 along axis") = 0.5,
+    comparison: tag(str, "[by_axis] GREATER | LESS") = "GREATER",
     # between
-    lo: float = 0.0, hi: float = 1.0,
+    lo: tag(float, "[between] band low 0..1") = 0.0,
+    hi: tag(float, "[between] band high 0..1") = 1.0,
     # boundary
-    from_selection: bool = True,
+    from_selection: tag(bool, "[boundary] restrict to current selection") = True,
     # grow / shrink
-    steps: int = 1,
+    steps: tag(int, "[grow/shrink] number of steps") = 1,
     # random
-    fraction: float = 0.2, seed: int = 0,
+    fraction: tag(float, "[random] fraction 0..1 to select") = 0.2,
+    seed: tag(int, "[random] random seed") = 0,
     # in_sphere
-    center_x: float = 0.0, center_y: float = 0.0, center_z: float = 0.0,
-    radius: float = 0.0,
+    center_x: tag(float, "[in_sphere] sphere center X") = 0.0,
+    center_y: tag(float, "[in_sphere] sphere center Y") = 0.0,
+    center_z: tag(float, "[in_sphere] sphere center Z") = 0.0,
+    radius: tag(float, "[in_sphere] sphere radius (m)") = 0.0,
     # ring / rings
-    index: int = 0, indices: list = None,
+    index: tag(int, "[ring] ring index along axis") = 0,
+    indices: tag(list, "[rings] list of ring indices") = None,
     # component mode
-    mode: str = "",
+    mode: tag(str, "[component_mode] VERT | EDGE | FACE") = "",
 ) -> str:
     """
     Make a selection — the **Select** menu. `op` selects:

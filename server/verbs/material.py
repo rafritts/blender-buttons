@@ -4,9 +4,11 @@ Assign and tune materials (PBR, toon, textured), shade smooth/flat, outlines, an
 search the Poly Haven texture/HDRI libraries. `op` selects the operation.
 """
 
+from typing import Literal
+
 from server._core import mcp
 from server import finishes, shaders, textures, scene
-from ._common import unknown
+from ._common import tag, unknown
 
 _OPS = ["set", "toon", "textured", "outline", "remove_outline", "shade_smooth",
         "shade_flat", "search_textures", "search_hdris"]
@@ -14,25 +16,42 @@ _OPS = ["set", "toon", "textured", "outline", "remove_outline", "shade_smooth",
 
 @mcp.tool(name="material")
 def material(
-    op: str,
-    target: str = "",
+    op: Literal["set", "toon", "textured", "outline", "remove_outline",
+                "shade_smooth", "shade_flat", "search_textures", "search_hdris"],
+    target: tag(str, "object(s) to shade") = "",
     # PBR (set)
-    base_color: list = None, hex: str = "",
-    metallic: float = None, roughness: float = None, ior: float = None,
-    alpha: float = None, emission_color: list = None, emission_strength: float = None,
-    material_name: str = "", material: str = "", slot: int = None,
+    base_color: tag(list, "[set/toon/textured] [r,g,b] 0..1") = None,
+    hex: tag(str, "[set/toon] #RRGGBB color") = "",
+    metallic: tag(float, "[set/textured] metallic 0..1") = None,
+    roughness: tag(float, "[set/textured] roughness 0..1") = None,
+    ior: tag(float, "[set] index of refraction") = None,
+    alpha: tag(float, "[set] opacity 0..1") = None,
+    emission_color: tag(list, "[set] emission [r,g,b]") = None,
+    emission_strength: tag(float, "[set] emission strength") = None,
+    material_name: tag(str, "[set/toon/textured] name for the material") = "",
+    material: tag(str, "[set] reuse an existing material by name") = "",
+    slot: tag(int, "[set/textured] material slot index") = None,
     # toon
-    shadow_color: list = None, bands: int = 2, shadow_softness: float = 0.05,
-    rim_color: list = None, rim_width: float = 0.2,
-    gradient_top: list = None, gradient_bottom: list = None,
+    shadow_color: tag(list, "[toon] shadow band [r,g,b]") = None,
+    bands: tag(int, "[toon] number of shading bands") = 2,
+    shadow_softness: tag(float, "[toon] band edge softness") = 0.05,
+    rim_color: tag(list, "[toon] rim light [r,g,b]") = None,
+    rim_width: tag(float, "[toon] rim width") = 0.2,
+    gradient_top: tag(list, "[toon] gradient top [r,g,b]") = None,
+    gradient_bottom: tag(list, "[toon] gradient bottom [r,g,b]") = None,
     # textured
-    asset_id: str = "", scale: float = 1.0, resolution: str = "1k", tint: list = None,
+    asset_id: tag(str, "[textured] Poly Haven texture id") = "",
+    scale: tag(float, "[textured] UV/texture scale") = 1.0,
+    resolution: tag(str, "[textured] 1k|2k|4k") = "1k",
+    tint: tag(list, "[textured] tint [r,g,b]") = None,
     # outline
-    thickness: float = 0.01, color: list = None,
+    thickness: tag(float, "[outline] outline thickness (m)") = 0.01,
+    color: tag(list, "[outline] outline [r,g,b]") = None,
     # shade_smooth
-    auto_smooth_angle: float = 30.0,
+    auto_smooth_angle: tag(float, "[shade_smooth] auto-smooth angle (deg)") = 30.0,
     # search
-    query: str = "", limit: int = 10,
+    query: tag(str, "[search_textures/search_hdris] search keywords") = "",
+    limit: tag(int, "[search_textures/search_hdris] max results") = 10,
     label: str = "",
 ) -> str:
     """

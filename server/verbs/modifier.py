@@ -5,31 +5,49 @@ Add / modify / move / remove / list modifiers. `op` selects the operation.
 deform binding and weights are `pose`.)
 """
 
+from typing import Literal
+
 from server._core import mcp
 from server import modifiers
-from ._common import unknown
+from ._common import tag, unknown
 
 _OPS = ["add", "modify", "move", "remove", "list", "apply"]
 
 
 @mcp.tool(name="modifier")
 def modifier(
-    op: str,
-    target: str = "",
+    op: Literal["add", "modify", "move", "remove", "list", "apply"],
+    target: tag(str, "object whose modifier stack to act on") = "",
     # add
-    type: str = "", name: str = "",
-    levels: int = None, render_levels: int = None,
-    width: float = None, segments: int = None,
-    offset: float = None, wrap_method: str = "",
-    axis: str = "X", merge_threshold: float = None, mirror_object: str = "",
-    precision: int = None, rest_source: str = "",
-    factor: float = None, iterations: int = None,
+    type: tag(str, "[add] SUBSURF|MIRROR|SOLIDIFY|BEVEL|ARRAY|…") = "",
+    name: tag(str, "[add] name for the new modifier · [apply] object (alias of target)") = "",
+    levels: tag(int, "[add/modify] subsurf viewport levels") = None,
+    render_levels: tag(int, "[add/modify] subsurf render levels") = None,
+    width: tag(float, "[add/modify] bevel/solidify width") = None,
+    segments: tag(int, "[add/modify] bevel segments") = None,
+    offset: tag(float, "[add/modify] solidify/mirror offset") = None,
+    wrap_method: tag(str, "[add/modify] shrinkwrap method") = "",
+    axis: tag(str, "[add] mirror axis X|Y|Z") = "X",
+    merge_threshold: tag(float, "[add] mirror merge threshold") = None,
+    mirror_object: tag(str, "[add] mirror across this object") = "",
+    precision: tag(int, "[add] mesh-deform bind precision") = None,
+    rest_source: tag(str, "[add] corrective-smooth rest source") = "",
+    factor: tag(float, "[add/modify] generic strength/factor") = None,
+    iterations: tag(int, "[add/modify] smooth iterations") = None,
     # modify (extra dials)
-    modifier_name: str = "", thickness: float = None, angle_limit: float = None,
-    count: int = None, strength: float = None,
-    show_viewport: bool = None, show_render: bool = None, target_object: str = "",
+    modifier_name: tag(str, "[modify/remove] modifier to act on") = "",
+    thickness: tag(float, "[modify] solidify thickness") = None,
+    angle_limit: tag(float, "[modify] bevel angle limit (deg)") = None,
+    count: tag(int, "[modify] array count") = None,
+    strength: tag(float, "[modify] displace/other strength") = None,
+    show_viewport: tag(bool, "[modify] show in viewport") = None,
+    show_render: tag(bool, "[modify] show in render") = None,
+    target_object: tag(str, "[modify] modifier's target object") = "",
     # move
-    modifier: str = "", index: int = None, before: str = "", after: str = "",
+    modifier: tag(str, "[move/remove] modifier name") = "",
+    index: tag(int, "[move] target stack index") = None,
+    before: tag(str, "[move] move before this modifier") = "",
+    after: tag(str, "[move] move after this modifier") = "",
     label: str = "",
 ) -> str:
     """
