@@ -1,6 +1,6 @@
 # SPEC-03 — The Verb Language (a grammar, not a toolbox)
 
-**Status:** proposed (design settled in dialogue; not yet built)
+**Status:** OBE — overtaken by `SPEC-05` (the verb collapse). Retained for reference; not a live plan.
 **Date:** 2026-06-14
 **Depends on:** `vision.md`, `SPEC-01` (coordinate-free), `SPEC-02` (the noun-space / introspection)
 

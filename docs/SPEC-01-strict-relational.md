@@ -1,6 +1,6 @@
 # SPEC-01 — Strict-Relational Mode (no 3D dead-reckoning)
 
-**Status:** proposed (settled in principle; inventory needs sign-off before code)
+**Status:** OBE — overtaken by `SPEC-05` (the verb collapse). Retained for reference; not a live plan.
 **Date:** 2026-06-14
 **Depends on:** `vision.md` ("Coordinates Never Cross the Boundary")
 

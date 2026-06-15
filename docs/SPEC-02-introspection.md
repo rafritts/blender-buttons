@@ -1,6 +1,6 @@
 # SPEC-02 — The Mental Model (introspection representation)
 
-**Status:** proposed (core settled; LOD machinery + auto-patch are staged)
+**Status:** OBE — overtaken by `SPEC-05` (the verb collapse). Retained for reference; not a live plan.
 **Date:** 2026-06-14
 **Depends on:** `vision.md` ("The Blind Sculptor", "Stereognosis"), `SPEC-01`
 
