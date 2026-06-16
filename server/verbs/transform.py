@@ -8,7 +8,7 @@ array, scatter — plus vertex-level move/scale. `op` selects the operation;
 from typing import Literal
 
 from server._core import mcp
-from server import transforms, relational, editmode
+from server import transforms, relational, editmode, handles
 from ._common import tag, unknown
 
 _OPS = ["nudge", "move_to", "rotate_to", "resize", "scale", "rotate", "apply",
@@ -36,6 +36,8 @@ def transform(
     to_x: tag(float, "[move_to=world X (m) / rotate_to=X euler (deg)]") = None,
     to_y: tag(float, "[move_to=world Y (m) / rotate_to=Y euler (deg)]") = None,
     to_z: tag(float, "[move_to=world Z (m) / rotate_to=Z euler (deg)]") = None,
+    handle: tag(str, "[move_to] move TO a named handle's live point (recomputed); "
+                     "explicit to_x/y/z override per axis") = "",
     # resize (absolute meters)
     width: tag(float, "[resize] absolute X extent (m)") = None,
     depth: tag(float, "[resize] absolute Y extent (m)") = None,
@@ -104,7 +106,8 @@ def transform(
 
       nudge    — relative move in meters  (right/left/up/down/back/forward/inward/out)
       move_to  — set ABSOLUTE world position (to_x/to_y/to_z; omitted axis preserved) —
-                 drop at a computed point, e.g. a feel op=aim hit
+                 drop at a computed point, e.g. a feel op=aim hit, or handle=<name>
+                 to move TO a handle's live point
       rotate_to— set ABSOLUTE euler rotation in degrees (to_x/to_y/to_z; omitted kept)
       resize   — set absolute dims         (width, depth, height)
       scale    — multiply size             (factor, pivot=center|.., pivot_object)
@@ -127,6 +130,13 @@ def transform(
     if o == "nudge":
         return transforms.nudge(targets, right, left, up, down, back, forward, label)
     if o == "move_to":
+        if handle:
+            pt, err = handles.resolve_point(handle)
+            if err:
+                return err
+            to_x = pt[0] if to_x is None else to_x
+            to_y = pt[1] if to_y is None else to_y
+            to_z = pt[2] if to_z is None else to_z
         return transforms.move_to(targets, to_x, to_y, to_z, label)
     if o == "rotate_to":
         return transforms.rotate_to(targets, to_x, to_y, to_z, label)

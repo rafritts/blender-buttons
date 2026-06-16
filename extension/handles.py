@@ -122,32 +122,116 @@ def mint_handle(params):
     return mint_from_active_selection(params.get("name", ""))
 
 
+def _find_handle(name):
+    """The handle Empty by name, or None. Scans the `Handles` collection."""
+    coll = bpy.data.collections.get(HANDLES_COLLECTION)
+    if coll is None:
+        return None
+    o = coll.objects.get(name)
+    return o if (o is not None and o.get("bb_handle")) else None
+
+
+def _resolve_vgroup(obj, vgname):
+    """Recompute (centroid, normal, n) in WORLD space from the named vertex group
+    against current CAGE geometry — so the point survives a mesh edit instead of
+    going stale. Returns (None, None, 0) when the group is gone or empty (the
+    unresolvable case; Phase 3 names it 'orphaned'). Reads the live bmesh when the
+    owning mesh is in edit mode (its `data.vertices` would be stale), else the cage.
+    Pose/deform tracking (evaluated mesh) is Phase 3."""
+    if obj is None or obj.type != 'MESH':
+        return None, None, 0
+    vg = obj.vertex_groups.get(vgname)
+    if vg is None:
+        return None, None, 0
+    gi = vg.index
+    mw = obj.matrix_world
+    nm = mw.to_3x3()
+    cos, nrms = [], []
+    if obj.mode == 'EDIT':
+        import bmesh
+        bm = bmesh.from_edit_mesh(obj.data)
+        deform = bm.verts.layers.deform.verify()
+        for v in bm.verts:
+            if gi in v[deform]:
+                cos.append(mw @ v.co)
+                nrms.append(nm @ v.normal)
+    else:
+        for v in obj.data.vertices:
+            if any(g.group == gi for g in v.groups):
+                cos.append(mw @ v.co)
+                nrms.append(nm @ v.normal)
+    if not cos:
+        return None, None, 0
+    n = len(cos)
+    centroid = Vector((
+        sum(c.x for c in cos) / n,
+        sum(c.y for c in cos) / n,
+        sum(c.z for c in cos) / n,
+    ))
+    nrm = Vector((0.0, 0.0, 0.0))
+    for nv in nrms:
+        nrm += nv
+    nrm = nrm.normalized() if nrm.length > 1e-9 else Vector((0.0, 0.0, 1.0))
+    return centroid, nrm, n
+
+
+def resolve_handle(params):
+    """Resolve a handle to its LIVE world point + normal (SPEC-07 Phase 2).
+
+    Recomputes from the `HANDLE_<name>` vertex group against current geometry —
+    NOT the frozen mint point — so consuming a handle after a mesh edit lands on
+    where the feature is now. Read-only."""
+    name = params.get("name")
+    empty = _find_handle(name)
+    if empty is None:
+        return {"error": f"handle '{name}' not found in the Handles collection"}
+    owner = bpy.data.objects.get(empty.get("bb_owner", ""))
+    vgname = empty.get("bb_vgroup", "")
+    point, normal, n = _resolve_vgroup(owner, vgname)
+    if point is None:
+        return {"error": f"handle '{name}' is unresolvable — its vertex group "
+                         f"'{vgname}' is gone or empty (re-mint or discard it)"}
+    return {
+        "success": True,
+        "name": name,
+        "owner": owner.name,
+        "point": [round(c, 5) for c in point],
+        "normal": [round(c, 4) for c in normal],
+        "vert_count": n,
+    }
+
+
 def list_handles(params):
     """List every handle by scanning the `Handles` collection — the read-model.
 
     The collection IS the registry; there is no separate store to drift from it.
-    A handle's resolved point is the Empty's current world location (Phase 1: the
-    frozen mint point — depsgraph tracking / recompute arrives in Phase 3)."""
+    Each handle's `point` is RESOLVED live from its vertex group (Phase 2), so the
+    list reflects current geometry, not the frozen mint location of the Empty."""
     coll = bpy.data.collections.get(HANDLES_COLLECTION)
     handles = []
     if coll is not None:
         for o in coll.objects:
             if not o.get("bb_handle"):
                 continue
-            loc = o.matrix_world.translation
+            owner = bpy.data.objects.get(o.get("bb_owner", ""))
+            vgname = o.get("bb_vgroup", "")
+            point, _normal, n = _resolve_vgroup(owner, vgname)
+            resolved = point is not None
             handles.append({
                 "name": o.name,
                 "kind": o.get("bb_kind", "?"),
                 "owner": o.get("bb_owner", "?"),
-                "vgroup": o.get("bb_vgroup", ""),
-                "vert_count": o.get("bb_vert_count", 0),
-                "point": [round(c, 5) for c in loc],
+                "vgroup": vgname,
+                "vert_count": n if resolved else o.get("bb_vert_count", 0),
+                "point": [round(c, 5) for c in point] if resolved else None,
+                "resolved": resolved,
             })
     handles.sort(key=lambda h: h["name"])
     return {"success": True, "count": len(handles), "handles": handles}
 
 
 TOOLS = {
-    "mint_handle":  mint_handle,
-    "list_handles": list_handles,
+    "mint_handle":    mint_handle,
+    "list_handles":   list_handles,
+    "resolve_handle": resolve_handle,
 }

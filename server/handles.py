@@ -28,7 +28,8 @@ def mint_handle(name: str = "", source: str = "selection") -> str:
 
 
 def list_handles() -> str:
-    """List every handle by scanning the `Handles` collection (the read-model)."""
+    """List every handle by scanning the `Handles` collection (the read-model).
+    Each point is RESOLVED live from its vertex group (Phase 2)."""
     result = call_blender("list_handles", {})
     if not result.get("success"):
         return result.get("error", "failed")
@@ -38,9 +39,23 @@ def list_handles() -> str:
                 "(select geometry in edit mode first), or right-click → Save as Handle")
     lines = [f"{result['count']} handle(s):"]
     for h in handles:
-        p = h["point"]
+        if h.get("resolved"):
+            p = h["point"]
+            where = f"@ [{p[0]}, {p[1]}, {p[2]}]"
+        else:
+            where = "⚠ UNRESOLVABLE (vgroup gone/empty — re-mint or discard)"
         lines.append(
             f"  {h['name']:<22} {h['kind']:<10} owner={h['owner']:<18} "
-            f"verts={h['vert_count']:<4} @ [{p[0]}, {p[1]}, {p[2]}]"
+            f"verts={h['vert_count']:<4} {where}"
         )
     return "\n".join(lines)
+
+
+def resolve_point(name: str):
+    """Resolve a handle to its live world point. Returns (point_list, None) on
+    success, or (None, error_str) — the shared accessor the action verbs use to
+    turn `handle=<name>` into a coordinate at call time."""
+    result = call_blender("resolve_handle", {"name": name})
+    if not result.get("success"):
+        return None, result.get("error", f"handle '{name}' could not be resolved")
+    return result["point"], None

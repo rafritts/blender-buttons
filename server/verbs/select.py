@@ -7,7 +7,7 @@ selection method. Component ops run in Edit Mode (handled by the flat handlers).
 from typing import Literal
 
 from server._core import mcp
-from server import editmode, objects, rings, queries
+from server import editmode, objects, rings, queries, handles
 from ._common import tag, unknown
 
 _OPS = ["all", "none", "object", "by_axis", "between", "boundary", "limb", "grow",
@@ -46,6 +46,8 @@ def select(
     center_y: tag(float, "[in_sphere] sphere center Y") = 0.0,
     center_z: tag(float, "[in_sphere] sphere center Z") = 0.0,
     radius: tag(float, "[in_sphere] sphere radius (m)") = 0.0,
+    handle: tag(str, "[in_sphere] center the sphere on a named handle's live point "
+                     "(recomputed); overrides center_x/y/z") = "",
     # ring / rings
     index: tag(int, "[ring] ring index along axis") = 0,
     indices: tag(list, "[rings] list of ring indices") = None,
@@ -68,8 +70,8 @@ def select(
       grow        — grow the selection             (steps)
       shrink      — shrink the selection           (steps)
       random      — a random fraction              (fraction, seed)
-      in_sphere   — verts inside a sphere   (center_x/y/z, radius, action, extend)
-                    extend=True unions onto the current selection (vs replacing).
+      in_sphere   — verts inside a sphere   (center_x/y/z OR handle=<name>, radius,
+                    action, extend) — extend=True unions onto the current selection.
       ring        — one edge ring          (axis, index, action, target)
       rings       — several edge rings     (axis, indices=[...], action, target)
       component_mode — set vert/edge/face mode    (mode=VERT|EDGE|FACE)
@@ -97,6 +99,11 @@ def select(
     if o == "random":
         return editmode.random_select(fraction, seed)
     if o == "in_sphere":
+        if handle:
+            pt, err = handles.resolve_point(handle)
+            if err:
+                return err
+            center_x, center_y, center_z = pt
         return editmode.select_in_sphere(center_x, center_y, center_z, radius, action, extend, target)
     if o == "ring":
         return rings.select_ring(axis, index, action, target)

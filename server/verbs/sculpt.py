@@ -7,7 +7,7 @@ brush shares the at_x/at_y/at_z + radius targeting. Auto-enters Sculpt Mode.
 from typing import Literal
 
 from server._core import mcp
-from server import sculpt as _s
+from server import sculpt as _s, handles
 from ._common import tag, unknown
 
 _BRUSHES = ["grab", "draw", "inflate", "smooth", "crease", "pinch", "flatten"]
@@ -17,8 +17,12 @@ _BRUSHES = ["grab", "draw", "inflate", "smooth", "crease", "pinch", "flatten"]
 def sculpt(
     brush: Literal["grab", "draw", "inflate", "smooth", "crease", "pinch", "flatten"],
     target: tag(str, "mesh to sculpt"),
-    at_x: tag(float, "brush world X"), at_y: tag(float, "brush world Y"),
-    at_z: tag(float, "brush world Z"), radius: tag(float, "brush radius (m)"),
+    radius: tag(float, "brush radius (m)"),
+    at_x: tag(float, "brush world X (or use handle=)") = None,
+    at_y: tag(float, "brush world Y (or use handle=)") = None,
+    at_z: tag(float, "brush world Z (or use handle=)") = None,
+    handle: tag(str, "brush at a named handle's live point (recomputed); "
+                     "overrides at_x/y/z") = "",
     # amount (draw/inflate/crease/pinch/flatten)
     amount: tag(float, "[draw/inflate/crease/pinch/flatten] strength") = 1.0,
     # grab displacement — absolute to_* OR relative directions
@@ -47,8 +51,9 @@ def sculpt(
     label: str = "",
 ) -> str:
     """
-    Sculpt a mesh — **Sculpt Mode** brushes. Strokes at a world point (at_x/y/z)
-    within `radius`. `brush` selects:
+    Sculpt a mesh — **Sculpt Mode** brushes. Strokes at a world point (at_x/y/z,
+    or handle=<name> to stroke at a handle's live point) within `radius`. `brush`
+    selects:
 
       grab    — drag verts   (to_x/y/z absolute, OR out/up/left/.. relative)
       draw    — raise/lower along a normal  (amount, normal_x/y/z)
@@ -61,6 +66,13 @@ def sculpt(
     falloff: SMOOTH|SHARP|… subdivide=True adds resolution under the brush first.
     """
     b = brush.lower().strip()
+    if handle:
+        pt, err = handles.resolve_point(handle)
+        if err:
+            return err
+        at_x, at_y, at_z = pt
+    if at_x is None or at_y is None or at_z is None:
+        return "sculpt: need a brush point — pass at_x/at_y/at_z or handle=<name>"
     if b == "grab":
         return _s.sculpt_grab(target, at_x, at_y, at_z, radius, to_x, to_y, to_z,
                               out, inward, up, down, left, right, forward, back,
