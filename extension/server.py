@@ -79,7 +79,7 @@ for _mod in _TOOL_MODULES:
 # Tools that require edit mode — support an optional `target` param that auto-selects the
 # named object and enters edit mode, then exits back to OBJECT mode after the call.
 EDIT_MODE_TOOLS = {
-    "bevel", "extrude", "loop_cut", "set_component_mode", "select_all",
+    "bevel", "extrude", "loop_cut", "subdivide_selection", "set_component_mode", "select_all",
     "select_by_axis", "select_between", "grow_selection", "move_vertices",
     "scale_vertices", "delete_geometry", "separate_selection", "jitter_vertices",
     "random_select", "proportional_move", "inflate_selection", "mark_sharp",
@@ -96,6 +96,7 @@ EDIT_MODE_TOOLS = {
 SHAPE_KEY_SHADOW_TOOLS = {
     "move_vertices", "scale_vertices", "proportional_move", "inflate_selection",
     "jitter_vertices", "bevel", "extrude", "extrude_along_curve", "scale_rings",
+    "subdivide_selection",
     "taper_end", "taper_section",
     "sculpt_grab", "sculpt_inflate", "sculpt_draw", "sculpt_smooth", "sculpt_crease",
     "sculpt_pinch", "sculpt_flatten",

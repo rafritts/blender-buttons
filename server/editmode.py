@@ -364,6 +364,36 @@ def loop_cut(axis: str = "Z", cuts: int = 1, label: str = "", target: str = "") 
     return main + _status(result)
 
 
+def subdivide_selection(cuts: int = 1, smooth: float = 0.0, label: str = "",
+                        target: str = "") -> str:
+    """Locally subdivide the SELECTED region — add sculptable resolution exactly where
+    you select, with no global edge loops (unlike loop_cut) and no shape-key block
+    (unlike apply-Subsurf / dyntopo). The 'add resolution here' affordance for a coarse
+    patch (e.g. a ~5-face breast region) before sculpting it.
+
+    cuts:   new cuts per edge (1 = quarter the faces, 2 = ninth, …).
+    smooth: 0 = flat (keeps the cage shape, just denser) … ~1 = round the new verts
+            toward the Catmull-Clark limit surface. A touch of smooth pre-curves a
+            region you're about to push out.
+    target: optional object name — auto-selects it, enters edit mode, exits after.
+            (Note: target= clears the selection on entry, so select the region first
+            in an explicit edit session — subdivide needs a selection to act on.)
+
+    Where the patch meets unselected faces the boundary fans into triangles (normal
+    Subdivide behavior) — fine for sculpt clay; retopo later for deformation flow.
+    Must be in edit mode with a selection."""
+    result = call_blender("subdivide_selection",
+                          {"cuts": cuts, "smooth": smooth, "target": target}, label=label)
+    if result.get("success"):
+        main = (f"subdivided {result['edges_subdivided']} edge(s) ×{result['cuts']} "
+                f"(smooth {result['smooth']}) — +{result['verts_added']} verts "
+                f"→ {result['verts_total']} verts / {result['faces_total']} faces "
+                f"[{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 @mcp.tool()
 def assign_weight(group: str, weight: float = 1.0, mode: str = "REPLACE",
                   label: str = "") -> str:

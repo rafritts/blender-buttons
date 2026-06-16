@@ -14,7 +14,7 @@ from ._common import tag, unknown
 _OPS = ["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
         "mark_sharp", "crease", "inflate", "jitter", "proportional_move",
         "extrude_along_curve", "round", "bend", "smooth_edges", "taper_end",
-        "taper_section", "scale_rings", "band", "trace", "boolean"]
+        "taper_section", "scale_rings", "band", "trace", "boolean", "subdivide"]
 
 
 @mcp.tool(name="edit")
@@ -22,7 +22,7 @@ def edit(
     op: Literal["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
                 "mark_sharp", "crease", "inflate", "jitter", "proportional_move",
                 "extrude_along_curve", "round", "bend", "smooth_edges", "taper_end",
-                "taper_section", "scale_rings", "band", "trace", "boolean"],
+                "taper_section", "scale_rings", "band", "trace", "boolean", "subdivide"],
     target: tag(str, "mesh object to edit (empty=active)") = "",
     # directional amounts (extrude / move-style ops; meters, local frame)
     out: tag(float, "[extrude/proportional_move] push out along normal (m)") = 0.0,
@@ -45,7 +45,8 @@ def edit(
     affect: tag(str, "[bevel] EDGES | VERTICES") = "EDGES",
     # loop_cut / axis-based
     axis: tag(str, "[loop_cut/taper_end/taper_section/scale_rings/band/trace] axis X|Y|Z") = "Z",
-    cuts: tag(int, "[loop_cut] number of loops to add") = 1,
+    cuts: tag(int, "[loop_cut/subdivide] number of cuts to add") = 1,
+    subdivide_smooth: tag(float, "[subdivide] 0=flat (denser cage) … ~1=round toward limit surface") = 0.0,
     # merge / delete / sharp / crease
     threshold: tag(float, "[merge] merge-by-distance threshold (m)") = 0.001,
     selected_only: tag(bool, "[merge] merge only within the selection") = False,
@@ -105,6 +106,8 @@ def edit(
                     meters, or until_contact=obj / until_length)
       bevel       — round edges/verts   (width OR factor, segments, affect=EDGES|VERTICES)
       loop_cut    — add edge loops       (axis, cuts)
+      subdivide   — densify the SELECTED patch locally — sculptable resolution where
+                    you select, no global loops, no shape-key block  (cuts, subdivide_smooth)
       merge       — merge by distance    (threshold, selected_only)
       delete      — delete geometry      (mode=VERT|EDGE|FACE|ONLY_FACE|EDGE_FACE)
       separate    — split selection into a new object   (new_name)
@@ -134,6 +137,8 @@ def edit(
         return editmode.bevel(width, factor, segments, affect, label, target)
     if o == "loop_cut":
         return editmode.loop_cut(axis, cuts, label, target)
+    if o == "subdivide":
+        return editmode.subdivide_selection(cuts, subdivide_smooth, label, target)
     if o == "merge":
         return editmode.merge_by_distance(threshold, selected_only, label, target)
     if o == "delete":

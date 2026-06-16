@@ -631,6 +631,44 @@ def loop_cut(params):
             "scoped_to_selection": scoped}
 
 
+def subdivide_selection(params):
+    """Locally subdivide the SELECTED region — add sculptable resolution exactly where
+    you select, with no global edge loops (unlike loop_cut) and no shape-key block
+    (unlike apply-Subsurf / dyntopo). The 'add resolution here' affordance for a coarse
+    patch (e.g. a 5-face breast region) before sculpting it.
+
+    cuts:   new cuts per edge (1 = quarter the faces, 2 = ninth, …).
+    smooth: 0 = flat (keeps the cage shape; just denser) … ~1 = round the new verts
+            toward the Catmull-Clark limit surface. Use a touch of smooth to pre-curve
+            a region you're about to push out.
+
+    Subdivides every edge of the selected faces/edges. Where the patch meets unselected
+    faces the boundary fans into triangles (the normal Subdivide behavior) — fine for
+    sculpt clay; run a retopo pass later for deformation-grade flow."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    cuts = max(1, int(params.get("cuts", 1)))
+    smooth = float(params.get("smooth", 0.0))
+    bm = bmesh.from_edit_mesh(obj.data)
+    edges = {e for e in bm.edges if e.select}
+    edges |= {e for f in bm.faces if f.select for e in f.edges}
+    edges = list(edges)
+    if not edges:
+        return {"error": "nothing selected — select verts/edges/faces to subdivide first"}
+    before = len(bm.verts)
+    bmesh.ops.subdivide_edges(bm, edges=edges, cuts=cuts, use_grid_fill=True,
+                              smooth=smooth)
+    bmesh.update_edit_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    after = len(bm.verts)
+    push_undo(f"subdivide_selection x{cuts}")
+    return {"success": True, "cuts": cuts, "smooth": round(smooth, 3),
+            "edges_subdivided": len(edges), "verts_added": after - before,
+            "verts_total": after, "faces_total": len(bm.faces)}
+
+
 def set_component_mode(params):
     mode = params.get("mode", "VERT").upper()
     obj = bpy.context.active_object
@@ -1422,6 +1460,7 @@ TOOLS = {
     "extrude":            extrude,
     "extrude_along_curve": extrude_along_curve,
     "loop_cut":           loop_cut,
+    "subdivide_selection": subdivide_selection,
     "set_component_mode": set_component_mode,
     "select_all":         select_all,
     "select_by_axis":     select_by_axis,

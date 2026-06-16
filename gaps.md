@@ -71,18 +71,23 @@ introspection style — e.g. "upper slope: concave, 4mm deep", "projects 2.3cm
 over a 5cm radius", "L/R symmetric to 0.1mm", local curvature sign. Closes the
 agent's feedback loop *between strokes* so it isn't narrating by the user's eyes.
 
-## G3 — no clean path to **sculptable resolution** in a region
+## G3 — no clean path to **sculptable resolution** in a region ✅ MOSTLY FIXED 2026-06-16
 
 The body cage has ~**12 verts / 5 faces** across a whole breast-sized patch —
-far too coarse for a dome *and* a crisp root. Every good densification path is
-blocked or unexposed:
-- **Apply-Subsurf** (→ dense clay) and **dyntopo** (`subdivide=True`) are both
-  blocked by the mere presence of shape keys (see G4).
-- **Multires** isn't exposed as a modifier/sculpt target.
-- `loop_cut` adds full torso loops, not *local* resolution.
+far too coarse for a dome *and* a crisp root. The densification paths are now open:
+- **Apply-Subsurf** (`modifier op=apply`, → dense clay) and **dyntopo**
+  (`sculpt … subdivide=True`) were only ever blocked by shape keys — **G4 unblocks
+  both** (clear the keys, then either works).
+- **Local subdivide** — NEW `edit op=subdivide` (cuts, subdivide_smooth) densifies
+  exactly the SELECTED patch, no global loops, no shape-key block. The direct "add
+  resolution here" affordance for a coarse 5-face region. (Engine
+  `subdivide_selection`; boundary fans to tris — fine for clay, retopo later.)
+- `loop_cut` still adds whole loops (by design — it's the global tool).
 
-Need a reliable "add sculptable resolution here" affordance: a multires wrapper,
-or local subdivide-of-selection, or simply unblocking the above once G4 lands.
+**Remaining (carried over):** **Multires** as a real multi-level sculpt target is
+still unexposed — that's the proper organic-sculpt resolution story, distinct from
+these three. Tracked below under "carried over". The immediate coarse-patch blocker
+is closed.
 
 ## G4 — no `delete` / `bake-to-basis` for shape keys ✅ FIXED 2026-06-16
 
