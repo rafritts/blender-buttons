@@ -249,6 +249,13 @@ No drift, no recompute yet — just mint, name, show in the Outliner, delete. Sm
 tryable loop: select → save → see it. *(Substrate is all native Blender — empties, vertex
 groups, custom props, collections, context-menu operators — so this is mostly gluing.)*
 
+**Naming — best-effort, iterate (it probably doesn't matter).** `name` is *optional* at
+mint. Given → use it (the right-click prompt, or the agent's `name=`). Omitted →
+auto-name `handle.001`-style (or `<object>.<region>` when minted from a known feature).
+Renaming is **native** — the human just renames the Empty in the Outliner (and we keep the
+`HANDLE_<name>` vgroup in sync, or accept a one-time drift and re-key on next scan). Don't
+overthink it for Phase 1; we'll tune the scheme once it's in hand.
+
 **Phase 2 — resolve + consume.** A handle resolves to point+normal (recompute from its
 vgroup against current geometry); action verbs accept `handle=<name>` (`transform move_to`,
 `select in_sphere`, `sculpt at`). Handles become *useful*, not just visible.
