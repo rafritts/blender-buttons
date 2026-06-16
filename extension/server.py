@@ -19,6 +19,7 @@ from . import (
     editmode,
     finishes,
     groups,
+    handles,
     history,
     introspect,
     lighting,
@@ -70,6 +71,7 @@ _TOOL_MODULES = (
     lint,
     introspect,
     topology,
+    handles,
 )
 
 TOOLS = {}

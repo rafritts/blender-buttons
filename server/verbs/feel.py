@@ -9,18 +9,19 @@ feel; op="topology" (default) is the structural sense.
 from typing import Literal
 
 from server._core import mcp
-from server import topology, queries, rings, introspect, lint
+from server import topology, queries, rings, introspect, lint, handles
 from ._common import tag, unknown
 
 _OPS = ["topology", "profile", "rings", "distance", "gap", "aligned", "symmetry",
-        "mesh", "overlaps", "validate", "audit", "contacts", "resting", "aim"]
+        "mesh", "overlaps", "validate", "audit", "contacts", "resting", "aim",
+        "handle", "handles"]
 
 
 @mcp.tool(name="feel")
 def feel(
     op: Literal["topology", "profile", "rings", "distance", "gap", "aligned",
                 "symmetry", "mesh", "overlaps", "validate", "audit", "contacts",
-                "resting", "aim"] = "topology",
+                "resting", "aim", "handle", "handles"] = "topology",
     target: tag(str, "[topology/rings/symmetry/mesh] mesh object (empty=active)") = "",
     # topology (SPEC-04)
     method: tag(str, "[topology] comma list of method tokens (empty = cheap bundle: "
@@ -53,6 +54,9 @@ def feel(
     u: tag(float, "[aim] 0..1 on the face, first of the other two local axes (X<Y<Z)") = 0.5,
     v: tag(float, "[aim] 0..1 on the face, second of the other two local axes") = 0.5,
     margin: tag(float, "[aim] extra cast start distance outside the face (m)") = 0.0,
+    # handles — named spatial anchors (SPEC-07 Phase 1)
+    name: tag(str, "[handle] handle name (optional — auto-named handle.001-style if empty)") = "",
+    source: tag(str, "[handle] addressing mode: selection (the live edit-mode selection; Phase 1)") = "selection",
 ) -> str:
     """
     Feel a mesh — structure, measurements, correctness. Read-only (no status block).
@@ -99,6 +103,12 @@ def feel(
                  normal, to feed sculpt/select/add. The constructive-side
                  `feel structure`: aim in fractions of the form, get the coordinate
                  back instead of dead-reckoning it.   (target, face, u, v, margin)
+      handle   — mint a named spatial anchor from the live edit-mode selection: an
+                 Empty in a `Handles` collection + a `HANDLE_<name>` vertex group on
+                 the owning mesh, visible/renamable/deletable in the Outliner. The
+                 reusable, named alternative to throwaway coordinates. SPEC-07 Phase 1:
+                 mint + see (no drift tracking yet).      (name, source=selection)
+      handles  — list every handle (scan the `Handles` collection — the read-model).
     """
     o = op.lower().strip()
     if o == "topology":
@@ -129,4 +139,8 @@ def feel(
         return introspect.check_resting(targets)
     if o == "aim":
         return queries.aim_surface(target, face, u, v, margin)
+    if o == "handle":
+        return handles.mint_handle(name, source)
+    if o == "handles":
+        return handles.list_handles()
     return unknown("feel", "op", op, _OPS)

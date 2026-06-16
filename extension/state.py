@@ -82,6 +82,8 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
     "get_bone_tree", "describe_bone", "list_constraints", "get_custom_properties",
     # mesh-data introspection (U8) — read-only
     "list_shape_keys",
+    # handle registry read-model (SPEC-07) — read-only scan of the Handles collection
+    "list_handles",
     # topology sense (SPEC-04) — read-only structural query
     "get_topology",
     # new_scene reloads the startup file, wiping Blender's undo stack and the
@@ -95,6 +97,7 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
 NO_STATUS_TOOLS = {
     "get_blender_status",
     "get_scene_tree", "get_history", "get_bone_tree",
+    "list_handles",
 }
 
 

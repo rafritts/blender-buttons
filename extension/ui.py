@@ -4,7 +4,7 @@ import threading
 
 import bpy
 
-from . import server, state
+from . import handles, server, state
 
 
 def start_server():
@@ -43,6 +43,44 @@ class BB_OT_StopServer(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class BB_OT_SaveAsHandle(bpy.types.Operator):
+    """Save the current vertex selection as a named handle (SPEC-07).
+
+    The human's half of the shared mint path: select geometry in the viewport,
+    right-click → Save as Handle, name it. Produces the same Empty + vgroup the
+    agent's `feel op=handle` does — identical citizens."""
+    bl_idname = "bb.save_as_handle"
+    bl_label = "Save as Handle"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    name: bpy.props.StringProperty(
+        name="Handle Name",
+        description="Name for the handle (blank = auto-named handle.001-style)",
+        default="",
+    )
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return obj is not None and obj.type == 'MESH' and obj.mode == 'EDIT'
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        result = handles.mint_from_active_selection(self.name)
+        if not result.get("success"):
+            self.report({'ERROR'}, result.get("error", "failed to mint handle"))
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Handle '{result['name']}' "
+                              f"({result['vert_count']} verts) → Handles collection")
+        return {'FINISHED'}
+
+
+def _draw_save_as_handle(self, context):
+    self.layout.operator(BB_OT_SaveAsHandle.bl_idname, icon='EMPTY_ARROWS')
+
+
 class BB_PT_Panel(bpy.types.Panel):
     bl_label = "Blender Buttons"
     bl_idname = "BB_PT_panel"
@@ -58,4 +96,4 @@ class BB_PT_Panel(bpy.types.Panel):
         layout.label(text=f"Port: {state.PORT}")
 
 
-CLASSES = (BB_OT_StartServer, BB_OT_StopServer, BB_PT_Panel)
+CLASSES = (BB_OT_StartServer, BB_OT_StopServer, BB_OT_SaveAsHandle, BB_PT_Panel)

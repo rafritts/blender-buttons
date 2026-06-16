@@ -53,6 +53,8 @@ def _on_load_post(*_args):
 def register():
     for cls in ui.CLASSES:
         bpy.utils.register_class(cls)
+    # SPEC-07: right-click → Save as Handle in the edit-mode component context menu.
+    bpy.types.VIEW3D_MT_edit_mesh_context_menu.append(ui._draw_save_as_handle)
     if _on_load_post not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_on_load_post)
     # One MCP tool call == one undo step, so a long build needs deep undo history.
@@ -69,6 +71,10 @@ def register():
 
 def unregister():
     state._running = False
+    try:
+        bpy.types.VIEW3D_MT_edit_mesh_context_menu.remove(ui._draw_save_as_handle)
+    except Exception:
+        pass
     if _on_load_post in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(_on_load_post)
     if bpy.app.timers.is_registered(server.process_queue):
