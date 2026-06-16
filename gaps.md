@@ -54,22 +54,32 @@ This is the sculpt analog of `select op=limb` and the direct sibling of the
 dimensions-over-coordinates thesis. Build it once → every constructive verb
 stops demanding meters.
 
-## G2 — `feel` cannot read **form** back, only the bounding box
+## G2 — `feel` cannot read **form** back, only the bounding box ✅ FIXED 2026-06-16 (needs live tuning)
 
-After a form sculpt the agent is blind: a concave slope, a teardrop, a dome, a
-splay are all invisible to an axis-aligned bbox. Today the **only** form-feedback
-channel is the human pasting a screenshot.
+After a form sculpt the agent was blind: a concave slope, a teardrop, a dome, a
+splay are all invisible to an axis-aligned bbox. The only form-feedback channel
+was the human pasting a screenshot.
 
-- Proof it bites: I called a correct `duplicate_mirrored` "upright/reset" purely
-  from its bbox dims, and was wrong — the mirror was fine (user confirmed by
-  eye). I cannot read shape from a box.
-- `feel op=profile` exists but dumps ~200 lines of near-zero per-ring deltas —
-  noise, not a verdict.
+**Added `feel topology method=region_form`** (engine `_m_region_form`): reads the
+FORM of the current SELECTION and emits compact scalars + a one-word verdict —
+- **curvature verdict**: convex / concave / flat, from inner-third vs outer-third
+  signed distance to the best-fit plane (`center_vs_rim_mm`). Answers "is this
+  slope concave?" directly.
+- **projection**: `+X cm out / Y cm in` over the patch (peak bulge along the
+  outward normal).
+- **L/R mirror error**: mirror the selection across the X plane, nearest-vert
+  distance to the whole mesh — finds the mirror twin if one exists.
+Raw scalars are reported alongside the verdict (legible-not-divine: trust the
+numbers even if a threshold word is off). Closes the loop *between strokes*.
 
-Fix: `feel` should emit **short scalar form-verdicts** in the tactile-
-introspection style — e.g. "upper slope: concave, 4mm deep", "projects 2.3cm
-over a 5cm radius", "L/R symmetric to 0.1mm", local curvature sign. Closes the
-agent's feedback loop *between strokes* so it isn't narrating by the user's eyes.
+**Caveat — verify/tune live:** thresholds (0.5 mm flat cutoff) and the
+selection-sync path (reads `v.select` on the base mesh; read in OBJECT mode or
+right after a select op) were written without a running Blender. Dogfood this one
+first and adjust the cutoffs against real patches. The math (PCA plane fit, signed
+distance, KDTree mirror) is sound; the calibration is the unknown.
+
+(The old `op=profile` 200-line per-ring dump is left as-is — `region_form` is the
+verdict channel it failed to be.)
 
 ## G3 — no clean path to **sculptable resolution** in a region ✅ MOSTLY FIXED 2026-06-16
 

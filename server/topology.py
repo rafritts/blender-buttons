@@ -100,6 +100,18 @@ def _fmt_method(name: str, data: dict) -> list:
                      f"concave {d['concave']}% / saddle {d['saddle']}%")
         for h in data.get("high_curvature", [])[:15]:
             lines.append(f"    {h['kind']} @ {h['region']} (id {h['vert_id']})")
+    elif name == "region_form":
+        if "note" in data:
+            lines.append(f"  region_form: {data['note']}")
+        else:
+            lines.append(f"  region_form ({data['selected']} selected verts @ {data['region']}, "
+                         f"~{data['span_cm']}cm patch):")
+            lines.append(f"    form: {data['curvature_verdict']}  "
+                         f"(centre−rim {data['center_vs_rim_mm']}mm)")
+            lines.append(f"    projection: +{data['projection_out_cm']}cm out / "
+                         f"{data['projection_in_cm']}cm in, over the patch")
+            lines.append(f"    L/R mirror (across X): {data['lr_mirror_mean_mm']}mm mean / "
+                         f"{data['lr_mirror_max_mm']}mm max to nearest twin vert")
     elif name == "features":
         lines.append(f"  features: {data['sharp_edges']} hard edge(s) ≥{data['threshold_deg']}° "
                      f"in {data['chains']} chain(s)")
@@ -144,6 +156,10 @@ def get_topology(target: str = "", method: str = "", lod: str = "low",
       sections   — cross-section sweep: where the material IS (voids, partial wraps,
                    branch splits). The COVERAGE sense topology is blind to.
       curvature  — flats/ridges/domes/saddles (fuzzy; v2 = exact)
+      region_form— FORM of the current selection: convex/concave verdict, how far it
+                   projects (cm), L/R mirror error — the form scalars a bbox can't show.
+                   Select a patch, then read this between sculpt strokes (needs >=4
+                   selected verts; read in OBJECT mode so the selection is synced).
       features   — hard dihedral edges in chains (the machine sense)
       thickness  — local wall/part diameter (the SDF part-segmentation cue)
     """

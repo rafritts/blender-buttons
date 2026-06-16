@@ -25,7 +25,7 @@ def feel(
     # topology (SPEC-04)
     method: tag(str, "[topology] comma list of method tokens (empty = cheap bundle: "
                      "components,genus,boundaries,sections,poles,symmetry,frame). "
-                     "Extra: structure,curvature,features,thickness") = "",
+                     "Extra: structure,curvature,region_form,features,thickness") = "",
     lod: tag(str, "[topology] low|medium|high output verbosity") = "low",
     base: tag(str, "[topology] cage | evaluated mesh to read") = "cage",
     seed: tag(str, "[topology] handle for seeded methods (v2)") = "",
@@ -68,6 +68,10 @@ def feel(
                    symmetry   — best mirror plane + error, per axis
                    frame      — intrinsic principal axes
                    curvature  — flats/ridges/domes/saddles  (not in bundle)
+                   region_form— FORM of the current SELECTION: convex/concave verdict,
+                                projection (cm), L/R mirror error — the form scalars a
+                                bbox can't show. Select a patch, read between strokes.
+                                (not in bundle; needs a selection)
                    features   — hard dihedral edges in chains (not in bundle)
                    thickness  — local wall/part diameter      (not in bundle)
                  lod=low|medium|high; base=cage|evaluated. (target, method, lod, base)

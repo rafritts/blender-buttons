@@ -217,6 +217,71 @@ def _m_symmetry(bm, lod, bbox):
             "best_mean_error_mm": round(best_err, 3)}
 
 
+def _m_region_form(bm, lod, bbox):
+    """Read the FORM of the current selection — the scalars an axis-aligned bbox
+    CANNOT show: how far the patch bulges, whether its slope is convex or concave,
+    and whether it has a left/right mirror twin. Closes the sculpt feedback loop so
+    form is judgeable between strokes without a screenshot (gaps.md G2).
+
+    Reads v.select — the last edit-mode selection, retained on the base mesh. Read it
+    in OBJECT mode (or right after a select op) so the selection is synced. Needs >=4
+    selected verts."""
+    from mathutils.kdtree import KDTree
+    sel = [v for v in bm.verts if v.select]
+    n = len(sel)
+    if n < 4:
+        return {"note": f"select a region first — this lens reads the current "
+                        f"selection (need >=4 verts, found {n})", "selected": n}
+    co = np.array([list(v.co) for v in sel])           # world space
+    c = co.mean(0)
+    # best-fit plane through the patch: normal = smallest-variance eigenvector
+    evals, evecs = np.linalg.eigh(np.cov((co - c).T))
+    normal = evecs[:, int(np.argmin(evals))]
+    # orient OUTWARD = away from the whole-mesh centre, so +proj = bulging out
+    mesh_c = np.array([(bbox[0] + bbox[3]) / 2, (bbox[1] + bbox[4]) / 2,
+                       (bbox[2] + bbox[5]) / 2])
+    if float(np.dot(normal, c - mesh_c)) < 0:
+        normal = -normal
+    d = (co - c) @ normal                              # signed dist from plane (m)
+    inplane = (co - c) - np.outer(d, normal)
+    r = np.linalg.norm(inplane, axis=1)                # in-plane radius per vert
+    span_cm = round(float(r.max()) * 2 * 100, 2)       # ~patch diameter
+    # convex/concave: inner third (by radius) vs outer third, signed along normal
+    order = np.argsort(r)
+    k = max(1, n // 3)
+    center_vs_rim_mm = round(float(d[order[:k]].mean() - d[order[-k:]].mean()) * 1000, 2)
+    if abs(center_vs_rim_mm) < 0.5:
+        verdict = "flat"
+    elif center_vs_rim_mm > 0:
+        verdict = "convex (centre bulges out past the rim)"
+    else:
+        verdict = "concave (centre dips in behind the rim)"
+    # L/R symmetry: mirror each selected vert across the X plane (through mesh centre)
+    # and measure nearest vert in the WHOLE mesh — finds a mirror twin region if any.
+    allco = [v.co.copy() for v in bm.verts]
+    kd = KDTree(len(allco))
+    for i, cc in enumerate(allco):
+        kd.insert(cc, i)
+    kd.balance()
+    errs = np.empty(n)
+    px = float(mesh_c[0])
+    for i in range(n):
+        m = mathutils.Vector(co[i]); m[0] = 2 * px - m[0]
+        _, _, dist = kd.find(m)
+        errs[i] = dist
+    return {
+        "selected": n,
+        "region": region_words(bbox, mathutils.Vector(c)),
+        "span_cm": span_cm,
+        "projection_out_cm": round(float(d.max()) * 100, 2),
+        "projection_in_cm": round(float(d.min()) * 100, 2),
+        "curvature_verdict": verdict,
+        "center_vs_rim_mm": center_vs_rim_mm,
+        "lr_mirror_mean_mm": round(float(errs.mean()) * 1000, 3),
+        "lr_mirror_max_mm": round(float(errs.max()) * 1000, 3),
+    }
+
+
 def _m_frame(bm, lod, bbox):
     """Intrinsic principal axes (PCA) + extents — so analysis never assumes
     world-up. The pose-independent frame of the shape."""
@@ -762,6 +827,7 @@ _METHODS = {
     "frame": _m_frame,
     "sections": _m_sections,
     "curvature": _m_curvature,
+    "region_form": _m_region_form,
     "features": _m_features,
     "thickness": _m_thickness,
 }
