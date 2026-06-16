@@ -47,8 +47,28 @@ adjacency as a perception primitive, not a render the agent isn't allowed to rea
 
 ## C — the handle registry (reflection-#5)
 
-A server-held dictionary of **named spatial handles** — the agent's working symbol
-table for assembly, distinct from the scene collection (the world's structure).
+**Named spatial handles backed by real Blender datablocks and visible in the Outliner**
+— the human's and agent's shared working anchors for assembly. (Resolved earlier as a
+server-held dict; the human's ask — "show them in the Scene Collection, right-click →
+Save as Handle" — settles it better.) A handle **is** a Blender object, so it persists in
+the `.blend`, shows in the Outliner, and is selectable / renamable / deletable with native
+tools. The "registry" becomes a **read-model over those datablocks**, not a parallel store
+— one source of truth, no server-dict↔file desync. Handles are a distinct *role* (working
+anchors, not character geometry) but live *in* the scene collection, in their own group.
+
+**Representation** — two datablocks per handle:
+- **An Empty** in a dedicated `Handles` collection marks the resolved point + normal,
+  named (`arms.armhole_L`); provenance (kind, base, signatures, owning object) lives in
+  its **custom properties**.
+- **A vertex group** (`HANDLE_<name>`) on the owning mesh stores the constituent verts —
+  Blender's native "named set of verts," persisted and select-from-able. A multi-object
+  handle gets one vgroup per owning mesh, tied together by the Empty (its dependency set).
+- **Optional vertex-parent**: parent the Empty to ~3 representative verts and Blender's
+  depsgraph rides it through pose/deform for free (see Handle state). Full vert set stays
+  in the vgroup; the 3 are just the tracking anchors.
+
+Human-made and agent-made handles are **identical citizens** — both your right-click and
+the agent's `feel op=handle` hit the same operator and produce the same Empty + vgroup.
 
 - **A handle stores provenance, not a frozen point.** Its derivation — `{object,
   kind: boundary-loop | aim(face,u,v) | vert-set | point, base: cage|evaluated}` — is
@@ -96,7 +116,9 @@ collaboration *medium*. The server already reads it (`select op=current`,
 - **Human → handle.** The human selects geometry in the viewport and says "make this a
   handle — the stuff we need to touch." The agent snapshots it; the selected vert indices
   become provenance, and the intrinsic + extrinsic signatures and dirty/attribution model
-  all apply unchanged.
+  all apply unchanged. The addon also adds a **native `right-click → Save as Handle`**
+  (viewport context menus: edit-mode for components, object-mode for whole objects → a
+  name prompt), so the human can mint one without the agent in the loop at all.
 - **Agent → confirm.** The agent selects a candidate region; the human *sees the
   highlight* and replies "yes / no / not that face." Selection is a two-way visual
   channel — agent proposes by selecting, human disposes by selecting. Confirmation
@@ -133,6 +155,13 @@ tree:
 - **orphaned (conflict)** — provenance won't replay (named loop gone, verts deleted).
   Can't resolve; must re-derive or discard. The merge conflict — a distinct state from
   drift.
+
+**Native tracking shortcut:** if the Empty is **vertex-parented** to its verts, Blender's
+depsgraph keeps it on the surface through pose/deform — so recompute-on-read for the
+common case is *free* (just read the Empty's evaluated world position), and an Empty that
+visibly drifts off the surface is the dirty signal made literal in the viewport. The drift
+machinery then only earns its keep on **topology** change (re-identify the feature) and the
+**intrinsic-deformation** signature; rigid + deform displacement is Blender's job.
 
 Checks are **lazy by default** — the `git status` model: validate on `feel op=handles`
 and inline on consume. Default on a dirty *consume*: recompute + flag (provenance is the
@@ -191,9 +220,12 @@ urgency, and the agent decides recompute vs pin.
 
 ## Lifecycle / open questions (for sign-off)
 
-- **Persistence scope.** Session-only (in-memory dict), or saved into the `.blend`
-  as custom properties / empties so handles survive a reopen? Lean session-only first;
-  revisit if durable anchors prove worth the file footprint.
+- **Persistence scope — RESOLVED.** Handles are Blender datablocks — Empties in a
+  `Handles` collection + `HANDLE_<name>` vertex groups — so they persist in the `.blend`
+  natively and show in the Outliner. The registry is a read-model over them, not a
+  separate store; the server may cache but must rebuild by scanning the collection, never
+  treat the cache as authoritative. Remaining knob: whether Empties vertex-parent (track
+  deform) by default or stay put (drift becomes a visible dirty cue).
 - **Staleness signalling — RESOLVED** (see "Handle state — dirty tracking" above):
   git-style clean / dirty / orphaned, lazy checks, recompute+flag default. Remaining
   knob: the drift ε (and whether it's absolute mm or relative to handle scale).
