@@ -11,16 +11,17 @@ from server._core import mcp
 from server import transforms, relational, editmode
 from ._common import tag, unknown
 
-_OPS = ["nudge", "resize", "scale", "rotate", "apply", "snap", "snap_grid",
-        "match_dim", "mirror", "distribute", "array_corners", "array_along",
-        "array_radial", "scatter", "move_verts", "scale_verts"]
+_OPS = ["nudge", "move_to", "rotate_to", "resize", "scale", "rotate", "apply",
+        "snap", "snap_grid", "match_dim", "mirror", "distribute", "array_corners",
+        "array_along", "array_radial", "scatter", "move_verts", "scale_verts"]
 
 
 @mcp.tool(name="transform")
 def transform(
-    op: Literal["nudge", "resize", "scale", "rotate", "apply", "snap", "snap_grid",
-                "match_dim", "mirror", "distribute", "array_corners", "array_along",
-                "array_radial", "scatter", "move_verts", "scale_verts"],
+    op: Literal["nudge", "move_to", "rotate_to", "resize", "scale", "rotate", "apply",
+                "snap", "snap_grid", "match_dim", "mirror", "distribute",
+                "array_corners", "array_along", "array_radial", "scatter",
+                "move_verts", "scale_verts"],
     targets: tag(str, "object(s): '' active, 'name', or 'a,b,c'") = "",
     # nudge (relative meters)
     right: tag(float, "[nudge] +X (m)") = 0.0,
@@ -31,6 +32,10 @@ def transform(
     forward: tag(float, "[nudge/move_verts] -Y (m)") = 0.0,
     inward: tag(float, "[move_verts] inward along normal (m)") = 0.0,
     out: tag(float, "[move_verts] outward along normal (m)") = 0.0,
+    # move_to / rotate_to (absolute; omitted axis preserved)
+    to_x: tag(float, "[move_to=world X (m) / rotate_to=X euler (deg)]") = None,
+    to_y: tag(float, "[move_to=world Y (m) / rotate_to=Y euler (deg)]") = None,
+    to_z: tag(float, "[move_to=world Z (m) / rotate_to=Z euler (deg)]") = None,
     # resize (absolute meters)
     width: tag(float, "[resize] absolute X extent (m)") = None,
     depth: tag(float, "[resize] absolute Y extent (m)") = None,
@@ -98,6 +103,9 @@ def transform(
     Transform objects (or verts) — the **transform** tools. `op` selects:
 
       nudge    — relative move in meters  (right/left/up/down/back/forward/inward/out)
+      move_to  — set ABSOLUTE world position (to_x/to_y/to_z; omitted axis preserved) —
+                 drop at a computed point, e.g. a feel op=aim hit
+      rotate_to— set ABSOLUTE euler rotation in degrees (to_x/to_y/to_z; omitted kept)
       resize   — set absolute dims         (width, depth, height)
       scale    — multiply size             (factor, pivot=center|.., pivot_object)
       rotate   — rotate degrees            (angle, axis, pivot, pivot_object)
@@ -118,6 +126,10 @@ def transform(
     o = op.lower().strip()
     if o == "nudge":
         return transforms.nudge(targets, right, left, up, down, back, forward, label)
+    if o == "move_to":
+        return transforms.move_to(targets, to_x, to_y, to_z, label)
+    if o == "rotate_to":
+        return transforms.rotate_to(targets, to_x, to_y, to_z, label)
     if o == "resize":
         return transforms.resize(targets, width, depth, height, label)
     if o == "scale":

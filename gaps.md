@@ -158,13 +158,21 @@ collide** — and now every collision-prone op can be pinned to a name. Driver
 discipline still applies: address by name and re-assert the target before each
 step.
 
-## G8 — no absolute "move/rotate to", and the local-frame placement story
+## G8 — no absolute "move/rotate to", and the local-frame placement story ✅ FIXED 2026-06-16
 
 `add` is relational-first (`on: seat/between/on_floor`) — good philosophy — but
-dropping a marker at a *computed* point needs the obscure `on={"at":[x,y,z]}`,
-and `transform` offers only **relative** `nudge` — no absolute set-position or
-set-rotation. The G1 local-frame layer should also serve placement (the same
-fix from the other end).
+dropping a marker at a *computed* point needed the obscure `on={"at":[x,y,z]}`,
+and `transform` offered only **relative** `nudge` — no absolute set-position or
+set-rotation.
+
+**Added** `transform op=move_to` (absolute world position) and `transform
+op=rotate_to` (absolute euler degrees), both via `to_x/to_y/to_z` with any axis
+omitted left unchanged (engine `move_to` / `rotate_to`). Pairs directly with `feel
+op=aim`: aim returns a world point → `move_to` drops an object there.
+
+The normalized local-frame placement layer (aim in fractions of the form for
+placement too, not just sculpt) is **SPEC-06 Phase 3** — this closes the absolute
+half of G8; the relative-to-the-form half rides on the G1 frame.
 
 ---
 

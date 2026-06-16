@@ -26,6 +26,38 @@ def nudge(targets: str = "", right: float = 0.0, left: float = 0.0,
     return main + _status(result)
 
 
+def move_to(targets: str = "", x: float = None, y: float = None, z: float = None,
+            label: str = "") -> str:
+    """Set objects' world location ABSOLUTELY (vs nudge's relative offset) — gaps.md
+    G8. Any of x/y/z omitted is left unchanged, so 'snap only Z' is one call. Pairs
+    with feel op=aim, which returns a world point to drop a marker / move an object to.
+
+    Relational placement (add on=…) is still preferred for FIRST placement; move_to is
+    for dropping at a COMPUTED point (e.g. a feel-op=aim hit). Empty targets = active.
+    Example: move_to("MARK", x=0.04, y=-0.08, z=0.9)"""
+    result = call_blender("move_to",
+                          {"targets": _targets(targets), "x": x, "y": y, "z": z}, label=label)
+    if result.get("success"):
+        main = f"moved {result['moved']} to {result['location']} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def rotate_to(targets: str = "", x: float = None, y: float = None, z: float = None,
+              label: str = "") -> str:
+    """Set objects' euler rotation ABSOLUTELY in degrees (vs rotate's relative spin) —
+    gaps.md G8. Any axis omitted is left unchanged. Empty targets = active.
+    Example: rotate_to("GUIDE", z=25)  # set yaw to exactly 25°, leave pitch/roll"""
+    result = call_blender("rotate_to",
+                          {"targets": _targets(targets), "x": x, "y": y, "z": z}, label=label)
+    if result.get("success"):
+        main = f"rotated {result['rotated']} to {result['rotation_deg']}° [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 @mcp.tool()
 def resize(targets: str = "", width: float = None, depth: float = None, height: float = None,
            label: str = "") -> str:

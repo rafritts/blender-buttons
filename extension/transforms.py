@@ -28,6 +28,40 @@ def nudge(params):
             "delta": [round(dx, 5), round(dy, 5), round(dz, 5)]}
 
 
+def move_to(params):
+    """Set objects' world location ABSOLUTELY (vs nudge's relative offset) — gaps.md
+    G8. Any of x/y/z omitted (None) is left unchanged, so 'snap only Z' is one call.
+    Pairs with feel op=aim, which returns a world point to drop a marker on."""
+    objs, err = resolve_targets(params.get("targets"))
+    if err:
+        return {"error": err}
+    x, y, z = params.get("x"), params.get("y"), params.get("z")
+    for o in objs:
+        if x is not None: o.location.x = float(x)
+        if y is not None: o.location.y = float(y)
+        if z is not None: o.location.z = float(z)
+    bpy.context.view_layer.update()
+    return {"success": True, "moved": [o.name for o in objs],
+            "location": [round(c, 5) for c in objs[-1].location] if objs else None}
+
+
+def rotate_to(params):
+    """Set objects' euler rotation ABSOLUTELY in degrees (vs rotate's relative spin) —
+    gaps.md G8. Any of x/y/z omitted (None) is left unchanged."""
+    objs, err = resolve_targets(params.get("targets"))
+    if err:
+        return {"error": err}
+    rx, ry, rz = params.get("x"), params.get("y"), params.get("z")
+    for o in objs:
+        if rx is not None: o.rotation_euler.x = math.radians(float(rx))
+        if ry is not None: o.rotation_euler.y = math.radians(float(ry))
+        if rz is not None: o.rotation_euler.z = math.radians(float(rz))
+    bpy.context.view_layer.update()
+    return {"success": True, "rotated": [o.name for o in objs],
+            "rotation_deg": [round(math.degrees(a), 3) for a in objs[-1].rotation_euler]
+                            if objs else None}
+
+
 def _axis_permutation(rot_matrix, tol=1e-4):
     """For an axis-aligned rotation (90°-multiples only), return perm where
     perm[j] = local axis index driving WORLD axis j. Returns None for any
@@ -412,6 +446,8 @@ def snap_to_grid(params):
 
 TOOLS = {
     "nudge":           nudge,
+    "move_to":         move_to,
+    "rotate_to":       rotate_to,
     "resize":          resize,
     "scale_group":     scale_group,
     "rotate_object":   rotate_object,
