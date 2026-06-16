@@ -235,6 +235,38 @@ urgency, and the agent decides recompute vs pin.
   socket-window timeout already noted (gaps.md "Open"). Cache per-object boundary
   reads; let `op=map` reuse them.
 
+## Build order — ordered by *tryability*, not the dependency chain
+
+The first slice needs no op-log and no perception layer, so it ships first — the human +
+agent can *try it* immediately. (This corrects an earlier "G12 op-log first" framing: G12
+is only needed for attribution, which is Phase 3.)
+
+**Phase 1 — mint + see (the demo, start here).** `feel op=handle from=selection name=X`
+reads the current selection and builds the native substrate: an **Empty** in a `Handles`
+collection + a `HANDLE_X` **vertex group** on the owning mesh. Plus `feel op=handles`
+(list by scanning the collection) and the addon **right-click → Save as Handle** operator.
+No drift, no recompute yet — just mint, name, show in the Outliner, delete. Smallest
+tryable loop: select → save → see it. *(Substrate is all native Blender — empties, vertex
+groups, custom props, collections, context-menu operators — so this is mostly gluing.)*
+
+**Phase 2 — resolve + consume.** A handle resolves to point+normal (recompute from its
+vgroup against current geometry); action verbs accept `handle=<name>` (`transform move_to`,
+`select in_sphere`, `sculpt at`). Handles become *useful*, not just visible.
+
+**Phase 3 — integrity.** Provenance snapshot at mint; git-style clean/dirty/orphaned on
+list/consume; intrinsic + extrinsic signatures; vertex-parent option for free deform
+tracking. Attribution (self vs external) needs the **G12 op-log** — so G12 lands here.
+
+**Phase 4 — multi-feel.** `feel op=assembly` (relational map + boundary catalog) and
+`feel op=map` (raycast adjacency), auto-minting Class-A handles.
+
+**Phase 5 — consumers.** G9 follow-ups narrate minting; G10 `edit op=bridge` welds two
+handles.
+
+Dev loop: a new `feel` op touches the server verb (`server/verbs/feel.py` + its engine)
+**and** the extension side, then reload addon + `/mcp` reconnect. Confirm the current
+server⇄extension file layout before editing — don't trust a stale path.
+
 ## Out of scope (named so they're not silently assumed in)
 
 - **Live X-symmetry edit mode** — a real want, **tabled by decision** this session
