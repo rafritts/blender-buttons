@@ -174,6 +174,64 @@ The normalized local-frame placement layer (aim in fractions of the form for
 placement too, not just sculpt) is **SPEC-06 Phase 3** — this closes the absolute
 half of G8; the relative-to-the-form half rides on the G1 frame.
 
+## G9 — responses are dead-end documents (the "dark cave") 🕯️ SPEC'D, NOT IMPLEMENTED
+
+Every tool answers the question asked and then goes silent. It never points at the
+**adjacent read or action that refines it** — so a driver who doesn't already know
+the tool surface is spelunking blind. The cross-references that *do* exist live only
+in docstrings (`info` says "prefer `describe`"), i.e. at tool-*selection* time — and
+under the deferred/`ToolSearch` loading model those schemas aren't even reliably in
+context. The response payload itself says nothing.
+
+**Proof from this session:** `object info` on `GEO_spring_arms` reported
+`vertex_count: 3288` and stopped. That those 3288 verts are **two disconnected
+shells with two open armholes** — the entire structural truth of the mesh — only
+surfaced because the driver already knew to reach for `feel op=topology`. A knowing
+operator who didn't was left in the dark by a response that had every reason to
+light the doorway.
+
+This is the **same perception→action bridge** the rest of this file is about, applied
+to the *responses* instead of the tools: `feel structure → select limb` works because
+the structural read hands back a named handle; a read tool should likewise hand back
+the **next read**. Call it a **follow-up** (the REST/HATEOAS idea — a hypermedia
+control — but named-tool, not URL). The principle: **the server should never feel
+like a dark cave.**
+
+**Mechanism (cheap — the machinery already exists).** `_status()` in `_core.py` is the
+shared renderer every verb appends, and it already drains generic ride-along channels
+off the result dict (`notes`, `bind_warning`, `shape_key_warning`). A follow-up is a
+fourth channel: a new **`server/followups.py`** with one *pure* function — given the
+result dict + the verb/op that produced it, return 0–2 follow-up lines — rendered by
+`_status` as a uniform `next:` line. **One central helper + a gating table, not an
+edit to all 15 verbs.** That keeps it a general primitive ("a response advertises the
+read/action that refines it"), never bespoke hint-strings per tool.
+
+**Discipline (this is where it goes wrong if rushed).** A follow-up must be *earned,
+conditional, factual*: fire only when the data warrants it, ≤2 lines, name the
+concrete tool + op + arg, **state a fact about the object** — never a static "you
+might also like" footer, never divining the driver's intent (cf. the
+legible-not-divine rule). When in doubt, stay silent.
+
+**The reviewable artifact is the table** (situation → follow-up) — sign off on this
+*before* coding it anywhere:
+
+| After this… | …when | Follow-up |
+|---|---|---|
+| `object info` / `describe` (MESH w/ modifiers) | always for rigged geo | counts are the **cage**; `feel op=topology` for shells/holes, `base=evaluated` for the final surface |
+| `object info` (raw coord dump) | normal workflow | `object describe` for the relational read (move the existing docstring nudge into the payload) |
+| `feel op=topology` (cheap bundle) | holes / poles / multiple shells found | the deeper method that explains it — `structure`, `region_form`, `thickness` |
+| `feel op=topology` | a protrusion/limb is named | `select op=limb` to anchor + act on it |
+| `select` (edit-mode selection) | a patch is selected | `feel op=region_form` to read its form back |
+| `feel op=aim` | returns point + normal | `sculpt … at_x/y/z`, `transform op=move_to`, or `select op=in_sphere center=…` |
+| `add` (primitive) | always | `edit` to shape it, `transform` to place it |
+| `scene tree` | a named object of interest | `object describe <name>` |
+| `modifier` add (subsurf/deform) | always | `feel … base=evaluated` to read the final surface, not the cage |
+
+Table is representative, not exhaustive — the rollout would start with the
+`info`/`describe → feel` row (the one this session proved) and grow from there. When
+promoted to work, this is **SPEC-07** territory: pattern + `followups.py` mechanism +
+the table, table signed off first.
+
 ---
 
 ## What worked — formalize this, don't fight it
