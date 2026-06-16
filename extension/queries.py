@@ -437,10 +437,72 @@ def check_symmetry(params):
     }
 
 
+def aim_surface(params):
+    """Cast a normalized bbox-face aim onto the surface — the constructive-side
+    analog of `feel structure` → handles (gaps.md G1 / SPEC-06). Turns a framing the
+    agent CAN reason about (a face of the local bbox + two 0..1 coords) into the world
+    point + surface normal the coordinate-hungry verbs (sculpt/select/add) need, and
+    hands the coordinate back so the agent learns it instead of inventing it.
+
+    face: which local bbox face to cast FROM, as a signed axis — -Y +Y -X +X -Z +Z.
+          '-Y' = origin on the −Y face, ray travels +Y INTO the volume.
+    u, v: 0..1 position on that face over the OTHER two local axes (ascending index,
+          X<Y<Z). face=-Y → u:X, v:Z. face=-Z → u:X, v:Y. 0=min, 0.5=centre, 1=max.
+    Casts onto the EVALUATED surface (subsurf/modifiers included)."""
+    from mathutils import Vector
+    name = params.get("target")
+    obj = bpy.data.objects.get(name) if name else bpy.context.active_object
+    if obj is None or obj.type != 'MESH':
+        return {"error": f"target '{name}' not a mesh"}
+    face = str(params.get("face", "-Y")).strip().upper()
+    if len(face) != 2 or face[0] not in "+-" or face[1] not in "XYZ":
+        return {"error": f"face '{face}' invalid — use one of -Y +Y -X +X -Z +Z"}
+    u = float(params.get("u", 0.5))
+    v = float(params.get("v", 0.5))
+    sign = -1.0 if face[0] == "-" else 1.0
+    axis = {"X": 0, "Y": 1, "Z": 2}[face[1]]
+    other = [i for i in (0, 1, 2) if i != axis]   # ascending → other[0]=u, other[1]=v
+
+    bb = [Vector(c) for c in obj.bound_box]        # 8 corners, LOCAL space
+    mn = Vector((min(c.x for c in bb), min(c.y for c in bb), min(c.z for c in bb)))
+    mx = Vector((max(c.x for c in bb), max(c.y for c in bb), max(c.z for c in bb)))
+    span = mx - mn
+    margin = max(float(params.get("margin", 0.0)) or 0.0, 1e-4)
+
+    # face plane along `axis`: -X/-Y/-Z face sits at mn[axis], +face at mx[axis].
+    face_pos = mn[axis] if sign < 0 else mx[axis]
+    ray_dir_axis = 1.0 if sign < 0 else -1.0       # into the volume
+    origin = Vector((0.0, 0.0, 0.0))
+    origin[axis] = face_pos - ray_dir_axis * margin   # start just OUTSIDE the face
+    origin[other[0]] = mn[other[0]] + u * span[other[0]]
+    origin[other[1]] = mn[other[1]] + v * span[other[1]]
+    direction = Vector((0.0, 0.0, 0.0))
+    direction[axis] = ray_dir_axis
+    distance = float(span[axis]) + 2 * margin
+
+    hit, loc_local, nrm_local, idx = obj.ray_cast(origin, direction, distance=distance)
+    if not hit:
+        return {"note": f"ray missed — no surface behind face={face} u={u} v={v} "
+                        f"(try other u/v, or the opposite face)", "hit": False}
+    mw = obj.matrix_world
+    loc_w = mw @ loc_local
+    nrm_w = (mw.to_3x3() @ nrm_local).normalized()
+    bbox = world_bbox(obj)
+    return {
+        "success": True, "hit": True,
+        "point": [round(c, 5) for c in loc_w],
+        "normal": [round(c, 4) for c in nrm_w],
+        "region": region_words(bbox, loc_w),
+        "cast_axis": face,
+        "push_out": f"move +normal to pull OUT, -normal to push IN",
+    }
+
+
 TOOLS = {
     "describe":         describe,
     "distance_between": distance_between,
     "gap_between":      gap_between,
     "is_aligned":       is_aligned,
     "check_symmetry":   check_symmetry,
+    "aim_surface":      aim_surface,
 }

@@ -18,41 +18,40 @@ bridge and it works beautifully:
 > topology → `edit delete`. **Zero coordinates.** It works because the target
 > *is* a real topological feature (an open loop, a tube).
 
-The **constructive / sculpt** half never grew that bridge. "Where a breast goes"
-is a smooth, blank, featureless patch — no loop, no pole, no boundary to anchor
-to. So `sculpt` falls back to raw world coordinates (`at_x/y/z`), which is the
-**exact thing `feel` exists to cure** (LLMs cannot dead-reckon points in open 3D
-space). `select op=limb` has no sculpt counterpart.
-
-We *routed around* this in the session — and the workaround is the spec for the
-fix (see "What worked"). But the gap itself is the project's next frontier.
+The **constructive / sculpt** half lacked that bridge: "where a breast goes" is a
+smooth, blank, featureless patch — no loop, pole, or boundary to anchor to — so
+`sculpt` fell back to raw world coordinates, the **exact thing `feel` exists to
+cure**. As of 2026-06-16 it has a **Phase-1 bridge**: `feel op=aim` (G1 below)
+casts a normalized framing onto the surface and hands back the world point +
+normal, the way `feel structure` hands back limb handles. The agent now aims in
+fractions of the form and *learns* the coordinate. Phases 2–3 (one-call sculpt,
+normalized placement) are speced in docs/SPEC-06; this section is no longer the
+project's blocker, it's its newest working seam.
 
 ---
 
-## G1 — surface-relative / local-frame brush addressing  ⭐ the big one
+## G1 — surface-relative / local-frame brush addressing  ⭐ ✅ PHASE 1 SHIPPED 2026-06-16
 
-`sculpt(brush, at_x/y/z, radius)` demands a world point on a featureless
-surface. Make the brush (and every constructive verb) addressable in a
-**normalized local frame** instead:
+`sculpt(brush, at_x/y/z, radius)` demanded a world point on a featureless surface —
+the exact thing an LLM can't dead-reckon. **Now there's a resolver:**
 
-> "Cast from the **front** (−Y), at **65% up** the torso, **25% left** of
-> center, radius **5cm**, pull out **2.5cm**."
+**`feel op=aim target=<mesh> face=-Y u=0.25 v=0.65`** (engine `aim_surface`) →
+casts that normalized bbox-face aim onto the EVALUATED surface and returns the
+**world point + surface normal + region word**. The agent then feeds the point to
+the existing verbs — `sculpt … at_x/y/z=point` (push along the normal), `select
+op=in_sphere center=point`, `add … on={"at":point}`. It **hands the coordinate
+back**, so the agent learns the point instead of inventing it.
 
-Spec:
-- A normalized addressing layer (`0..1` or `−1..1` per **local** axis, origin at
-  the object) that any constructive verb accepts — sculpt brush, drop-primitive,
-  `move_verts`, `in_sphere`.
-- Optional **"cast to surface along an axis"**: the server raycasts the
-  normalized aim onto the actual skin, applies the op at the hit point, **and
-  returns the world point + surface normal it used** (so push direction is
-  automatically correct, and the agent *learns* the coordinate instead of
-  inventing it).
-- Fully general — "hit the surface behind a normalized framing coordinate" works
-  on any mesh. **No anatomy baked in** (per the general-tools rule).
+This is the constructive-side `feel structure` → handles: aim in fractions of the
+form, get the coordinate back, act with a normal-correct push. Fully general, no
+anatomy baked in. See **docs/SPEC-06** for the addressing model + Phases 2–3
+(one-call `sculpt face/u/v`; normalized placement for move_verts/add + absolute
+move-to, which folds in G8).
 
-This is the sculpt analog of `select op=limb` and the direct sibling of the
-dimensions-over-coordinates thesis. Build it once → every constructive verb
-stops demanding meters.
+**To verify live (written without a running Blender):** confirm
+`Object.ray_cast(origin, dir, distance)` hits the subsurfed surface (not the
+cage), the outside-origin + inward ray finds the NEAR wall, and the normal points
+out. Tune `margin`. This is the one to dogfood carefully first.
 
 ## G2 — `feel` cannot read **form** back, only the bounding box ✅ FIXED 2026-06-16 (needs live tuning)
 

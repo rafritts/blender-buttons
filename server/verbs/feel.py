@@ -13,14 +13,14 @@ from server import topology, queries, rings, introspect, lint
 from ._common import tag, unknown
 
 _OPS = ["topology", "profile", "rings", "distance", "gap", "aligned", "symmetry",
-        "mesh", "overlaps", "validate", "audit", "contacts", "resting"]
+        "mesh", "overlaps", "validate", "audit", "contacts", "resting", "aim"]
 
 
 @mcp.tool(name="feel")
 def feel(
     op: Literal["topology", "profile", "rings", "distance", "gap", "aligned",
                 "symmetry", "mesh", "overlaps", "validate", "audit", "contacts",
-                "resting"] = "topology",
+                "resting", "aim"] = "topology",
     target: tag(str, "[topology/rings/symmetry/mesh] mesh object (empty=active)") = "",
     # topology (SPEC-04)
     method: tag(str, "[topology] comma list of method tokens (empty = cheap bundle: "
@@ -48,6 +48,11 @@ def feel(
     targets: tag(str, "[overlaps/validate/contacts/resting] object(s) to check") = "",
     group: tag(str, "[audit] group/collection to audit") = "",
     tri_budget: tag(int, "[audit] triangle budget") = 5000,
+    # aim — surface-relative addressing (G1 / SPEC-06)
+    face: tag(str, "[aim] local bbox face to cast FROM: -Y +Y -X +X -Z +Z (-Y = ray travels +Y into the volume)") = "-Y",
+    u: tag(float, "[aim] 0..1 on the face, first of the other two local axes (X<Y<Z)") = 0.5,
+    v: tag(float, "[aim] 0..1 on the face, second of the other two local axes") = 0.5,
+    margin: tag(float, "[aim] extra cast start distance outside the face (m)") = 0.0,
 ) -> str:
     """
     Feel a mesh — structure, measurements, correctness. Read-only (no status block).
@@ -90,6 +95,10 @@ def feel(
       audit    — asset budget/quality audit of a group       (group, tri_budget)
       contacts — which objects touch which                   (targets)
       resting  — are objects resting on / floating above surfaces? (targets)
+      aim      — cast a normalized bbox-face aim onto the surface → world point +
+                 normal, to feed sculpt/select/add. The constructive-side
+                 `feel structure`: aim in fractions of the form, get the coordinate
+                 back instead of dead-reckoning it.   (target, face, u, v, margin)
     """
     o = op.lower().strip()
     if o == "topology":
@@ -118,4 +127,6 @@ def feel(
         return introspect.check_contacts(targets)
     if o == "resting":
         return introspect.check_resting(targets)
+    if o == "aim":
+        return queries.aim_surface(target, face, u, v, margin)
     return unknown("feel", "op", op, _OPS)
