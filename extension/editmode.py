@@ -1199,6 +1199,105 @@ def merge_by_distance(params):
             "verts_after": after, "merged": before - after}
 
 
+def bridge_handles(params):
+    """edit op=bridge — weld two open boundary loops into a continuous skin (SPEC-07
+    Phase 5, the consumer half of gaps.md G10). Consumes two named boundary handles,
+    selects their rims, and runs bridge_edge_loops — the single most fundamental
+    "close the gap between two open loops" move, which the edit surface lacked.
+
+    SAME-OBJECT only. `edit` acts on one mesh; both loops must live on the same owner.
+    Two parts on separate objects → `object op=join` them first, then bridge the loops
+    on the joined mesh. Keyed/rigged meshes are refused: bridging adds faces, which
+    corrupts a shape-key block or a deform bind (the honest G10 limit).
+
+    a, b: the two boundary handles to weld (order-independent — bridging is symmetric)."""
+    import bmesh
+    from . import handles as H
+    a = (params.get("a") or "").strip()
+    b = (params.get("b") or "").strip()
+    if not a or not b:
+        return {"error": "edit op=bridge needs a=<handle> and b=<handle> (two boundary handles)"}
+    if a == b:
+        return {"error": "a and b are the same handle — bridge needs two distinct loops"}
+
+    ea, eb = H._find_handle(a), H._find_handle(b)
+    if ea is None:
+        return {"error": f"handle '{a}' not found (run feel op=assembly to mint boundary handles)"}
+    if eb is None:
+        return {"error": f"handle '{b}' not found (run feel op=assembly to mint boundary handles)"}
+
+    owner_a, owner_b = ea.get("bb_owner", ""), eb.get("bb_owner", "")
+    if owner_a != owner_b:
+        return {"error":
+            f"cross-object bridge: '{a}' is on '{owner_a}', '{b}' is on '{owner_b}'. "
+            f"edit is single-object — join them first "
+            f"(`object op=join names={owner_a},{owner_b}`), then bridge the loops on "
+            f"the joined mesh."}
+
+    obj = bpy.data.objects.get(owner_a)
+    if obj is None or obj.type != 'MESH':
+        return {"error": f"owner '{owner_a}' is gone or not a mesh"}
+    if obj.data.shape_keys is not None:
+        return {"error":
+            f"'{obj.name}' has shape keys — bridging changes topology and would corrupt "
+            f"the keys. Keyed/rigged welds are out of scope."}
+
+    idx_a = H._vgroup_vertset(obj, ea.get("bb_vgroup", ""))
+    idx_b = H._vgroup_vertset(obj, eb.get("bb_vgroup", ""))
+    if not idx_a or not idx_b:
+        return {"error": "a handle's vgroup is empty/gone — re-mint with feel op=assembly"}
+
+    # Own the edit-mode entry: the owner is derived from the handles, not a user
+    # `target=`, so this doesn't route through the EDIT_MODE_TOOLS path.
+    if bpy.context.active_object is not None and bpy.context.active_object.mode == 'EDIT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.select_all(action='DESELECT')
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.context.tool_settings.mesh_select_mode = (False, True, False)
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    bm.edges.ensure_lookup_table()
+    want = idx_a | idx_b
+    for f in bm.faces:
+        f.select = False
+    for e in bm.edges:
+        e.select = False
+    for v in bm.verts:
+        v.select = False
+    sel_edges = 0
+    for e in bm.edges:
+        if (len(e.link_faces) == 1
+                and e.verts[0].index in want and e.verts[1].index in want):
+            e.select = True
+            e.verts[0].select = True
+            e.verts[1].select = True
+            sel_edges += 1
+    bmesh.update_edit_mesh(obj.data)
+    if sel_edges == 0:
+        bpy.ops.object.mode_set(mode='OBJECT')
+        return {"error":
+            f"no open boundary edges on those handles — '{a}'/'{b}' may not be open "
+            f"loops (bridge needs two rims of one-face edges)"}
+
+    faces_before = len(bm.faces)
+    try:
+        bpy.ops.mesh.bridge_edge_loops()
+    except RuntimeError as ex:
+        bpy.ops.object.mode_set(mode='OBJECT')
+        return {"error": f"bridge_edge_loops failed: {ex}"}
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    faces_after = len(bm.faces)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    push_undo(f"bridge {a} ↔ {b}")
+    return {"success": True, "owner": obj.name, "a": a, "b": b,
+            "edges_bridged": sel_edges, "faces_created": faces_after - faces_before,
+            "faces_total": faces_after}
+
+
 def select_in_sphere(params):
     """Select vertices inside a world-space sphere — for localized region editing on joined meshes.
 
@@ -1481,4 +1580,5 @@ TOOLS = {
     "split_by_part":      split_by_part,
     "assign_weight":      assign_weight,
     "select_boundary":    select_boundary,
+    "bridge_handles":     bridge_handles,
 }

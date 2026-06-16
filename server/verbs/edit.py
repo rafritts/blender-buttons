@@ -14,7 +14,7 @@ from ._common import tag, unknown
 _OPS = ["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
         "mark_sharp", "crease", "inflate", "jitter", "proportional_move",
         "extrude_along_curve", "round", "bend", "smooth_edges", "taper_end",
-        "taper_section", "scale_rings", "band", "trace", "boolean", "subdivide"]
+        "taper_section", "scale_rings", "band", "trace", "boolean", "subdivide", "bridge"]
 
 
 @mcp.tool(name="edit")
@@ -22,8 +22,12 @@ def edit(
     op: Literal["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
                 "mark_sharp", "crease", "inflate", "jitter", "proportional_move",
                 "extrude_along_curve", "round", "bend", "smooth_edges", "taper_end",
-                "taper_section", "scale_rings", "band", "trace", "boolean", "subdivide"],
+                "taper_section", "scale_rings", "band", "trace", "boolean", "subdivide",
+                "bridge"],
     target: tag(str, "mesh object to edit (empty=active)") = "",
+    # bridge — weld two boundary handles (SPEC-07 Phase 5 / G10)
+    a: tag(str, "[bridge] first boundary handle to weld (order-independent)") = "",
+    b: tag(str, "[bridge] second boundary handle to weld") = "",
     # directional amounts (extrude / move-style ops; meters, local frame)
     out: tag(float, "[extrude/proportional_move] push out along normal (m)") = 0.0,
     inward: tag(float, "[extrude/proportional_move] push inward (m)") = 0.0,
@@ -128,6 +132,12 @@ def edit(
       trace       — trace a cross-section profile  (target, axis, sections)
       boolean     — boolean with a cutter  (cutter, bool_op=DIFFERENCE|UNION|
                     INTERSECT, solver, apply, hide_cutter)
+      bridge      — weld two open boundary loops into a continuous surface (the
+                    bridge-edge-loops primitive). a/b are two boundary handles (mint
+                    with feel op=assembly); their rims get bridged. SAME-OBJECT only —
+                    join cross-object parts first (object op=join), then bridge on the
+                    joined mesh. Keyed/rigged meshes refused (topology change corrupts
+                    the deform). Order-independent.     (a, b)
     """
     o = op.lower().strip()
     if o == "extrude":
@@ -177,4 +187,6 @@ def edit(
         return introspect.trace_profile(target, axis, sections)
     if o == "boolean":
         return modifiers.boolean(target, cutter, bool_op, solver, apply, hide_cutter, label)
+    if o == "bridge":
+        return editmode.bridge(a, b, label)
     return unknown("edit", "op", op, _OPS)

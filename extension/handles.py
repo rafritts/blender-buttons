@@ -223,6 +223,9 @@ def mint_from_active_selection(name="", vertex_parent=False):
     # caveat).
     vgname = f"{VGROUP_PREFIX}{empty.name}"
     vg = obj.vertex_groups.new(name=vgname)
+    vgname = vg.name  # Blender suffixes .001 on collision with an orphaned vgroup
+                      # (a deleted handle leaves its group behind — G15); track the
+                      # ACTUAL name so bb_vgroup never points at the stale leftover.
     deform = bm.verts.layers.deform.verify()
     gi = vg.index
     for v in bm.verts:
@@ -347,6 +350,8 @@ def mint_from_vert_indices(obj, indices, name, kind="boundary"):
 
     vgname = f"{VGROUP_PREFIX}{empty.name}"
     vg = obj.vertex_groups.new(name=vgname)
+    vgname = vg.name  # see mint_from_active_selection: a .001 suffix on collision with
+                      # an orphaned leftover vgroup (G15) must not desync bb_vgroup.
     vg.add(indices, 1.0, 'REPLACE')
 
     empty["bb_handle"] = True

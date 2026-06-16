@@ -44,6 +44,14 @@ def feel_assembly(targets: str = "", group: str = "") -> str:
         for p in pairs:
             t = ("touching " + "".join(p["touching"])) if p["touching"] else f"gap {p['gap'] * 100:.1f}cm"
             lines.append(f"      {p['a']} ↔ {p['b']:<14} {t}")
+    # G9 follow-up: the minted boundary handles are now addressable — point at the ops
+    # that consume them, so the read isn't a dead end.
+    handle_names = [b["handle"] for o in objs for b in o.get("boundaries", [])]
+    if handle_names:
+        lines.append(
+            "  → next: `feel op=map handle=" + handle_names[0] + "` (what an opening "
+            "looks out onto) · `edit op=bridge a=… b=…` (weld two) · "
+            "`transform move_to handle=…` (align by name)")
     return "\n".join(lines)
 
 
@@ -65,4 +73,9 @@ def feel_map(handle: str = "", target: str = "", margin: float = 0.0) -> str:
             )
         else:
             lines.append(f"  {c['handle']:<22} ✗ miss (opening looks out onto nothing)")
+    # G9 follow-up: a hit means two openings face each other — the bridge candidate.
+    if any(c.get("hit") for c in casts):
+        lines.append(
+            "  → next: `edit op=bridge a=… b=…` to weld two facing openings "
+            "(same object — `object op=join` cross-object parts first)")
     return "\n".join(lines)

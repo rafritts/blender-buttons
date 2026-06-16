@@ -233,7 +233,7 @@ promoted to work, this is **its own later SPEC**: pattern + `followups.py` mecha
 the table, table signed off first. (SPEC-07 is taken by multi-feel; the new multi-feel
 ops are prime follow-up *producers* — `assembly → map → handle → weld`.)
 
-## G10 — construction has no **bridge / weld** (you can fabricate a part but not attach it) 🧩 OPEN
+## G10 — construction has no **bridge / weld** (you can fabricate a part but not attach it) ✅ SHIPPED 2026-06-16 (same-object; cross-object/rigged out of scope by design)
 
 Surfaced building a torso onto Spring (the pullover hides that the body has *no*
 torso mesh — `GEO_spring_arms` is two disconnected arm shells, each open at a 17.6 cm
@@ -261,6 +261,15 @@ bridged faces), plus an honest note that cross-object/rigged welds are out of sc
 without a join. Until then, fabricated parts are *placed*, never *joined*.
 (**SPEC-07 multi-feel** is the perception half — it mints the two named handles, e.g.
 `torso.top_ring` + `arms.armhole_L`, that an `edit op=bridge` would weld.)
+
+**Resolution (SPEC-07 Phase 5).** `edit op=bridge a=<handle> b=<handle>` ships the
+bridge-edge-loops primitive: it selects the two boundary handles' rims and welds them
+into a continuous skin. Held to the honest scope above — **same-object only** (cross-
+object → directed error: `object op=join` first, then bridge on the joined mesh), and
+**keyed/rigged meshes refused** (a topology change corrupts the shape-key block / deform
+bind). Verified: two joined open tubes, bridge the facing rims → 2 shells collapse to 1,
+4 boundaries to 2. The cross-object case (reasons 2–3 above) stays an explicit limit, not
+a silent failure.
 
 ## G11 — render config is **write-only**, and the engine enum is **stale** 🎛️ OPEN
 

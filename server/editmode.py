@@ -581,6 +581,29 @@ def merge_by_distance(threshold: float = 0.001, selected_only: bool = False,
     return main + _status(result)
 
 
+def bridge(a: str = "", b: str = "", label: str = "") -> str:
+    """Weld two open boundary loops into a continuous surface — the bridge-edge-loops
+    primitive (SPEC-07 Phase 5, closing gaps.md G10). `a` and `b` are two boundary
+    handles (mint them with `feel op=assembly`); their rims get selected and bridged.
+
+    SAME-OBJECT only — `edit` acts on one mesh. Two parts on separate objects: run
+    `object op=join names=A,B` first, then bridge the loops on the joined mesh. Keyed/
+    rigged meshes are refused (adding faces corrupts the shape-key block / deform bind).
+    Bridging is symmetric, so a/b order doesn't matter."""
+    result = call_blender("bridge_handles", {"a": a, "b": b}, label=label)
+    if result.get("success"):
+        main = (f"bridged {result['a']} ↔ {result['b']} on {result['owner']} — "
+                f"+{result['faces_created']} faces ({result['edges_bridged']} edge pairs) "
+                f"→ {result['faces_total']} faces [{result.get('op_id','')}]")
+        # G9 follow-up: a fresh weld usually wants a seam-weld + a lint pass.
+        main += ("\n  → next: `edit op=merge target=" + result['owner']
+                 + "` to weld any coincident seam verts · `feel op=mesh target="
+                 + result['owner'] + "` to lint the new faces (normals / non-manifold)")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 @mcp.tool()
 def select_in_sphere(center_x: float, center_y: float, center_z: float, radius: float,
                      action: str = "SELECT", extend: bool = False, target: str = "") -> str:
