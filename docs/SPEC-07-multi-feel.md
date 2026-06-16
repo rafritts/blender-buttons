@@ -102,14 +102,32 @@ tree:
   Can't resolve; must re-derive or discard. The merge conflict — a distinct state from
   drift.
 
-Checks are **lazy** — the `git status` model: validate on `feel op=handles` and inline
-on consume, never an eager re-validation storm after every edit. Default on a dirty
-*consume*: recompute + flag (provenance is the whole point), agent can override to pin.
-Honest edge: a raw `from=point` handle has no provenance to diff, so it's the one kind
-that **can't self-detect staleness** — the labeled escape hatch, another reason
-derivation-backed is the default. Bonus: this dirty flag is also how the agent notices
-the **human** moved something under a handle between calls — free detection for the
-shared-state problem (G7).
+Checks are **lazy by default** — the `git status` model: validate on `feel op=handles`
+and inline on consume. Default on a dirty *consume*: recompute + flag (provenance is the
+whole point), agent can override to pin.
+
+But **eager is opt-in**, flaggable at three scopes — **per-handle**, **per-mesh** (every
+handle derived from it), or **store-wide** — for anchors the agent is actively building
+against and wants flagged the instant they move. The re-validation-storm fear is smaller
+than it sounds: a mutation is localized to specific object(s), and a handle can only
+drift if a mesh in its **dependency set** was touched, so eager re-checks just the
+handles on the edited mesh, not the registry — cost scales with handles-on-the-touched-
+mesh, which is tiny. (Wrinkle: a `feel op=map` handle depends on *two* meshes — the loop
+it casts *from* and the surface it *hits* — so its dependency set is both; re-check if
+either moves.)
+
+Honest edge — `from=point` handles have no provenance to recompute, but they're **not
+fully blind**. *Fiducial check:* snapshot a point handle's distances to its *k* nearest
+**provenance-backed** handles at mint; on validate, recompute those neighbors (they
+self-resolve) and diff the distances — any change beyond a micro-ε means the geometry
+*around* the point moved, so the frozen point is probably stale. It's a **weak** signal
+(it only sees motion its fiducials sample — a bulge rising right at the point with no
+nearby handle reads clean) that strengthens with handle density, but it upgrades point
+handles from silently-frozen to drift-flagged-when-witnessed. Derivation-backed stays
+the default; `point` stays the labeled escape hatch.
+
+Bonus: this whole dirty machinery is also how the agent notices the **human** moved
+something under a handle between calls — free detection for the shared-state problem (G7).
 
 ## Lifecycle / open questions (for sign-off)
 
