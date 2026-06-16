@@ -319,6 +319,33 @@ tabled** this session — logged so it isn't lost, not because it's solved. Hand
 (SPEC-07 C) ease the manual path (mint `…_L`, mirror to `…_R`); the symmetry *mode*
 itself is separate work for later.
 
+## G15 — handles have no garbage collection for orphans 🧹 OPEN
+
+Building the Phase-4 test, deleting a mesh left its handles behind: the `HANDLE_<name>`
+vertex group dies with the mesh, but the **Empty lingers** in the `Handles` collection,
+now permanently `✗ orphaned`. `feel op=handles` flags them, but there's no way to *act*
+on the flag — no prune. The general primitive is a handle-lifecycle op: `feel
+op=handles prune` (or `feel op=forget name=…`) that deletes the Empties whose
+provenance can no longer replay (owner gone / vgroup gone), turning the orphaned state
+from a permanent annotation into something collectable. Native-delete the Empty in the
+Outliner already works; this is just the agent-facing equivalent so the registry can be
+kept tidy without leaving the chat. Cheap, and it closes the loop the dirty/orphaned
+model opened.
+
+## G16 — `assembly` relates object **bounding boxes**, not the **openings themselves** 📐 OPEN
+
+`feel op=assembly` reports the pairwise gap between two objects' AABBs (+ which axes
+touch) — enough to know two parts are ~N cm apart, but it can't yet answer the question
+assembly is *for*: "does **this** opening line up with **that** one?" The spec's section A
+named "flush/aligned faces, contact"; Phase 4 shipped the bbox-level subset and the
+per-opening `op=map` raycast, but not a **boundary-to-boundary** relation. The general
+primitive is a relation between two *handles* (not two objects): given `arms.armhole_L`
+and `torso.top_ring`, report centre-to-centre distance, whether their plane normals are
+coaxial/opposed (do they face each other?), and the radius/circumference match — the
+read a `bridge`/`weld` (G10) needs to decide *if* two openings can be joined before it
+tries. `op=map` already computes the loop plane normal; this is that math applied to a
+*named pair* instead of a raycast into the scene.
+
 ---
 
 ## What worked — formalize this, don't fight it
