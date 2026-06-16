@@ -232,6 +232,57 @@ Table is representative, not exhaustive — the rollout would start with the
 promoted to work, this is **SPEC-07** territory: pattern + `followups.py` mechanism +
 the table, table signed off first.
 
+## G10 — construction has no **bridge / weld** (you can fabricate a part but not attach it) 🧩 OPEN
+
+Surfaced building a torso onto Spring (the pullover hides that the body has *no*
+torso mesh — `GEO_spring_arms` is two disconnected arm shells, each open at a 17.6 cm
+armhole; the neck ring lives on the head). A blockout torso placed into the gap is
+trivial (`add → resize → move_to`, exact bounds via the status loop). **Attaching it
+is impossible on the current surface**, for three compounding reasons:
+
+1. **No bridge-edge-loops primitive.** The single most fundamental "close the gap
+   between two open loops" move in all of mesh modeling is absent from `edit`
+   (extrude / bevel / loop_cut / merge / inflate / bend / boolean … none bridge two
+   boundaries). Without it a fabricated part and its socket sit centimeters apart
+   forever. Closest hacks — `extrude until_contact` then `merge by distance` — only
+   work same-object with near-coincident loops.
+2. **`edit` is single-object.** Every edit op acts on the active mesh's own
+   selection; the neck ring and armholes are on *other* objects, untouchable from the
+   torso's session.
+3. **Rigged geometry can't be restructured.** The body carries Armature + MeshDeform
+   + CorrectiveSmooth + Subsurf, so the "join everything, then bridge" escape hatch
+   would corrupt the deform stack.
+
+This is the mirror of the headline: the **destructive** half has its perception→action
+bridge (`feel structure → select limb → delete`); **constructive welding has none.**
+The missing primitive is `edit op=bridge` (two boundary loops on the active mesh →
+bridged faces), plus an honest note that cross-object/rigged welds are out of scope
+without a join. Until then, fabricated parts are *placed*, never *joined*.
+
+## G11 — render config is **write-only**, and the engine enum is **stale** 🎛️ OPEN
+
+The `render` verb can *set* engine / quality / cycles / color but offers **no read** —
+no way to ask the build which engines exist, the current engine, or the live params
+(samples, device, denoiser, view transform, resolution, output size). The only way to
+learn the available engines is **discovery-by-exception**: send a bad `engine`, read
+the list off the error. Proven this session — a render bounced and the error was the
+first time the real engine list appeared.
+
+Compounded by a **version-stale enum**: the schema advertises
+`engine = CYCLES | BLENDER_EEVEE_NEXT`. `BLENDER_EEVEE_NEXT` was the 4.2–4.x id; in
+**Blender 5.x** EEVEE-Next is the only Eevee and the id reverted to plain
+`BLENDER_EEVEE`. Hardcoding a version-specific engine name **guarantees** a failed
+round-trip on 5.x (the build under test is 5.1.2). The server shouldn't hardcode
+engine names at all — it should surface the build's own list.
+
+**Fix:** add `render op=settings` (read) → available engines (from the build), current
+engine, and the active per-engine config (Cycles device/backend/samples/denoise; Eevee
+samples/AO/shadows/raytracing; color view_transform/look/exposure/gamma; output
+resolution/format). Stop hardcoding the engine enum; validate against the build's list.
+Natural **G9 follow-up**: any `render` result points at `render op=settings`. (The
+status block already shows the *current* engine — this is the missing *capabilities +
+full-config* read.)
+
 ---
 
 ## What worked — formalize this, don't fight it
