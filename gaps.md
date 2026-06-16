@@ -357,6 +357,24 @@ tries. `op=map` already computes the loop plane normal; this is that math applie
 
 ---
 
+## G17 — no **snap/fit a boundary loop onto a target** (the action half of G16) 🧲 OPEN
+
+G16 wants to *measure* whether two openings line up; this is the **action** that should
+follow — "take this boundary loop and **fit it onto** that one." Today you assemble it by
+hand: read both handle points/sizes (`feel op=assembly`), compute the delta yourself,
+`transform op=move_verts` the selected rim by it, `scale_verts` to match size, eyeball the
+normal. The missing primitive is one op — **snap the selected boundary loop (or a named
+handle) onto a target handle**: translate centre→centre, scale rim→rim, optionally rotate
+to align plane normals. General (necks→collars, sleeves→armholes, pipe→flange, any tube→
+any opening) and the natural precursor to `edit op=bridge` (G10): *fit, then weld*.
+Distinct from `transform op=snap`, which is object-level (AABB side-to-side), not loop-to-
+loop; and from `move_to handle=`, which moves a whole **object**, not a selected loop.
+Surfaced live 2026-06-16 fitting a torso neck to a head's neck hole — the snap was a
+hand-computed `move_verts` from two `assembly` points. Candidate surface: `transform
+op=snap_loop handle=<target>` or `edit op=fit_boundary a=<sel> to=<handle>`.
+
+---
+
 ## What worked — formalize this, don't fight it
 
 The breast volume was placed, sized, projected, teardropped, splayed, spaced,
