@@ -129,6 +129,34 @@ the default; `point` stays the labeled escape hatch.
 Bonus: this whole dirty machinery is also how the agent notices the **human** moved
 something under a handle between calls — free detection for the shared-state problem (G7).
 
+### Two drift signatures + attribution (custom / multi-element handles)
+
+A `from=selection` handle over verts/edges/faces carries *internal* structure, so it
+gets **two complementary signatures** — distances, not raw positions, precisely because
+distances are **rigid-invariant**, which keeps the two failure modes separable:
+- **Intrinsic (shape):** the distance set among its own constituent verts — full
+  pairwise for a small selection (e.g. three faces), a bounded signature for large ones
+  (vert-to-centroid + a few cross distances; we only need to *flag* a change, not
+  reconstruct it). Catches **deformation** (the region got squished), blind to where it
+  sits.
+- **Extrinsic (place):** the fiducial distances to nearest provenance-backed handles
+  (the `from=point` mechanism, generalized). Catches **rigid displacement** (it slid as
+  a whole), which the intrinsic check can't see by construction.
+
+Together they cover squished *and* moved. A raw-position hash would flag both but
+**conflate** them; the distance form keeps deform and displacement diagnostically apart.
+
+**Attribution — "…and the agent wasn't the one who edited it."** On detected drift, ask
+*who*. The server sees its own tool calls (the G12 history/undo log is exactly this
+record), so intersect the handle's **dependency meshes** with the meshes agent ops
+touched since the handle minted:
+- explained by an agent op → **`dirty (self)`** — low-key, "you changed your own anchor."
+- nothing the agent did explains it → **`dirty (external)`** — the loud alarm: the
+  *human* (or a side-effect) moved your anchor. This is what makes the G7 detection
+  *actionable*, not merely present.
+It still flags either way (git doesn't auto-commit your edits); attribution sets the
+urgency, and the agent decides recompute vs pin.
+
 ## Lifecycle / open questions (for sign-off)
 
 - **Persistence scope.** Session-only (in-memory dict), or saved into the `.blend`
