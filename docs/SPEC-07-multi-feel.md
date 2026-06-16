@@ -71,15 +71,54 @@ Handles are the reusable output of A and B: an assembly read and a raycast both 
 handles* as a side effect, so the relationships the agent just learned are addressable
 by name for the rest of the session.
 
+### Creation — auto-mint only the *structural*, never the *semantic*
+
+Two classes, kept apart on purpose — this is the legible-vs-divination line:
+- **Class A — structural (safe to auto-mint).** Features `feel` already finds
+  deterministically: open boundary loops, poles, shells, the symmetry plane. An open
+  loop is a topological *fact* (edges with one adjacent face), not a judgment, so
+  naming each one is exposing what's there, not interpreting it.
+- **Class B — semantic (agent-minted only).** "Where the weld goes," "where the breast
+  sits" — meaning with no topological signature. The tool must **not** guess these;
+  they come only from explicit creation, and `from=aim` is their robust home (a
+  normalized framing re-resolves cleanly on a smooth patch where no feature exists).
+
+Creation needs no new primitive: a handle is **a name + any addressing mode `feel`
+already has** — `from = selection | aim(face,u,v) | boundary | point`. The agent
+supplies the meaning; the tool supplies the math + persistence.
+
+### Handle state — dirty tracking, git-style
+
+Each handle snapshots its **resolved underlying geometry** at mint (the loop's vert
+positions / the aim hit / the selection centroid). On list or consume, `feel`
+**recomputes from provenance and diffs** the snapshot — three states, like a working
+tree:
+- **clean** — recompute matches; use silently.
+- **dirty (drifted)** — geometry moved under it (pose, edit, sculpt) beyond ε, but the
+  feature still resolves. Don't silently trust either value: **flag it** — "⚠
+  `torso.top_ring` drifted 1.8 cm since mint" — and offer **recompute** (accept the new,
+  like staging it), **pin** (keep the frozen point), or **re-derive**.
+- **orphaned (conflict)** — provenance won't replay (named loop gone, verts deleted).
+  Can't resolve; must re-derive or discard. The merge conflict — a distinct state from
+  drift.
+
+Checks are **lazy** — the `git status` model: validate on `feel op=handles` and inline
+on consume, never an eager re-validation storm after every edit. Default on a dirty
+*consume*: recompute + flag (provenance is the whole point), agent can override to pin.
+Honest edge: a raw `from=point` handle has no provenance to diff, so it's the one kind
+that **can't self-detect staleness** — the labeled escape hatch, another reason
+derivation-backed is the default. Bonus: this dirty flag is also how the agent notices
+the **human** moved something under a handle between calls — free detection for the
+shared-state problem (G7).
+
 ## Lifecycle / open questions (for sign-off)
 
 - **Persistence scope.** Session-only (in-memory dict), or saved into the `.blend`
   as custom properties / empties so handles survive a reopen? Lean session-only first;
   revisit if durable anchors prove worth the file footprint.
-- **Staleness signalling.** Recompute-on-read handles the common case. Should a
-  resolve that *moved* a cached point beyond ε warn ("handle drifted 1.2 cm since
-  mint")? Probably yes — cheap, and it surfaces rig/edit changes the agent didn't
-  cause (the shared-state problem, G7).
+- **Staleness signalling — RESOLVED** (see "Handle state — dirty tracking" above):
+  git-style clean / dirty / orphaned, lazy checks, recompute+flag default. Remaining
+  knob: the drift ε (and whether it's absolute mm or relative to handle scale).
 - **Auto-handle volume.** A dense scene could mint dozens. Namespace by object and
   only auto-mint for boundaries (the assembly-relevant features), not every pole.
 - **`assembly` cost.** Cracking topology on Spring's production meshes risks the
