@@ -48,8 +48,11 @@ _ISAMPLE = 32   # intrinsic signature is bounded to this many vert-to-centroid d
 _FID_K = 3      # extrinsic signature keeps distances to the k nearest neighbour handles
 
 # Registry ops never count as "geometry touched" for attribution — minting/accepting
-# a handle writes a vgroup + props but moves no verts.
-_HANDLE_TOOLS = {"mint_handle", "list_handles", "resolve_handle", "accept_handle"}
+# a handle writes a vgroup + props but moves no verts. `feel_assembly` auto-mints
+# boundary handles the same way, so it's excluded too (else it would falsely mark
+# its own target meshes as agent-touched).
+_HANDLE_TOOLS = {"mint_handle", "list_handles", "resolve_handle", "accept_handle",
+                 "feel_assembly"}
 
 
 def _handles_collection():
@@ -261,6 +264,115 @@ def mint_from_active_selection(name="", vertex_parent=False):
         "normal": [round(c, 4) for c in nrm],
         "vertex_parent": bool(vertex_parent),
     }
+
+
+def _newell_normal(cos, centroid, outward_from=None):
+    """Newell's plane normal of an ordered loop polygon (world space) — the axis
+    *through* the opening, unlike the average vert normal which lies along the
+    surface near the rim. Oriented to point away from `outward_from` (the owner's
+    centre) so a boundary handle's arrow reads 'out through the hole'."""
+    nrm = Vector((0.0, 0.0, 0.0))
+    m = len(cos)
+    for i in range(m):
+        a, b = cos[i], cos[(i + 1) % m]
+        nrm.x += (a.y - b.y) * (a.z + b.z)
+        nrm.y += (a.z - b.z) * (a.x + b.x)
+        nrm.z += (a.x - b.x) * (a.y + b.y)
+    nrm = nrm.normalized() if nrm.length > 1e-9 else Vector((0.0, 0.0, 1.0))
+    if outward_from is not None and nrm.dot(centroid - outward_from) < 0:
+        nrm = -nrm
+    return nrm
+
+
+def _vgroup_vertset(obj, vgname):
+    """The set of vertex indices in a vgroup (OBJECT-mode read). Used to dedupe
+    auto-minted boundary handles — two mints of the same loop share a vert-set."""
+    if obj is None or obj.type != 'MESH':
+        return frozenset()
+    vg = obj.vertex_groups.get(vgname)
+    if vg is None:
+        return frozenset()
+    gi = vg.index
+    return frozenset(v.index for v in obj.data.vertices
+                     if any(g.group == gi for g in v.groups))
+
+
+def find_handle_by_vertset(owner_name, indices):
+    """An existing handle on `owner_name` whose vgroup is exactly this vert-set, or
+    None. The idempotency key for auto-mint: re-reading an assembly must reuse the
+    boundary handles it already minted, not spawn `.001` duplicates."""
+    coll = bpy.data.collections.get(HANDLES_COLLECTION)
+    if coll is None:
+        return None
+    owner = bpy.data.objects.get(owner_name)
+    target = frozenset(int(i) for i in indices)
+    for o in coll.objects:
+        if not o.get("bb_handle") or o.get("bb_owner") != owner_name:
+            continue
+        if _vgroup_vertset(owner, o.get("bb_vgroup", "")) == target:
+            return o.name
+    return None
+
+
+def mint_from_vert_indices(obj, indices, name, kind="boundary"):
+    """Mint a handle from an explicit vert-index set on `obj` (OBJECT mode) — the
+    auto-mint path for Class-A structural features (boundary loops) that perception
+    finds, where there's no live edit-mode selection to read. The vgroup is assigned
+    directly by index via the object-mode API (no bmesh deform-layer dance), and the
+    handle normal is the loop's plane normal (the axis through the opening).
+
+    Returns the same result shape as `mint_from_active_selection`. Callers that want
+    idempotency should go through `mint_boundary_handle`."""
+    if obj is None or obj.type != 'MESH':
+        return {"error": "owner is not a mesh"}
+    if obj.mode == 'EDIT':
+        return {"error": f"'{obj.name}' is in edit mode — exit to object mode to auto-mint"}
+    indices = list(dict.fromkeys(int(i) for i in indices))   # dedup, preserve order
+    if not indices:
+        return {"error": "no vertices to anchor"}
+
+    mw = obj.matrix_world
+    world = [mw @ obj.data.vertices[i].co for i in indices]
+    n = len(world)
+    centroid = _centroid(world)
+    owner_center = sum((mw @ Vector(c) for c in obj.bound_box), Vector()) / 8.0
+    nrm = _newell_normal(world, centroid, owner_center)
+
+    empty = bpy.data.objects.new(name.strip() or "handle", None)
+    empty.empty_display_type = 'ARROWS'
+    empty.empty_display_size = 0.05
+    empty.location = centroid
+    empty.rotation_euler = nrm.to_track_quat('Z', 'Y').to_euler()
+    _handles_collection().objects.link(empty)
+
+    vgname = f"{VGROUP_PREFIX}{empty.name}"
+    vg = obj.vertex_groups.new(name=vgname)
+    vg.add(indices, 1.0, 'REPLACE')
+
+    empty["bb_handle"] = True
+    empty["bb_kind"] = kind
+    empty["bb_owner"] = obj.name
+    empty["bb_vgroup"] = vgname
+    _snapshot_provenance(empty, centroid, nrm, world, n, empty.name)
+
+    return {
+        "success": True, "name": empty.name, "kind": kind, "owner": obj.name,
+        "vgroup": vgname, "vert_count": n,
+        "point": [round(c, 5) for c in centroid],
+        "normal": [round(c, 4) for c in nrm],
+    }
+
+
+def mint_boundary_handle(obj, indices, base_name):
+    """Idempotent Class-A auto-mint: reuse an existing handle on the same vert-set,
+    else mint a fresh one. Returns a dict with `name` and `reused` (bool)."""
+    existing = find_handle_by_vertset(obj.name, indices)
+    if existing is not None:
+        return {"success": True, "name": existing, "reused": True}
+    res = mint_from_vert_indices(obj, indices, base_name, kind="boundary")
+    if res.get("success"):
+        res["reused"] = False
+    return res
 
 
 def mint_handle(params):

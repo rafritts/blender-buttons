@@ -13,6 +13,7 @@ import bpy
 
 from . import (
     armature,
+    assembly,
     bands,
     curves,
     designs,
@@ -72,6 +73,7 @@ _TOOL_MODULES = (
     introspect,
     topology,
     handles,
+    assembly,
 )
 
 TOOLS = {}

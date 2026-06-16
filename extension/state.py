@@ -88,6 +88,10 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
     "list_handles", "resolve_handle", "accept_handle",
     # topology sense (SPEC-04) — read-only structural query
     "get_topology",
+    # multi-feel (SPEC-07 Phase 4) — feel_map is a pure raycast read (mints nothing);
+    # feel_assembly DOES mint boundary handles, so it stays mutating (logged + undoable)
+    # and is NOT listed here.
+    "feel_map",
     # new_scene reloads the startup file, wiping Blender's undo stack and the
     # scene; it resets the history log itself (designs.new_scene) rather than
     # pushing an undo step that would immediately be desynced.
@@ -100,6 +104,9 @@ NO_STATUS_TOOLS = {
     "get_blender_status",
     "get_scene_tree", "get_history", "get_bone_tree",
     "list_handles", "resolve_handle", "accept_handle",
+    # multi-feel (SPEC-07 Phase 4) — perception ops; assembly mints as a side effect
+    # but is read-shaped, so neither carries the status block.
+    "feel_assembly", "feel_map",
 }
 
 

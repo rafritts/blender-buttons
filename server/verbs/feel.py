@@ -9,20 +9,22 @@ feel; op="topology" (default) is the structural sense.
 from typing import Literal
 
 from server._core import mcp
-from server import topology, queries, rings, introspect, lint, handles
+from server import topology, queries, rings, introspect, lint, handles, assembly
 from ._common import tag, unknown
 
 _OPS = ["topology", "profile", "rings", "distance", "gap", "aligned", "symmetry",
         "mesh", "overlaps", "validate", "audit", "contacts", "resting", "aim",
-        "handle", "handles", "accept"]
+        "handle", "handles", "accept", "assembly", "map"]
 
 
 @mcp.tool(name="feel")
 def feel(
     op: Literal["topology", "profile", "rings", "distance", "gap", "aligned",
                 "symmetry", "mesh", "overlaps", "validate", "audit", "contacts",
-                "resting", "aim", "handle", "handles", "accept"] = "topology",
-    target: tag(str, "[topology/rings/symmetry/mesh] mesh object (empty=active)") = "",
+                "resting", "aim", "handle", "handles", "accept",
+                "assembly", "map"] = "topology",
+    target: tag(str, "[topology/rings/symmetry/mesh] mesh object (empty=active); "
+                     "[map] cast from every boundary handle on this mesh") = "",
     # topology (SPEC-04)
     method: tag(str, "[topology] comma list of method tokens (empty = cheap bundle: "
                      "components,genus,boundaries,sections,poles,symmetry,frame). "
@@ -46,16 +48,18 @@ def feel(
     plane: tag(float, "[symmetry] mirror plane offset") = 0.0,
     epsilon: tag(float, "[symmetry/overlaps/validate] tolerance") = None,
     # lint / check
-    targets: tag(str, "[overlaps/validate/contacts/resting] object(s) to check") = "",
-    group: tag(str, "[audit] group/collection to audit") = "",
+    targets: tag(str, "[overlaps/validate/contacts/resting/assembly] object(s) to check; "
+                      "assembly: '' = all scene meshes, 'a,b,c' = just those") = "",
+    group: tag(str, "[audit/assembly] group/collection (assembly: read this collection's meshes)") = "",
     tri_budget: tag(int, "[audit] triangle budget") = 5000,
     # aim — surface-relative addressing (G1 / SPEC-06)
     face: tag(str, "[aim] local bbox face to cast FROM: -Y +Y -X +X -Z +Z (-Y = ray travels +Y into the volume)") = "-Y",
     u: tag(float, "[aim] 0..1 on the face, first of the other two local axes (X<Y<Z)") = 0.5,
     v: tag(float, "[aim] 0..1 on the face, second of the other two local axes") = 0.5,
-    margin: tag(float, "[aim] extra cast start distance outside the face (m)") = 0.0,
+    margin: tag(float, "[aim/map] extra cast start distance outside the face/opening (m)") = 0.0,
     # handles — named spatial anchors (SPEC-07)
     name: tag(str, "[handle/accept] handle name (optional at mint — auto-named handle.001-style if empty)") = "",
+    handle: tag(str, "[map] boundary handle to cast FROM (run feel op=assembly first to mint them)") = "",
     source: tag(str, "[handle] addressing mode: selection (the live edit-mode selection)") = "selection",
     vertex_parent: tag(bool, "[handle] vertex-parent the Empty to a tracking vert so it rides pose/deform (default off; the vgroup recompute stays the source of truth)") = False,
 ) -> str:
@@ -115,6 +119,17 @@ def feel(
                  (self = an agent op moved it; external = the human did).
       accept   — re-baseline a dirty handle: re-snapshot its provenance from current
                  geometry, clearing the drift (the 'stage it' move).      (name)
+      assembly — the RELATIONAL map over a SET of objects (multi-feel): per-object
+                 size, each one's open boundary loops (the catalog — verts, cm,
+                 region), and the pairwise gaps. Auto-mints every open boundary as a
+                 named Class-A handle `<object>.<region>` (deduped, re-runs reuse), so
+                 the relations become addressable by name.  (targets='' = all scene
+                 meshes | 'a,b,c', or group=<collection>)
+      map      — loose spatial adjacency: cast a ray from a boundary handle's centre
+                 along its plane normal and report what OTHER mesh it looks out onto
+                 + distance (or a miss). Reports the hit as a coordinate; mints
+                 nothing (a smooth-face hit is Class-B, agent-minted only).
+                 (handle=<one> OR target=<mesh, all its boundaries>, margin)
     """
     o = op.lower().strip()
     if o == "topology":
@@ -151,4 +166,8 @@ def feel(
         return handles.list_handles()
     if o == "accept":
         return handles.accept_handle(name)
+    if o == "assembly":
+        return assembly.feel_assembly(targets, group)
+    if o == "map":
+        return assembly.feel_map(handle, target, margin)
     return unknown("feel", "op", op, _OPS)
