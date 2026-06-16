@@ -28,6 +28,35 @@ def _fmt_method(name: str, data: dict) -> list:
             path = f"  path={len(b['path_vert_ids'])} ids" if "path_vert_ids" in b else ""
             lines.append(f"    [{b['index']}] {b['region']}: {b['circumference_cm']}cm around, "
                          f"{b['verts']} verts{path}")
+    elif name == "structure":
+        t = data.get("triage", {})
+        regimes = ", ".join(data.get("regimes", [])) or "unclassified"
+        lenses = ", ".join(data.get("lenses_run", [])) or "none"
+        lines.append(f"  structure: regime [{regimes}] — {t.get('shells', '?')} shell(s), "
+                     f"{t.get('open_loops', '?')} open loop(s), χ={t.get('euler', '?')}"
+                     f"   [lenses: {lenses}]")
+        p = data.get("protrusion")
+        if p:
+            lines.append(f"    protrusion lens: {p['n_protrusions']} protrusion(s) + "
+                         f"{p['n_apertures']} flush aperture(s)")
+            for pr in p.get("protrusions", []):
+                lines.append(f"      ▸ protrusion: ø{pr['diameter_cm']}cm cap @ {pr['cap_region']}, "
+                             f"runs {pr['extent_cm']}cm to a base @ {pr['base_region']} "
+                             f"(girth {pr['base_girth_cm']}cm) ← cut the base to remove it")
+                if "base_point" in pr:
+                    lines.append(f"          base_point={pr['base_point']}  "
+                                 f"cap={len(pr['cap_path_vert_ids'])} ids  "
+                                 f"cut-ring={len(pr.get('base_ring_ids', []))} ids  "
+                                 f"→ select op=limb which='{pr['cap_region']}'")
+                if "girth_profile_cm" in pr:
+                    lines.append(f"          girth→ {pr['girth_profile_cm']}")
+            for a in p.get("apertures", []):
+                lines.append(f"      ○ aperture: {a['circumference_cm']}cm @ {a['region']} "
+                             f"(opens straight into the body)")
+                if "girth_profile_cm" in a:
+                    lines.append(f"          girth→ {a['girth_profile_cm']}")
+        for u in data.get("unhandled", []):
+            lines.append(f"    ⚠ {u}")
     elif name == "poles":
         bv = ", ".join(f"val{k}×{v}" for k, v in data["by_valence"].items()) or "none"
         lines.append(f"  poles: {data['count']} ({bv})")

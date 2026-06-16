@@ -25,7 +25,7 @@ def feel(
     # topology (SPEC-04)
     method: tag(str, "[topology] comma list of method tokens (empty = cheap bundle: "
                      "components,genus,boundaries,sections,poles,symmetry,frame). "
-                     "Extra: curvature,features,thickness") = "",
+                     "Extra: structure,curvature,features,thickness") = "",
     lod: tag(str, "[topology] low|medium|high output verbosity") = "low",
     base: tag(str, "[topology] cage | evaluated mesh to read") = "cage",
     seed: tag(str, "[topology] handle for seeded methods (v2)") = "",
@@ -55,6 +55,11 @@ def feel(
 
       topology — STRUCTURE (default). `method` = comma list of these tokens
                  (empty = the cheap bundle, the first seven):
+                   structure  — THE structural read (a DISPATCHER): triages the
+                                mesh (open holes? solid? through-holes? shells?) and
+                                runs the lens(es) that fit. Today: the protrusion
+                                lens (cuffs/limbs with cut lines) on open shells;
+                                names regimes it can't yet read. (not in bundle)
                    components — separate shells (fused vs not)
                    genus      — sphere/tube/handled + holes through it
                    boundaries — the open holes: size + location (the "openings")

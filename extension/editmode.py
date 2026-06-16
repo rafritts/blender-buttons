@@ -1360,7 +1360,64 @@ def split_by_part(params):
             "part_count": len(new_names) + 1}
 
 
+def select_limb(params):
+    """Feature-anchored limb select (SPEC-06): select a whole protrusion — sleeve,
+    limb, finger, spout — by its CAP REGION, anchored to the mesh's own topology, so
+    a sleeve comes off at the armhole with no coordinate ever typed. Consumes the
+    handles from topology.find_protrusions and selects the limb's verts OUT TO (not
+    including) its base ring; delete them and the base ring is left as a clean
+    opening. `which` filters by cap-region substring (e.g. 'top-left'); empty =
+    every protrusion. extend unions onto the current selection."""
+    import bmesh
+    from . import topology
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    if obj.type != 'MESH':
+        return {"error": f"'{obj.name}' is not a mesh"}
+    which = (params.get("which") or "").strip().lower()
+    extend = bool(params.get("extend", False))
+
+    abm = topology._topology_bmesh(obj, "cage")
+    try:
+        bbox = topology._bbox(abm)
+        prots, _ap = topology.find_protrusions(abm, bbox)
+    finally:
+        abm.free()
+    if not prots:
+        return {"error": "No protrusions found — needs an open-shell tube "
+                         "(run feel structure to see the regime)."}
+    chosen = prots if not which else [p for p in prots if which in p["cap_region"]]
+    if not chosen:
+        avail = ", ".join(p["cap_region"] for p in prots)
+        return {"error": f"No protrusion cap matches '{which}'. Available: {avail}"}
+
+    member = set()
+    for p in chosen:
+        member.update(p["member_ids"])
+
+    bpy.context.tool_settings.mesh_select_mode = (True, False, False)  # VERT
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    if not extend:
+        for v in bm.verts:
+            v.select = False
+    nverts = len(bm.verts)
+    for i in member:
+        if 0 <= i < nverts:
+            bm.verts[i].select = True
+    _flush_vert_selection(bm)
+    bmesh.update_edit_mesh(obj.data)
+    count = sum(1 for v in bm.verts if v.select)
+    caps = [p["cap_region"] for p in chosen]
+    return {"success": True, "selected_count": count, "limbs": caps,
+            "base_regions": [p["base_region"] for p in chosen],
+            "note": f"selected limb(s) capped @ {', '.join(caps)}; delete to "
+                    f"remove — the base ring stays as a clean opening"}
+
+
 TOOLS = {
+    "select_limb":        select_limb,
     "bevel":              bevel,
     "extrude":            extrude,
     "extrude_along_curve": extrude_along_curve,

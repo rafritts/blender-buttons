@@ -10,15 +10,15 @@ from server._core import mcp
 from server import editmode, objects, rings, queries
 from ._common import tag, unknown
 
-_OPS = ["all", "none", "object", "by_axis", "between", "boundary", "grow",
+_OPS = ["all", "none", "object", "by_axis", "between", "boundary", "limb", "grow",
         "shrink", "random", "in_sphere", "ring", "rings", "component_mode", "current"]
 
 
 @mcp.tool(name="select")
 def select(
-    op: Literal["all", "none", "object", "by_axis", "between", "boundary", "grow",
-                "shrink", "random", "in_sphere", "ring", "rings", "component_mode",
-                "current"],
+    op: Literal["all", "none", "object", "by_axis", "between", "boundary", "limb",
+                "grow", "shrink", "random", "in_sphere", "ring", "rings",
+                "component_mode", "current"],
     # object selection
     name: tag(str, "[object] object name to select") = "",
     # generic
@@ -34,6 +34,8 @@ def select(
     hi: tag(float, "[between] band high 0..1") = 1.0,
     # boundary
     from_selection: tag(bool, "[boundary] restrict to current selection") = True,
+    # limb
+    which: tag(str, "[limb] cap-region substring filter (e.g. 'top-left'); empty = every protrusion") = "",
     # grow / shrink
     steps: tag(int, "[grow/shrink] number of steps") = 1,
     # random
@@ -60,6 +62,9 @@ def select(
                     GREATER|LESS, action, extend)
       between     — verts in an axis band         (axis, lo, hi, action, extend)
       boundary    — open-edge boundary loop        (from_selection, action)
+      limb        — a whole protrusion (sleeve/limb/finger), anchored to the mesh's
+                    OWN topology — selects out to its base ring (the armhole), no
+                    coordinates. delete it to remove the limb cleanly.  (which, extend)
       grow        — grow the selection             (steps)
       shrink      — shrink the selection           (steps)
       random      — a random fraction              (fraction, seed)
@@ -83,6 +88,8 @@ def select(
         return editmode.select_between(axis, lo, hi, action, extend)
     if o == "boundary":
         return editmode.select_boundary(action, from_selection)
+    if o == "limb":
+        return editmode.select_limb(which, extend)
     if o == "grow":
         return editmode.grow_selection("GROW", steps)
     if o == "shrink":

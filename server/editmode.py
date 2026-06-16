@@ -426,6 +426,23 @@ def select_boundary(action: str = "SELECT", from_selection: bool = True) -> str:
     return main + _status(result)
 
 
+def select_limb(which: str = "", extend: bool = False) -> str:
+    """Select a whole protrusion (sleeve/limb/finger/spout) anchored to the mesh's
+    own topology — no coordinates. Consumes the structural handles `feel structure`
+    surfaces. which: cap-region substring filter (e.g. 'top-left'); empty = every
+    protrusion. extend: union onto the current selection. Then `edit delete` removes
+    it, leaving the base ring as a clean opening (the armhole). Must be in Edit Mode."""
+    result = call_blender("select_limb", {"which": which or None, "extend": extend})
+    if result.get("success"):
+        limbs = ", ".join(result.get("limbs", []))
+        bases = ", ".join(result.get("base_regions", []))
+        main = (f"selected {result['selected_count']} vert(s) — limb(s) capped @ {limbs}; "
+                f"cut line at base @ {bases}. delete to remove (base ring left as opening).")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 @mcp.tool()
 def set_component_mode(mode: str) -> str:
     """

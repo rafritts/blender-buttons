@@ -526,8 +526,235 @@ def _m_sections(bm, lod, bbox):
     return {"axes": axes_out}
 
 
+# ──────────────────── structure (SPEC-07: the skeleton lens) ────────────────────
+#
+# The compact, role-HONEST read. Every other method either floods (sections) or
+# lies by omission (boundaries says "4 holes" — can't tell a cuff from an armhole).
+# This one runs a fingertip inward from each opening and classifies it:
+#   PROTRUSION cap — a tube (sleeve/limb/finger/spout) that holds a girth then
+#                    necks UP into a much larger body. The opening is a cuff; the
+#                    neck is the armhole = the natural cut line.
+#   FLUSH aperture — opens straight into the body (neck hole, hem). No tube.
+# It spends its tokens on the protrusions, because that's where a cut goes and
+# exactly where a census is silent. Zero extra deps (bmesh + numpy).
+
+def _loop_perimeter(co):
+    """True circumference of an ORDERED vert-coord loop (metres)."""
+    n = len(co)
+    return sum((co[k] - co[(k + 1) % n]).length for k in range(n))
+
+
+def _ring_layers(bm, seed_ids, max_rings=400):
+    """BFS vertex layers outward from a seed set (a boundary loop). layer[0] = the
+    seed; layer[k] = verts at edge-distance k. This IS the fingertip running inward
+    from the opening; each layer is a cross-ring whose girth we then read."""
+    visited = set(seed_ids)
+    cur = [bm.verts[i] for i in seed_ids]
+    layers = [cur]
+    while cur and len(layers) < max_rings:
+        nxt = []
+        for v in cur:
+            for e in v.link_edges:
+                o = e.other_vert(v)
+                if o.index not in visited:
+                    visited.add(o.index)
+                    nxt.append(o)
+        if not nxt:
+            break
+        layers.append(nxt)
+        cur = nxt
+    return layers
+
+
+def _ring_girth(verts):
+    """Girth proxy of an UNORDERED vert ring: treat it as a circle about its own
+    centroid, girth = 2π·mean_radius. Tessellation-independent and monotone-faithful
+    along a tube — all the step-up test needs. Returns (girth_m, centroid_np)."""
+    co = np.array([list(v.co) for v in verts], dtype=float)
+    c = co.mean(0)
+    return float(2 * math.pi * np.linalg.norm(co - c, axis=1).mean()), c
+
+
+def _find_protrusion_base(girths):
+    """Walking inward from an opening, decide PROTRUSION vs FLUSH from the girth
+    profile. The discriminator is a FLAT RUN: a real protrusion is a TUBE, so its
+    girth holds roughly constant for a stretch (the tube wall) and only THEN ramps up
+    into the body. A flush opening on a CURVED body — an armhole, a neckline — has no
+    flat run: girth climbs straight off the rim, ring after ring. Requiring the flat
+    run is what stops the re-anchoring spiral (cut a sleeve → the fresh armhole is a
+    rising rim, NOT a flat tube → not re-flagged → no endless inward re-cutting).
+
+    Returns (base_index, body_girth) where base_index is the LAST ring of the flat
+    tube (the cut line), or None for a flush opening.
+    """
+    n = len(girths)
+    if n < 5:
+        return None
+    body = max(girths)
+    BAND = 0.15        # a 'flat' run stays within ±15% (max ≤ 1.15·min of the run)
+    MIN_RUN = 4        # ... for at least this many rings — a real tube wall
+    CAP_FRAC = 0.6     # the tube must be meaningfully narrower than the body it joins
+    i = 0
+    while i < n:
+        j, lo, hi = i, girths[i], girths[i]
+        while j + 1 < n:
+            nlo, nhi = min(lo, girths[j + 1]), max(hi, girths[j + 1])
+            if nhi <= (1 + BAND) * nlo:        # run stays flat
+                lo, hi, j = nlo, nhi, j + 1
+            else:
+                break
+        level = 0.5 * (lo + hi)
+        if (j - i + 1) >= MIN_RUN and level < CAP_FRAC * body and j < n - 1:
+            return j, body                     # cut at the end of the flat tube wall
+        i = j + 1
+    return None
+
+
+def find_protrusions(bm, bbox):
+    """Shared protrusion analysis — the engine behind BOTH the perception lens and
+    the action (select_limb). Returns (protrusions, apertures). Each protrusion
+    carries grabbable HANDLES so the cut can be anchored to topology, never a
+    coordinate:
+      cap_ids       — the cuff/opening loop (vert indices, obj.data-aligned)
+      base_ring_ids — the cut loop (the armhole): the ring where the tube meets body
+      member_ids    — the limb's verts OUT to (not incl.) the base ring: the set to
+                      delete to remove the limb, leaving base_ring as a clean opening
+    plus metrics (diameter, extent, girths, regions, girth profile).
+    """
+    loops = sorted(_boundary_loops(bm), key=len, reverse=True)
+    protrusions, apertures = [], []
+    for lv in loops:
+        if len(lv) < 3:
+            continue
+        co = [bm.verts[i].co for i in lv]
+        circ = _loop_perimeter(co)
+        centroid = mathutils.Vector((0, 0, 0))
+        for c in co:
+            centroid += c
+        centroid /= len(co)
+        layers = _ring_layers(bm, lv)
+        rings = [_ring_girth(L) for L in layers]
+        prof = [round(g * 100, 1) for g, _ in rings]
+        found = _find_protrusion_base([g for g, _ in rings])
+        if found is None:
+            apertures.append({"circumference_cm": round(circ * 100, 1),
+                              "region": region_words(bbox, centroid),
+                              "verts": len(lv), "girth_profile_cm": prof[:30]})
+        else:
+            base_idx, body = found
+            base_g, base_c = rings[base_idx]
+            base_v = mathutils.Vector(tuple(base_c))
+            member = set()
+            for L in layers[:base_idx]:          # cap..base-1: the limb, sans cut ring
+                for v in L:
+                    member.add(v.index)
+            protrusions.append({
+                "cap_circumference_cm": round(circ * 100, 1),
+                "diameter_cm": round(circ / math.pi * 100, 1),
+                "extent_cm": round((base_v - centroid).length * 100, 1),
+                "base_girth_cm": round(base_g * 100, 1),
+                "cap_region": region_words(bbox, centroid),
+                "base_region": region_words(bbox, base_v),
+                "base_point": [round(float(x), 4) for x in base_c],
+                "cap_ids": lv,
+                "base_ring_ids": [v.index for v in layers[base_idx]],
+                "member_ids": sorted(member),
+                "girth_profile_cm": prof[:30],
+            })
+    return protrusions, apertures
+
+
+def _lens_protrusion(bm, lod, bbox):
+    """The PROTRUSION lens (open-shell regime). Tubes capped by an open loop that
+    neck into a larger body — sleeves, limbs, fingers, spouts — become protrusions
+    with their cut line; everything else is a flush aperture. Gated by the
+    dispatcher: only fired when the mesh actually has open boundary loops. Today it
+    seeds on open loops; generalizing the seed to curve-skeleton leaves is what
+    extends it to CLOSED limbs (a character's arm ends in a hand, not a hole).
+    Presentation only — strips the heavy id handles at low lod; `find_protrusions`
+    holds them for select_limb."""
+    protrusions, apertures = find_protrusions(bm, bbox)
+    pres_p, pres_a = [], []
+    for p in protrusions:
+        e = {k: p[k] for k in ("cap_circumference_cm", "diameter_cm", "extent_cm",
+                               "base_girth_cm", "cap_region", "base_region")}
+        if lod != "low":
+            e["base_point"] = p["base_point"]
+            e["cap_path_vert_ids"] = p["cap_ids"]
+            e["base_ring_ids"] = p["base_ring_ids"]
+            e["girth_profile_cm"] = p["girth_profile_cm"]
+        pres_p.append(e)
+    for a in apertures:
+        e = {"circumference_cm": a["circumference_cm"], "region": a["region"]}
+        if lod != "low":
+            e["girth_profile_cm"] = a["girth_profile_cm"]
+        pres_a.append(e)
+    return {"n_protrusions": len(pres_p), "n_apertures": len(pres_a),
+            "protrusions": pres_p, "apertures": pres_a}
+
+
+def _count_shells(bm):
+    """Cheap connected-component (shell) count — a triage predicate, O(V+E)."""
+    seen, n = set(), 0
+    for v in bm.verts:
+        if v.index in seen:
+            continue
+        n += 1
+        stack = [v]
+        seen.add(v.index)
+        while stack:
+            cur = stack.pop()
+            for e in cur.link_edges:
+                o = e.other_vert(cur)
+                if o.index not in seen:
+                    seen.add(o.index)
+                    stack.append(o)
+    return n
+
+
+def _m_structure(bm, lod, bbox):
+    """The DISPATCHER (SPEC-07). Touch a mesh → cheap triage (open holes? watertight?
+    through-holes? how many shells?) → fire the lens(es) that fit, and NAME any
+    regime we detect but have no lens for yet. Never a silent 0+0: an unhandled
+    regime says so out loud. Lenses are non-exclusive — a mesh can match several.
+    The predicates are all near-free (boundary count, shell count, Euler χ), so the
+    triage rides on every touch and only the matching heavy lens actually runs.
+
+    Lens registry today:
+      open boundary loops → protrusion lens (sleeves/limbs/spouts) — BUILT
+      watertight, χ < 2   → through-hole / handle regime (genus lens) — TBD
+      watertight, χ = 2   → closed solid: symmetry/primitive regime (gear) — TBD
+      > 1 shell           → assembly (flagged; per-shell lensing) — TBD
+    """
+    loops = _boundary_loops(bm)
+    nbound = len(loops)
+    shells = _count_shells(bm)
+    euler = len(bm.verts) - len(bm.edges) + len(bm.faces)
+    watertight = nbound == 0
+
+    out = {"triage": {"shells": shells, "open_loops": nbound,
+                      "watertight": watertight, "euler": euler},
+           "regimes": [], "lenses_run": [], "unhandled": []}
+
+    if nbound > 0:
+        out["regimes"].append("open-shell")
+        out["lenses_run"].append("protrusion")
+        out["protrusion"] = _lens_protrusion(bm, lod, bbox)
+    if watertight and euler < 2:
+        out["regimes"].append("solid-with-through-holes")
+        out["unhandled"].append("through-hole/handle lens (genus regime) — not built yet")
+    if watertight and euler == 2:
+        out["regimes"].append("closed-solid")
+        out["unhandled"].append("symmetry/primitive lens (gear, prop, blob) — not built yet")
+    if shells > 1:
+        out["unhandled"].append(f"{shells} separate shells — per-shell lensing not built "
+                                f"(protrusion lens reads them pooled)")
+    return out
+
+
 _METHODS = {
     "components": _m_components,
+    "structure": _m_structure,
     "genus": _m_genus,
     "boundaries": _m_boundaries,
     "poles": _m_poles,
