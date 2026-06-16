@@ -130,14 +130,16 @@ def transform(
     if o == "nudge":
         return transforms.nudge(targets, right, left, up, down, back, forward, label)
     if o == "move_to":
+        note = ""
         if handle:
-            pt, err = handles.resolve_point(handle)
+            pt, err, drift = handles.resolve_point(handle)
             if err:
                 return err
+            note = drift or ""
             to_x = pt[0] if to_x is None else to_x
             to_y = pt[1] if to_y is None else to_y
             to_z = pt[2] if to_z is None else to_z
-        return transforms.move_to(targets, to_x, to_y, to_z, label)
+        return note + transforms.move_to(targets, to_x, to_y, to_z, label)
     if o == "rotate_to":
         return transforms.rotate_to(targets, to_x, to_y, to_z, label)
     if o == "resize":

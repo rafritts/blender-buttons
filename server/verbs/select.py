@@ -99,12 +99,14 @@ def select(
     if o == "random":
         return editmode.random_select(fraction, seed)
     if o == "in_sphere":
+        note = ""
         if handle:
-            pt, err = handles.resolve_point(handle)
+            pt, err, drift = handles.resolve_point(handle)
             if err:
                 return err
+            note = drift or ""
             center_x, center_y, center_z = pt
-        return editmode.select_in_sphere(center_x, center_y, center_z, radius, action, extend, target)
+        return note + editmode.select_in_sphere(center_x, center_y, center_z, radius, action, extend, target)
     if o == "ring":
         return rings.select_ring(axis, index, action, target)
     if o == "rings":

@@ -14,14 +14,14 @@ from ._common import tag, unknown
 
 _OPS = ["topology", "profile", "rings", "distance", "gap", "aligned", "symmetry",
         "mesh", "overlaps", "validate", "audit", "contacts", "resting", "aim",
-        "handle", "handles"]
+        "handle", "handles", "accept"]
 
 
 @mcp.tool(name="feel")
 def feel(
     op: Literal["topology", "profile", "rings", "distance", "gap", "aligned",
                 "symmetry", "mesh", "overlaps", "validate", "audit", "contacts",
-                "resting", "aim", "handle", "handles"] = "topology",
+                "resting", "aim", "handle", "handles", "accept"] = "topology",
     target: tag(str, "[topology/rings/symmetry/mesh] mesh object (empty=active)") = "",
     # topology (SPEC-04)
     method: tag(str, "[topology] comma list of method tokens (empty = cheap bundle: "
@@ -54,9 +54,10 @@ def feel(
     u: tag(float, "[aim] 0..1 on the face, first of the other two local axes (X<Y<Z)") = 0.5,
     v: tag(float, "[aim] 0..1 on the face, second of the other two local axes") = 0.5,
     margin: tag(float, "[aim] extra cast start distance outside the face (m)") = 0.0,
-    # handles — named spatial anchors (SPEC-07 Phase 1)
-    name: tag(str, "[handle] handle name (optional — auto-named handle.001-style if empty)") = "",
-    source: tag(str, "[handle] addressing mode: selection (the live edit-mode selection; Phase 1)") = "selection",
+    # handles — named spatial anchors (SPEC-07)
+    name: tag(str, "[handle/accept] handle name (optional at mint — auto-named handle.001-style if empty)") = "",
+    source: tag(str, "[handle] addressing mode: selection (the live edit-mode selection)") = "selection",
+    vertex_parent: tag(bool, "[handle] vertex-parent the Empty to a tracking vert so it rides pose/deform (default off; the vgroup recompute stays the source of truth)") = False,
 ) -> str:
     """
     Feel a mesh — structure, measurements, correctness. Read-only (no status block).
@@ -106,9 +107,14 @@ def feel(
       handle   — mint a named spatial anchor from the live edit-mode selection: an
                  Empty in a `Handles` collection + a `HANDLE_<name>` vertex group on
                  the owning mesh, visible/renamable/deletable in the Outliner. The
-                 reusable, named alternative to throwaway coordinates. SPEC-07 Phase 1:
-                 mint + see (no drift tracking yet).      (name, source=selection)
-      handles  — list every handle (scan the `Handles` collection — the read-model).
+                 reusable, named alternative to throwaway coordinates. Snapshots
+                 provenance (mint point + drift signatures) so it tracks clean/dirty/
+                 orphaned thereafter.      (name, source=selection, vertex_parent)
+      handles  — list every handle, each VALIDATED: live point + git-style state
+                 (● clean / ⚠ dirty / ✗ orphaned), drift in cm, and attribution
+                 (self = an agent op moved it; external = the human did).
+      accept   — re-baseline a dirty handle: re-snapshot its provenance from current
+                 geometry, clearing the drift (the 'stage it' move).      (name)
     """
     o = op.lower().strip()
     if o == "topology":
@@ -140,7 +146,9 @@ def feel(
     if o == "aim":
         return queries.aim_surface(target, face, u, v, margin)
     if o == "handle":
-        return handles.mint_handle(name, source)
+        return handles.mint_handle(name, source, vertex_parent)
     if o == "handles":
         return handles.list_handles()
+    if o == "accept":
+        return handles.accept_handle(name)
     return unknown("feel", "op", op, _OPS)

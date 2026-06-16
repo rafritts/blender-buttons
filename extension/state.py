@@ -82,8 +82,10 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
     "get_bone_tree", "describe_bone", "list_constraints", "get_custom_properties",
     # mesh-data introspection (U8) — read-only
     "list_shape_keys",
-    # handle registry read-model (SPEC-07) — read-only scan / recompute
-    "list_handles", "resolve_handle",
+    # handle registry read-model (SPEC-07) — read-only scan / recompute. accept_handle
+    # rewrites a handle's provenance snapshot (metadata only, no geometry), so it stays
+    # out of the undo stack too — keeping history 1:1 with geometry ops.
+    "list_handles", "resolve_handle", "accept_handle",
     # topology sense (SPEC-04) — read-only structural query
     "get_topology",
     # new_scene reloads the startup file, wiping Blender's undo stack and the
@@ -97,7 +99,7 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
 NO_STATUS_TOOLS = {
     "get_blender_status",
     "get_scene_tree", "get_history", "get_bone_tree",
-    "list_handles", "resolve_handle",
+    "list_handles", "resolve_handle", "accept_handle",
 }
 
 
@@ -159,8 +161,13 @@ def log_operation(tool, params, label=""):
     op_id = hashlib.md5(
         f"{tool}{json.dumps(params, sort_keys=True)}{time.time()}".encode()
     ).hexdigest()[:8]
+    # `active` is the G12 attribution signal SPEC-07 Phase 3 reads: which object was
+    # active when this op ran. For target= edit verbs the dispatch pops `target` out of
+    # params before logging, so the touched mesh would be lost — but it's the active
+    # object by then (_enter_edit_for_target made it active), so this recovers it.
     _history.append({"id": op_id, "label": label or tool, "tool": tool,
-                     "params": params, "objects": scene_object_names()})
+                     "params": params, "objects": scene_object_names(),
+                     "active": getattr(bpy.context.active_object, "name", None)})
     _snapshots[op_id] = capture_geometry_snapshot()  # diff_since (P11) checkpoint
     _redo_stack.clear()  # a new operation forks history; old redo branch is dead
     return op_id

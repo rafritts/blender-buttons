@@ -66,35 +66,39 @@ def sculpt(
     falloff: SMOOTH|SHARP|… subdivide=True adds resolution under the brush first.
     """
     b = brush.lower().strip()
+    note = ""
     if handle:
-        pt, err = handles.resolve_point(handle)
+        pt, err, drift = handles.resolve_point(handle)
         if err:
             return err
+        note = drift or ""
         at_x, at_y, at_z = pt
     if at_x is None or at_y is None or at_z is None:
         return "sculpt: need a brush point — pass at_x/at_y/at_z or handle=<name>"
     if b == "grab":
-        return _s.sculpt_grab(target, at_x, at_y, at_z, radius, to_x, to_y, to_z,
-                              out, inward, up, down, left, right, forward, back,
-                              falloff, subdivide, label)
-    if b == "draw":
-        return _s.sculpt_draw(target, at_x, at_y, at_z, radius, amount,
-                              normal_x, normal_y, normal_z, falloff, subdivide, label)
-    if b == "inflate":
-        return _s.sculpt_inflate(target, at_x, at_y, at_z, radius, amount,
-                                 falloff, subdivide, label)
-    if b == "smooth":
-        return _s.sculpt_smooth(target, at_x, at_y, at_z, radius, iterations,
+        result = _s.sculpt_grab(target, at_x, at_y, at_z, radius, to_x, to_y, to_z,
+                                out, inward, up, down, left, right, forward, back,
                                 falloff, subdivide, label)
-    if b == "crease":
-        return _s.sculpt_crease(target, at_x, at_y, at_z, radius, amount,
-                                falloff if falloff != "SMOOTH" else "SHARP",
-                                subdivide, label)
-    if b == "pinch":
-        return _s.sculpt_pinch(target, at_x, at_y, at_z, radius, amount,
-                               falloff, subdivide, label)
-    if b == "flatten":
-        return _s.sculpt_flatten(target, at_x, at_y, at_z, radius, amount,
-                                 plane_normal_x, plane_normal_y, plane_normal_z,
+    elif b == "draw":
+        result = _s.sculpt_draw(target, at_x, at_y, at_z, radius, amount,
+                                normal_x, normal_y, normal_z, falloff, subdivide, label)
+    elif b == "inflate":
+        result = _s.sculpt_inflate(target, at_x, at_y, at_z, radius, amount,
+                                   falloff, subdivide, label)
+    elif b == "smooth":
+        result = _s.sculpt_smooth(target, at_x, at_y, at_z, radius, iterations,
+                                  falloff, subdivide, label)
+    elif b == "crease":
+        result = _s.sculpt_crease(target, at_x, at_y, at_z, radius, amount,
+                                  falloff if falloff != "SMOOTH" else "SHARP",
+                                  subdivide, label)
+    elif b == "pinch":
+        result = _s.sculpt_pinch(target, at_x, at_y, at_z, radius, amount,
                                  falloff, subdivide, label)
-    return unknown("sculpt", "brush", brush, _BRUSHES)
+    elif b == "flatten":
+        result = _s.sculpt_flatten(target, at_x, at_y, at_z, radius, amount,
+                                   plane_normal_x, plane_normal_y, plane_normal_z,
+                                   falloff, subdivide, label)
+    else:
+        return unknown("sculpt", "brush", brush, _BRUSHES)
+    return note + result
