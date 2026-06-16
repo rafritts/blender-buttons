@@ -87,6 +87,38 @@ Creation needs no new primitive: a handle is **a name + any addressing mode `fee
 already has** — `from = selection | aim(face,u,v) | boundary | point`. The agent
 supplies the meaning; the tool supplies the math + persistence.
 
+### `save selected to handle` — the live selection as a shared pointer
+
+The most natural creation path, and the one that turns the **shared selection** (the
+G7 liability — Blender has exactly one, written by both human and agent) into the
+collaboration *medium*. The server already reads it (`select op=current`,
+`get_current_selection`), so minting from it is the **cheapest** mode, not the hardest:
+- **Human → handle.** The human selects geometry in the viewport and says "make this a
+  handle — the stuff we need to touch." The agent snapshots it; the selected vert indices
+  become provenance, and the intrinsic + extrinsic signatures and dirty/attribution model
+  all apply unchanged.
+- **Agent → confirm.** The agent selects a candidate region; the human *sees the
+  highlight* and replies "yes / no / not that face." Selection is a two-way visual
+  channel — agent proposes by selecting, human disposes by selecting. Confirmation
+  returns through chat, not a callback.
+
+Honest limits (where this *won't* behave as one might picture):
+- **Pull, not push.** Blender doesn't notify the agent when the human selects — the
+  human's words are the cue. Perfect for "Hey Claude, save this"; impossible as ambient
+  "the agent always knows what's selected" without wasteful polling.
+- **One global selection → strict ordering.** The agent must snapshot the live selection
+  as its *first* action; any intervening select op / mode switch / stray click clobbers
+  it. The G7 `target=` escape hatch doesn't help (we *want* the current selection).
+- **Mode + sync wrinkle.** Component selection is Edit-Mode and per-active-mesh, and
+  reading `v.select` reliably has the documented sync caveat G2 already hit — calibration,
+  not a wall. Object-mode selection is a different beast (whole objects → a group, not a
+  geometry handle); multi-object edit (Blender 5.1) → a multi-mesh dependency set, like
+  `op=map`.
+
+Synergy: once the human marks "the stuff we need to touch," the agent operating there
+*should* trip **`dirty (self)`** — so the dirty flag doubles as **positive confirmation
+the agent worked exactly where the human pointed.**
+
 ### Handle state — dirty tracking, git-style
 
 Each handle snapshots its **resolved underlying geometry** at mint (the loop's vert
