@@ -78,7 +78,8 @@ def object_verb(
       props       — read custom properties           (name, bone)
       set_prop    — write a custom property   (name, key, value, bone)
       light       — tweak an existing light  (name, energy/color/hex/size/spot_angle/x/y/z/target)
-      mode        — explicit mode switch     (mode=OBJECT|EDIT|SCULPT|POSE)
+      mode        — explicit mode switch; pass name to guarantee it lands on that
+                    object despite a stray click   (name, mode=OBJECT|EDIT|SCULPT|POSE)
 
     (Object SELECTION is the `select` verb; modifiers are `modifier`; materials
     are `material`; armature/weights/shape-keys are `pose`.)
@@ -122,5 +123,5 @@ def object_verb(
         return _scene.modify_light(name, energy, color, hex, size, spot_angle,
                                    x, y, z, target, label)
     if o == "mode":
-        return objects.set_mode(mode)
+        return objects.set_mode(mode, name)
     return unknown("object", "op", op, _OPS)

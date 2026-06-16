@@ -122,22 +122,27 @@ Left as-is — relocating it under `object` would only duplicate the surface.
   mode strings `bbox_center | cursor | origin` before falling back to an
   object-name lookup. `bbox_center` is the in-place rotate that was blocked.
 
-## G7 — shared selection / active-object / mode collides with the human
+## G7 — shared selection / active-object / mode collides with the human ✅ FIXED 2026-06-16
 
 Blender has exactly **one** active object, **one** selection, **one** mode,
 globally — and both the human's clicks and the MCP write them. This bit us three
 times (a deleted selection, a cleared selection, an "enter Edit mode" landing on
 the wrong object after a stray click).
 
-- **Coexistence model worth documenting for drivers:** the **camera is
-  conflict-free** (orbit/pan/zoom/shading never touch MCP state); **only
-  selection + active + mode collide.**
-- Server fix: ops that run on the *active* object implicitly (`object op=mode`,
-  edit-mode selections) should accept an explicit `target`, so a click can't
-  hijack them.
-- Driver discipline (already adopted): address by name and **re-assert the
-  target immediately before each step**; announce "hands-off the selection"
-  during multi-step Edit-mode sequences.
+**Added the explicit-`target` escape hatch everywhere it was missing:**
+- `object op=mode` now takes `name` — it selects + activates that object *before*
+  switching mode, so a stray click can't make "enter Edit" land on the wrong
+  object (`set_mode` grew a `target`).
+- `select op=limb` was the one edit-mode select missing the auto-`target` path —
+  added to `EDIT_MODE_TOOLS`. The `select` verb's `target` now threads into
+  by_axis / between / boundary / limb / grow / shrink / in_sphere / component_mode
+  (each auto-selects + enters edit on the named object, exits after).
+
+**Still true (document for drivers):** the **camera is conflict-free**
+(orbit/pan/zoom/shading never touch MCP state); **only selection + active + mode
+collide** — and now every collision-prone op can be pinned to a name. Driver
+discipline still applies: address by name and re-assert the target before each
+step.
 
 ## G8 — no absolute "move/rotate to", and the local-frame placement story
 

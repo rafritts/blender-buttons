@@ -24,12 +24,15 @@ def select_object(name: str) -> str:
 
 
 @mcp.tool()
-def set_mode(mode: str) -> str:
+def set_mode(mode: str, target: str = "") -> str:
     """
-    Switch the active object's interaction mode.
+    Switch interaction mode.
     mode: OBJECT | EDIT | SCULPT
+    target: object to select + make active BEFORE switching (G7). Pass it whenever a
+            stray click might have moved the active object — the switch is then
+            guaranteed to land on the object you named, not whatever is selected.
     """
-    result = call_blender("set_mode", {"mode": mode})
+    result = call_blender("set_mode", {"mode": mode, "target": target})
     main = "ok" if result.get("success") else result.get("error", "failed")
     return main + _status(result)
 

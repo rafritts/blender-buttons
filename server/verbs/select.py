@@ -25,7 +25,7 @@ def select(
     action: tag(str, "[all/by_axis/between/boundary/in_sphere/ring/rings] SELECT|DESELECT|INVERT|TOGGLE") = "SELECT",
     extend: tag(bool, "[by_axis/between/in_sphere] True = ADD to current selection (union regions across calls) instead of replacing") = False,
     axis: tag(str, "[by_axis/between/ring/rings] axis X|Y|Z") = "Z",
-    target: tag(str, "[ring/rings] mesh object (empty=active)") = "",
+    target: tag(str, "[edit-mode ops: by_axis/between/boundary/limb/grow/shrink/in_sphere/ring/rings/component_mode] mesh object to auto-select + enter edit on (empty=active); pass it so a stray click can't hijack the op") = "",
     # by_axis
     factor: tag(float, "[by_axis] threshold 0..1 along axis") = 0.5,
     comparison: tag(str, "[by_axis] GREATER | LESS") = "GREATER",
@@ -83,27 +83,27 @@ def select(
     if o == "object":
         return objects.select_object(name)
     if o == "by_axis":
-        return editmode.select_by_axis(axis, factor, comparison, action, extend)
+        return editmode.select_by_axis(axis, factor, comparison, action, extend, target)
     if o == "between":
-        return editmode.select_between(axis, lo, hi, action, extend)
+        return editmode.select_between(axis, lo, hi, action, extend, target)
     if o == "boundary":
-        return editmode.select_boundary(action, from_selection)
+        return editmode.select_boundary(action, from_selection, target)
     if o == "limb":
-        return editmode.select_limb(which, extend)
+        return editmode.select_limb(which, extend, target)
     if o == "grow":
-        return editmode.grow_selection("GROW", steps)
+        return editmode.grow_selection("GROW", steps, target)
     if o == "shrink":
-        return editmode.grow_selection("SHRINK", steps)
+        return editmode.grow_selection("SHRINK", steps, target)
     if o == "random":
         return editmode.random_select(fraction, seed)
     if o == "in_sphere":
-        return editmode.select_in_sphere(center_x, center_y, center_z, radius, action, extend)
+        return editmode.select_in_sphere(center_x, center_y, center_z, radius, action, extend, target)
     if o == "ring":
         return rings.select_ring(axis, index, action, target)
     if o == "rings":
         return rings.select_rings(axis, indices or [], action, target)
     if o == "component_mode":
-        return editmode.set_component_mode(mode)
+        return editmode.set_component_mode(mode, target)
     if o == "current":
         return queries.get_current_selection()
     return unknown("select", "op", op, _OPS)

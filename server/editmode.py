@@ -128,7 +128,7 @@ def select_all(action: str = "SELECT") -> str:
 
 @mcp.tool()
 def select_by_axis(axis: str = "Z", factor: float = 0.5, comparison: str = "GREATER",
-                   action: str = "SELECT", extend: bool = False) -> str:
+                   action: str = "SELECT", extend: bool = False, target: str = "") -> str:
     """
     Select or deselect vertices in edit mode by position along an axis.
     axis: X | Y | Z
@@ -139,11 +139,12 @@ def select_by_axis(axis: str = "Z", factor: float = 0.5, comparison: str = "GREA
             Use DESELECT to select a band: select_all → deselect left → deselect right = center band.
     extend: True = ADD to the current selection instead of replacing it, so two
             calls union two regions (e.g. select both sleeves before one delete).
+    target: optional object name — auto-selects it, enters edit mode, exits after.
     Returns the actual world-space threshold used.
     """
     result = call_blender("select_by_axis", {"axis": axis, "factor": factor,
                                               "comparison": comparison, "action": action,
-                                              "extend": extend})
+                                              "extend": extend, "target": target})
     if result.get("success"):
         main = f"ok (threshold_world={result.get('threshold_world')})"
     else:
@@ -399,7 +400,8 @@ def assign_weight(group: str, weight: float = 1.0, mode: str = "REPLACE",
 
 
 @mcp.tool()
-def select_boundary(action: str = "SELECT", from_selection: bool = True) -> str:
+def select_boundary(action: str = "SELECT", from_selection: bool = True,
+                    target: str = "") -> str:
     """Select the OPEN-BOUNDARY edges of a mesh — the edges of a hole or rim.
 
     The only way to grab a mesh rim: a tilted collar / sleeve / armhole loop can't be
@@ -411,12 +413,14 @@ def select_boundary(action: str = "SELECT", from_selection: bool = True) -> str:
                     boundary edges touching that selection — grow a rim from a seed
                     region. With nothing selected, selects EVERY open boundary.
     action: SELECT (replace) | ADD | DESELECT.
+    target: optional object name — auto-selects it, enters edit mode, exits after.
 
     Example — crease a freshly-cut collar so SubSurf keeps the hem crisp:
       select_boundary(); set_edge_crease(1.0)
     """
     result = call_blender("select_boundary",
-                          {"action": action, "from_selection": from_selection})
+                          {"action": action, "from_selection": from_selection,
+                           "target": target})
     if result.get("success"):
         seed = "from seed selection" if result.get("from_seed") else "all rims"
         main = (f"{result['action']} {result['boundary_edges']} boundary edge(s) "
@@ -426,13 +430,15 @@ def select_boundary(action: str = "SELECT", from_selection: bool = True) -> str:
     return main + _status(result)
 
 
-def select_limb(which: str = "", extend: bool = False) -> str:
+def select_limb(which: str = "", extend: bool = False, target: str = "") -> str:
     """Select a whole protrusion (sleeve/limb/finger/spout) anchored to the mesh's
     own topology — no coordinates. Consumes the structural handles `feel structure`
     surfaces. which: cap-region substring filter (e.g. 'top-left'); empty = every
-    protrusion. extend: union onto the current selection. Then `edit delete` removes
-    it, leaving the base ring as a clean opening (the armhole). Must be in Edit Mode."""
-    result = call_blender("select_limb", {"which": which or None, "extend": extend})
+    protrusion. extend: union onto the current selection. target: optional object name
+    — auto-selects it, enters edit mode, exits after. Then `edit delete` removes it,
+    leaving the base ring as a clean opening (the armhole). Must be in Edit Mode."""
+    result = call_blender("select_limb", {"which": which or None, "extend": extend,
+                                          "target": target})
     if result.get("success"):
         limbs = ", ".join(result.get("limbs", []))
         bases = ", ".join(result.get("base_regions", []))
@@ -444,33 +450,36 @@ def select_limb(which: str = "", extend: bool = False) -> str:
 
 
 @mcp.tool()
-def set_component_mode(mode: str) -> str:
+def set_component_mode(mode: str, target: str = "") -> str:
     """
     Switch the mesh select component mode in Edit Mode.
     mode: VERT | EDGE | FACE
+    target: optional object name — auto-selects it, enters edit mode, exits after.
     Must be in Edit Mode. Call this before selection operations that depend on component type.
     """
-    result = call_blender("set_component_mode", {"mode": mode})
+    result = call_blender("set_component_mode", {"mode": mode, "target": target})
     main = f"component mode → {mode}" if result.get("success") else result.get("error", "failed")
     return main + _status(result)
 
 
 @mcp.tool()
-def grow_selection(direction: str = "GROW", steps: int = 1) -> str:
+def grow_selection(direction: str = "GROW", steps: int = 1, target: str = "") -> str:
     """
     Expand or contract the current selection by one topology step per step.
     direction: GROW (add adjacent elements) | SHRINK (remove boundary elements)
     steps: number of times to grow/shrink (default 1)
+    target: optional object name — auto-selects it, enters edit mode, exits after.
     Must be in Edit Mode with something selected.
     """
-    result = call_blender("grow_selection", {"direction": direction, "steps": steps})
+    result = call_blender("grow_selection", {"direction": direction, "steps": steps,
+                                             "target": target})
     main = f"{direction} x{steps}" if result.get("success") else result.get("error", "failed")
     return main + _status(result)
 
 
 @mcp.tool()
 def select_between(axis: str = "Z", lo: float = 0.0, hi: float = 1.0,
-                   action: str = "SELECT", extend: bool = False) -> str:
+                   action: str = "SELECT", extend: bool = False, target: str = "") -> str:
     """
     Select (or deselect) vertices whose world-space position on an axis falls between lo and hi.
     axis: X | Y | Z
@@ -478,11 +487,13 @@ def select_between(axis: str = "Z", lo: float = 0.0, hi: float = 1.0,
             e.g. lo=0.4, hi=0.6 selects the middle 20% of the mesh along the axis.
     action: SELECT | DESELECT
     extend: True = ADD to the current selection instead of replacing it.
+    target: optional object name — auto-selects it, enters edit mode, exits after.
     Returns the actual world-space thresholds and total selected vert count.
     Replaces the verbose select_all → deselect_below → deselect_above band pattern.
     """
     result = call_blender("select_between", {"axis": axis, "lo": lo, "hi": hi,
-                                             "action": action, "extend": extend})
+                                             "action": action, "extend": extend,
+                                             "target": target})
     if result.get("success"):
         main = (f"ok  {axis}:[{result['lo_world']} → {result['hi_world']}]"
                 f"  selected={result['selected_count']}")
@@ -542,7 +553,7 @@ def merge_by_distance(threshold: float = 0.001, selected_only: bool = False,
 
 @mcp.tool()
 def select_in_sphere(center_x: float, center_y: float, center_z: float, radius: float,
-                     action: str = "SELECT", extend: bool = False) -> str:
+                     action: str = "SELECT", extend: bool = False, target: str = "") -> str:
     """Select edit-mode vertices inside a world-space sphere. The right tool for localized
     region edits on a joined mesh (push out the bust, inflate the brow ridge, etc.) when
     ring-based addressing won't reach the area.
@@ -550,10 +561,11 @@ def select_in_sphere(center_x: float, center_y: float, center_z: float, radius: 
     center_x/y/z: world coords. radius: meters. action: SELECT | ADD | DESELECT.
     extend: True = ADD to the current selection (same as action=ADD), for parity
             with select_by_axis / select_between.
+    target: optional object name — auto-selects it, enters edit mode, exits after.
     Pair with proportional_move or inflate_selection to sculpt the region."""
     result = call_blender("select_in_sphere", {
         "center": [center_x, center_y, center_z], "radius": radius, "action": action,
-        "extend": extend,
+        "extend": extend, "target": target,
     })
     if result.get("success"):
         main = (f"{action} {result['selected']} verts within {result['radius']}m of "

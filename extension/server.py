@@ -85,7 +85,7 @@ EDIT_MODE_TOOLS = {
     "random_select", "proportional_move", "inflate_selection", "mark_sharp",
     "set_edge_crease", "merge_by_distance", "select_in_sphere", "split_by_part",
     "get_rings", "select_ring", "select_rings", "scale_rings", "taper_end", "taper_section",
-    "assign_weight", "select_boundary",
+    "assign_weight", "select_boundary", "select_limb",
 }
 
 # Y1: verbs that write VERTEX POSITIONS, so on a keyed mesh they land on the active

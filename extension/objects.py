@@ -167,6 +167,20 @@ def join_objects(params):
 
 def set_mode(params):
     mode = params.get("mode", "OBJECT").upper()
+    target = params.get("target") or ""
+    # G7: with an explicit target, select+activate it FIRST so a stray human click
+    # can't make a mode switch land on the wrong object. Drop any other object's
+    # edit/sculpt mode before re-pointing the active object.
+    if target:
+        obj = bpy.data.objects.get(target)
+        if obj is None:
+            return {"error": f"target '{target}' not found"}
+        active = bpy.context.active_object
+        if active is not None and active is not obj and active.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
     active = bpy.context.active_object
     prev_mode = active.mode if active is not None else None
     # W2: snapshot deform binds when EDIT is entered, so a topology edit spread
