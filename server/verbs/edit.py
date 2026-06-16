@@ -80,7 +80,7 @@ def edit(
     x_end: tag(float, "[taper_section] X scale at to_ring") = 1.0,
     y_start: tag(float, "[taper_section] Y scale at from_ring") = 1.0,
     y_end: tag(float, "[taper_section] Y scale at to_ring") = 1.0,
-    curve_shape: tag(str, "[taper_section] linear|smooth interpolation") = "linear",
+    curve_shape: tag(str, "[taper_section] interpolation: linear|ease_in|ease_out|ease_in_out|smoothstep") = "linear",
     # ring scale (op=scale_rings uses x/y as ring-plane scale factors)
     ring_x: tag(float, "[scale_rings] X scale of the rings") = 1.0,
     ring_y: tag(float, "[scale_rings] Y scale of the rings") = 1.0,

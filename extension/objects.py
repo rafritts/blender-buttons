@@ -682,6 +682,60 @@ def set_active_shape_key(params):
             "value": round(kb.value, 4), "is_basis": is_basis}
 
 
+def delete_shape_key(params):
+    """Delete one shape key, or ALL of them, from a mesh (Object Data > Shape Keys >
+    the ⌄ menu > Delete / Delete All Shapes). Removing EVERY key turns a keyed mesh
+    back into a plain mesh — which is what UNBLOCKS apply-Subsurf and dyntopo (both
+    refuse to run while any shape key exists). A mesh duplicated from a rigged source
+    inherits its keys; clear them before densifying for sculpt. Deleting all leaves
+    the mesh at the Basis shape — to keep a dialed-in non-Basis mix, bake it first
+    (bake_shape_keys_to_basis)."""
+    name = params.get("name")
+    key = params.get("key") or ""
+    obj = bpy.data.objects.get(name)
+    if obj is None:
+        return {"error": f"Object '{name}' not found"}
+    data = getattr(obj, "data", None)
+    sk = getattr(data, "shape_keys", None) if data is not None else None
+    if sk is None:
+        return {"error": f"'{name}' has no shape keys"}
+    before = [k.name for k in sk.key_blocks]
+    if not key or key.upper() == "ALL":
+        obj.shape_key_clear()
+        return {"success": True, "name": name, "deleted": before, "remaining": []}
+    kb = sk.key_blocks.get(key)
+    if kb is None:
+        return {"error": f"shape key '{key}' not found on '{name}'. Available: {before}"}
+    obj.shape_key_remove(kb)
+    after = obj.data.shape_keys
+    remaining = [k.name for k in after.key_blocks] if after else []
+    return {"success": True, "name": name, "deleted": [key], "remaining": remaining}
+
+
+def bake_shape_keys_to_basis(params):
+    """Flatten the CURRENT shape-key mix into the base mesh and remove every key —
+    the 'apply all shapes as the new rest shape' move. The visible (mixed) shape
+    becomes the keyless geometry, so nothing changes on screen, but the mesh is now
+    plain and apply-Subsurf / dyntopo are unblocked. Use this instead of a plain
+    delete when a non-Basis key is dialed in and you want to keep its contribution."""
+    name = params.get("name")
+    obj = bpy.data.objects.get(name)
+    if obj is None:
+        return {"error": f"Object '{name}' not found"}
+    me = getattr(obj, "data", None)
+    sk = getattr(me, "shape_keys", None) if me is not None else None
+    if sk is None:
+        return {"error": f"'{name}' has no shape keys"}
+    n_keys = len(sk.key_blocks)
+    mix = obj.shape_key_add(name="__bake_mix__", from_mix=True)
+    coords = [d.co.copy() for d in mix.data]
+    obj.shape_key_clear()           # removes ALL key blocks (incl. the temp mix)
+    for i, co in enumerate(coords):
+        me.vertices[i].co = co
+    me.update()
+    return {"success": True, "name": name, "baked_keys": n_keys, "verts": len(coords)}
+
+
 def set_object_visibility(params):
     """Show or hide an object in the viewport and/or render, without deleting or
     unbinding it. Hiding an armature hides its bones from the user's live view while
@@ -721,5 +775,7 @@ TOOLS = {
     "list_shape_keys":        list_shape_keys,
     "set_shape_key":          set_shape_key,
     "set_active_shape_key":   set_active_shape_key,
+    "delete_shape_key":       delete_shape_key,
+    "bake_shape_keys_to_basis": bake_shape_keys_to_basis,
     "set_object_visibility":  set_object_visibility,
 }

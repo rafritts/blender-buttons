@@ -150,6 +150,8 @@ def taper_section(axis: str = "Z", from_ring: int = 0, to_ring: int = -1,
     (x_end, y_end); intermediate rings interpolate linearly.
 
     Negative indices are allowed (Python-style, so -1 = last ring).
+    curve: interpolation across the span — linear (default) | ease_in | ease_out |
+           ease_in_out | smoothstep (ease_in_out and smoothstep are aliases).
     target: optional object name — auto-selects it, enters edit mode, exits after.
 
     Examples:

@@ -37,7 +37,7 @@ def transform(
     height: tag(float, "[resize] absolute Z extent (m)") = None,
     # scale / rotate
     factor: tag(float, "[scale] multiply size by") = 1.0,
-    pivot: tag(str, "[scale/rotate] center|cursor|… pivot") = "center",
+    pivot: tag(str, "[scale/rotate] pivot: center (default; scale=bbox centre, rotate=own origin) | bbox_center | cursor | origin") = "center",
     pivot_object: tag(str, "[scale/rotate] object to pivot around") = "",
     angle: tag(float, "[rotate] degrees") = 0.0,
     axis: tag(str, "[rotate/match_dim/array_*] axis X|Y|Z") = "Z",

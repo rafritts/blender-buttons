@@ -309,6 +309,52 @@ def set_active_shape_key(name: str, key: str, label: str = "") -> str:
 
 
 @mcp.tool()
+def delete_shape_key(name: str, key: str = "", label: str = "") -> str:
+    """
+    Delete a shape key — or ALL of them — from a mesh. key="" or "ALL" clears every
+    key (Object Data > Shape Keys > the ⌄ menu > Delete All Shapes).
+
+    Removing every shape key turns a keyed mesh back into a plain mesh, which is what
+    UNBLOCKS apply-Subsurf and dyntopo (both refuse while any key exists). A mesh
+    duplicated from a rigged source inherits its keys — clear them before densifying
+    for sculpt. Deleting all leaves the mesh at the Basis shape; if a non-Basis morph
+    is dialed in and you want to keep it, bake_shape_keys_to_basis first.
+
+    Example: delete_shape_key("GEO_spring_body")        # clear all
+             delete_shape_key("face", key="smile")       # one key
+    """
+    result = call_blender("delete_shape_key", {"name": name, "key": key}, label=label)
+    if result.get("success"):
+        deleted = result.get("deleted", [])
+        remaining = result.get("remaining", [])
+        tail = f"; {len(remaining)} remain" if remaining else " — mesh is now keyless"
+        main = f"deleted shape key(s) {deleted} from {name}{tail} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def bake_shape_keys_to_basis(name: str, label: str = "") -> str:
+    """
+    Flatten the current shape-key mix into the base mesh and remove every key — the
+    'apply all shapes as the new rest shape' move. The visible (mixed) shape becomes
+    the keyless geometry: nothing changes on screen, but the mesh is now plain, so
+    apply-Subsurf and dyntopo are unblocked. Use this instead of delete_shape_key
+    when a non-Basis key is dialed in and you want to keep its contribution.
+
+    Example: bake_shape_keys_to_basis("GEO_spring_body")
+    """
+    result = call_blender("bake_shape_keys_to_basis", {"name": name}, label=label)
+    if result.get("success"):
+        main = (f"baked {result['baked_keys']} shape key(s) into {name}'s mesh "
+                f"({result['verts']} verts) — now keyless [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def split_by_part(label: str = "") -> str:
     """Split the active mesh into separate objects, one per connected component
     (P → By Loose Parts). Restores per-part addressability after a join_objects."""

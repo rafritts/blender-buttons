@@ -113,18 +113,22 @@ def rotate_object(angle: float, axis: str = "Z", targets: str = "",
     Rotate objects by `angle` degrees around `axis` (X | Y | Z).
     targets: single object name, group name, or comma-separated list. Empty = active object.
 
-    pivot / pivot_object: rotate about a SHARED external point instead of each object's
-    own origin — a rigid swing where both position and orientation turn. Pass
-    pivot=[x,y,z] for a world point, or pivot_object="dial" to pivot about an object's
-    bbox center. Use this for clock hands turning about the dial center or a door about
-    its hinge, instead of pre-rotating with hand-computed positions. Omit both to spin
-    each object about its own origin (the default, unchanged behavior).
+    pivot / pivot_object: rotate about a SHARED point instead of each object's own
+    origin — a rigid swing where both position and orientation turn. Pass
+    pivot=[x,y,z] for a world point; pivot_object="dial" to pivot about an object's
+    bbox center; or a pivot MODE string: "bbox_center" (the targets' combined
+    geometric centre — rotate in place even when the origin is off the mesh),
+    "cursor" (the 3D cursor), or "origin" (world 0,0,0). pivot="center" (the default)
+    spins each object about its own origin (unchanged behavior).
     """
     params = {"angle": angle, "axis": axis, "targets": _targets(targets)}
     if pivot_object:
         params["pivot"] = pivot_object
-    elif pivot is not None:
-        params["pivot"] = pivot
+    elif isinstance(pivot, (list, tuple)):
+        params["pivot"] = list(pivot)
+    elif isinstance(pivot, str) and pivot.strip().lower() not in ("", "center", "self"):
+        params["pivot"] = pivot.strip().lower()
+    # else (pivot="center"/""): no shared pivot — each object spins about its own origin
     result = call_blender("rotate_object", params, label=label)
     if result.get("success"):
         about = f" about {result['pivot']}" if result.get("pivot") else ""

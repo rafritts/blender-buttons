@@ -229,10 +229,23 @@ def rotate_object(params):
                 "angle_deg": angle, "axis": axis, "pivot": None}
 
     if isinstance(pivot_spec, str):
-        p_obj = bpy.data.objects.get(pivot_spec)
-        if p_obj is None:
-            return {"error": f"pivot object '{pivot_spec}' not found"}
-        pivot = Vector(world_center(p_obj))
+        mode = pivot_spec.strip().lower()
+        if mode in ("bbox", "bbox_center", "center"):
+            # combined geometric centre of all targets (world space)
+            pts = [o.matrix_world @ Vector(c) for o in objs for c in o.bound_box]
+            pivot = Vector((sum(p.x for p in pts) / len(pts),
+                            sum(p.y for p in pts) / len(pts),
+                            sum(p.z for p in pts) / len(pts)))
+        elif mode == "cursor":
+            pivot = Vector(bpy.context.scene.cursor.location)
+        elif mode == "origin":
+            pivot = Vector((0.0, 0.0, 0.0))
+        else:
+            p_obj = bpy.data.objects.get(pivot_spec)
+            if p_obj is None:
+                return {"error": f"pivot '{pivot_spec}' not understood — use "
+                                 f"bbox_center | cursor | origin | an object name | [x,y,z]"}
+            pivot = Vector(world_center(p_obj))
     elif isinstance(pivot_spec, (list, tuple)) and len(pivot_spec) == 3:
         pivot = Vector([float(v) for v in pivot_spec])
     else:

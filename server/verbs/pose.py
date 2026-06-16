@@ -12,14 +12,16 @@ from ._common import tag, unknown
 
 _OPS = ["create_armature", "auto_weight", "weight_to_bone", "assign_weight",
         "pose_bone", "bone_tree", "describe_bone", "constraints", "bind", "rebind",
-        "shape_keys", "shape_key_set", "shape_key_active"]
+        "shape_keys", "shape_key_set", "shape_key_active", "shape_key_delete",
+        "shape_key_bake"]
 
 
 @mcp.tool(name="pose")
 def pose(
     op: Literal["create_armature", "auto_weight", "weight_to_bone", "assign_weight",
                 "pose_bone", "bone_tree", "describe_bone", "constraints", "bind",
-                "rebind", "shape_keys", "shape_key_set", "shape_key_active"],
+                "rebind", "shape_keys", "shape_key_set", "shape_key_active",
+                "shape_key_delete", "shape_key_bake"],
     # armature / mesh refs
     name: tag(str, "[create_armature/constraints/shape_*] object name") = "",
     armature: tag(str, "[auto_weight/weight_to_bone/pose_bone/bone_tree/describe_bone] armature name") = "",
@@ -46,7 +48,7 @@ def pose(
     precision: tag(int, "[bind] bind precision") = None,
     timeout: tag(int, "[bind/rebind] seconds before giving up") = 120,
     # shape keys
-    key: tag(str, "[shape_key_set/shape_key_active] shape-key name") = "",
+    key: tag(str, "[shape_key_set/shape_key_active/shape_key_delete] shape-key name (delete: ''/'ALL' = clear all)") = "",
     value: tag(float, "[shape_key_set] key value 0..1") = 0.0,
     label: str = "",
 ) -> str:
@@ -66,6 +68,9 @@ def pose(
       shape_keys      — list shape keys           (name)
       shape_key_set   — set a key's value         (name, key, value)
       shape_key_active— make a key active for editing (name, key)
+      shape_key_delete— delete one key, or ALL (key="" / "ALL") — unblocks
+                        apply-Subsurf & dyntopo on a keyed mesh   (name, key)
+      shape_key_bake  — flatten the current mix into Basis, drop all keys (name)
     """
     o = op.lower().strip()
     arm = armature or name
@@ -96,4 +101,8 @@ def pose(
         return objects.set_shape_key(name or mesh, key, value, label)
     if o == "shape_key_active":
         return objects.set_active_shape_key(name or mesh, key, label)
+    if o == "shape_key_delete":
+        return objects.delete_shape_key(name or mesh, key, label)
+    if o == "shape_key_bake":
+        return objects.bake_shape_keys_to_basis(name or mesh, label)
     return unknown("pose", "op", op, _OPS)

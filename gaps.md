@@ -84,31 +84,43 @@ blocked or unexposed:
 Need a reliable "add sculptable resolution here" affordance: a multires wrapper,
 or local subdivide-of-selection, or simply unblocking the above once G4 lands.
 
-## G4 — no `delete` / `bake-to-basis` for shape keys
+## G4 — no `delete` / `bake-to-basis` for shape keys ✅ FIXED 2026-06-16
 
-`pose` has `shape_keys` / `shape_key_set` / `shape_key_active` — but no
+`pose` had `shape_keys` / `shape_key_set` / `shape_key_active` — but no
 **delete**, and no **"flatten current mix into Basis."** A mesh derived from a
 rigged source inherits its shape keys, which (a) silently capture edits into the
-active non-basis key, and (b) block apply-Subsurf and dyntopo (G3). Today the
-only fix is a manual hand-off to the human. Need both verbs server-side.
+active non-basis key, and (b) block apply-Subsurf and dyntopo (G3). The only fix
+was a manual hand-off to the human.
 
-## G5 — no `shade_smooth` on the verb surface
+**Added:** `pose op=shape_key_delete` (one key, or key=""/"ALL" → clear all) and
+`pose op=shape_key_bake` (flatten the current mix into Basis, drop every key).
+Engine handlers `delete_shape_key` / `bake_shape_keys_to_basis` in objects.py.
+Clearing all keys is what unblocks apply-Subsurf / dyntopo — no more manual
+hand-off.
 
-Turning faceted shading to smooth is a one-click human op (`Object → Shade
-Smooth`) with no reachable MCP equivalent — `edit smooth_edges` also bevels, so
-it's not the same primitive. Want plain `object op=shade_smooth | shade_flat |
-shade_auto_smooth` (a flat `shade_smooth` may still exist pre-collapse but isn't
-surfaced through the `object`/`view` verbs).
+## G5 — ~~no `shade_smooth` on the verb surface~~ ✗ NOT A GAP (verified 2026-06-16)
 
-## G6 — schema↔engine mismatches (small, but they cost a round trip each)
+This was wrong. `shade_smooth` / `shade_flat` ARE reachable — as
+`material op=shade_smooth` (with `auto_smooth_angle`) and `material op=shade_flat`,
+wired to the engine `shade_smooth`/`shade_flat` handlers via `finishes.py`. They
+just live under `material`, not `object`/`view`, which is where I looked. Plain
+shade is the donut-tutorial *material/finish* step, so `material` is a defensible
+home. (`edit smooth_edges` is the separate bevel-and-reshade primitive.)
+Left as-is — relocating it under `object` would only duplicate the surface.
 
-- `edit taper_section curve_shape`: docstring says `linear|smooth`; engine
-  rejects `smooth` and wants `ease_in | ease_in_out | ease_out | linear |
+## G6 — schema↔engine mismatches (small, but they cost a round trip each) ✅ FIXED 2026-06-16
+
+- `edit taper_section curve_shape`: docstring said `linear|smooth`; engine rejects
+  `smooth`. **Fixed:** the `curve_shape` tag + the `rings.taper_section` proxy
+  docstring now list the real enum `linear | ease_in | ease_out | ease_in_out |
   smoothstep`.
-- `transform rotate pivot`: docstring lists `center|cursor|..`, but passing
-  `pivot="center"` errors with `pivot object 'center' not found` — the string is
-  treated as a `pivot_object` name. The pivot-**mode** path is unreachable; only
-  the default works. (Blocked an in-place rotate mid-session.)
+- `transform rotate pivot`: passing `pivot="center"` errored with `pivot object
+  'center' not found` — the default string was sent straight to an object lookup,
+  so the pivot-**mode** path was unreachable (and the default itself errored).
+  **Fixed:** the server wrapper no longer forwards the `"center"` default (→ each
+  object spins about its own origin, as documented), and the engine now recognizes
+  mode strings `bbox_center | cursor | origin` before falling back to an
+  object-name lookup. `bbox_center` is the in-place rotate that was blocked.
 
 ## G7 — shared selection / active-object / mode collides with the human
 
