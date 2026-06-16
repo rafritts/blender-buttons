@@ -229,8 +229,9 @@ legible-not-divine rule). When in doubt, stay silent.
 
 Table is representative, not exhaustive — the rollout would start with the
 `info`/`describe → feel` row (the one this session proved) and grow from there. When
-promoted to work, this is **SPEC-07** territory: pattern + `followups.py` mechanism +
-the table, table signed off first.
+promoted to work, this is **its own later SPEC**: pattern + `followups.py` mechanism +
+the table, table signed off first. (SPEC-07 is taken by multi-feel; the new multi-feel
+ops are prime follow-up *producers* — `assembly → map → handle → weld`.)
 
 ## G10 — construction has no **bridge / weld** (you can fabricate a part but not attach it) 🧩 OPEN
 
@@ -258,6 +259,8 @@ bridge (`feel structure → select limb → delete`); **constructive welding has
 The missing primitive is `edit op=bridge` (two boundary loops on the active mesh →
 bridged faces), plus an honest note that cross-object/rigged welds are out of scope
 without a join. Until then, fabricated parts are *placed*, never *joined*.
+(**SPEC-07 multi-feel** is the perception half — it mints the two named handles, e.g.
+`torso.top_ring` + `arms.armhole_L`, that an `edit op=bridge` would weld.)
 
 ## G11 — render config is **write-only**, and the engine enum is **stale** 🎛️ OPEN
 
@@ -282,6 +285,39 @@ resolution/format). Stop hardcoding the engine enum; validate against the build'
 Natural **G9 follow-up**: any `render` result points at `render op=settings`. (The
 status block already shows the *current* engine — this is the missing *capabilities +
 full-config* read.)
+
+## G12 — no trusted checkpoint / rollback before risky edits 💾 OPEN
+
+Editing a rigged *production* file (`spring_cut.blend`), there was no cheap "snapshot
+before I try the bridge — roll back if the modifier stack screams." The `history` verb
+exists but its guarantees weren't legible enough to lean on mid-experiment, so edits
+were made timidly. The fix is to **lean into Blender's own edit history / undo stack**
+rather than invent a parallel one: expose a named, agent-facing checkpoint — `history
+op=mark name=torso-experiment` → `history op=restore name=…` — backed by Blender undo
+(and/or a scratch `.blend` copy for coarse-grained safety). The goal is bold
+experimentation on someone's real file without fear: mark, try, restore. Relates to
+G7 (shared undo stack with the human — a restore must not stomp the human's work; scope
+the guarantee honestly).
+
+## G13 — the scene tree is a firehose, not a map 🌲 OPEN
+
+First contact with Spring meant wading through **hundreds** of `cs_*` rig widgets to
+find ~15 real geometry meshes — and `type=MESH` didn't help, because the widgets are
+meshes too. `scene op=tree` prints everything at one depth. Fix (cheap): **print
+high-level first and let the agent drill into "directories"** — collapsed collections
+the agent expands by name — plus **filter and search**. A "show me what actually
+renders / the real parts" semantic view (collection-aware, skip widget/helper
+collections) would make first contact a map instead of a wall. This is the navigation
+half of reflection-#2, merged here.
+
+## G14 — live X-symmetry edit mode 🪞 TABLED (known, deferred by decision 2026-06-16)
+
+Shaping one side and having it mirror live is the natural primitive for torsos, the
+breast work, almost all character modelling — mirroring as a post-hoc cleanup step
+means shaping twice or mirror-and-pray. **Acknowledged as a real gap and deliberately
+tabled** this session — logged so it isn't lost, not because it's solved. Handles
+(SPEC-07 C) ease the manual path (mint `…_L`, mirror to `…_R`); the symmetry *mode*
+itself is separate work for later.
 
 ---
 
