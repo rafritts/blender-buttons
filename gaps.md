@@ -305,6 +305,55 @@ wrong patch is worse than one that refuses. Dogfood: verifying the enlarged bust
 reported the wrong vert set twice, so symmetry/`bbox` (selection-independent reads) had to stand
 in as the verification.
 
+## G43 — no **region-coherent feature selection**; you can't select "a breast / its lower half" as a unit 🫳 OPEN
+
+The action-side twin of G38. Even *knowing* a feature is there, there is no way to select it **as a
+feature**. The only routes are (a) dead-reckon coordinates into `select op=in_sphere center=…` —
+which failed outright: guessed bust-apex centers landed asymmetrically (one sphere on the breast
+flank, not the tip), and a 4cm pull coned it; or (b) a band+subtract dance (`by_axis` frontmost →
+`between` deselect below → deselect above) that **inevitably grabs the connecting torso** — the
+"under both breasts" selection swept up the whole sternum/upper-abdomen midriff and could not
+isolate the two lobes from the flesh bridging them. Blender's human answer is "click the lobe /
+select-linked / soft-select under the cursor" — the agent has no cursor and no form-aware select.
+
+**General fix:** region-coherent selection that snaps to a form's natural boundary — grow-to-crease,
+select-by-curvature-basin, or a **lobe handle** minted from one seed point that floods out to the
+feature's own edge (the under-breast crease), so "this breast's lower half" is a single addressable
+op rather than a coordinate guess or a band that bleeds into its neighbours. Dogfood: enlarging the
+bust — every attempt to select just the breast geometry either missed (guessed coords) or over-grabbed
+(band caught the midriff between/under the breasts).
+
+## G44 — no selection **algebra** (intersect) and no selection **spatial readout** 📐 OPEN
+
+Two compounding holes exposed while hand-building a region. (1) **No boolean AND:** to get
+"frontmost verts AND in the chest band" I had to select the frontmost set, then *subtract* everything
+outside the band by complement — there is no intersect, so every compound region is a deselect dance.
+(2) **No spatial readout of a selection:** the edit status block reports `sel_z` only — no `sel_x`/`sel_y`,
+no centroid, no per-axis bbox — so the agent cannot tell **where in X** its selection sits or whether
+it is left/right balanced. I could not confirm "both breasts, symmetric" without the human's viewport.
+
+**General fix:** (a) selection set-ops — intersect/union/subtract over the running selection, so
+"frontmost ∩ chest-band" is one expression; and (b) a selection spatial readout in the `── edit ──`
+status block — centroid + per-axis bbox + a left/right balance flag — so a live selection is as legible
+as an object's bounds. Dogfood: isolating the breast undersides required ~4 select calls and still
+couldn't be verified symmetric from server data alone.
+
+## G45 — global/scalar checks give **false confidence on a local edit** 🟢 OPEN
+
+The +4cm bust pull reported success on every instrument available — the world-bbox front bound shifted
+−0.1258→−0.1658, whole-mesh `feel op=symmetry` held at 0.104mm — yet the edit was visibly wrong
+(asymmetric, coned), as the user's screenshot proved. Both metrics are **global**: a bbox bound sees
+only the single frontmost vert, and mesh-wide symmetry is dominated by the torso and numb to a
+centimetre-scale local asymmetry. The agent had green lights on a bad edit; only the human's eyes
+caught it — a direct hole in the "verify with ground truth, not vision" thesis, exactly where organic
+sculpting lives.
+
+**General fix:** selection-**scoped** verification — symmetry, projection, and form computed over just
+the edited region, plus a before/after diff of that region, so a local change is checked locally. The
+nearest existing tool (`region_form`'s per-patch L/R mirror) is the right shape but is undermined by the
+stale-selection bug (G42); fixing G42 + scoping the checks to the active selection would close most of
+this. Dogfood: the bust edit passed bbox + global-symmetry while being asymmetric and malformed.
+
 ## Considered and declined — pencil dogfood (2026-06-17)
 
 Logged so they aren't re-raised. Each conflicts with a settled design principle, not a missing build.
