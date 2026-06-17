@@ -113,6 +113,67 @@ Note: JSON-Schema conditionals help server-side *validation* but *hurt* readabil
 errors with `teach()` (move 3), don't buy obviousness with schema conditionals. Obviousness
 comes from move 2.
 
+## G33 — `edit op=taper_section` ignores `from_ring`→`to_ring` direction 🔀 OPEN
+
+The param docs read `x_start` = "X scale at **from_ring**", `x_end` = "X scale at **to_ring**".
+But empirically the endpoints bind to **ascending ring index**, not to the from→to order
+passed: calling `from_ring=16, to_ring=1, x_start=1.0, x_end=0.16` put the `0.16` pinch at
+ring 1 (the lower index) and `1.0` at ring 16 — i.e. it behaved as if `from_ring=1`. A
+directional taper "narrow toward the **from** end" silently inverts, and you only catch it
+by reading `feel op=profile` afterward. The operator is forced out of intent-space ("pinch
+the bottom toward the mouth") into "which ring index is numerically smaller, and does that
+match my from/to?" trial-and-error.
+
+**General fix:** honor the caller's from→to ordering — `x_start` lands on `from_ring`
+whichever end that is — OR, if ascending-index binding is intentional, say so in the param
+docs and reject/ignore a descending `from_ring`>`to_ring` with a `teach()` note. Either way
+the meaning must be unambiguous from op+param name (the G23 litmus). Dogfood: hot-air-balloon
+envelope — first taper produced an upside-down silhouette (pinch under the equator, bulge at
+the base); only the profile read revealed the flip.
+
+## G34 — `select op=all` / `op=none` don't honor the `target`=auto-enter-edit contract 🎯 OPEN
+
+The edit-mode select ops (`by_axis`, `between`, `boundary`, `limb`, `ring`, …) all take
+`target` and auto-enter Edit mode on it so a stray click can't hijack the op. `op=all` (and
+`op=none`) **don't** — `select op=all target=basket` from Object mode returns
+`bpy.ops.mesh.select_all.poll() failed, context is incorrect` instead of switching to Edit
+on `basket` like its siblings. The operator has to know that *this one* select op breaks the
+contract and insert a manual `object op=mode mode=EDIT` first.
+
+**General fix:** make `op=all`/`op=none` respect the same `target`→enter-Edit contract the
+other component-level select ops already implement. Dogfood: beveling the balloon basket —
+`select op=all target=basket` failed; had to switch mode by hand.
+
+## G35 — camera-write ops can't address a **named** camera; no "set active camera" primitive 🎥 OPEN
+
+`view op=camera_position` and `op=camera_dof` write to the scene's **active** camera and have
+no `camera=` param — yet the *read* sibling `check_framing` does take `camera=`. With two
+cameras present (the default `Camera` + an added `hero_cam`), `camera_position` silently moved
+`Camera` while I was checking `hero_cam`, so the framing readout never changed and the move
+looked like a no-op. Worse, there is **no primitive to set the active scene camera** at all:
+`add type=camera` doesn't make the new camera active, and nothing else does, so a freshly-added
+hero camera can't be driven by the camera-write ops or become the render camera without
+deleting every other camera and hoping.
+
+**General fix:** (a) give `camera_position`/`camera_dof` a `camera=` param symmetric with
+`check_framing`; (b) add a "set active scene camera" primitive (or an `active=true` flag on
+`add type=camera`). Dogfood: positioning the balloon hero shot — three `camera_position` calls
+moved the wrong camera before the cause was found.
+
+## G36 — `check_framing` and `render op=image` disagree on the default (unset) camera 🧭 OPEN
+
+With no explicit `camera=` and `scene.camera` unset, `check_framing` returns
+`no camera (pass camera=<name> or set the scene camera)` — but `render op=image` with the same
+state **succeeds**, falling back to an available camera and producing a correct image. Two
+tools, two different default-camera resolutions: a preflight (`check_framing`) that says the
+shot is unshootable, and a render that shoots it fine. The preflight can't be trusted as the
+render's ground truth, which is the whole point of having it.
+
+**General fix:** unify default-camera resolution across the camera-consuming tools — both
+fall back to the sole/active camera, or both require explicit naming with the same `teach()`
+message. Dogfood: balloon hero render — `check_framing` (no arg) reported "no camera" seconds
+before `render` (no arg) wrote a 1.97 MB frame.
+
 ## Considered and declined — pencil dogfood (2026-06-17)
 
 Logged so they aren't re-raised. Each conflicts with a settled design principle, not a missing build.
