@@ -68,7 +68,9 @@ def object_verb(
       duplicate_mirrored — mirrored copy   (name, axis=X|Y|Z, pivot=WORLD|.., new_name)
       join        — weld several into one  (names=[...], merge_threshold)
       split       — split active by loose parts into objects       (—)
-      group       — parent parts under an empty (name, parts=[...])
+      group       — gather parts into a named collection; move/rotate the whole
+                    group as one by passing its name to a transform's targets=
+                    (name, parts=[...])
       ungroup     — dissolve the group                             (name)
       add_to_group— add parts to an existing group (name, parts=[...])
       parts       — list a group's members                        (name)
