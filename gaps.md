@@ -247,6 +247,64 @@ be unambiguous without the operator first checking `rotation_deg` and mentally u
 locating the nose on the base mesh — two casts missed the head entirely because the bbox frame was
 rotated.
 
+## G40 — `edit`-verb ops don't auto-enter Edit mode; the select→edit chain silently breaks 🔗 OPEN
+
+`select` and `feel` manage mode internally (a `select op=in_sphere target=…` makes the selection
+and the read tools see it), but they leave the object in **Object** mode between calls. The
+**`edit` verb's mutating ops do not auto-enter Edit** on their `target=` — so the natural
+two-step "select a region, then act on it" sequence fails: `select op=in_sphere` → `edit
+op=inflate` returned `Must be in edit mode`, even though `target=polySurface25` was passed to
+both. The fix was a manual `object op=mode mode=EDIT` wedged between them. The selection itself
+survived (it's stored on the mesh), so this is purely a mode-contract gap: a `select` that
+auto-enters Edit but an `edit` that doesn't, with no warning that the chain is broken — the
+operator just gets a poll failure and has to know the missing mode hop.
+
+**General fix:** make `edit`-verb ops honor the same `target`→enter-Edit contract `select`/`feel`
+already do — if a `target` (or active mesh) and a live selection exist, enter Edit and operate.
+Same family as G34 (`select op=all/none` skipping the contract); the unifying principle is that a
+`target=` should *guarantee* the op lands in the right mode, never assume the caller pre-staged
+it. Dogfood: enlarging the bust on the base mesh — `select in_sphere` → `edit inflate` broke until
+a manual mode switch was inserted.
+
+## G41 — no **absolute protrusion** read; `region_form` is shape-relative and can't confirm a size change 📏 OPEN
+
+`region_form` measures a patch's form **relative to its own re-fitted plane** — so after
+`edit op=inflate` grew the bust ~1.4cm along normals, it reported **byte-identical** numbers
+(centre−rim 22.36mm, +2.76cm/−4.44cm) because the cap grew roughly self-similarly and its plane
+re-fit with it. Correct by its own definition, but it means **`region_form` cannot answer "did
+this region get bigger / how far does it now stick out?"** The only reason "bigger" was
+verifiable here is that the bust is the mesh's global front-most point, so the **world bbox**
+front bound shifted (−0.1258 → −0.1398) and exposed the delta. That trick only works when the
+edited region is the global extremum on some axis; enlarge a non-extreme bulge (one breast, a
+cheek, a belly) and neither `region_form` nor the bbox reports the change.
+
+**General fix:** an **absolute protrusion** read — the signed distance of a selected region from
+the surrounding body surface (or a fitted base plane of the *neighbourhood*, not the patch
+itself), as a before/after-able scalar in cm. That's the measure that makes "make it 2cm bigger"
+and "confirm it grew" first-class, and it complements `region_form` (relative shape) the way an
+absolute ruler complements a curvature gauge. Deterministic geometry, not vision. Dogfood:
+enlarging the bust — the change was real but only on-axis-lucky to catch (front bbox bound shifted
+−0.1258 → −0.1381); an off-axis edit would have been invisible to every existing read.
+
+## G42 — `feel` selection-reads bind to a **stale selection snapshot** across calls 🥶 OPEN
+
+`feel op=region_form` reads *the current selection* — but after intervening `select` calls it
+returned data for a **stale, earlier selection**. Concretely: `select op=in_sphere` reported
+`SELECT 150 verts` and the status block's `── edit ──` line confirmed `selected: {verts: 150}`,
+yet the *very next* `region_form` printed `region_form (12 selected verts …)` — the 12-vert core
+from two ops earlier — and kept printing 12 on a repeat call while the status still showed 150.
+The read silently describes geometry the operator is no longer pointing at, and the only tell is
+the vert-count mismatch between the `region_form` header and the status block. This compounds with
+G40: the mode-toggle dance between `select` (leaves Object), `feel` (re-enters Edit to read), and
+`edit` (needs Edit) appears to leave more than one notion of "the selection" live at once.
+
+**General fix:** `feel`'s selection-consuming reads must resolve the **live** edit-mode selection
+at call time (refresh from the bmesh, don't reuse a cached handle), and ideally fail loud if the
+selection it read disagrees with the active mesh's current selection. A read that reports the
+wrong patch is worse than one that refuses. Dogfood: verifying the enlarged bust — `region_form`
+reported the wrong vert set twice, so symmetry/`bbox` (selection-independent reads) had to stand
+in as the verification.
+
 ## Considered and declined — pencil dogfood (2026-06-17)
 
 Logged so they aren't re-raised. Each conflicts with a settled design principle, not a missing build.
