@@ -174,6 +174,28 @@ fall back to the sole/active camera, or both require explicit naming with the sa
 message. Dogfood: balloon hero render — `check_framing` (no arg) reported "no camera" seconds
 before `render` (no arg) wrote a 1.97 MB frame.
 
+## G37 — no projected-**silhouette** read; 2D shape must be reconstructed from orthogonal 1D sweeps 👤 OPEN
+
+`feel op=profile` gives a **1D** width sweep (bounding girth per band along one axis) and
+`op=sections` gives slice **contour counts** — but nothing returns the **2D projected outline**
+of the form along a view axis (its orthographic shadow). To answer the most natural perception
+question — "what is the gross shape of this?" — the agent must fire several reads and then
+*mentally cross-multiply two orthogonal width-tables into a 2D silhouette*. That reconstruction
+is exactly the dead-reckon-from-scalars the server exists to eliminate, and it's lossy: the
+per-band girth is a **bounding** width, so it can't by itself tell a thin horizontal crossbar
+from a tapering V — a concavity is invisible until you correlate it against the other axis's
+sweep. It happened to be enough here, but it's brittle (a different pose defeats the
+bounding-width heuristic).
+
+**General fix:** a `feel op=silhouette` (a.k.a. `outline`) — deterministic orthographic
+projection of the mesh onto a plane (`axis=X|Y|Z`), returned as a **coarse occupancy grid or a
+boundary polygon**, coarse-to-fine, in scene units. Pure geometry, **not** vision — it keeps the
+no-render-readback thesis intact while letting the agent read the projected form *directly*
+instead of triangulating it. Complements `profile` (1D girth) and `sections` (slice counts) with
+the missing 2D read. Dogfood: identifying an unnamed imported mesh (`polySurface25`) blind from
+ground truth — correctly read as a T-posed human figure, but only by hand-assembling the
+silhouette from a Z-profile + an X-profile + section counts + curvature + symmetry.
+
 ## Considered and declined — pencil dogfood (2026-06-17)
 
 Logged so they aren't re-raised. Each conflicts with a settled design principle, not a missing build.
