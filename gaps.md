@@ -725,6 +725,26 @@ what happens with rendering today.
 Why this is worth real weight: it's not a render-quality nicety — it's the agent's *only*
 window into render correctness, and right now that window shows a painted-on view.
 
+**Live evidence, sharpened (same session, after the user enabled Cycles):**
+- **`render op=settings` contradicts *itself* in one read:** `engine: CYCLES   available:
+  BLENDER_EEVEE` — plus a full `cycles: samples=160 device=GPU denoiser=OPENIMAGEDENOISE`
+  block. Since Blender refuses to set `scene.render.engine` to an invalid enum, the engine
+  genuinely *is* Cycles — so the **`available` list is the liar** (it never lists Cycles
+  even when Cycles is the active, configured engine). The preflight's headline field is the
+  wrong one.
+- **The validation built on that list rejects the real engine.** Passing `engine='CYCLES'`
+  to `render op=image` fails ("not available… available: ['BLENDER_EEVEE']") *because* it
+  checks the broken list. **Workaround found:** omit `engine=` entirely (empty = keep scene
+  engine) to bypass the check and render on the actual current engine. A correct `available`
+  list would make the explicit form work and the workaround unnecessary.
+- **`device=GPU` reports success, then the GPU OOMs at render.** `render op=cycles
+  device=GPU` returned clean, `settings` showed `device=GPU` — then `render op=image` died
+  with `Out of memory in CUDA queue enqueue` on a *trivial* scene (~a dozen primitives).
+  The agent has **zero visibility into VRAM / whether the GPU is actually viable**, so it
+  can't choose CPU vs GPU ahead of time; the only recovery was to hit OOM, then set
+  `device=CPU` and re-render. A preflight should report free VRAM / a GPU-viability signal,
+  and ideally auto-fall-back (or warn) instead of failing mid-render.
+
 ---
 
 ## What worked — formalize this, don't fight it
