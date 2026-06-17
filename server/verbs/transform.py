@@ -9,7 +9,7 @@ from typing import Literal
 
 from server._core import mcp
 from server import transforms, relational, editmode, handles
-from ._common import tag, unknown
+from ._common import tag, unknown, teach
 
 _OPS = ["nudge", "move_to", "rotate_to", "aim_axis", "rest_on", "resize", "scale",
         "rotate", "apply", "snap", "snap_grid", "match_dim", "mirror", "distribute",
@@ -156,6 +156,52 @@ def transform(
                    — fit, then `edit op=bridge` welds. Be in edit mode, loop selected.
     """
     o = op.lower().strip()
+    # G23 move 3 — teaching errors: a valid op missing a structurally-required param
+    # (a destination, a target, a prototype, two endpoints) gets the requirement named
+    # + a canonical call, instead of a silent no-op or a deep crash.
+    bad = teach("transform", "op", o, {
+        "move_to":       (bool(handle) or any(v is not None for v in (to_x, to_y, to_z)),
+                          "to_x/to_y/to_z (any) or handle=<name>",
+                          "transform op=move_to targets=cap to_z=1.2"),
+        "rotate_to":     (any(v is not None for v in (deg_x, deg_y, deg_z, to_x, to_y, to_z)),
+                          "deg_x/deg_y/deg_z (any)",
+                          "transform op=rotate_to targets=guide deg_z=25"),
+        "aim_axis":      ((aim_from and aim_to) or (from_handle and to_handle),
+                          "aim_from+aim_to (points) or from_handle+to_handle",
+                          "transform op=aim_axis targets=bolt aim_from=[0,0,0] aim_to=[1,0,0] axis=Z"),
+        "rest_on":       (bool(target),
+                          "target=<surface to rest on>",
+                          "transform op=rest_on targets=crate target=floor axis=Z"),
+        "resize":        (any(v is not None for v in (width, depth, height)),
+                          "width/depth/height (any)",
+                          "transform op=resize targets=box width=0.5"),
+        "snap":          (bool(target),
+                          "target=<object to snap against>",
+                          "transform op=snap targets=lid target=jar side=Z_MAX"),
+        "match_dim":     (bool(target and reference),
+                          "target and reference",
+                          "transform op=match_dim target=shelf reference=wall axis=X"),
+        "distribute":    (bool(between) and len(between or []) == 2,
+                          "between=[a,b] (two endpoint objects)",
+                          "transform op=distribute targets=a,b,c between=[left,right] axis=X"),
+        "array_corners": (bool(prototype and of),
+                          "prototype and of=<target whose 4 corners to fill>",
+                          "transform op=array_corners prototype=leg of=tabletop"),
+        "array_along":   (bool(prototype and count) and len(between or []) == 2,
+                          "prototype, count, between=[a,b]",
+                          "transform op=array_along prototype=picket count=5 between=[postL,postR]"),
+        "array_radial":  (bool(prototype and count and (center or center_object)),
+                          "prototype, count, center=[x,y,z] or center_object",
+                          "transform op=array_radial prototype=spoke count=8 center_object=hub axis=Z"),
+        "scatter":       (bool(target and source),
+                          "target=<prototype> and source=<surface to scatter onto>",
+                          "transform op=scatter target=rock source=terrain count=50"),
+        "snap_loop":     (bool(handle),
+                          "handle=<target opening> (be in edit mode, loop selected)",
+                          "transform op=snap_loop handle=jar.rim"),
+    })
+    if bad:
+        return bad
     if o == "nudge":
         return transforms.nudge(targets, right, left, up, down, back, forward, label)
     if o == "move_to":

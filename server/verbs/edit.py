@@ -9,7 +9,7 @@ from typing import Literal
 
 from server._core import mcp
 from server import editmode, finishes, rings, bands, introspect, modifiers
-from ._common import tag, unknown
+from ._common import tag, unknown, teach
 
 _OPS = ["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
         "mark_sharp", "crease", "inflate", "jitter", "proportional_move",
@@ -143,6 +143,19 @@ def edit(
                     the deform). Order-independent.     (a, b)
     """
     o = op.lower().strip()
+    # G23 move 3 — teaching errors for ops whose key input has no safe default.
+    bad = teach("edit", "op", o, {
+        "bridge":  (bool(a and b), "a and b (two boundary handles)",
+                    "edit op=bridge a=torso.neck b=head.base"),
+        "boolean": (bool(cutter), "cutter=<object to cut with>",
+                    "edit op=boolean target=block cutter=drill bool_op=DIFFERENCE"),
+        "extrude_along_curve": (bool(curve), "curve=<curve to sweep along>",
+                    "edit op=extrude_along_curve target=ring curve=path"),
+        "round":   (bool(corners), "corners=[...] (named corners to round)",
+                    "edit op=round target=panel corners=[c1,c2] width=0.02"),
+    })
+    if bad:
+        return bad
     if o == "extrude":
         return editmode.extrude(out, inward, up, down, left, right, forward, back,
                                 until_contact, until_length, x, y, z, label, target)

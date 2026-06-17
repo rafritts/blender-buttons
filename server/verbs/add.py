@@ -10,7 +10,7 @@ from typing import Literal, Union
 
 from server._core import mcp
 from server import primitives, scene
-from ._common import tag, unknown
+from ._common import tag, unknown, teach
 
 _TYPES = ["box", "plane", "cylinder", "sphere", "cone", "torus", "icosphere",
           "circle", "tube", "helix", "curve", "floor", "light", "camera"]
@@ -109,6 +109,20 @@ def add(
     """
     t = type.lower().strip()
     r = [rot_x, rot_y, rot_z]
+
+    # G23 move 3 — teaching errors. name is required for everything but floor; the
+    # curve types are inert without the points they pass through.
+    if t != "floor" and t in _TYPES and not name:
+        return (f"add type={t}: needs name=<object name> — got none. "
+                f"e.g. add type={t} name=my_{t}")
+    bad = teach("add", "type", t, {
+        "tube":  (bool(points), "points=[...] the tube passes through",
+                  "add type=tube name=cable points=[[0,0,0],[0,0,1]] tube_radius=0.02"),
+        "curve": (bool(points), "points=[...] control points",
+                  "add type=curve name=path points=[[0,0,0],[1,0,0]] subtype=BEZIER"),
+    })
+    if bad:
+        return bad
 
     if t == "box":
         return primitives.add_box(name, width, depth, height, on, *r, label)

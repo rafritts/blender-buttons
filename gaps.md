@@ -4,9 +4,12 @@ _A **live worklist of OPEN gaps** — fixable limitations in the MCP surface, no
 historical. Shipped/fixed items are **removed** (they live in git history), so this file
 is only ever "what's still wrong." G-numbers are **stable across rewrites**: a number
 missing from the sequence (G1–G8, G10–G13, G15–G22, G24–G29) means that gap shipped and
-was retired. Last updated 2026-06-17 — G24–G29 shipped (render preflight, aim_axis,
-rest_on, material target list, edit-mode contract, nearest-surface distance), all
-covered by `tests/e2e_gaps_b.py`._
+was retired. Last updated 2026-06-17 — G23 moves 1–3 shipped (the per-verb scan tax:
+polymorphic-param split, per-op param manifests, and teaching errors via
+`server/verbs/_common.py:teach()`, covered by `tests/g23_teaching.py`); move 4 (splitting
+fat verbs) deferred as unwarranted. Earlier: G24–G29 shipped (render preflight, aim_axis,
+rest_on, material target list, edit-mode contract, nearest-surface distance), covered by
+`tests/e2e_gaps_b.py`._
 
 ## North star
 
@@ -77,29 +80,34 @@ must re-apply it to the twin by hand. A one-call `object op=mirror_edit name=<sr
 +25° — mirror it right" a single move. Post-hoc twin-matching, not a live mode — cheaper than
 G14 proper and independently useful.
 
-## G23 — the per-verb **parameter union**: scan tax (moves 2–4 open) 🪢
+## G23 — the per-verb **parameter union**: scan tax 🪢 MITIGATED (moves 1–3 shipped; move 4 deferred)
 
 The 17-verb consolidation is right — **do not undo it.** But each fat verb (`transform`,
 `add`, `edit`) carries ~40–50 params; any one op uses a handful, so picking an op means
-scanning and filtering. The `[op]`-prefix tags are the load-bearing mitigation and they work.
-Move 1 (kill polymorphic params — `rotate_to` got its own `deg_*`) shipped. Remaining:
+scanning and filtering. Three of the four moves shipped; the scan tax is now mitigated
+without paying the cost of splitting verbs.
 
-**Litmus test:** a param is correctly designed if its meaning is unambiguous from **op name +
-param name alone**, no description needed.
+**Litmus test (still the bar for any new param):** a param is correctly designed if its
+meaning is unambiguous from **op name + param name alone**, no description needed.
 
-2. **Put each op's param manifest in the op-enum description** — `box — uses: name, width,
-   depth, height, on`. Inverts the lookup: picking the op hands you its params instead of
-   scan-and-filter. Cheap, description-only.
-3. **Teaching errors + one canonical example per op** — `op=bevel needs width OR factor; got
-   neither`, and `box → {op:box, name, width, depth, height}`. Turns the fat schema into a
-   guided loop instead of a memorization burden. Fits the status-block-teaches philosophy.
-4. **Last resort — split only the 2–3 genuinely fat verbs** into namespaced sub-tools
-   (`transform_move_to`), the verb surviving as an index of its ops. Honest cost = a discovery
-   hop + a sliver of the old 150-tool world, so apply **only** where the schema is actually
-   fat, never to lean verbs (`scene`/`view`/`render`).
+- **Move 1 — kill polymorphic params** ✅ `rotate_to` got its own `deg_*`, so no field means
+  two things depending on op.
+- **Move 2 — param manifest per op** ✅ each op line in the fat verbs' docstrings carries its
+  own `(params)` manifest, plus `[op]`-prefix tags on every param — picking the op hands you
+  its handful instead of scan-and-filter.
+- **Move 3 — teaching errors + a canonical example per op** ✅ `server/verbs/_common.py:teach()`
+  + a per-verb guard table: a valid op missing a structurally-required param (a destination, a
+  target, a prototype, two endpoints, a name) returns `needs … — got none. e.g. <canonical
+  call>` instead of a silent no-op (`move_to` with no destination used to report "moved" and
+  change nothing) or a deep crash. Covered by `tests/g23_teaching.py` (25 checks).
+- **Move 4 — split the 2–3 genuinely fat verbs into namespaced sub-tools** (`transform_move_to`)
+  🪞 DEFERRED. Honest cost = a discovery hop + a sliver of the old 150-tool world. Moves 1–3
+  make it unwarranted today; revisit only if the union scan tax resurfaces in real use, and
+  only on the genuinely-fat verbs — never the lean ones (`scene`/`view`/`render`).
 
 Note: JSON-Schema conditionals help server-side *validation* but *hurt* readability — catch
-errors with them, don't buy obviousness with them. Obviousness comes from moves 2.
+errors with `teach()` (move 3), don't buy obviousness with schema conditionals. Obviousness
+comes from move 2.
 
 ---
 
