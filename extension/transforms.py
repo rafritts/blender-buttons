@@ -541,8 +541,33 @@ def rest_on(params):
             if min_clear is None or clear < min_clear:
                 min_clear = clear
         if min_clear is None:
-            return {"error": f"'{o.name}' has no geometry above '{target_name}' along "
-                             f"{axis_key} — nothing to rest on (move it over the target first)"}
+            # Diagnostic, not divinatory (G31): say WHY nothing was beneath it —
+            # planar overlap/clearance with the target per in-plane axis, the nearest
+            # target surface point, and the nudge that brings the footprints over.
+            s_bb = world_bbox(o)
+            t_bb = tgt["bbox"]
+            s_c = [(s_bb[i] + s_bb[i + 3]) / 2 for i in range(3)]
+            near, _n, _i, _d = tgt["bvh"].find_nearest(mathutils.Vector(s_c))
+            plane = [i for i in range(3) if i != axis_idx]
+            parts, nudges = [], []
+            for i in plane:
+                an = "XYZ"[i]
+                overlap = min(s_bb[i + 3], t_bb[i + 3]) - max(s_bb[i], t_bb[i])
+                if overlap > 0:
+                    parts.append(f"{an} overlap {round(overlap * 1000, 1)}mm")
+                else:
+                    off = (t_bb[i] + t_bb[i + 3]) / 2 - s_c[i]
+                    parts.append(f"{an} apart {round(-overlap * 1000, 1)}mm")
+                    nudges.append(f"{an}{'+' if off >= 0 else ''}{round(off * 1000, 1)}mm")
+            diag = "; ".join(parts)
+            near_txt = (f"; nearest target point ({', '.join(f'{c:.3f}' for c in near)})"
+                        if near is not None else "")
+            hint = (f" — nudge ~{', '.join(nudges)} to bring it over the target"
+                    if nudges else
+                    f" — footprints overlap but no '{target_name}' surface lies directly "
+                    f"below along {axis_key}; try a different drop axis")
+            return {"error": (f"'{o.name}' has no '{target_name}' surface beneath it along "
+                              f"{axis_key} to rest on. Planar fit: {diag}{near_txt}{hint}.")}
         drop = min_clear - offset   # translate by −drop along axis to seat (then add clearance)
         o.location[axis_idx] -= drop
         rested.append({"name": o.name, "dropped_mm": round(drop * 1000, 2)})
@@ -551,8 +576,46 @@ def rest_on(params):
             "offset": offset, "rested": rested}
 
 
+def place(params):
+    """Re-place EXISTING objects with the same relational DSL as add's `on=` (G30).
+    resolve_placement gives the desired world-bbox CENTRE for the object's own dims;
+    we translate so its bbox centre lands there. Closes the 'placement DSL is add-only'
+    gap — an object already in the scene can be seated left_of/on/under/at_corner
+    another without dropping to raw coordinates. Per-object (each resolves against its
+    own dims), so a list converges on the same anchor; place one object at a time.
+
+    targets: object(s) to move (name / group / list / active).
+    on:      a placement spec dict — same vocabulary as add's on= (see placement.py)."""
+    from .placement import resolve_placement
+    objs, err = resolve_targets(params.get("targets"))
+    if err:
+        return {"error": err}
+    spec = params.get("on")
+    if not spec:
+        return {"error": "place needs 'on' — a placement spec "
+                         "(e.g. {\"left_of\":\"base\",\"gap\":0})"}
+
+    placed = []
+    for o in objs:
+        xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(o)
+        dims = (xmax - xmin, ymax - ymin, zmax - zmin)
+        cx, cy, cz = (xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2
+        try:
+            tx, ty, tz = resolve_placement(spec, dims)
+        except ValueError as e:
+            return {"error": str(e)}
+        o.location.x += tx - cx
+        o.location.y += ty - cy
+        o.location.z += tz - cz
+        placed.append({"name": o.name,
+                       "center": [round(tx, 5), round(ty, 5), round(tz, 5)]})
+    bpy.context.view_layer.update()
+    return {"success": True, "placed": placed}
+
+
 TOOLS = {
     "nudge":           nudge,
+    "place":           place,
     "aim_axis":        aim_axis,
     "rest_on":         rest_on,
     "move_to":         move_to,

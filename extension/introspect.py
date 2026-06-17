@@ -89,9 +89,13 @@ def _bbox_overlaps(a, b):
 
 
 def check_contacts(params):
-    """Per target part, the nearest other part and how they relate: connected
-    (touching), floating (gap in mm), or penetrating (depth in mm). Reports facts,
-    makes no judgement — interpenetration is correct for chain links and sunk markers."""
+    """Per target part, how it relates to its neighbours: connected (touching),
+    floating (gap in mm), or penetrating (depth in mm). Reports facts, makes no
+    judgement — interpenetration is correct for chain links and sunk markers.
+
+    G32: ALL penetrating neighbours are surfaced (not just the single nearest), so a
+    deep cross can't hide behind a closer touch, and each part gets a combined one-line
+    read ('connected to base · penetrating peg 6mm')."""
     report_objs, err = _report_targets(params)
     if err:
         return {"error": err}
@@ -105,35 +109,57 @@ def check_contacts(params):
             continue
         others = [p for name, p in prepared.items() if name != o.name]
         if not others:
-            results.append({"object": o.name, "relation": "alone", "other": None})
+            results.append({"object": o.name, "relation": "alone", "other": None,
+                            "summary": "alone in scene"})
             continue
         others.sort(key=lambda p: _bbox_separation(me["bbox"], p["bbox"]))
-        best = None
-        for p in others[:5]:
+
+        # Exact surface test only for bbox-overlapping candidates — penetration and
+        # touch both require near-zero bbox separation, and the list is sorted, so we
+        # stop at the first clearly-separated neighbour. This is where a hidden
+        # penetration would otherwise be capped away.
+        penetrations, touching = [], []
+        for p in others:
+            if _bbox_separation(me["bbox"], p["bbox"]) > _TOUCH:
+                break
             gap = min(_surface_gap(me, p), _surface_gap(p, me))
             ox, oy, oz = _bbox_overlaps(me["bbox"], p["bbox"])
             # Penetration = surfaces cross AND the bboxes overlap on every axis.
             # Vertex-inside tests fail for matched footprints (verts land on shared
             # planes); all-axis bbox overlap is the robust signal at hobby scale.
-            penetrating = gap <= _TOUCH and ox > _TOUCH and oy > _TOUCH and oz > _TOUCH
-            depth = min(ox, oy, oz) if penetrating else 0.0
-            if penetrating:
-                key = (0, -depth)
+            if gap <= _TOUCH and ox > _TOUCH and oy > _TOUCH and oz > _TOUCH:
+                penetrations.append({"other": p["name"],
+                                     "depth_mm": round(min(ox, oy, oz) * 1000, 1)})
             elif gap <= _TOUCH:
-                key = (1, 0.0)
-            else:
-                key = (2, gap)
-            if best is None or key < best["key"]:
-                best = {"key": key, "other": p["name"], "gap": gap,
-                        "depth": depth, "penetrating": penetrating}
-        if best["penetrating"]:
-            rel = {"object": o.name, "relation": "penetrating", "other": best["other"],
-                   "depth_mm": round(best["depth"] * 1000, 1)}
-        elif best["gap"] <= _TOUCH:
-            rel = {"object": o.name, "relation": "connected", "other": best["other"]}
+                touching.append(p["name"])
+
+        # Nearest neighbour by bbox separation, for the floating context/fallback.
+        nearest = others[0]
+        near_gap = min(_surface_gap(me, nearest), _surface_gap(nearest, me))
+
+        # Primary single-read relation (back-compat): penetration takes priority over
+        # a touch, a touch over a float.
+        if penetrations:
+            deepest = max(penetrations, key=lambda d: d["depth_mm"])
+            rel = {"object": o.name, "relation": "penetrating",
+                   "other": deepest["other"], "depth_mm": deepest["depth_mm"]}
+        elif touching:
+            rel = {"object": o.name, "relation": "connected", "other": touching[0]}
         else:
-            rel = {"object": o.name, "relation": "floating", "other": best["other"],
-                   "gap_mm": round(best["gap"] * 1000, 1)}
+            rel = {"object": o.name, "relation": "floating", "other": nearest["name"],
+                   "gap_mm": round(near_gap * 1000, 1)}
+
+        # Every penetration surfaced, plus a combined one-line picture (G32).
+        if penetrations:
+            rel["penetrating"] = penetrations
+        seg = []
+        if touching:
+            seg.append("connected to " + ", ".join(touching))
+        for d in sorted(penetrations, key=lambda d: -d["depth_mm"]):
+            seg.append(f"penetrating {d['other']} {d['depth_mm']}mm")
+        if not touching and not penetrations:
+            seg.append(f"nearest {nearest['name']} floating {round(near_gap * 1000, 1)}mm")
+        rel["summary"] = " · ".join(seg)
         results.append(rel)
     return {"success": True, "contacts": results}
 

@@ -11,7 +11,7 @@ from server._core import mcp
 from server import transforms, relational, editmode, handles
 from ._common import tag, unknown, teach
 
-_OPS = ["nudge", "move_to", "rotate_to", "aim_axis", "rest_on", "resize", "scale",
+_OPS = ["nudge", "place", "move_to", "rotate_to", "aim_axis", "rest_on", "resize", "scale",
         "rotate", "apply", "snap", "snap_grid", "match_dim", "mirror", "distribute",
         "array_corners", "array_along", "array_radial", "scatter", "move_verts",
         "scale_verts", "snap_loop"]
@@ -19,11 +19,13 @@ _OPS = ["nudge", "move_to", "rotate_to", "aim_axis", "rest_on", "resize", "scale
 
 @mcp.tool(name="transform")
 def transform(
-    op: Literal["nudge", "move_to", "rotate_to", "aim_axis", "rest_on", "resize",
+    op: Literal["nudge", "place", "move_to", "rotate_to", "aim_axis", "rest_on", "resize",
                 "scale", "rotate", "apply", "snap", "snap_grid", "match_dim", "mirror",
                 "distribute", "array_corners", "array_along", "array_radial", "scatter",
                 "move_verts", "scale_verts", "snap_loop"],
     targets: tag(str, "object(s): '' active, 'name', or 'a,b,c'") = "",
+    # place (relational re-placement — same DSL as add's on=)
+    on: tag(dict, "[place] placement spec — {\"left_of\":\"base\",\"gap\":0}, {\"on\":\"seat\"}, …") = None,
     # nudge (relative meters)
     right: tag(float, "[nudge] +X (m)") = 0.0,
     left: tag(float, "[nudge] -X (m)") = 0.0,
@@ -119,6 +121,10 @@ def transform(
     Transform objects (or verts) — the **transform** tools. `op` selects:
 
       nudge    — relative move in meters  (right/left/up/down/back/forward/inward/out)
+      place    — RE-place an existing object with the relational DSL (on=) — the same
+                 vocabulary as add's on=, but for objects already in the scene. Seat
+                 left_of/on/under/at_corner another without raw coordinates. Resolves
+                 against the object's own dims; place one object at a time.
       move_to  — set ABSOLUTE world position (to_x/to_y/to_z; omitted axis preserved) —
                  drop at a computed point, e.g. a feel op=aim hit, or handle=<name>
                  to move TO a handle's live point
@@ -160,6 +166,9 @@ def transform(
     # (a destination, a target, a prototype, two endpoints) gets the requirement named
     # + a canonical call, instead of a silent no-op or a deep crash.
     bad = teach("transform", "op", o, {
+        "place":         (bool(on),
+                          "on=<placement spec> (same DSL as add's on=)",
+                          "transform op=place targets=cup on={\"left_of\":\"base\",\"gap\":0}"),
         "move_to":       (bool(handle) or any(v is not None for v in (to_x, to_y, to_z)),
                           "to_x/to_y/to_z (any) or handle=<name>",
                           "transform op=move_to targets=cap to_z=1.2"),
@@ -204,6 +213,8 @@ def transform(
         return bad
     if o == "nudge":
         return transforms.nudge(targets, right, left, up, down, back, forward, label)
+    if o == "place":
+        return transforms.place(targets, on, label)
     if o == "move_to":
         note = ""
         if handle:

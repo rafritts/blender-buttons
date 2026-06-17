@@ -96,6 +96,26 @@ def rest_on(targets: str = "", target: str = "", axis: str = "Z",
     return main + _status(result)
 
 
+def place(targets: str = "", on: dict = None, label: str = "") -> str:
+    """Re-place EXISTING objects with the relational placement DSL — the same `on=`
+    vocabulary as add (G30). Closes the 'placement DSL is add-only' gap: seat an
+    object already in the scene left_of/on/under/at_corner another without dropping to
+    raw coordinates. resolve_placement is evaluated against each object's own dims, so
+    place one object at a time (a list converges on the same anchor).
+
+    Example: place("cup", on={"left_of": "base", "gap": 0})  # snug to the base's -X."""
+    if not on:
+        return ("place needs on=<placement spec> — e.g. "
+                "transform op=place targets=cup on={\"left_of\":\"base\",\"gap\":0}")
+    result = call_blender("place", {"targets": _targets(targets), "on": on}, label=label)
+    if result.get("success"):
+        seated = ", ".join(f"{p['name']}→{p['center']}" for p in result["placed"]) or "nothing"
+        main = f"placed {seated} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 @mcp.tool()
 def resize(targets: str = "", width: float = None, depth: float = None, height: float = None,
            label: str = "") -> str:

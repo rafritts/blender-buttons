@@ -25,7 +25,12 @@ def check_contacts(targets: str = "") -> str:
         return result.get("error", "failed")
     lines = []
     for c in result["contacts"]:
-        if c["relation"] == "alone":
+        # The combined one-line read (G32) is the full picture — touch + every
+        # penetration, so a deep cross can't hide behind a closer touch.
+        summary = c.get("summary")
+        if summary:
+            lines.append(f"  {c['object']}: {summary}")
+        elif c["relation"] == "alone":
             lines.append(f"  {c['object']}: alone in scene")
         elif c["relation"] == "connected":
             lines.append(f"  {c['object']}: connected to '{c['other']}'")
