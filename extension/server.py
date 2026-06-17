@@ -149,6 +149,17 @@ def execute_command(command):
     state.flush_eval_dirty()
 
     target = params.pop("target", "") if tool in EDIT_MODE_TOOLS else ""
+    # G40/G34: a target= GUARANTEES the op lands in the right mode. But the natural
+    # chain "select a region (leaves Object mode), then act on it" passes no target on
+    # the second call — so fall back to the ACTIVE mesh as the implicit target. The
+    # selection survives on the mesh, so this enters Edit on the right object and the
+    # op finds its selection. If the active object is already in EDIT (an explicit
+    # multi-op edit session), _enter_edit_for_target is a no-op and won't exit after —
+    # the session is preserved.
+    if tool in EDIT_MODE_TOOLS and not target:
+        _active = bpy.context.active_object
+        if _active is not None and _active.type == 'MESH':
+            target = _active.name
     auto_switched = False
     bind_snapshot = None  # (target_name, [(mod, type)…], pre-edit vert count) — V2
     if target:

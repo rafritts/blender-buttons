@@ -62,6 +62,9 @@ uniform normal-push lumps and *collapses* the form (this sank a bust on the firs
   seam-free enlargement. Pure directional motion, no normals involved.
 - Keep the core **off the symmetry seam** if the lobes should stay separate — a core that spans
   both lobes + the cleft drags the valley forward too (merges a bust).
-- **Verify with absolute / selection-independent reads**, not `region_form`: it is shape-relative
-  (invariant to self-similar growth — see gaps G41) and can latch onto a stale selection (G42).
-  The honest signals are the world-bbox bound delta and whole-mesh `feel … method=symmetry`.
+- **Be wary of `region_form` for confirming a size change**: it is shape-relative — invariant to
+  self-similar growth (gaps G41) — so a cap that grows roughly self-similarly reads identically
+  before/after. (It now reads the *live* selection correctly — the old stale-snapshot bug is fixed.)
+  For "did it grow," the honest signals are the world-bbox bound delta and whole-mesh
+  `feel … method=symmetry`; for "is it balanced," the `── edit ──` status block now reports the
+  selection's centroid, bbox, and `lr_balance` on every call.

@@ -84,6 +84,15 @@ def _status(result: dict) -> str:
             f"  selected:    {e['selected']}  /  total: {e['total']}",
             f"  sel_z:       {e.get('selection_z_range', '—')}",
         ]
+        # G44: full spatial readout of the live selection, when one exists.
+        sb = e.get("selection_bounds")
+        if sb:
+            lines += [
+                f"  sel_bounds:  x={sb.get('x')}  y={sb.get('y')}  z={sb.get('z')}",
+                f"  sel_center:  {e.get('selection_centroid')}",
+                f"  lr_balance:  {e.get('lr_balance_cm')}cm from X-center "
+                f"(~0 = centered on the mirror plane)",
+            ]
         ak = e.get("active_key")
         if ak:
             tag = " (Basis — edits show)" if ak.get("is_basis") else \

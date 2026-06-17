@@ -25,7 +25,7 @@ def select(
     action: tag(str, "[all/by_axis/between/boundary/in_sphere/ring/rings] SELECT|DESELECT|INVERT|TOGGLE") = "SELECT",
     extend: tag(bool, "[by_axis/between/in_sphere] True = ADD to current selection (union regions across calls) instead of replacing") = False,
     axis: tag(str, "[by_axis/between/ring/rings] axis X|Y|Z") = "Z",
-    target: tag(str, "[edit-mode ops: by_axis/between/boundary/limb/grow/shrink/in_sphere/ring/rings/component_mode] mesh object to auto-select + enter edit on (empty=active); pass it so a stray click can't hijack the op") = "",
+    target: tag(str, "[edit-mode ops: all/none/by_axis/between/boundary/limb/grow/shrink/in_sphere/ring/rings/component_mode] mesh object to auto-select + enter edit on (empty=active); pass it so a stray click can't hijack the op") = "",
     # by_axis
     factor: tag(float, "[by_axis] threshold 0..1 along axis") = 0.5,
     comparison: tag(str, "[by_axis] GREATER | LESS") = "GREATER",
@@ -79,9 +79,9 @@ def select(
     """
     o = op.lower().strip()
     if o == "all":
-        return editmode.select_all(action)
+        return editmode.select_all(action, target)
     if o == "none":
-        return editmode.select_all("DESELECT")
+        return editmode.select_all("DESELECT", target)
     if o == "object":
         return objects.select_object(name)
     if o == "by_axis":

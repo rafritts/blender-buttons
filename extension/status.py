@@ -224,10 +224,28 @@ def get_blender_status(params):
         }
         if sel_verts:
             world_sel = [(obj.matrix_world @ v.co) for v in sel_verts]
-            status["edit"]["selection_z_range"] = [
-                round(min(v.z for v in world_sel), 4),
-                round(max(v.z for v in world_sel), 4),
+            sx = [v.x for v in world_sel]
+            sy = [v.y for v in world_sel]
+            sz = [v.z for v in world_sel]
+            n = len(world_sel)
+            status["edit"]["selection_z_range"] = [round(min(sz), 4), round(max(sz), 4)]
+            # G44: a live selection should be as legible as an object's bounds. Report
+            # the full world bbox + centroid (not just sel_z), so a region edit can be
+            # checked for placement and L/R balance from server data alone.
+            status["edit"]["selection_bounds"] = {
+                "x": [round(min(sx), 4), round(max(sx), 4)],
+                "y": [round(min(sy), 4), round(max(sy), 4)],
+                "z": [round(min(sz), 4), round(max(sz), 4)],
+            }
+            status["edit"]["selection_centroid"] = [
+                round(sum(sx) / n, 4), round(sum(sy) / n, 4), round(sum(sz) / n, 4),
             ]
+            # L/R balance: signed offset (cm) of the selection's centroid from the
+            # object's X-center (the conventional mirror axis). ~0 = centered on the
+            # symmetry plane; a non-zero value flags an off-center / one-sided patch
+            # that was meant to be symmetric (e.g. "both breasts" landing on one side).
+            cx = (xmin + xmax) / 2.0
+            status["edit"]["lr_balance_cm"] = round((sum(sx) / n - cx) * 100.0, 2)
         # Y1b: on a keyed mesh, surface which shape key is ACTIVE — edit-mode moves
         # write there, not to the displayed mesh. A non-Basis key at value 0 is the
         # silent-edit landmine (gaps.md Y1).

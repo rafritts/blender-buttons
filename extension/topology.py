@@ -37,6 +37,13 @@ def _topology_bmesh(obj, base):
     Caller owns the bmesh and must .free() it.
     """
     import bpy
+    # G42: in EDIT mode the live selection (and any unflushed geometry) lives in the
+    # edit bmesh, NOT in obj.data — `from_mesh(obj.data)` would read the STALE snapshot
+    # from the last mode exit (region_form reported a 12-vert core while 150 were live-
+    # selected). Flush the edit-mode data back to obj.data so every method below reads
+    # the selection the operator is actually pointing at.
+    if obj.mode == 'EDIT':
+        obj.update_from_editmode()
     bm = bmesh.new()
     if base == "evaluated":
         depsgraph = bpy.context.evaluated_depsgraph_get()

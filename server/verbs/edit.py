@@ -176,12 +176,13 @@ def edit(
     if o == "crease":
         return editmode.set_edge_crease(weight, label, target)
     if o == "inflate":
-        return editmode.inflate_selection(amount, label)
+        return editmode.inflate_selection(amount, label, target)
     if o == "jitter":
         return editmode.jitter_vertices(amount, axis, seed, only_positive, label, target)
     if o == "proportional_move":
         return editmode.proportional_move(out, inward, up, down, left, right,
-                                          forward, back, x, y, z, radius, falloff, label)
+                                          forward, back, x, y, z, radius, falloff, label,
+                                          target)
     if o == "extrude_along_curve":
         return editmode.extrude_along_curve(curve, segments, taper, label)
     if o == "round":

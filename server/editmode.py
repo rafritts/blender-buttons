@@ -116,12 +116,13 @@ def extrude_along_curve(curve: str, segments: int = 8, taper: float = 1.0,
 
 
 @mcp.tool()
-def select_all(action: str = "SELECT") -> str:
+def select_all(action: str = "SELECT", target: str = "") -> str:
     """
     Select/deselect geometry in edit mode.
     action: SELECT | DESELECT | INVERT
+    target: optional object name — auto-selects it, enters edit mode, exits after.
     """
-    result = call_blender("select_all", {"action": action})
+    result = call_blender("select_all", {"action": action, "target": target})
     main = "ok" if result.get("success") else result.get("error", "failed")
     return main + _status(result)
 
@@ -251,7 +252,7 @@ def proportional_move(out: float = 0.0, inward: float = 0.0,
                       forward: float = 0.0, back: float = 0.0,
                       x: float = 0.0, y: float = 0.0, z: float = 0.0,
                       radius: float = 0.01, falloff: str = "SMOOTH",
-                      label: str = "") -> str:
+                      label: str = "", target: str = "") -> str:
     """
     Move selected verts with a falloff — drags nearby verts along (proportional editing).
     Selected verts move full amount; verts at radius edge don't move at all.
@@ -267,11 +268,14 @@ def proportional_move(out: float = 0.0, inward: float = 0.0,
 
     For icing drips: select sparse boundary verts, proportional_move(down=0.01, radius=0.005)
     gives bulbous rounded drops instead of triangular spikes.
+    target: optional object name — enters edit mode on it first (acts on its live
+            selection), exits after. Empty = the active mesh.
     """
     result = call_blender("proportional_move", {
         "out": out, "inward": inward, "up": up, "down": down, "left": left,
         "right": right, "forward": forward, "back": back,
         "x": x, "y": y, "z": z, "radius": radius, "falloff": falloff,
+        "target": target,
     }, label=label)
     if result.get("success"):
         frame = f" ({result['frame']})" if result.get("frame") else ""
@@ -328,15 +332,17 @@ def jitter_vertices(amount: float = 0.005, axis: str = "NORMAL", seed: int = 0,
 
 
 @mcp.tool()
-def inflate_selection(amount: float = 0.003, label: str = "") -> str:
+def inflate_selection(amount: float = 0.003, label: str = "", target: str = "") -> str:
     """
     Push selected verts outward along their normals by a fixed amount (sculpt 'Inflate' brush, one-shot).
     amount: meters to move along normal. Positive = outward, negative = inward (deflate). Default 3mm.
 
     For bulbous drip tips: after pulling tips down with proportional_move,
     select just the tip verts and inflate_selection(amount=0.003) to swell them into teardrop bulbs.
+    target: optional object name — enters edit mode on it first (acts on its live
+            selection), exits after. Empty = the active mesh.
     """
-    result = call_blender("inflate_selection", {"amount": amount}, label=label)
+    result = call_blender("inflate_selection", {"amount": amount, "target": target}, label=label)
     if result.get("success"):
         main = f"inflated {result['verts_inflated']} verts by {result['amount']}m along normals"
     else:

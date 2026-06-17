@@ -93,19 +93,6 @@ the meaning must be unambiguous from op+param name (the G23 litmus). Dogfood: ho
 envelope — first taper produced an upside-down silhouette (pinch under the equator, bulge at
 the base); only the profile read revealed the flip.
 
-## G34 — `select op=all` / `op=none` don't honor the `target`=auto-enter-edit contract 🎯 OPEN
-
-The edit-mode select ops (`by_axis`, `between`, `boundary`, `limb`, `ring`, …) all take
-`target` and auto-enter Edit mode on it so a stray click can't hijack the op. `op=all` (and
-`op=none`) **don't** — `select op=all target=basket` from Object mode returns
-`bpy.ops.mesh.select_all.poll() failed, context is incorrect` instead of switching to Edit
-on `basket` like its siblings. The operator has to know that *this one* select op breaks the
-contract and insert a manual `object op=mode mode=EDIT` first.
-
-**General fix:** make `op=all`/`op=none` respect the same `target`→enter-Edit contract the
-other component-level select ops already implement. Dogfood: beveling the balloon basket —
-`select op=all target=basket` failed; had to switch mode by hand.
-
 ## G35 — camera-write ops can't address a **named** camera; no "set active camera" primitive 🎥 OPEN
 
 `view op=camera_position` and `op=camera_dof` write to the scene's **active** camera and have
@@ -209,25 +196,6 @@ be unambiguous without the operator first checking `rotation_deg` and mentally u
 locating the nose on the base mesh — two casts missed the head entirely because the bbox frame was
 rotated.
 
-## G40 — `edit`-verb ops don't auto-enter Edit mode; the select→edit chain silently breaks 🔗 OPEN
-
-`select` and `feel` manage mode internally (a `select op=in_sphere target=…` makes the selection
-and the read tools see it), but they leave the object in **Object** mode between calls. The
-**`edit` verb's mutating ops do not auto-enter Edit** on their `target=` — so the natural
-two-step "select a region, then act on it" sequence fails: `select op=in_sphere` → `edit
-op=inflate` returned `Must be in edit mode`, even though `target=polySurface25` was passed to
-both. The fix was a manual `object op=mode mode=EDIT` wedged between them. The selection itself
-survived (it's stored on the mesh), so this is purely a mode-contract gap: a `select` that
-auto-enters Edit but an `edit` that doesn't, with no warning that the chain is broken — the
-operator just gets a poll failure and has to know the missing mode hop.
-
-**General fix:** make `edit`-verb ops honor the same `target`→enter-Edit contract `select`/`feel`
-already do — if a `target` (or active mesh) and a live selection exist, enter Edit and operate.
-Same family as G34 (`select op=all/none` skipping the contract); the unifying principle is that a
-`target=` should *guarantee* the op lands in the right mode, never assume the caller pre-staged
-it. Dogfood: enlarging the bust on the base mesh — `select in_sphere` → `edit inflate` broke until
-a manual mode switch was inserted.
-
 ## G41 — no **absolute protrusion** read; `region_form` is shape-relative and can't confirm a size change 📏 OPEN
 
 `region_form` measures a patch's form **relative to its own re-fitted plane** — so after
@@ -248,25 +216,6 @@ absolute ruler complements a curvature gauge. Deterministic geometry, not vision
 enlarging the bust — the change was real but only on-axis-lucky to catch (front bbox bound shifted
 −0.1258 → −0.1381); an off-axis edit would have been invisible to every existing read.
 
-## G42 — `feel` selection-reads bind to a **stale selection snapshot** across calls 🥶 OPEN
-
-`feel op=region_form` reads *the current selection* — but after intervening `select` calls it
-returned data for a **stale, earlier selection**. Concretely: `select op=in_sphere` reported
-`SELECT 150 verts` and the status block's `── edit ──` line confirmed `selected: {verts: 150}`,
-yet the *very next* `region_form` printed `region_form (12 selected verts …)` — the 12-vert core
-from two ops earlier — and kept printing 12 on a repeat call while the status still showed 150.
-The read silently describes geometry the operator is no longer pointing at, and the only tell is
-the vert-count mismatch between the `region_form` header and the status block. This compounds with
-G40: the mode-toggle dance between `select` (leaves Object), `feel` (re-enters Edit to read), and
-`edit` (needs Edit) appears to leave more than one notion of "the selection" live at once.
-
-**General fix:** `feel`'s selection-consuming reads must resolve the **live** edit-mode selection
-at call time (refresh from the bmesh, don't reuse a cached handle), and ideally fail loud if the
-selection it read disagrees with the active mesh's current selection. A read that reports the
-wrong patch is worse than one that refuses. Dogfood: verifying the enlarged bust — `region_form`
-reported the wrong vert set twice, so symmetry/`bbox` (selection-independent reads) had to stand
-in as the verification.
-
 ## G43 — no **region-coherent feature selection**; you can't select "a breast / its lower half" as a unit 🫳 OPEN
 
 The action-side twin of G38. Even *knowing* a feature is there, there is no way to select it **as a
@@ -285,36 +234,36 @@ op rather than a coordinate guess or a band that bleeds into its neighbours. Dog
 bust — every attempt to select just the breast geometry either missed (guessed coords) or over-grabbed
 (band caught the midriff between/under the breasts).
 
-## G44 — no selection **algebra** (intersect) and no selection **spatial readout** 📐 OPEN
+## G44 — no selection **algebra** (intersect) 📐 OPEN
 
-Two compounding holes exposed while hand-building a region. (1) **No boolean AND:** to get
-"frontmost verts AND in the chest band" I had to select the frontmost set, then *subtract* everything
-outside the band by complement — there is no intersect, so every compound region is a deselect dance.
-(2) **No spatial readout of a selection:** the edit status block reports `sel_z` only — no `sel_x`/`sel_y`,
-no centroid, no per-axis bbox — so the agent cannot tell **where in X** its selection sits or whether
-it is left/right balanced. I could not confirm "both breasts, symmetric" without the human's viewport.
+There is no boolean AND over selections: to get "frontmost verts AND in the chest band" you must
+select the frontmost set, then *subtract* everything outside the band by complement — every
+compound region is a deselect dance. `action=SELECT|DESELECT|ADD` covers replace/subtract/union
+but not intersect, so "frontmost ∩ chest-band" can't be one expression.
 
-**General fix:** (a) selection set-ops — intersect/union/subtract over the running selection, so
-"frontmost ∩ chest-band" is one expression; and (b) a selection spatial readout in the `── edit ──`
-status block — centroid + per-axis bbox + a left/right balance flag — so a live selection is as legible
-as an object's bounds. Dogfood: isolating the breast undersides required ~4 select calls and still
-couldn't be verified symmetric from server data alone.
+**General fix:** selection set-ops — an `INTERSECT` action (keep only verts that are BOTH already
+selected AND match the new criterion) across the running selection, so a compound region is built
+by intersection instead of a complement dance. Dogfood: isolating the breast undersides required
+~4 select calls because the band had to be carved out by subtraction.
 
-## G45 — global/scalar checks give **false confidence on a local edit** 🟢 OPEN
+## G45 — no **before/after region diff** to confirm a local edit did what was intended 🟢 OPEN
 
-The +4cm bust pull reported success on every instrument available — the world-bbox front bound shifted
-−0.1258→−0.1658, whole-mesh `feel op=symmetry` held at 0.104mm — yet the edit was visibly wrong
-(asymmetric, coned), as the user's screenshot proved. Both metrics are **global**: a bbox bound sees
-only the single frontmost vert, and mesh-wide symmetry is dominated by the torso and numb to a
-centimetre-scale local asymmetry. The agent had green lights on a bad edit; only the human's eyes
-caught it — a direct hole in the "verify with ground truth, not vision" thesis, exactly where organic
-sculpting lives.
+A local sculpt edit needs a *local* verification, computed over just the edited region. The
+selection-scoped instruments now exist — `region_form` gives the patch's convex/concave verdict,
+projection, and per-patch L/R mirror error (and reads the live selection correctly), and the
+`── edit ──` status block now reports the selection's centroid, per-axis bbox, and `lr_balance`
+(see the closed G42/G44 work in `git log`). What's still missing is the **temporal** half: there
+is no way to snapshot a region's form *before* an edit and diff it *after*, so "did this region
+grow by 2cm / stay symmetric through the edit" must be reconstructed by hand from two separate
+reads. Global metrics still mislead on a local edit — the +4cm bust pull passed the world-bbox
+front bound and whole-mesh symmetry while being visibly asymmetric and coned — so the agent needs
+a scoped *delta*, not just a scoped *snapshot*.
 
-**General fix:** selection-**scoped** verification — symmetry, projection, and form computed over just
-the edited region, plus a before/after diff of that region, so a local change is checked locally. The
-nearest existing tool (`region_form`'s per-patch L/R mirror) is the right shape but is undermined by the
-stale-selection bug (G42); fixing G42 + scoping the checks to the active selection would close most of
-this. Dogfood: the bust edit passed bbox + global-symmetry while being asymmetric and malformed.
+**General fix:** a before/after region diff — capture a selection's form/symmetry/projection as a
+named baseline, then after an edit report the signed change per metric over the same verts, so a
+local change is checked locally and temporally. Builds directly on the now-live selection-scoped
+reads. Dogfood: the bust edit passed bbox + global-symmetry while being asymmetric and malformed,
+and confirming "it grew, and stayed symmetric" needed the human's viewport.
 
 ## Carried over — bigger build-outs (not yet started)
 
