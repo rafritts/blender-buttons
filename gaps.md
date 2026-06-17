@@ -117,8 +117,3 @@ errors with them, don't buy obviousness with them. Obviousness comes from moves 
   geometry) vs the socket window.
 - bbox-vs-`sel_z` self-contradiction flag (a stale-eval-cache symptom — may already be cured by
   the G19 depsgraph-refresh fix; needs re-checking on dense geo).
-- **Render OOM is still unpredictable (G24 residual).** The render preflight now shows the
-  Cycles compute backend, per-device enabled flags, and the effective GPU-vs-CPU device — but
-  Blender's Python API exposes no portable *free-VRAM* figure, so a GPU render can still OOM on
-  a heavy scene with no up-front warning. Recovery remains: catch the OOM, set `device=CPU`,
-  re-render. Wants a VRAM/viability probe if a clean API surfaces.

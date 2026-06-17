@@ -74,6 +74,16 @@ def render(
       cycles  — Cycles controls (device=GPU|CPU, backend=OPTIX|CUDA|…, denoise,
                 denoiser, adaptive_threshold, samples)
       color   — color management (view_transform=Standard|AgX|…, look, exposure, gamma)
+
+    GPU VRAM / OOM (device=GPU): Blender's API exposes no free-VRAM figure, and this
+    server is LOCAL — so check it YOURSELF before a heavy GPU render: run
+    `nvidia-smi --query-gpu=memory.total,memory.free --format=csv,noheader` in your
+    own shell (it reads the same GPU that renders). If free VRAM is low, tell the user
+    a CUDA/HIP out-of-memory is likely and offer a slower `device=CPU` render. No
+    nvidia-smi (non-NVIDIA, or not on PATH) → just proceed on GPU. If a GPU render
+    DOES OOM (the error says "out of memory" / CUDA), do NOT silently retry — surface
+    it and ask the user whether they want the slower CPU render, then re-run with
+    `render op=cycles device=CPU`.
     """
     o = op.lower().strip()
     if o == "image":
