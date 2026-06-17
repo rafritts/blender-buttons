@@ -200,8 +200,25 @@ def describe(params):
     return result
 
 
+def _nearest_surface_pair(pa, pb):
+    """Min distance from any of pa's sampled verts to pb's surface, with the point
+    pair at that minimum. Same BVH path check_contacts uses, so the number reconciles
+    with a contacts read (G29). Returns (dist, point_on_a, point_on_b)."""
+    best = (float("inf"), None, None)
+    for v in pa["verts"]:
+        loc, normal, idx, d = pb["bvh"].find_nearest(v)
+        if loc is not None and d < best[0]:
+            best = (d, v.copy(), loc.copy())
+    return best
+
+
 def distance_between(params):
-    """Centre-to-centre distance between two objects. Optionally restricted to one axis."""
+    """Distance between two objects.
+
+    axis=ANY (default) reports the true nearest-SURFACE distance (BVH) — the same
+    measurement check_contacts uses, so it reconciles with a contacts read and the
+    bounds in the status block — and labels what it measured. axis=X|Y|Z reports the
+    single-axis centre-to-centre projection (G29)."""
     a_name = params.get("a")
     b_name = params.get("b")
     axis = params.get("axis", "ANY").upper()
@@ -214,16 +231,29 @@ def distance_between(params):
     cb = world_center(b)
     dx, dy, dz = cb[0] - ca[0], cb[1] - ca[1], cb[2] - ca[2]
 
-    if axis == "X":
-        dist = abs(dx)
-    elif axis == "Y":
-        dist = abs(dy)
-    elif axis == "Z":
-        dist = abs(dz)
-    else:
-        dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if axis in ("X", "Y", "Z"):
+        dist = abs({"X": dx, "Y": dy, "Z": dz}[axis])
+        return {"success": True, "a": a_name, "b": b_name, "axis": axis,
+                "distance": round(dist, 5), "measured": "centre-to-centre"}
 
-    return {"success": True, "a": a_name, "b": b_name, "axis": axis, "distance": round(dist, 5)}
+    # ANY → genuine nearest-surface distance (BVH), with the point pair so the operator
+    # can check it against the bounds the status block reports.
+    from .introspect import _prepare
+    pa, pb = _prepare(a), _prepare(b)
+    if pa is not None and pb is not None:
+        d1, a1, b1 = _nearest_surface_pair(pa, pb)
+        d2, b2, a2 = _nearest_surface_pair(pb, pa)
+        if d1 <= d2:
+            dist, pt_a, pt_b = d1, a1, b1
+        else:
+            dist, pt_a, pt_b = d2, a2, b2
+        return {"success": True, "a": a_name, "b": b_name, "axis": "ANY",
+                "distance": round(dist, 5), "measured": "nearest surface (BVH)",
+                "between": [[round(c, 4) for c in pt_a], [round(c, 4) for c in pt_b]]}
+    # Either object has no usable mesh geometry (e.g. an empty) — fall back to centroid.
+    dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+    return {"success": True, "a": a_name, "b": b_name, "axis": "ANY",
+            "distance": round(dist, 5), "measured": "centre-to-centre (no mesh geometry)"}
 
 
 def gap_between(params):

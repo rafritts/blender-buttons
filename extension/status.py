@@ -176,6 +176,11 @@ def get_blender_status(params):
         "exposure": round(vs.exposure, 4),
         "gamma": round(vs.gamma, 4),
     }
+    # Never present a non-renderable engine as plain state (G24) — if the scene names
+    # an engine this build can't provide, the instrument must say so, not lie.
+    from .render import _available_engines
+    if scene.render.engine not in _available_engines():
+        render["engine_unavailable"] = True
     eevee = getattr(scene, "eevee", None)
     if eevee is not None and hasattr(eevee, "use_raytracing"):
         render["raytracing"] = eevee.use_raytracing

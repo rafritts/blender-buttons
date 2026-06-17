@@ -58,6 +58,44 @@ def rotate_to(targets: str = "", x: float = None, y: float = None, z: float = No
     return main + _status(result)
 
 
+def aim_axis(targets: str = "", frm: list = None, to: list = None,
+             axis: str = "Z", label: str = "") -> str:
+    """Rotate objects so their local `axis` points down the frm→to segment (G25) — the
+    orient-along-an-edge primitive for solids that don't self-orient like add type=tube.
+    Endpoints are world points; the verb resolves handles to points first. Orientation
+    only — pair with move_to to position. Example: lay a helix along a strut's two ends."""
+    if frm is None or to is None:
+        return ("aim_axis needs both endpoints — aim_from/aim_to points, "
+                "or from_handle/to_handle")
+    result = call_blender("aim_axis", {"targets": _targets(targets),
+                                       "from": list(frm), "to": list(to), "axis": axis},
+                          label=label)
+    if result.get("success"):
+        main = (f"aimed {result['aimed']} local {result['axis']} along {result['direction']} "
+                f"→ rot {result['rotation_deg']}° [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def rest_on(targets: str = "", target: str = "", axis: str = "Z",
+            offset: float = 0.0, label: str = "") -> str:
+    """Drop objects along −axis until their REAL geometry rests on `target` (G26). Uses
+    BVH ray-casts from the source's own verts, so a tilted/irregular part seats by its
+    true lowest point (snap_to uses the AABB bottom and mis-seats anything rotated). The
+    action half of feel op=contacts 'floating 3mm'. offset leaves a clearance gap."""
+    if not target:
+        return "rest_on needs 'target' — the surface object to rest on"
+    result = call_blender("rest_on", {"targets": _targets(targets), "target": target,
+                                      "axis": axis, "offset": offset}, label=label)
+    if result.get("success"):
+        drops = ", ".join(f"{r['name']}↓{r['dropped_mm']}mm" for r in result["rested"]) or "nothing"
+        main = f"rested on {target} ({result['axis']}): {drops} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 @mcp.tool()
 def resize(targets: str = "", width: float = None, depth: float = None, height: float = None,
            label: str = "") -> str:

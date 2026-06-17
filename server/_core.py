@@ -69,8 +69,9 @@ def _status(result: dict) -> str:
     r = s.get("render")
     if r:
         rt = f"  raytracing={r['raytracing']}" if "raytracing" in r else ""
+        eng = r['engine'] + ("  ⚠ NOT AVAILABLE in this build" if r.get("engine_unavailable") else "")
         lines.append(
-            f"  render:      {r['engine']}  view={r['view_transform']} "
+            f"  render:      {eng}  view={r['view_transform']} "
             f"look={r['look']} exp={r['exposure']} gamma={r['gamma']}{rt}"
         )
     if s.get("viewport"):

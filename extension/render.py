@@ -15,6 +15,62 @@ import bpy
 _FORMATS = {"PNG", "JPEG", "OPEN_EXR", "TIFF", "WEBP"}
 
 
+def _available_engines():
+    """The engines this build can ACTUALLY render with (G24).
+
+    The `engine` RNA enum's static items can MISS dynamically-registered engines —
+    CYCLES is a Python RenderEngine subclass, so it isn't always in the enum items
+    (the same dynamic-enum gotcha that empties compute_device_type's items). That
+    produced the self-contradicting read `engine: CYCLES  available: BLENDER_EEVEE`.
+    Union three authoritative sources: the enum items, the registered RenderEngine
+    subclasses, and the currently-set engine (valid by definition — Blender refuses
+    to assign an engine it can't provide)."""
+    scene = bpy.context.scene
+    names = set()
+    try:
+        names.update(e.identifier for e in
+                     type(scene.render).bl_rna.properties["engine"].enum_items)
+    except Exception:
+        pass
+    for cls in bpy.types.RenderEngine.__subclasses__():
+        bl_idname = getattr(cls, "bl_idname", None)
+        if bl_idname:
+            names.add(bl_idname)
+    names.add(scene.render.engine)
+    return sorted(names)
+
+
+def _cycles_preflight():
+    """The Cycles GPU/compute layer — which lives in ADDON PREFERENCES, not the scene
+    (G24). Lets the agent tell 'GPU' from 'silent CPU fallback' before a render crawls
+    or OOMs. Reports addon-enabled, the compute backend, and every device with its
+    enabled flag."""
+    addon = bpy.context.preferences.addons.get("cycles")
+    if addon is None:
+        return {"addon_enabled": False,
+                "note": "Cycles addon not enabled in this build — GPU rendering "
+                        "unavailable (CPU only)."}
+    prefs = addon.preferences
+    # The device list is populated lazily; refresh it (API name varies by version).
+    for refresh in ("refresh_devices", "get_devices"):
+        fn = getattr(prefs, refresh, None)
+        if fn is not None:
+            try:
+                fn()
+                break
+            except Exception:
+                pass
+    devices = [{"name": d.name, "type": d.type, "enabled": bool(d.use)}
+               for d in getattr(prefs, "devices", [])]
+    gpu_on = [d["name"] for d in devices if d["enabled"] and d["type"] != 'CPU']
+    return {
+        "addon_enabled": True,
+        "compute_device_type": getattr(prefs, "compute_device_type", None),
+        "devices": devices,
+        "gpu_devices_enabled": gpu_on,
+    }
+
+
 def render_to_file(params):
     """Render the active scene camera to an image file.
 
@@ -43,12 +99,15 @@ def render_to_file(params):
 
     engine = params.get("engine")
     if engine:
-        avail = [e.identifier for e in
-                 type(scene.render).bl_rna.properties["engine"].enum_items]
-        if engine not in avail:
+        # Authoritative check: try to SET it and catch the TypeError an invalid engine
+        # raises. The old pre-validation read a static enum list that could omit a
+        # genuinely-renderable engine (CYCLES), forcing callers to drop engine= to
+        # bypass a false rejection (G24). Assignment can't be fooled.
+        try:
+            scene.render.engine = engine
+        except TypeError:
             return {"error": f"render engine '{engine}' not available in this build; "
-                             f"available: {avail}"}
-        scene.render.engine = engine
+                             f"available: {_available_engines()}"}
 
     fmt = (params.get("format") or "PNG").upper()
     if fmt not in _FORMATS:
@@ -107,8 +166,7 @@ def render_settings(params):
     r = scene.render
     vs = scene.view_settings
 
-    available = [e.identifier for e in
-                 type(r).bl_rna.properties["engine"].enum_items]
+    available = _available_engines()
 
     out = {
         "success": True,
@@ -135,7 +193,18 @@ def render_settings(params):
               "denoiser": getattr(c, "denoiser", None)}
         if getattr(c, "use_adaptive_sampling", False):
             cy["adaptive_threshold"] = round(getattr(c, "adaptive_threshold", 0.0), 5)
-        out["cycles"] = {k: v for k, v in cy.items() if v is not None}
+        cyc = {k: v for k, v in cy.items() if v is not None}
+        # The preference-layer preflight: backend + per-device enabled flags, and the
+        # EFFECTIVE device (so 'device=GPU' that will silently fall back to CPU shows it).
+        pre = _cycles_preflight()
+        cyc["compute"] = pre
+        wants_gpu = getattr(c, "device", "CPU") == 'GPU'
+        has_gpu = pre.get("addon_enabled") and pre.get("gpu_devices_enabled")
+        cyc["effective_device"] = "GPU" if (wants_gpu and has_gpu) else "CPU"
+        if wants_gpu and not has_gpu:
+            cyc["warning"] = ("device=GPU but no GPU device is enabled in Cycles "
+                              "preferences — this render falls back to CPU.")
+        out["cycles"] = cyc
     else:
         eevee = getattr(scene, "eevee", None)
         if eevee is not None:

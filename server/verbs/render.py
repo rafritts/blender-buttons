@@ -64,9 +64,12 @@ def render(
                 for a picture, then hand them the path.
                 (engine: builds vary — CYCLES may be absent, Eevee's id shifts by
                 version. `render op=settings` reports this build's real list.)
-      settings— READ the render config: available engines (the build's own list),
-                current engine, resolution/format, color management, and the active
-                engine's params. The read half of this verb.                  (—)
+      settings— READ the render config / PREFLIGHT: available engines (the build's
+                own list, dynamically-registered engines included), current engine,
+                resolution/format, color management, the active engine's params, and
+                for Cycles the GPU preflight — compute backend, per-device enabled
+                flags, and the EFFECTIVE device (catches a device=GPU that silently
+                falls back to CPU). The read half of this verb.                (—)
       quality — Eevee quality toggles (raytracing, ao, shadows, samples)
       cycles  — Cycles controls (device=GPU|CPU, backend=OPTIX|CUDA|…, denoise,
                 denoiser, adaptive_threshold, samples)

@@ -18,7 +18,7 @@ _OPS = ["set", "toon", "textured", "outline", "remove_outline", "shade_smooth",
 def material(
     op: Literal["set", "toon", "textured", "outline", "remove_outline",
                 "shade_smooth", "shade_flat", "search_textures", "search_hdris"],
-    target: tag(str, "object(s) to shade") = "",
+    target: tag(str, "object(s) to shade: 'name', group, or 'a,b,c'") = "",
     # PBR (set)
     base_color: tag(list, "[set/toon/textured] [r,g,b] 0..1") = None,
     hex: tag(str, "[set/toon] #RRGGBB color") = "",

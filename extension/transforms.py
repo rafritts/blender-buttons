@@ -3,8 +3,13 @@
 import math
 
 import bpy
+import mathutils
 
 from .common import activate, resolve_targets, world_bbox
+
+_AXIS_VEC = {"X": mathutils.Vector((1, 0, 0)),
+             "Y": mathutils.Vector((0, 1, 0)),
+             "Z": mathutils.Vector((0, 0, 1))}
 
 
 def nudge(params):
@@ -444,8 +449,112 @@ def snap_to_grid(params):
             "location_after": [round(v, 5) for v in obj.location]}
 
 
+def aim_axis(params):
+    """Rotate objects so a chosen LOCAL axis points down the from→to segment (G25).
+
+    The construction-side analogue of `add type=tube`'s point list, for the solids that
+    DON'T orient themselves (cylinder, cone, helix, box). Lays a coil along an edge, a
+    bolt down a hole, a spring along a strut — without hand-computing the euler. Sets
+    ABSOLUTE orientation about each object's own origin (roll is left free, which is
+    what you want for a radially-symmetric part); pair with move_to to position.
+
+    targets: object name / group / list / active.
+    from, to: world points [x,y,z]. The server resolves handles to points first.
+    axis:    the LOCAL axis to align with the segment — X|Y|Z, optionally signed
+             ('-Z' aims the object's −Z down the segment). Default Z."""
+    objs, err = resolve_targets(params.get("targets"))
+    if err:
+        return {"error": err}
+    frm, to = params.get("from"), params.get("to")
+    if frm is None or to is None:
+        return {"error": "aim_axis needs 'from' and 'to' points (or handles)"}
+    a = mathutils.Vector(frm)
+    direction = mathutils.Vector(to) - a
+    if direction.length < 1e-9:
+        return {"error": "'from' and 'to' coincide — no direction to aim along"}
+    direction.normalize()
+
+    axis_str = (params.get("axis") or "Z").upper().strip()
+    sign = -1.0 if axis_str.startswith("-") else 1.0
+    axis_key = axis_str.lstrip("+-")
+    if axis_key not in _AXIS_VEC:
+        return {"error": f"axis must be X|Y|Z (optionally signed), got '{params.get('axis')}'"}
+    quat = (_AXIS_VEC[axis_key] * sign).rotation_difference(direction)
+
+    for o in objs:
+        o.rotation_mode = 'XYZ'
+        o.rotation_euler = quat.to_euler()
+    bpy.context.view_layer.update()
+    return {"success": True, "aimed": [o.name for o in objs],
+            "axis": ("-" if sign < 0 else "") + axis_key,
+            "direction": [round(c, 4) for c in direction],
+            "rotation_deg": [round(math.degrees(v), 2) for v in quat.to_euler()]}
+
+
+def rest_on(params):
+    """Drop a source object along −axis until its REAL geometry rests on a target
+    surface (G26) — BVH ray-casts from the source's own vertices, so a rotated or
+    irregular part seats by its true lowest point, not its AABB bottom (which snap_to
+    gets wrong for anything tilted). Closes the loop between feel op=contacts saying
+    'floating 3mm' and an action that fixes it without the agent doing arithmetic.
+
+    targets: the object to drop (name / group / list / active).
+    target:  the surface object to rest ON (required).
+    axis:    drop axis — X|Y|Z. Default Z (gravity).
+    offset:  clearance to leave along axis after contact (m). Default 0 (tangent)."""
+    from .introspect import _prepare
+    objs, err = resolve_targets(params.get("targets"))
+    if err:
+        return {"error": err}
+    target_name = params.get("target")
+    if not target_name:
+        return {"error": "rest_on needs 'target' — the surface to rest on"}
+    target = bpy.data.objects.get(target_name)
+    if target is None:
+        return {"error": f"Target '{target_name}' not found"}
+    axis_key = (params.get("axis") or "Z").upper().strip().lstrip("+-")
+    if axis_key not in _AXIS_VEC:
+        return {"error": f"axis must be X|Y|Z, got '{params.get('axis')}'"}
+    axis_idx = "XYZ".index(axis_key)
+    offset = float(params.get("offset", 0.0) or 0.0)
+
+    tgt = _prepare(target)
+    if tgt is None:
+        return {"error": f"target '{target_name}' has no usable geometry"}
+    down = -_AXIS_VEC[axis_key]
+
+    rested = []
+    for o in objs:
+        if o.name == target_name:
+            continue
+        src = _prepare(o, cap=500)
+        if src is None:
+            continue
+        # Smallest clearance over source verts that have target surface directly
+        # beneath them = how far the object can fall before the first vert touches.
+        min_clear = None
+        for v in src["verts"]:
+            loc, normal, idx, dist = tgt["bvh"].ray_cast(v, down)
+            if loc is None:
+                continue
+            clear = v[axis_idx] - loc[axis_idx]   # ≥0 when surface is below the vert
+            if min_clear is None or clear < min_clear:
+                min_clear = clear
+        if min_clear is None:
+            return {"error": f"'{o.name}' has no geometry above '{target_name}' along "
+                             f"{axis_key} — nothing to rest on (move it over the target first)"}
+        drop = min_clear - offset   # translate by −drop along axis to seat (then add clearance)
+        o.location[axis_idx] -= drop
+        rested.append({"name": o.name, "dropped_mm": round(drop * 1000, 2)})
+    bpy.context.view_layer.update()
+    return {"success": True, "target": target_name, "axis": axis_key,
+            "offset": offset, "rested": rested}
+
+
 TOOLS = {
     "nudge":           nudge,
+    "aim_axis":        aim_axis,
+    "rest_on":         rest_on,
     "move_to":         move_to,
     "rotate_to":       rotate_to,
     "resize":          resize,

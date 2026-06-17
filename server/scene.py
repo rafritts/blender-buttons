@@ -329,8 +329,21 @@ def render_settings() -> str:
         ev = result["eevee"]
         lines.append("eevee:  " + "  ".join(f"{k}={v}" for k, v in ev.items()))
     if "cycles" in result:
-        cy = result["cycles"]
+        cy = dict(result["cycles"])
+        compute = cy.pop("compute", None)
+        warning = cy.pop("warning", None)
         lines.append("cycles: " + "  ".join(f"{k}={v}" for k, v in cy.items()))
+        if compute is not None:
+            if not compute.get("addon_enabled"):
+                lines.append("  compute: " + compute.get("note", "Cycles addon not enabled"))
+            else:
+                devs = compute.get("devices", [])
+                shown = ", ".join(f"{d['name']}[{d['type']}]{'✓' if d['enabled'] else '✗'}"
+                                  for d in devs) or "none"
+                lines.append(f"  compute: backend={compute.get('compute_device_type')}  "
+                             f"devices: {shown}")
+        if warning:
+            lines.append(f"  ⚠ {warning}")
     return "\n".join(lines)
 
 

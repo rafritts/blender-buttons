@@ -94,8 +94,8 @@ def feel(
                  bands with the narrowest/widest flagged; full=True dumps every ring
                  (axis, min, max, bands, full)
       rings    — edge-ring structure along an axis           (axis, target)
-      distance — distance between two objects (a, b; default = straight-line,
-                 or axis=X|Y for a single-axis distance)
+      distance — distance between two objects (a, b; default ANY = nearest-surface,
+                 reconciles with contacts; axis=X|Y|Z = single-axis centre-to-centre)
       gap      — surface-to-surface gap between two objects   (a, b)
       aligned  — are two objects aligned on a side?    (a, b, side=TOP|BOTTOM|…, tolerance)
       symmetry — mirror symmetry of a mesh    (target, axis, plane, epsilon)

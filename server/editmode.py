@@ -301,19 +301,23 @@ def random_select(fraction: float = 0.2, seed: int = 0, label: str = "") -> str:
 
 @mcp.tool()
 def jitter_vertices(amount: float = 0.005, axis: str = "NORMAL", seed: int = 0,
-                    only_positive: bool = False, label: str = "") -> str:
+                    only_positive: bool = False, label: str = "", target: str = "") -> str:
     """
-    Randomly displace selected vertices in edit mode — organic lumpy geometry in one call.
+    Randomly displace vertices in edit mode — organic lumpy geometry in one call.
     amount: max displacement in meters (default 5mm).
     axis: NORMAL (puffs along each vert's normal — best for organic dough) | X | Y | Z | XYZ.
     seed: RNG seed for reproducibility.
     only_positive: if true, only displace outward (default both directions).
+    target: mesh to jitter (empty=active). Like loop_cut, passing target auto-enters
+            edit mode and exits after; with no narrowed selection it jitters the WHOLE
+            mesh, so a one-call "lump up the donut" needs no manual mode/select (G28).
 
     Tutorial uses: jitter donut with axis=NORMAL for lumpy dough; jitter icing's bottom ring
     with axis=Z + only_positive (negative amount) for drippy edges.
     """
     result = call_blender("jitter_vertices", {
         "amount": amount, "axis": axis, "seed": seed, "only_positive": only_positive,
+        "target": target,
     }, label=label)
     if result.get("success"):
         main = (f"Jittered {result['verts_jittered']} verts along {result['axis']} "

@@ -1083,7 +1083,14 @@ def jitter_vertices(params):
     bm = bmesh.from_edit_mesh(obj.data)
     selected = [v for v in bm.verts if v.select]
     if not selected:
-        return {"error": "No vertices selected"}
+        # No narrowed selection → jitter the WHOLE mesh (matches this op's own
+        # "jitter all the donut's verts" use case). One predictable contract: pass
+        # target=, get the whole mesh unless you've selected a subset (G28).
+        for v in bm.verts:
+            v.select = True
+        selected = list(bm.verts)
+        if not selected:
+            return {"error": f"'{obj.name}' has no vertices to jitter"}
 
     # Convert world-space amount into local space (account for object scale).
     scale = obj.scale

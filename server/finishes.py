@@ -173,7 +173,10 @@ def set_material(target: str = "",
       set_material("wheel_FL", slot=1, hex="#3a3a40")                       # the iron rim
     """
     params = {}
-    if target:               params["target"] = target
+    # Route `target` through the shared parser so a comma list / group name expands
+    # like every other verb (G27) — "a,b,c" → ["a","b","c"], "" → omitted.
+    tgt = _targets(target)
+    if tgt is not None:      params["target"] = tgt
     if material:             params["material"] = material
     if slot is not None:     params["slot"] = slot
     if material_name:        params["material_name"] = material_name

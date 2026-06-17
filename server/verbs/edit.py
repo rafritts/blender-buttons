@@ -165,7 +165,7 @@ def edit(
     if o == "inflate":
         return editmode.inflate_selection(amount, label)
     if o == "jitter":
-        return editmode.jitter_vertices(amount, axis, seed, only_positive, label)
+        return editmode.jitter_vertices(amount, axis, seed, only_positive, label, target)
     if o == "proportional_move":
         return editmode.proportional_move(out, inward, up, down, left, right,
                                           forward, back, x, y, z, radius, falloff, label)

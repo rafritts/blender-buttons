@@ -11,17 +11,17 @@ from server._core import mcp
 from server import transforms, relational, editmode, handles
 from ._common import tag, unknown
 
-_OPS = ["nudge", "move_to", "rotate_to", "resize", "scale", "rotate", "apply",
-        "snap", "snap_grid", "match_dim", "mirror", "distribute", "array_corners",
-        "array_along", "array_radial", "scatter", "move_verts", "scale_verts",
-        "snap_loop"]
+_OPS = ["nudge", "move_to", "rotate_to", "aim_axis", "rest_on", "resize", "scale",
+        "rotate", "apply", "snap", "snap_grid", "match_dim", "mirror", "distribute",
+        "array_corners", "array_along", "array_radial", "scatter", "move_verts",
+        "scale_verts", "snap_loop"]
 
 
 @mcp.tool(name="transform")
 def transform(
-    op: Literal["nudge", "move_to", "rotate_to", "resize", "scale", "rotate", "apply",
-                "snap", "snap_grid", "match_dim", "mirror", "distribute",
-                "array_corners", "array_along", "array_radial", "scatter",
+    op: Literal["nudge", "move_to", "rotate_to", "aim_axis", "rest_on", "resize",
+                "scale", "rotate", "apply", "snap", "snap_grid", "match_dim", "mirror",
+                "distribute", "array_corners", "array_along", "array_radial", "scatter",
                 "move_verts", "scale_verts", "snap_loop"],
     targets: tag(str, "object(s): '' active, 'name', or 'a,b,c'") = "",
     # nudge (relative meters)
@@ -44,6 +44,11 @@ def transform(
     deg_z: tag(float, "[rotate_to] absolute Z euler (deg)") = None,
     handle: tag(str, "[move_to/snap_loop] a named handle: move_to moves a whole object "
                      "TO its point; snap_loop seats the selected loop ONTO it") = "",
+    # aim_axis (orient a local axis down a from→to segment)
+    aim_from: tag(list, "[aim_axis] start point [x,y,z]") = None,
+    aim_to: tag(list, "[aim_axis] end point [x,y,z]") = None,
+    from_handle: tag(str, "[aim_axis] start handle (instead of aim_from)") = "",
+    to_handle: tag(str, "[aim_axis] end handle (instead of aim_to)") = "",
     # resize (absolute meters)
     width: tag(float, "[resize] absolute X extent (m)") = None,
     depth: tag(float, "[resize] absolute Y extent (m)") = None,
@@ -53,16 +58,16 @@ def transform(
     pivot: tag(str, "[scale/rotate] pivot: center (default; scale=bbox centre, rotate=own origin) | bbox_center | cursor | origin") = "center",
     pivot_object: tag(str, "[scale/rotate] object to pivot around") = "",
     angle: tag(float, "[rotate] degrees") = 0.0,
-    axis: tag(str, "[rotate/match_dim/array_*] axis X|Y|Z") = "Z",
+    axis: tag(str, "[rotate/match_dim/array_*] axis X|Y|Z; [aim_axis] local axis (signed ok, e.g. -Z); [rest_on] drop axis") = "Z",
     # apply
     scale: tag(bool, "[apply] bake scale into mesh data") = True,
     rotation: tag(bool, "[apply] bake rotation") = False,
     location: tag(bool, "[apply] bake location") = False,
     # snap
-    target: tag(str, "[snap/match_dim] object to snap/measure against") = "",
+    target: tag(str, "[snap/match_dim] object to snap/measure against; [rest_on] surface to rest on") = "",
     side: tag(str, "[snap] target side, e.g. Z_MAX") = "Z_MAX",
     source_side: tag(str, "[snap] moved-object side (AUTO infers)") = "AUTO",
-    offset: tag(float, "[snap] gap along the snap axis (m)") = 0.0,
+    offset: tag(float, "[snap] gap along the snap axis (m); [rest_on] clearance after contact (m)") = 0.0,
     # snap_grid
     size: tag(float, "[snap_grid] grid size (m)") = 0.1,
     axes: tag(str, "[snap_grid] axes to snap, e.g. XYZ") = "XYZ",
@@ -120,6 +125,15 @@ def transform(
       rotate_to— set ABSOLUTE euler rotation in degrees (deg_x/deg_y/deg_z; omitted
                  kept). Distinct param names from move_to's to_*, so no field is
                  polymorphic — meaning is unambiguous from the name alone.
+      aim_axis — orient a LOCAL axis down a from→to segment (aim_from/aim_to points or
+                 from_handle/to_handle; axis=Z default, signed ok). The orient-along-
+                 an-edge primitive for solids that don't self-orient like type=tube —
+                 lay a coil/bolt/strut along a direction without hand-trig. Rotation
+                 only; pair with move_to to position.
+      rest_on  — drop along −axis until the object's REAL geometry rests on `target`
+                 (axis=Z default, offset=clearance). BVH from the source's own verts,
+                 so tilted/irregular parts seat by their true lowest point — the action
+                 half of feel op=contacts 'floating Xmm'.
       resize   — set absolute dims         (width, depth, height)
       scale    — multiply size             (factor, pivot=center|.., pivot_object)
       rotate   — rotate degrees            (angle, axis, pivot, pivot_object)
@@ -162,6 +176,21 @@ def transform(
         ry = deg_y if deg_y is not None else to_y
         rz = deg_z if deg_z is not None else to_z
         return transforms.rotate_to(targets, rx, ry, rz, label)
+    if o == "aim_axis":
+        frm, to = aim_from, aim_to
+        if from_handle:
+            pt, err, drift = handles.resolve_point(from_handle)
+            if err:
+                return err
+            frm = pt
+        if to_handle:
+            pt, err, drift = handles.resolve_point(to_handle)
+            if err:
+                return err
+            to = pt
+        return transforms.aim_axis(targets, frm, to, axis, label)
+    if o == "rest_on":
+        return transforms.rest_on(targets, target, axis, offset, label)
     if o == "resize":
         return transforms.resize(targets, width, depth, height, label)
     if o == "scale":

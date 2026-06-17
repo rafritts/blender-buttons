@@ -218,15 +218,22 @@ def get_current_selection() -> str:
 @mcp.tool()
 def distance_between(a: str, b: str, axis: str = "ANY") -> str:
     """
-    Centre-to-centre distance between two objects, in meters.
-    axis: ANY (3D Euclidean) | X | Y | Z (single-axis distance).
+    Distance between two objects, in meters.
+    axis: ANY (default) = true NEAREST-SURFACE distance (BVH — reconciles with a
+    contacts read and the status-block bounds), X | Y | Z = single-axis centre-to-
+    centre projection.
 
     Use this when you'd otherwise be tempted to fetch coords of both and subtract —
     let the server do the math so you don't carry numbers in your head.
     """
     result = call_blender("distance_between", {"a": a, "b": b, "axis": axis})
     if result.get("success"):
-        return f"{a} ↔ {b} ({result['axis']}): {result['distance']} m" + _status(result)
+        measured = result.get("measured", "")
+        tail = f"  ({measured})" if measured else ""
+        btw = result.get("between")
+        if btw:
+            tail += f"  between {btw[0]}↔{btw[1]}"
+        return f"{a} ↔ {b} ({result['axis']}): {result['distance']} m{tail}" + _status(result)
     return result.get("error", "failed")
 
 

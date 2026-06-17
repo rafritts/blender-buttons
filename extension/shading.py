@@ -165,7 +165,10 @@ def set_material(params):
             mat = mats[slot_idx]
             meshes = []  # editing the slot's material in place; no reassignment
         else:
-            mat_name = params.get("material_name") or material or f"{target}_mat"
+            # target may be a list (G27 multi-object recolor); derive a string label
+            # for the default material name rather than stringifying the list.
+            tgt_label = target if isinstance(target, str) else (target[0] if target else "material")
+            mat_name = params.get("material_name") or material or f"{tgt_label}_mat"
             mat = bpy.data.materials.get(mat_name) or bpy.data.materials.new(mat_name)
     bsdf = _ensure_principled(mat)
 
