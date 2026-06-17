@@ -6,3 +6,6 @@ __pycache__/
 .DS_Store
 *.zip
 .grok/
+*.png
+*.jpeg
+*.jpg
