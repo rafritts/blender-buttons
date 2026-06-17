@@ -1,19 +1,10 @@
 # MCP gaps
 
-_A **live worklist of OPEN gaps** — fixable limitations in the MCP surface, nothing
-historical. Shipped/fixed items are **removed** (they live in git history), so this file
-is only ever "what's still wrong." G-numbers are **stable across rewrites**: a number
-missing from the sequence (G1–G8, G10–G13, G15–G22, G24–G29) means that gap shipped and
-was retired. Last updated 2026-06-17 — relational-placement primitives shipped (dogfooded
-by a Newton's-cradle build that refused to dead-reckon): `on`/`under` accept an anchor LIST
-(span across / hang between supports), `at_corner` gains `top:true` (rest on the target's
-top, not embed), and `add type=tube between=[A,B]` (strut between two anchors on
-nearest-surface endpoints) — all covered by `tests/e2e_relational.py`. Also G23 moves 1–3 shipped (the per-verb scan tax:
-polymorphic-param split, per-op param manifests, and teaching errors via
-`server/verbs/_common.py:teach()`, covered by `tests/g23_teaching.py`); move 4 (splitting
-fat verbs) deferred as unwarranted. Earlier: G24–G29 shipped (render preflight, aim_axis,
-rest_on, material target list, edit-mode contract, nearest-surface distance), covered by
-`tests/e2e_gaps_b.py`._
+> **This file is a live worklist of CURRENT, OPEN gaps only.** No history lives here.
+> Shipped, fixed, or retired gaps are **deleted, not archived** — use `git log -- gaps.md`
+> / `git blame` to see anything past. No changelogs, no "what we shipped," no "considered
+> and declined." When a gap is closed, **delete its entry**. G-numbers are **stable and
+> never reused** — a missing number just means that gap was retired.
 
 ## North star
 
@@ -83,35 +74,6 @@ must re-apply it to the twin by hand. A one-call `object op=mirror_edit name=<sr
 (read src's delta-from-twin, apply the mirrored transform) makes "you yawed the left form
 +25° — mirror it right" a single move. Post-hoc twin-matching, not a live mode — cheaper than
 G14 proper and independently useful.
-
-## G23 — the per-verb **parameter union**: scan tax 🪢 MITIGATED (moves 1–3 shipped; move 4 deferred)
-
-The 17-verb consolidation is right — **do not undo it.** But each fat verb (`transform`,
-`add`, `edit`) carries ~40–50 params; any one op uses a handful, so picking an op means
-scanning and filtering. Three of the four moves shipped; the scan tax is now mitigated
-without paying the cost of splitting verbs.
-
-**Litmus test (still the bar for any new param):** a param is correctly designed if its
-meaning is unambiguous from **op name + param name alone**, no description needed.
-
-- **Move 1 — kill polymorphic params** ✅ `rotate_to` got its own `deg_*`, so no field means
-  two things depending on op.
-- **Move 2 — param manifest per op** ✅ each op line in the fat verbs' docstrings carries its
-  own `(params)` manifest, plus `[op]`-prefix tags on every param — picking the op hands you
-  its handful instead of scan-and-filter.
-- **Move 3 — teaching errors + a canonical example per op** ✅ `server/verbs/_common.py:teach()`
-  + a per-verb guard table: a valid op missing a structurally-required param (a destination, a
-  target, a prototype, two endpoints, a name) returns `needs … — got none. e.g. <canonical
-  call>` instead of a silent no-op (`move_to` with no destination used to report "moved" and
-  change nothing) or a deep crash. Covered by `tests/g23_teaching.py` (25 checks).
-- **Move 4 — split the 2–3 genuinely fat verbs into namespaced sub-tools** (`transform_move_to`)
-  🪞 DEFERRED. Honest cost = a discovery hop + a sliver of the old 150-tool world. Moves 1–3
-  make it unwarranted today; revisit only if the union scan tax resurfaces in real use, and
-  only on the genuinely-fat verbs — never the lean ones (`scene`/`view`/`render`).
-
-Note: JSON-Schema conditionals help server-side *validation* but *hurt* readability — catch
-errors with `teach()` (move 3), don't buy obviousness with schema conditionals. Obviousness
-comes from move 2.
 
 ## G33 — `edit op=taper_section` ignores `from_ring`→`to_ring` direction 🔀 OPEN
 
@@ -353,26 +315,6 @@ the edited region, plus a before/after diff of that region, so a local change is
 nearest existing tool (`region_form`'s per-patch L/R mirror) is the right shape but is undermined by the
 stale-selection bug (G42); fixing G42 + scoping the checks to the active selection would close most of
 this. Dogfood: the bust edit passed bbox + global-symmetry while being asymmetric and malformed.
-
-## Considered and declined — pencil dogfood (2026-06-17)
-
-Logged so they aren't re-raised. Each conflicts with a settled design principle, not a missing build.
-
-- **Post-action render thumbnail** — against the core thesis (instrumented API, *not* a screenshot
-  puzzle) and the agent never reads renders back; ground truth is the status block + `feel`. The same
-  review praised the no-screenshot thesis, then asked for screenshots.
-- **Scene tree with "functional roles" (container / top-surface)** — divination. The tree already
-  shows collections + their parts; naming "the top surface" *for* the agent is the semantic guessing
-  the server deliberately won't do (legibility, not divination). `object info` bounds make the surface
-  legible without it.
-- **Mandatory / auto `targets`** — already solved: every `transform` takes `targets` (object, list,
-  OR a collection name, which expands to members). A stale active object is normal Blender; the
-  active-object default is a convenience, not a bug.
-- **`lay_on(target, angle)` high-level intent** — the angle is *taste* (the human's domain), and
-  `rotate_to` → `rest_on` already seats arbitrary rotated geometry on real contact. The extra
-  choreography hit was the coil penetration (G32), not a missing primitive. No bespoke verb.
-
----
 
 ## Carried over — bigger build-outs (not yet started)
 
