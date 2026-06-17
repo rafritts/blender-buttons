@@ -417,6 +417,181 @@ def get_mesh_profile(params):
             "narrowest": narrow, "widest": wide, "profile": out_bands}
 
 
+def get_silhouette(params):
+    """Orthographic projected outline along a view axis (gaps.md G37) — the 2D shape,
+    read directly instead of cross-multiplying two 1D profile sweeps.
+
+    Pure geometry, NOT a render: project every vert onto the plane perpendicular to
+    `axis`, rasterize into a coarse occupancy grid, return it as a text map of '#'
+    (filled) / '.' (empty). Shows drape-vs-projection (teardrop vs cone) in one read.
+
+    axis:      view axis to look ALONG (X|Y|Z). Default X = the side view (Y-depth ×
+               Z-height plane). The silhouette is the other two axes.
+    res:       grid resolution on the wider plane axis (default 32, 4..120).
+    selection: True = only the live selection's verts (default whole mesh)."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.type != 'MESH':
+        return {"error": "No active mesh object"}
+    axis = params.get("axis", "X").upper()
+    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 0)
+    others = [(i, n) for i, n in enumerate(['X', 'Y', 'Z']) if i != axis_idx]
+    res = max(4, min(120, int(params.get("res") or 32)))
+    sel_only = bool(params.get("selection", False))
+
+    if sel_only and obj.mode == 'EDIT':
+        obj.update_from_editmode()
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.transform(obj.matrix_world)
+    verts = [v for v in bm.verts if (v.select if sel_only else True)]
+    if not verts:
+        bm.free()
+        return {"error": "no verts" + (" selected" if sel_only else "")}
+    us = [v.co[others[0][0]] for v in verts]
+    vs = [v.co[others[1][0]] for v in verts]
+    bm.free()
+
+    umin, umax = min(us), max(us)
+    vmin, vmax = min(vs), max(vs)
+    uext = (umax - umin) or 1e-9
+    vext = (vmax - vmin) or 1e-9
+    # square-ish cells: res cells on the wider axis, the other axis proportional.
+    if uext >= vext:
+        cols = res
+        cell = uext / cols
+        rows = max(1, round(vext / cell))
+    else:
+        rows = res
+        cell = vext / rows
+        cols = max(1, round(uext / cell))
+    grid = [[False] * cols for _ in range(rows)]
+    for u, w in zip(us, vs):
+        ci = min(cols - 1, int((u - umin) / uext * cols))
+        ri = min(rows - 1, int((w - vmin) / vext * rows))
+        grid[ri][ci] = True
+    filled = sum(c for row in grid for c in row)
+    # rows emitted high-v first so the text map reads top-down like the viewport.
+    return {"success": True, "axis": axis, "u_label": others[0][1], "v_label": others[1][1],
+            "cols": cols, "rows": rows, "cell_m": round(cell, 4),
+            "u_range": [round(umin, 4), round(umax, 4)],
+            "v_range": [round(vmin, 4), round(vmax, 4)],
+            "filled_cells": filled,
+            "grid": ["".join("#" if c else "." for c in grid[r]) for r in range(rows - 1, -1, -1)]}
+
+
+def _section_loops_area(edges, axis_idx):
+    """Walk a set of cut edges into closed contours; return (summed shoelace area,
+    n_loops). Each contour is shoelaced in the 2D section plane (the two non-axis
+    coords). Approximate on branching cuts; exact on clean closed loops."""
+    from collections import defaultdict
+    adj = defaultdict(list)
+    coords = {}
+    for e in edges:
+        a, b = e.verts
+        adj[a.index].append(b.index)
+        adj[b.index].append(a.index)
+        coords[a.index] = a.co
+        coords[b.index] = b.co
+    o = [i for i in range(3) if i != axis_idx]
+    visited = set()
+    total = 0.0
+    nloops = 0
+    for start in list(adj):
+        if start in visited:
+            continue
+        loop = []
+        prev = None
+        cur = start
+        while cur is not None and cur not in visited:
+            visited.add(cur)
+            loop.append(cur)
+            nbrs = [x for x in adj[cur] if x != prev]
+            prev = cur
+            cur = nbrs[0] if nbrs else None
+        if len(loop) >= 3:
+            nloops += 1
+            pts = [(coords[i][o[0]], coords[i][o[1]]) for i in loop]
+            s = 0.0
+            for k in range(len(pts)):
+                x1, y1 = pts[k]
+                x2, y2 = pts[(k + 1) % len(pts)]
+                s += x1 * y2 - x2 * y1
+            total += abs(s) * 0.5
+    return total, nloops
+
+
+def get_section(params):
+    """True cross-section PERIMETER + enclosed AREA along an axis (gaps.md G47).
+
+    Unlike profile (bbox width per band), this slices the actual mesh with a plane at
+    each section position and sums the cut-contour edge lengths (perimeter ≈ girth /
+    circumference) plus the shoelace area — so circumference and cross-sectional area
+    are first-class (cup size, pipe girth, limb circumference, volume reasoning).
+
+    axis:     slice axis (X|Y|Z, default Z).
+    sections: number of evenly spaced slices (default 12).
+    min, max: optional world-space window on the axis."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.type != 'MESH':
+        return {"error": "No active mesh object"}
+    axis = params.get("axis", "Z").upper()
+    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
+    n = max(1, int(params.get("sections") or 12))
+    win_min = params.get("min")
+    win_max = params.get("max")
+    win_min = float(win_min) if win_min is not None else None
+    win_max = float(win_max) if win_max is not None else None
+
+    src = bmesh.new()
+    src.from_mesh(obj.data)
+    src.transform(obj.matrix_world)
+    axis_vals = [v.co[axis_idx] for v in src.verts]
+    if not axis_vals:
+        src.free()
+        return {"error": "mesh has no geometry"}
+    lo = win_min if win_min is not None else min(axis_vals)
+    hi = win_max if win_max is not None else max(axis_vals)
+    if hi - lo <= 1e-9:
+        src.free()
+        return {"error": "no extent on this axis to section"}
+
+    # Sample inside the span (avoid the exact end caps, which bisect to nothing).
+    no = [0.0, 0.0, 0.0]
+    no[axis_idx] = 1.0
+    sections = []
+    for i in range(n):
+        frac = (i + 0.5) / n
+        pos = lo + frac * (hi - lo)
+        bm = src.copy()
+        co = [0.0, 0.0, 0.0]
+        co[axis_idx] = pos
+        try:
+            res = bmesh.ops.bisect_plane(
+                bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:],
+                plane_co=co, plane_no=no, clear_inner=False, clear_outer=False)
+            cut_edges = [g for g in res["geom_cut"] if isinstance(g, bmesh.types.BMEdge)]
+            perim = sum((e.verts[0].co - e.verts[1].co).length for e in cut_edges)
+            area, nloops = _section_loops_area(cut_edges, axis_idx)
+        finally:
+            bm.free()
+        if not cut_edges:
+            continue
+        sections.append({axis: round(pos, 4), "perimeter_cm": round(perim * 100, 2),
+                         "area_cm2": round(area * 10000, 2), "loops": nloops,
+                         "cut_edges": len(cut_edges)})
+    src.free()
+    if not sections:
+        return {"error": "no closed cross-sections found in the window"}
+    widest = max(sections, key=lambda s: s["perimeter_cm"])
+    narrow = min(sections, key=lambda s: s["perimeter_cm"])
+    return {"success": True, "axis": axis, "sections": len(sections),
+            "extent": [round(lo, 4), round(hi, 4)],
+            "windowed": win_min is not None or win_max is not None,
+            "widest": widest, "narrowest": narrow, "profile": sections}
+
+
 def get_current_selection(params):
     import bmesh
     obj = bpy.context.active_object
@@ -793,6 +968,8 @@ TOOLS = {
     "set_mode":               set_mode,
     "get_object_info":        get_object_info,
     "get_mesh_profile":       get_mesh_profile,
+    "get_silhouette":         get_silhouette,
+    "get_section":            get_section,
     "get_current_selection":  get_current_selection,
     "get_custom_properties":  get_custom_properties,
     "set_custom_property":    set_custom_property,

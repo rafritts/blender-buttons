@@ -494,6 +494,99 @@ def sculpt_flatten(params):
     return result
 
 
+def sculpt_gravity(params):
+    """Region-parametric GRAVITY drape — SPEC-08 Tier A, the lead deformer.
+
+    Pins the TOP of the region (the attachment) and lets the lower mass fall along
+    world -Z, weighted by height: the top is frozen, the bottom falls fully, the
+    middle ramps. The fullest point sinks and the lower pole elongates downward → a
+    hanging / teardrop form BY CONSTRUCTION, not by a seeing hand. The correctness
+    lives in the algorithm; the agent only tunes magnitude (strength + pin), which
+    the numeric reads can verify (feel op=silhouette/protrusion).
+
+    target:   object name (required).
+    at:       optional [x, y, z] world center to SCOPE the drape to a sphere. Omit
+              to drape the WHOLE mesh (SPEC-08 build-order Phase 1).
+    radius:   sphere radius (m) — required when `at` is given; ignored otherwise.
+    strength: metres the FREE (bottom) end falls. Default 0.02.
+    pin:      0..1 fraction of the region's Z-height, measured from the TOP, that is
+              FROZEN (the attachment line). Default 0.25 — the top quarter holds, the
+              rest hangs. pin=0 lets everything fall (rigid slide, no sag); pin→1
+              freezes nearly all of it.
+    falloff:  radial falloff at the sphere edge (scoped mode only). Default SMOOTH.
+    """
+    target = params.get("target")
+    if not target:
+        return {"error": "'target' (object name) is required"}
+    obj = bpy.data.objects.get(target)
+    if obj is None:
+        return {"error": f"Object '{target}' not found"}
+    if obj.type != 'MESH':
+        return {"error": f"'{target}' is not a mesh (type={obj.type})"}
+
+    at = params.get("at")
+    scoped = isinstance(at, list) and len(at) == 3
+    falloff = (params.get("falloff") or "SMOOTH").upper()
+    if falloff not in _FALLOFFS:
+        return {"error": f"Invalid falloff '{falloff}'. Use one of {sorted(_FALLOFFS)}"}
+    strength = float(params.get("strength", params.get("amount", 0.02)))
+    pin = max(0.0, min(0.95, float(params.get("pin", 0.25))))
+
+    bm = _enter_edit(obj)
+    subdivided = 0
+    if scoped:
+        center = mathutils.Vector((float(at[0]), float(at[1]), float(at[2])))
+        radius = float(params.get("radius", 0.0))
+        if radius <= 0:
+            _exit_edit(obj)
+            return {"error": "'radius' must be > 0 when 'at' is given"}
+        subdivided = _maybe_subdivide(bm, obj, center, radius, params.get("subdivide", False))
+        hits = _verts_in_radius(bm, obj, center, radius)
+    else:
+        hits = [(v, 0.0) for v in bm.verts]
+
+    if not hits:
+        _exit_edit(obj)
+        return {"error": "no verts in region"}
+
+    mat = obj.matrix_world
+    zs = [(mat @ v.co).z for v, _ in hits]
+    zmin, zmax = min(zs), max(zs)
+    pin_z = zmax - pin * (zmax - zmin)
+    span = pin_z - zmin
+    if span <= 1e-9:
+        _exit_edit(obj)
+        return {"error": "region has no vertical extent below the pin line to drape"}
+
+    moved = 0
+    max_drop = 0.0
+    for v, t in hits:
+        wz = (mat @ v.co).z
+        if wz >= pin_z:
+            continue  # frozen attachment
+        # 0 at the pin line → 1 at the region bottom, smoothstepped for a soft seam.
+        vw = (pin_z - wz) / span
+        vw = vw * vw * (3.0 - 2.0 * vw)
+        rw = _falloff_weight(t, falloff) if scoped else 1.0
+        drop = strength * vw * rw
+        if drop == 0.0:
+            continue
+        v.co += _world_to_local_dir(obj, mathutils.Vector((0.0, 0.0, -drop)))
+        moved += 1
+        if drop > max_drop:
+            max_drop = drop
+
+    _exit_edit(obj)
+    push_undo(f"sculpt_gravity strength={strength}")
+    result = {"success": True, "verts_affected": moved, "strength": strength,
+              "pin": pin, "region": "sphere" if scoped else "whole_mesh",
+              "max_drop": round(max_drop, 4), "subdivided_edges": subdivided}
+    warn = _affected_warning(moved, subdivided, "sculpt_gravity")
+    if warn:
+        result["warning"] = warn
+    return result
+
+
 TOOLS = {
     "sculpt_grab":    sculpt_grab,
     "sculpt_inflate": sculpt_inflate,
@@ -502,4 +595,5 @@ TOOLS = {
     "sculpt_crease":  sculpt_crease,
     "sculpt_pinch":   sculpt_pinch,
     "sculpt_flatten": sculpt_flatten,
+    "sculpt_gravity": sculpt_gravity,
 }

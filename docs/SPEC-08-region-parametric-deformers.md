@@ -1,7 +1,9 @@
 # SPEC-08 — Region-parametric deformers: put the sculpt skill in the tool
 
-_Status: Proposed 2026-06-17, awaiting sign-off. Sourced from the bust enlarge →
-gravity-shaping dogfood — see gaps.md G46 (and the "cone, not teardrop" reflection)._
+_Status: Proposed 2026-06-17. **Phase 1 (Tier A — gravity drape) + the eyeless verify
+reads implemented 2026-06-17, untested — awaiting a live-build dogfood.** Tiers B–E and
+the mask/bake shared infra remain open. Sourced from the bust enlarge → gravity-shaping
+dogfood — see gaps.md G46 (and the "cone, not teardrop" reflection)._
 
 ## The problem
 
@@ -128,10 +130,14 @@ closes — without them the agent is tuning magnitude against partial proxies.
 
 ## Build order — by tryability
 
-1. **Mesh Filter `gravity` (+ inflate/smooth/relax), region = whole active mesh.** Smallest
-   tryable win — re-run the bust and see if one call beats the hand-sculpt. No mask, no
-   infra.
+1. **Mesh Filter `gravity`, region = whole active mesh or a sphere.** ✅ DONE (untested) —
+   shipped as `sculpt brush=gravity` (a bmesh drape: pin the top, ramp the fall by height),
+   not Blender's modal mesh-filter operator, to match the programmatic-bmesh sculpt family
+   and stay reliable headless. inflate/smooth already exist as brushes. Re-run the bust:
+   `sculpt brush=gravity target=… at_x/y/z=<breast apex> radius=… strength=0.03 pin=0.3`,
+   then `feel op=silhouette axis=X` to see if it hangs.
 2. **Mask from selection** → filters respect a pinned region (chest stays, breast falls).
+   Still TODO — gravity scopes by sphere/whole-mesh today, not by an arbitrary selection mask.
 3. **Elastic Deform brush** — drop-in `brush=elastic` on `sculpt`.
 4. **Lattice deform** — cage + named-point moves.
 5. **Cloth Filter** (gravity + pin) — first taste of a solve, still bake-free.

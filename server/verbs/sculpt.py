@@ -10,14 +10,14 @@ from server._core import mcp
 from server import sculpt as _s, handles
 from ._common import tag, unknown
 
-_BRUSHES = ["grab", "draw", "inflate", "smooth", "crease", "pinch", "flatten"]
+_BRUSHES = ["grab", "draw", "inflate", "smooth", "crease", "pinch", "flatten", "gravity"]
 
 
 @mcp.tool(name="sculpt")
 def sculpt(
-    brush: Literal["grab", "draw", "inflate", "smooth", "crease", "pinch", "flatten"],
+    brush: Literal["grab", "draw", "inflate", "smooth", "crease", "pinch", "flatten", "gravity"],
     target: tag(str, "mesh to sculpt"),
-    radius: tag(float, "brush radius (m)"),
+    radius: tag(float, "brush radius (m); optional for gravity (omit = whole mesh)") = None,
     at_x: tag(float, "brush world X (or use handle=)") = None,
     at_y: tag(float, "brush world Y (or use handle=)") = None,
     at_z: tag(float, "brush world Z (or use handle=)") = None,
@@ -46,6 +46,9 @@ def sculpt(
     plane_normal_z: tag(float, "[flatten] plane normal Z") = 0.0,
     # smooth
     iterations: tag(int, "[smooth] relax iterations") = 1,
+    # gravity (region-parametric drape)
+    strength: tag(float, "[gravity] metres the free (bottom) end falls") = 0.02,
+    pin: tag(float, "[gravity] 0..1 top fraction frozen as the attachment") = 0.25,
     falloff: tag(str, "brush falloff SMOOTH|SHARP|…") = "SMOOTH",
     subdivide: tag(bool, "add resolution under the brush first") = False,
     label: str = "",
@@ -62,6 +65,9 @@ def sculpt(
       crease  — pull into a sharp ridge     (amount; falloff defaults SHARP)
       pinch   — pull verts together         (amount)
       flatten — flatten toward a plane      (amount, plane_normal_x/y/z)
+      gravity — DRAPE a soft form: pin the top, let the lower mass fall →
+                a hanging/teardrop shape by construction (strength, pin). Scope
+                with at_x/y/z + radius, or omit the point to drape the whole mesh.
 
     falloff: SMOOTH|SHARP|… subdivide=True adds resolution under the brush first.
     """
@@ -73,8 +79,14 @@ def sculpt(
             return err
         note = drift or ""
         at_x, at_y, at_z = pt
+    # gravity is region-parametric, not a stroke: it allows no point (whole mesh).
+    if b == "gravity":
+        return note + _s.sculpt_gravity(target, at_x, at_y, at_z, radius,
+                                        strength, pin, falloff, subdivide, label)
     if at_x is None or at_y is None or at_z is None:
         return "sculpt: need a brush point — pass at_x/at_y/at_z or handle=<name>"
+    if radius is None:
+        return "sculpt: 'radius' is required for this brush"
     if b == "grab":
         result = _s.sculpt_grab(target, at_x, at_y, at_z, radius, to_x, to_y, to_z,
                                 out, inward, up, down, left, right, forward, back,

@@ -12,16 +12,17 @@ from server._core import mcp
 from server import topology, queries, rings, introspect, lint, handles, assembly
 from ._common import tag, unknown
 
-_OPS = ["topology", "profile", "rings", "distance", "gap", "aligned", "symmetry",
-        "mesh", "overlaps", "validate", "audit", "contacts", "resting", "aim",
-        "handle", "handles", "accept", "forget", "assembly", "map", "relate"]
+_OPS = ["topology", "profile", "silhouette", "section", "rings", "distance", "gap",
+        "aligned", "symmetry", "mesh", "overlaps", "validate", "audit", "contacts",
+        "resting", "aim", "handle", "handles", "accept", "forget", "assembly", "map",
+        "relate"]
 
 
 @mcp.tool(name="feel")
 def feel(
-    op: Literal["topology", "profile", "rings", "distance", "gap", "aligned",
-                "symmetry", "mesh", "overlaps", "validate", "audit", "contacts",
-                "resting", "aim", "handle", "handles", "accept", "forget",
+    op: Literal["topology", "profile", "silhouette", "section", "rings", "distance",
+                "gap", "aligned", "symmetry", "mesh", "overlaps", "validate", "audit",
+                "contacts", "resting", "aim", "handle", "handles", "accept", "forget",
                 "assembly", "map", "relate"] = "topology",
     target: tag(str, "[topology/rings/symmetry/mesh] mesh object (empty=active); "
                      "[map] cast from every boundary handle on this mesh") = "",
@@ -39,6 +40,9 @@ def feel(
     bands: tag(int, "[profile] aggregation band count (default 24)") = 0,
     full: tag(bool, "[profile] True = raw per-ring dump instead of aggregated bands") = False,
     max_rings: tag(int, "[profile] max rings in full mode (0 = uncap)") = 200,
+    res: tag(int, "[silhouette] occupancy-grid resolution on the wider axis (default 32)") = 32,
+    sections: tag(int, "[section] number of evenly spaced slices (default 12)") = 12,
+    selection: tag(bool, "[silhouette] project only the live selection's verts") = False,
     # measurements
     a: tag(str, "[distance/gap/aligned] first object; [relate] first boundary handle") = "",
     b: tag(str, "[distance/gap/aligned] second object; [relate] second boundary handle") = "",
@@ -87,12 +91,24 @@ def feel(
                                 projection (cm), L/R mirror error — the form scalars a
                                 bbox can't show. Select a patch, read between strokes.
                                 (not in bundle; needs a selection)
+                   protrusion — ABSOLUTE protrusion of the SELECTION above its
+                                surrounding ring, in cm. Unlike region_form (shape-
+                                relative, invariant to self-similar growth), this is a
+                                ruler that moves when the form grows — diff before/after
+                                to confirm "it got 2cm bigger". (needs a selection)
                    features   — hard dihedral edges in chains (not in bundle)
                    thickness  — local wall/part diameter      (not in bundle)
                  lod=low|medium|high; base=cage|evaluated. (target, method, lod, base)
       profile  — cross-section width sweep along an axis: by default AGGREGATED into
                  bands with the narrowest/widest flagged; full=True dumps every ring
                  (axis, min, max, bands, full)
+      silhouette — orthographic projected OUTLINE along a view axis as a coarse '#'/'.'
+                 occupancy grid — the 2D shape read directly (teardrop vs cone), not
+                 reconstructed from two 1D profiles. Pure geometry, not a render.
+                 (axis = look-along axis, res, selection)
+      section  — TRUE cross-section perimeter + enclosed area per slice (real contour
+                 edge-length & shoelace, not bbox width) — circumference / girth /
+                 cross-sectional area as first-class numbers.   (axis, sections, min, max)
       rings    — edge-ring structure along an axis           (axis, target)
       distance — distance between two objects (a, b; default ANY = nearest-surface,
                  reconciles with contacts; axis=X|Y|Z = single-axis centre-to-centre)
@@ -144,6 +160,10 @@ def feel(
         return topology.get_topology(target, method, lod, base, seed)
     if o == "profile":
         return queries.get_mesh_profile(axis, min, max, max_rings, bands, full)
+    if o == "silhouette":
+        return queries.get_silhouette(axis, res, selection)
+    if o == "section":
+        return queries.get_section(axis, sections, min, max)
     if o == "rings":
         return rings.get_rings(axis, target)
     if o == "distance":

@@ -112,6 +112,16 @@ def _fmt_method(name: str, data: dict) -> list:
                          f"{data['projection_in_cm']}cm in, over the patch")
             lines.append(f"    L/R mirror (across X): {data['lr_mirror_mean_mm']}mm mean / "
                          f"{data['lr_mirror_max_mm']}mm max to nearest twin vert")
+    elif name == "protrusion":
+        if "note" in data:
+            lines.append(f"  protrusion: {data['note']}")
+        else:
+            lines.append(f"  protrusion ({data['selected']} selected verts @ {data['region']}, "
+                         f"base plane fit to {data['ring_verts']} ring verts):")
+            lines.append(f"    sticks out: {data['max_protrusion_cm']}cm max / "
+                         f"{data['mean_protrusion_cm']}cm mean above the surrounding surface "
+                         f"(recess {data['base_recess_cm']}cm)")
+            lines.append(f"    apex @ {data['apex_world']}  (absolute — diff before/after to confirm growth)")
     elif name == "features":
         lines.append(f"  features: {data['sharp_edges']} hard edge(s) ≥{data['threshold_deg']}° "
                      f"in {data['chains']} chain(s)")
@@ -160,6 +170,10 @@ def get_topology(target: str = "", method: str = "", lod: str = "low",
                    projects (cm), L/R mirror error — the form scalars a bbox can't show.
                    Select a patch, then read this between sculpt strokes (needs >=4
                    selected verts; read in OBJECT mode so the selection is synced).
+      protrusion — ABSOLUTE protrusion of the selection above its surrounding ring
+                   (cm). Where region_form is shape-relative (invariant to self-similar
+                   growth), this is a ruler that moves when the form grows — diff
+                   before/after to confirm a size change (needs a selection + a ring).
       features   — hard dihedral edges in chains (the machine sense)
       thickness  — local wall/part diameter (the SDF part-segmentation cue)
     """

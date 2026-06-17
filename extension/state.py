@@ -77,7 +77,8 @@ NO_LOG_TOOLS = {
 NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
     "describe", "distance_between", "gap_between", "is_aligned",
     "check_symmetry", "is_symmetric", "get_object_info", "get_current_selection",
-    "get_mesh_profile", "get_rings", "parts_in", "list_modifiers", "list_designs",
+    "get_mesh_profile", "get_silhouette", "get_section",
+    "get_rings", "parts_in", "list_modifiers", "list_designs",
     "set_viewport_angle", "set_viewport_shading", "set_viewport_overlays", "frame_scene",
     "zoom_to_selected", "orbit_viewport",
     # read-only introspection / lint tools (P3-P12) — pure queries, no scene mutation

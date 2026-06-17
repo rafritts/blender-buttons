@@ -149,6 +149,71 @@ def get_mesh_profile(axis: str = "Z", min: float = None, max: float = None,
 
 
 @mcp.tool()
+def get_silhouette(axis: str = "X", res: int = 32, selection: bool = False) -> str:
+    """Orthographic projected OUTLINE of the active mesh along a view axis — the 2D
+    shape read directly, not cross-multiplied from two 1D profile sweeps (gaps.md G37).
+
+    Pure geometry, not a render: projects every vert onto the plane perpendicular to
+    `axis` and rasterizes a coarse '#'/'.' occupancy map. Shows drape-vs-projection
+    (teardrop vs cone) in one read — the thing a profile sweep is blind to.
+
+    axis: view axis to look ALONG (X|Y|Z). Default X = side view (depth × height).
+    res: grid resolution on the wider plane axis (default 32, 4..120).
+    selection: True = only the live selection's verts.
+    """
+    result = call_blender("get_silhouette",
+                          {"axis": axis, "res": res, "selection": selection})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    ur, vr = result["u_range"], result["v_range"]
+    head = (f"silhouette along {result['axis']} — {result['u_label']}(→)×{result['v_label']}(↑) "
+            f"plane, {result['cols']}×{result['rows']} cells @ {result['cell_m']}m\n"
+            f"  {result['u_label']} [{ur[0]}, {ur[1]}]   {result['v_label']} [{vr[0]}, {vr[1]}]   "
+            f"{result['filled_cells']} filled")
+    return head + "\n" + "\n".join("  " + row for row in result["grid"])
+
+
+@mcp.tool()
+def get_section(axis: str = "Z", sections: int = 12,
+                min: float = None, max: float = None) -> str:
+    """True cross-section PERIMETER + enclosed AREA along an axis (gaps.md G47).
+
+    Unlike profile (bbox width per band), this slices the actual mesh with a plane at
+    each position and sums the cut-contour edge lengths (perimeter ≈ girth /
+    circumference) plus shoelace area — so circumference and cross-sectional area are
+    first-class (cup size, pipe girth, limb circumference, volume reasoning).
+
+    axis: slice axis (X|Y|Z, default Z).
+    sections: number of evenly spaced slices (default 12).
+    min, max: optional world-space window on the axis.
+    """
+    params = {"axis": axis, "sections": sections}
+    if min is not None:
+        params["min"] = min
+    if max is not None:
+        params["max"] = max
+    result = call_blender("get_section", params)
+    if not result.get("success"):
+        return result.get("error", "failed")
+    ax = result["axis"]
+    ext = result["extent"]
+    nb, wb = result["narrowest"], result["widest"]
+    head = (f"{result['sections']} cross-sections along {ax}  (extent [{ext[0]}, {ext[1]}])")
+    if result.get("windowed"):
+        head += "  (windowed)"
+    lines = [
+        f"  ← narrowest: {ax}={nb[ax]:+.4f}  perim {nb['perimeter_cm']}cm  area {nb['area_cm2']}cm²",
+        f"  → widest:    {ax}={wb[ax]:+.4f}  perim {wb['perimeter_cm']}cm  area {wb['area_cm2']}cm²",
+        f"  {ax:>8}   perim_cm   area_cm²   loops",
+    ]
+    for s in result["profile"]:
+        flag = "  ⚠ multi-loop" if s["loops"] > 1 else ""
+        lines.append(f"  {s[ax]:+.4f}   {s['perimeter_cm']:>8.2f}   {s['area_cm2']:>8.2f}   "
+                     f"{s['loops']:>5}{flag}")
+    return f"{head}:\n" + "\n".join(lines)
+
+
+@mcp.tool()
 def get_object_info(name: str = "") -> str:
     """
     Detailed state dump of an object: location, scale, rotation, dimensions, world bbox,

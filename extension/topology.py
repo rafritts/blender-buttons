@@ -289,6 +289,56 @@ def _m_region_form(bm, lod, bbox):
     }
 
 
+def _m_protrusion(bm, lod, bbox):
+    """ABSOLUTE protrusion of the SELECTION above its surrounding surface (gaps.md
+    G41). region_form fits its plane to the patch ITSELF, so it's invariant to
+    self-similar growth and can't answer "did this get bigger / how far does it stick
+    out?". This fits the base plane to the NEIGHBOURHOOD ring (the unselected verts
+    bordering the selection) — the local surface the patch rises from — and measures
+    the selection's rise above it, in cm. An absolute ruler that moves when the form
+    grows: snapshot before, read after, diff. Complements region_form (relative shape)
+    the way a ruler complements a curvature gauge.
+
+    Reads v.select (world-space bmesh). Needs >=4 selected verts and a border ring."""
+    sel = [v for v in bm.verts if v.select]
+    n = len(sel)
+    if n < 4:
+        return {"note": f"select a region first — this reads the current selection "
+                        f"(need >=4 verts, found {n})", "selected": n}
+    sel_idx = {v.index for v in sel}
+    ring = {}
+    for v in sel:
+        for e in v.link_edges:
+            o = e.other_vert(v)
+            if o.index not in sel_idx:
+                ring[o.index] = o
+    if len(ring) < 3:
+        return {"note": "selection has no surrounding ring (whole-shell or boundary "
+                        "selection?) — absolute protrusion needs unselected neighbours "
+                        "to fit the base plane against", "selected": n, "ring_verts": len(ring)}
+    rco = np.array([list(v.co) for v in ring.values()])
+    base_c = rco.mean(0)
+    evals, evecs = np.linalg.eigh(np.cov((rco - base_c).T))
+    normal = evecs[:, int(np.argmin(evals))]
+    mesh_c = np.array([(bbox[0] + bbox[3]) / 2, (bbox[1] + bbox[4]) / 2,
+                       (bbox[2] + bbox[5]) / 2])
+    if float(np.dot(normal, base_c - mesh_c)) < 0:
+        normal = -normal
+    sco = np.array([list(v.co) for v in sel])
+    d = (sco - base_c) @ normal                 # signed dist from the base plane (m)
+    apex = sco[int(np.argmax(d))]
+    return {
+        "selected": n,
+        "ring_verts": len(ring),
+        "region": region_words(bbox, mathutils.Vector(base_c)),
+        "max_protrusion_cm": round(float(d.max()) * 100, 2),
+        "mean_protrusion_cm": round(float(d.mean()) * 100, 2),
+        "base_recess_cm": round(float(d.min()) * 100, 2),
+        "apex_world": [round(float(x), 4) for x in apex],
+        "base_normal": [round(float(x), 3) for x in normal],
+    }
+
+
 def _m_frame(bm, lod, bbox):
     """Intrinsic principal axes (PCA) + extents — so analysis never assumes
     world-up. The pose-independent frame of the shape."""
@@ -835,6 +885,7 @@ _METHODS = {
     "sections": _m_sections,
     "curvature": _m_curvature,
     "region_form": _m_region_form,
+    "protrusion": _m_protrusion,
     "features": _m_features,
     "thickness": _m_thickness,
 }

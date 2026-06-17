@@ -104,7 +104,7 @@ SHAPE_KEY_SHADOW_TOOLS = {
     "subdivide_selection",
     "taper_end", "taper_section",
     "sculpt_grab", "sculpt_inflate", "sculpt_draw", "sculpt_smooth", "sculpt_crease",
-    "sculpt_pinch", "sculpt_flatten",
+    "sculpt_pinch", "sculpt_flatten", "sculpt_gravity",
 }
 
 
