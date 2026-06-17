@@ -113,6 +113,74 @@ Note: JSON-Schema conditionals help server-side *validation* but *hurt* readabil
 errors with `teach()` (move 3), don't buy obviousness with schema conditionals. Obviousness
 comes from move 2.
 
+## G30 — relational placement is **add-only**; the move verbs can't speak it 🧭 OPEN (high-leverage)
+
+The `on` / `left_of` / `between` / `at_corner` / `under` DSL (`resolve_placement`) is wired into
+**`add` only** — `primitives.py` is its sole caller. To *re-place an object already in the scene*
+relationally there is no path: you fall back to `transform op=move_to` with literal coordinates
+read out of `object info` — the exact dead-reckoning the North star and `GUIDANCE_FOR_LLMS.md`
+tell the agent not to do. The vocabulary the docs preach (relational) and the vocabulary the move
+verbs offer (absolute/relative scalars) don't match, so a careful agent reads the guidance and then
+violates it under duress; a careless one eyeballs eulers and declares victory.
+
+**Mechanism (cheap — the resolver already exists).** Add `transform op=place` taking `targets` +
+the same `on=` spec; call `resolve_placement(spec, dims)` against the moved object's own dims and
+set its world centre. `snap` / `rest_on` / `distribute` / `match_dim` already cover *fragments* of
+relational moves; `place` hands the full add-grammar to existing objects. One op, one existing
+function, no new DSL. Litmus: "slide the cup left of the lamp, touching" becomes
+`transform op=place targets=cup on={"left_of":"base","gap":0}` — no `object info`, no arithmetic.
+(Surfaced by a pencil-on-notebook dogfood: the single biggest foot-gun it hit.)
+
+## G31 — seating errors **dead-end** instead of handing back the fix 🪨 OPEN
+
+`transform op=rest_on` ray-casts straight down from the source's verts onto the target BVH. When no
+vert sits directly over the target surface (a thin/rotated part beside the target, or rays slipping
+between faces) it returns `'<x>' has no geometry above '<target>' along Z — nothing to rest on (move
+it over the target first)`. Right in spirit, **not diagnostic**: from the response the agent can't
+tell whether the XY bboxes overlap at all, by how much, or which way to nudge — so "move it over the
+target" is a guess-and-retry loop. (A G9 "dark cave" instance, but on an **action's error**, not a
+read.)
+
+**Mechanism.** On the no-hit branch, before erroring, compute the source↔target XY-bbox overlap and
+the nearest point on the target, and return them: `no down-hit; XY overlap 0mm (source is +X of
+target by 4mm); nearest target point (…); nudge left ~4mm`. A dead-end becomes a one-step fix. Keep
+it factual — state the geometry (overlap, nearest point, delta); don't divine intent.
+
+## G32 — the contact lenses don't reconcile; a **penetration can hide behind a touch** 🔍 OPEN
+
+`feel op=contacts` reports **one** relation per part — the single nearest other part (`best` over
+the 5 nearest bboxes), connected / floating / penetrating. `feel op=resting` reports the support
+**directly below**. For a part that rests on A while sinking into B they name different surfaces and
+**neither call alone** tells the whole truth: a pencil dogfood saw `contacts: connected to
+nb_cover_front` and `resting: on nb_coil, sunk 6mm` and had to reverse-engineer that the pencil
+spanned the coil binding. Worse, `contacts`'s single-best + top-5-bbox cap means a real
+**penetration can be omitted** when a closer non-penetrating neighbour wins the slot — the one state
+that's actionable is the one that can vanish.
+
+**Mechanism (two cheap moves, either or both).** (1) In `contacts`, never collapse away a
+penetration — list *all* penetrating neighbours for a part, not just the single nearest relation.
+(2) A combined read (`contacts` already prepares every mesh) that states per part "resting on X ·
+penetrating Y 6mm · floating from Z 2mm" in one line — the coherent contact picture, all facts, no
+chosen 'primary'. Legible, not divinatory.
+
+## Considered and declined — pencil dogfood (2026-06-17)
+
+Logged so they aren't re-raised. Each conflicts with a settled design principle, not a missing build.
+
+- **Post-action render thumbnail** — against the core thesis (instrumented API, *not* a screenshot
+  puzzle) and the agent never reads renders back; ground truth is the status block + `feel`. The same
+  review praised the no-screenshot thesis, then asked for screenshots.
+- **Scene tree with "functional roles" (container / top-surface)** — divination. The tree already
+  shows collections + their parts; naming "the top surface" *for* the agent is the semantic guessing
+  the server deliberately won't do (legibility, not divination). `object info` bounds make the surface
+  legible without it.
+- **Mandatory / auto `targets`** — already solved: every `transform` takes `targets` (object, list,
+  OR a collection name, which expands to members). A stale active object is normal Blender; the
+  active-object default is a convenience, not a bug.
+- **`lay_on(target, angle)` high-level intent** — the angle is *taste* (the human's domain), and
+  `rotate_to` → `rest_on` already seats arbitrary rotated geometry on real contact. The extra
+  choreography hit was the coil penetration (G32), not a missing primitive. No bespoke verb.
+
 ---
 
 ## Carried over — bigger build-outs (not yet started)
