@@ -668,6 +668,63 @@ pre-change callers don't break while the schema steers to the clear name. **Move
 split) remain open** — they're broader schema-surface work, tracked here for a later
 pass; do not undo the 17-verb collapse.
 
+## G24 — no render **preflight**: engine availability + GPU compute device are invisible (and the status block reports a non-renderable engine as truth) 🖥️ ❗ RECURRING
+
+This one keeps biting, across sessions. The whole architecture rests on one rule —
+**"don't read the render back, trust ground truth instead"** (the status block, `feel`,
+`render op=settings`). That makes those reads load-bearing. When one of them *lies*, the
+agent has no fallback: it can't look at the image to catch the mistake. That's exactly
+what happens with rendering today.
+
+**What went wrong (desk-lamp session, observed live):**
+- The status block's one-liner read `render: CYCLES` for the entire build. I trusted it
+  and set up Cycles-grade lighting/quality against it.
+- `render op=cycles device=GPU samples=160` returned a clean **success** —
+  `"cycles quality [device=GPU]: ['denoise=True', 'samples=160']"` — a confident report
+  for what turned out to be a **no-op**: it set `scene.cycles.device=GPU` on an engine the
+  build couldn't even render.
+- Only at `render op=image engine=CYCLES`, *after the whole scene was built*, did the
+  truth surface: `render engine 'CYCLES' not available in this build; available:
+  ['BLENDER_EEVEE']`. The user then had to go enable Cycles / GPU compute **by hand in
+  Preferences** — something I have no read of and no way to set.
+
+**The three blind spots, all general (not lamp-specific):**
+1. **Scene engine ≠ renderable engine.** The status block prints `scene.render.engine`
+   verbatim — which can name an engine (`CYCLES`) that `bl_rna…engine.enum_items` /
+   the render path will *reject*. Ground truth reporting a value that isn't true is the
+   worst failure mode for a "trust the instruments" design (the G22/G23 family — a number
+   whose meaning shifts underfoot — but worse, because it's a *false* instrument, not just
+   an ambiguous one).
+2. **The Cycles GPU layer is entirely invisible.** Whether Cycles renders on GPU lives in
+   **addon preferences**, not the scene: `preferences.addons['cycles']` enabled?,
+   `…preferences.compute_device_type` (NONE/CUDA/OPTIX/HIP/ONEAPI/METAL), the device list
+   and which are *enabled*. `render op=settings` (G11) reports the engine enum + per-engine
+   scene config but **none of this** — so "will this render run on GPU, or silently fall
+   back to CPU?" is unanswerable from any read.
+3. **No SET path for the preference layer.** `render op=cycles device=GPU` only flips
+   `scene.cycles.device`; it can't enable the Cycles addon, pick `compute_device_type`, or
+   enable specific GPU devices — the things that actually had to be toggled by hand. And it
+   reports success regardless, instead of refusing.
+
+**Fix (a real render preflight + honest device controls):**
+- **Make the status `render:` line truthful.** Reconcile scene-engine vs renderable: if
+  the scene names an engine the build can't render, say so inline —
+  `render: CYCLES ⚠ NOT AVAILABLE (build has: BLENDER_EEVEE)` — never present a
+  non-renderable engine as plain state.
+- **Turn `render op=settings` into a genuine preflight.** For Cycles, surface: addon
+  enabled?, `compute_device_type`, the device list with enabled flags, and the
+  **effective** device (GPU vs CPU-fallback). One read should answer "will my render look
+  as intended, and on what hardware," *before* a scene is built against false assumptions.
+- **Give `render op=cycles` the preference-layer knobs:** set `compute_device_type` and
+  enable/disable GPU devices (e.g. `device=GPU compute=OPTIX`), operating on addon
+  preferences — and **refuse with a teaching error** when asked for a config the machine
+  can't provide, instead of a hollow success (the status-block-teaches philosophy).
+- **Fail early, not after the build.** `render op=image` already errors loudly at the end;
+  the value is letting the agent learn engine/device viability up front from the preflight.
+
+Why this is worth real weight: it's not a render-quality nicety — it's the agent's *only*
+window into render correctness, and right now that window shows a painted-on view.
+
 ---
 
 ## What worked — formalize this, don't fight it
