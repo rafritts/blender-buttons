@@ -265,6 +265,47 @@ local change is checked locally and temporally. Builds directly on the now-live 
 reads. Dogfood: the bust edit passed bbox + global-symmetry while being asymmetric and malformed,
 and confirming "it grew, and stayed symmetric" needed the human's viewport.
 
+## G46 — no **region-parametric / physics deformers**; organic shaping must be hand-sculpted blind 🜄 SPEC'D → SPEC-08
+
+The only deformers are stroke brushes (`sculpt` grab/draw/inflate) and `edit
+proportional_move` — *expressive* tools whose correctness lives in a seeing operator's
+hand. Driven by reasoning, enlarging the bust "organically" produced a forward-projecting
+**cone** "held up by invisible hands," not a hanging teardrop — and the numeric
+instruments *misreported* it: bbox + `region_form` said "fullest point dropped, lower pole
+filled → teardrop" because they measure *bigger* and *lower* but are blind to
+**drape-vs-projection**, the axis that defines organic. There is also no physics path: a
+Cloth/Soft-Body modifier can't be added with its dials, there is no pin/goal vertex-group
+authoring, and — decisively — **no frame-step/bake** anywhere in the 15 verbs, so any
+physics modifier is inert. "Flat out use gravity" is impossible today.
+
+**General fix:** expose deformers whose correctness is in the **algorithm, not the eye** —
+region (mask/selection) + parameter (gravity / strength / stiffness) → physically-plausible
+**by construction**, which also reduces the agent's job from *invent the shape* (needs eyes)
+to *tune the magnitude* (the reads can verify). Ranked: **Mesh Filter incl. gravity (+
+mask)** as the lead primitive, then Cloth Filter, Elastic Deform brush, Lattice cage, and
+full Soft-Body/Cloth+bake last. Shared infra: **selection→vgroup/mask**, **frame-step/bake**,
+**apply-sim-to-mesh**. Full plan in `docs/SPEC-08`. Composes with G37 (silhouette) and G41
+(absolute protrusion) — the reads that would let the eyeless verify-loop actually close.
+Dogfood: enlarging the bust to a *hanging* G cup — the hand-grab coned it, and the gravity
+the human asked for had no tool to run.
+
+## G47 — no cross-section **perimeter / area** read; circumference must be guessed from bbox widths 📐 OPEN
+
+`feel op=profile` reports each slice's bbox `X_width + Y_width` (their sum, labelled
+"girth"); `op=sections` reports open/closed coverage % — neither gives the actual **contour
+perimeter** or **enclosed area**. Gauging the bust's cup size (bust − underbust
+*circumference*) forced an ellipse-perimeter approximation over the bbox widths (circ ≈
+bbox_sum × ~1.57) — good to ±a cup, not a measurement. Over-fine profile bands made it worse:
+bands thinner than the vert spacing sampled partial rings, so "girth" bounced 0.30 → 0.52m
+on the same torso.
+
+**General fix:** a true cross-section **perimeter + enclosed-area** read along an axis (sum
+the edge lengths of the actual section contour; shoelace for area), so
+girth / circumference / cross-sectional area are first-class — useful far beyond bust math
+(pipe girth, limb circumference, any volume or structural reasoning). Deterministic geometry,
+not vision. Dogfood: estimating cup size from Blender dims — the difference that *defines* a
+cup is a circumference difference, and there was no circumference to read.
+
 ## Carried over — bigger build-outs (not yet started)
 
 - **Multires + dyntopo** as real multi-level sculpt targets — the proper organic-sculpt
