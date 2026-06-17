@@ -217,6 +217,31 @@ def scale_vertices(in_plane: float = 0.0, x: float = 1.0, y: float = 1.0, z: flo
     return main + _status(result)
 
 
+def snap_loop(handle: str = "", fit_scale: bool = True, fit_rotation: bool = False,
+              label: str = "") -> str:
+    """Seat the selected boundary loop onto a target opening (transform op=snap_loop /
+    gaps.md G17). Operates on the LIVE edit-mode selection — be in edit mode with the
+    source loop selected first. Translates its centroid onto the target handle's point;
+    optionally scales rim→rim and rotates plane→plane."""
+    result = call_blender("snap_loop", {"handle": handle, "fit_scale": fit_scale,
+                                        "fit_rotation": fit_rotation}, label=label)
+    if result.get("success"):
+        bits = [f"snapped {result['verts']} verts onto '{result['handle']}'",
+                f"moved {result['moved_cm']}cm {result.get('delta_world')}"]
+        if result.get("scaled") is not None:
+            bits.append(f"scaled ×{result['scaled']} "
+                        f"(⌀ {result['source_diam_cm']}→{result['target_diam_cm']}cm)")
+        else:
+            bits.append(f"size kept (⌀ {result['source_diam_cm']}cm, "
+                        f"target ⌀ {result['target_diam_cm']}cm)")
+        if result.get("rotated"):
+            bits.append("plane aligned")
+        main = "  ".join(bits) + f" [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 @mcp.tool()
 def proportional_move(out: float = 0.0, inward: float = 0.0,
                       up: float = 0.0, down: float = 0.0, left: float = 0.0, right: float = 0.0,

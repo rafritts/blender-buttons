@@ -51,6 +51,24 @@ def _on_load_post(*_args):
 
 
 def register():
+    # Dev hot-reload: Blender keeps an add-on's submodules cached in sys.modules across
+    # a disable→enable, so edited tool code wouldn't load without a full restart. Since
+    # register() runs on every enable, drop the package subtree and re-import it fresh
+    # here — a plain add-on toggle is then enough to pick up code changes. No-op on the
+    # first enable of a session (nothing cached yet); guarded so a bad reload can't brick
+    # the enable (falls back to the cached modules).
+    import sys
+    global server, state, ui
+    _stale = [m for m in list(sys.modules) if m.startswith(__name__ + ".")]
+    if _stale:
+        try:
+            for _m in _stale:
+                del sys.modules[_m]
+            from . import server as _s, state as _st, ui as _ui
+            server, state, ui = _s, _st, _ui
+        except Exception as _e:                       # pragma: no cover
+            print(f"[blender_buttons] hot-reload failed, using cached modules: {_e}")
+
     for cls in ui.CLASSES:
         bpy.utils.register_class(cls)
     # SPEC-07: right-click → Save as Handle in the edit-mode component context menu.

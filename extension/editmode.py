@@ -801,6 +801,95 @@ def scale_vertices(params):
     return {"success": True, "verts_scaled": len(selected)}
 
 
+def snap_loop(params):
+    """transform op=snap_loop — seat the selected boundary loop onto a target opening
+    (gaps.md G17, the ACTION half of feel op=assembly's measurement). Translates the
+    live selection's centroid onto a named target handle's point; optionally scales the
+    loop about that centroid so its rim matches the target's (rim→rim) and rotates its
+    plane parallel to the target's. The "fit one opening onto another" primitive —
+    necks→collars, sleeves→armholes, any tube→any opening — and the natural precursor
+    to `edit op=bridge` (fit, then weld).
+
+    Source = the current edit-mode selection (so you select the loop yourself — no
+    deselect-on-entry). Target = a named boundary handle (mint with feel op=assembly).
+
+      handle:       target boundary handle to seat onto (required).
+      fit_scale:    scale the loop about its centroid so its mean radius matches the
+                    target's (default True). False keeps the loop's own size — a pure
+                    align (e.g. a slim neck sinking into a wider head hole).
+      fit_rotation: rotate the loop so its plane is parallel to the target's, by the
+                    SHORTER turn so two near-coplanar rims don't flip 180° (default
+                    False)."""
+    import bmesh
+    from . import handles as H
+
+    target_name = (params.get("handle") or "").strip()
+    if not target_name:
+        return {"error": "transform op=snap_loop needs handle=<target opening> "
+                         "(mint boundary handles with feel op=assembly)"}
+    fit_scale = bool(params.get("fit_scale", True))
+    fit_rotation = bool(params.get("fit_rotation", False))
+
+    obj = bpy.context.active_object
+    if obj is None:
+        return {"error": "No active object"}
+    if obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode with the source loop selected "
+                         "(snap_loop seats the live selection onto the target)"}
+
+    # target opening — world-space loop from its vgroup
+    empty = H._find_handle(target_name)
+    if empty is None:
+        return {"error": f"target handle '{target_name}' not found "
+                         f"(run feel op=assembly to mint boundary handles)"}
+    owner = bpy.data.objects.get(empty.get("bb_owner", ""))
+    tcos, _tn = H._vgroup_geo(owner, empty.get("bb_vgroup", ""))
+    if not tcos:
+        return {"error": f"target handle '{target_name}' is orphaned (vgroup gone/empty)"}
+    t_centroid = H._centroid(tcos)
+    t_radius = sum((c - t_centroid).length for c in tcos) / len(tcos)
+
+    # source loop — the live selection, world space
+    bm = bmesh.from_edit_mesh(obj.data)
+    sel = [v for v in bm.verts if v.select]
+    if not sel:
+        return {"error": "No vertices selected — select the source boundary loop first"}
+    mw = obj.matrix_world
+    scos = [mw @ v.co for v in sel]
+    s_centroid = H._centroid(scos)
+    s_radius = sum((c - s_centroid).length for c in scos) / len(scos)
+
+    scale = (t_radius / s_radius) if (fit_scale and s_radius > 1e-9) else 1.0
+
+    rot = None
+    if fit_rotation:
+        s_n = H._newell_normal(scos, s_centroid, None)
+        t_n = H._newell_normal(tcos, t_centroid, None)
+        if s_n.dot(t_n) < 0:            # nearer orientation — no 180° surprise
+            t_n = -t_n
+        rot = s_n.rotation_difference(t_n)
+
+    miw = mw.inverted()
+    for v, p in zip(sel, scos):
+        rel = p - s_centroid
+        if rot is not None:
+            rel = rot @ rel
+        v.co = miw @ (t_centroid + rel * scale)
+    bmesh.update_edit_mesh(obj.data)
+    push_undo(f"snap_loop → {target_name}")
+
+    move = t_centroid - s_centroid
+    return {
+        "success": True, "verts": len(sel), "handle": target_name,
+        "moved_cm": round(move.length * 100, 2),
+        "delta_world": [round(c, 5) for c in move],
+        "scaled": round(scale, 4) if fit_scale else None,
+        "rotated": bool(rot is not None),
+        "source_diam_cm": round(s_radius * 2 * 100, 2),
+        "target_diam_cm": round(t_radius * 2 * 100, 2),
+    }
+
+
 _FALLOFFS = {"SMOOTH", "LINEAR", "SPHERE", "SHARP", "ROOT", "CONSTANT"}
 
 
@@ -1567,6 +1656,7 @@ TOOLS = {
     "grow_selection":     grow_selection,
     "move_vertices":      move_vertices,
     "scale_vertices":     scale_vertices,
+    "snap_loop":          snap_loop,
     "delete_geometry":    delete_geometry,
     "separate_selection": separate_selection,
     "jitter_vertices":    jitter_vertices,

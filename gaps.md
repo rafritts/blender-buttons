@@ -357,7 +357,7 @@ tries. `op=map` already computes the loop plane normal; this is that math applie
 
 ---
 
-## G17 — no **snap/fit a boundary loop onto a target** (the action half of G16) 🧲 OPEN
+## G17 — no **snap/fit a boundary loop onto a target** (the action half of G16) 🧲 ✅ SHIPPED 2026-06-16
 
 G16 wants to *measure* whether two openings line up; this is the **action** that should
 follow — "take this boundary loop and **fit it onto** that one." Today you assemble it by
@@ -372,6 +372,16 @@ loop; and from `move_to handle=`, which moves a whole **object**, not a selected
 Surfaced live 2026-06-16 fitting a torso neck to a head's neck hole — the snap was a
 hand-computed `move_verts` from two `assembly` points. Candidate surface: `transform
 op=snap_loop handle=<target>` or `edit op=fit_boundary a=<sel> to=<handle>`.
+
+**Shipped** as `transform op=snap_loop handle=<target> [fit_scale] [fit_rotation]`: source
+is the live edit-mode selection (no deselect-on-entry), target is a named boundary handle.
+Translates the selection's centroid onto the handle's live point; `fit_scale` (default on)
+scales the loop rim→rim, `fit_rotation` (default off) tilts the plane parallel by the
+shorter turn (no 180° flip). Reports move delta + both diameters. Validated live seating the
+torso neck onto `GEO-spring_head.bottom.001`: 32-vert loop, `fit_scale=False`, moved
+[0, 0, −0.0055] so the rim sits exactly on the head's neck-hole point, size kept (⌀7.2 vs
+hole ⌀7.83). The natural precursor to `edit op=bridge` (G10): *fit, then weld*. Siblings on
+the ladder still open — `snap_edge` (axis + endpoint correspondence), face/3-point.
 
 ---
 

@@ -98,7 +98,8 @@ EDIT_MODE_TOOLS = {
 # selection / topology-flag verbs are excluded (they don't move verts). Sculpt
 # strokes write to the active key too, so they're in here despite not being EDIT.
 SHAPE_KEY_SHADOW_TOOLS = {
-    "move_vertices", "scale_vertices", "proportional_move", "inflate_selection",
+    "move_vertices", "scale_vertices", "snap_loop", "proportional_move",
+    "inflate_selection",
     "jitter_vertices", "bevel", "extrude", "extrude_along_curve", "scale_rings",
     "subdivide_selection",
     "taper_end", "taper_section",

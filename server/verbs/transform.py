@@ -13,7 +13,8 @@ from ._common import tag, unknown
 
 _OPS = ["nudge", "move_to", "rotate_to", "resize", "scale", "rotate", "apply",
         "snap", "snap_grid", "match_dim", "mirror", "distribute", "array_corners",
-        "array_along", "array_radial", "scatter", "move_verts", "scale_verts"]
+        "array_along", "array_radial", "scatter", "move_verts", "scale_verts",
+        "snap_loop"]
 
 
 @mcp.tool(name="transform")
@@ -21,7 +22,7 @@ def transform(
     op: Literal["nudge", "move_to", "rotate_to", "resize", "scale", "rotate", "apply",
                 "snap", "snap_grid", "match_dim", "mirror", "distribute",
                 "array_corners", "array_along", "array_radial", "scatter",
-                "move_verts", "scale_verts"],
+                "move_verts", "scale_verts", "snap_loop"],
     targets: tag(str, "object(s): '' active, 'name', or 'a,b,c'") = "",
     # nudge (relative meters)
     right: tag(float, "[nudge] +X (m)") = 0.0,
@@ -36,8 +37,8 @@ def transform(
     to_x: tag(float, "[move_to=world X (m) / rotate_to=X euler (deg)]") = None,
     to_y: tag(float, "[move_to=world Y (m) / rotate_to=Y euler (deg)]") = None,
     to_z: tag(float, "[move_to=world Z (m) / rotate_to=Z euler (deg)]") = None,
-    handle: tag(str, "[move_to] move TO a named handle's live point (recomputed); "
-                     "explicit to_x/y/z override per axis") = "",
+    handle: tag(str, "[move_to/snap_loop] a named handle: move_to moves a whole object "
+                     "TO its point; snap_loop seats the selected loop ONTO it") = "",
     # resize (absolute meters)
     width: tag(float, "[resize] absolute X extent (m)") = None,
     depth: tag(float, "[resize] absolute Y extent (m)") = None,
@@ -99,6 +100,9 @@ def transform(
     sz: tag(float, "[scale_verts] Z scale factor") = 1.0,
     in_plane: tag(float, "[scale_verts] in-plane scale (flatten)") = 0.0,
     vert_pivot: tag(str, "[scale_verts] SELECTION|CURSOR|…") = "SELECTION",
+    # snap_loop
+    fit_scale: tag(bool, "[snap_loop] scale the loop rim→rim to the target (False=keep size)") = True,
+    fit_rotation: tag(bool, "[snap_loop] tilt the loop's plane parallel to the target") = False,
     label: str = "",
 ) -> str:
     """
@@ -125,6 +129,10 @@ def transform(
       scatter  — scatter copies on a surface (target, source, count, scale_min/max, …)
       move_verts — move selected verts (edit) (out/up/.. or x/y/z, target)
       scale_verts— scale selected verts (edit) (sx/sy/sz, in_plane, vert_pivot, target)
+      snap_loop  — seat the SELECTED boundary loop onto a target opening (handle):
+                   translate centre→centre, optional scale rim→rim (fit_scale) and
+                   tilt plane→plane (fit_rotation). The action half of feel op=assembly
+                   — fit, then `edit op=bridge` welds. Be in edit mode, loop selected.
     """
     o = op.lower().strip()
     if o == "nudge":
@@ -180,4 +188,6 @@ def transform(
                                       back, x, y, z, label, target)
     if o == "scale_verts":
         return editmode.scale_vertices(in_plane, sx, sy, sz, vert_pivot, label, target)
+    if o == "snap_loop":
+        return editmode.snap_loop(handle, fit_scale, fit_rotation, label)
     return unknown("transform", "op", op, _OPS)
