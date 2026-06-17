@@ -47,6 +47,7 @@ def add(
     fill_type: tag(str, "[circle] NOTHING|NGON|TRIFAN") = "",
     # ── curve / tube (type=curve|tube) ──
     points: tag(list, "[tube/curve] control points the curve passes through") = None,
+    between: tag(list, "[tube] connect two anchors [A,B] — straight tube, nearest-surface endpoints (alt to points)") = None,
     subtype: tag(str, "[light] POINT|SUN|SPOT|AREA · [curve] BEZIER|NURBS|POLY") = "",
     cyclic: tag(bool, "[curve] close the curve into a loop") = False,
     resolution: tag(int, "[tube/curve] samples per segment") = 0,
@@ -92,7 +93,9 @@ def add(
         floor      — size                                (ground plane at z=0)
       CURVES (take name, points):
         tube       — points + tube_radius (float OR per-point list for taper),
-                     resolution, sides    (baked tube MESH — hair/cable/handle)
+                     resolution, sides    (baked tube MESH — hair/cable/handle).
+                     OR between=[A,B] to strut/connect two objects (nearest-surface
+                     endpoints — no coordinates)
         helix      — turns, height, radius, tube_radius, taper, handedness, axis,
                      center, segments_per_turn, sides  (continuous coil MESH — wire
                      wrap, spring, screw thread, coiled rope; no point cap)
@@ -116,7 +119,7 @@ def add(
         return (f"add type={t}: needs name=<object name> — got none. "
                 f"e.g. add type={t} name=my_{t}")
     bad = teach("add", "type", t, {
-        "tube":  (bool(points), "points=[...] the tube passes through",
+        "tube":  (bool(points) or bool(between), "points=[...] the tube passes through, or between=[A,B]",
                   "add type=tube name=cable points=[[0,0,0],[0,0,1]] tube_radius=0.02"),
         "curve": (bool(points), "points=[...] control points",
                   "add type=curve name=path points=[[0,0,0],[1,0,0]] subtype=BEZIER"),
@@ -155,7 +158,7 @@ def add(
     if t == "tube":
         return primitives.spline_tube(
             name, points or [], tube_radius if tube_radius is not None else 0.02,
-            resolution or 8, sides or 4, label)
+            resolution or 8, sides or 4, label, between)
     if t == "helix":
         return primitives.helix_coil(
             name, turns or 3, height or 0.2, radius or 0.05,

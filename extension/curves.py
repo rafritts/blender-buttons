@@ -172,6 +172,9 @@ def spline_tube(params):
     points:     list of control points the curve passes THROUGH. Each is
                 [x, y, z] world coords, or {"near": "obj", "offset": [dx,dy,dz]}
                 relative to an existing object's bbox center.
+    between:    [A, B] — alternative to `points`: connect two named objects with a
+                straight tube, endpoints picked at the NEAREST SURFACE points
+                between them (BVH). The generic strut/cable/wire — no offset math.
     radius:     tube radius in meters — a single float, or a list (one per
                 control point) for taper. Default 0.02.
     resolution: curve samples per segment (default 8; higher = smoother bends).
@@ -186,9 +189,35 @@ def spline_tube(params):
     if bpy.data.objects.get(name) is not None:
         return {"error": f"Object '{name}' already exists — choose a different name"}
 
+    # `between`: connect two named anchors with a straight tube whose endpoints are
+    # the NEAREST SURFACE points between them (the generic "strut/cable between A and
+    # B" — struts, wiring, linkages, a cradle's suspension string). No offset math:
+    # the BVH finds where the two surfaces face each other.
+    between = params.get("between")
     raw_points = params.get("points")
+    if between is not None:
+        if raw_points:
+            return {"error": "pass either 'points' or 'between' — not both"}
+        if not (isinstance(between, (list, tuple)) and len(between) == 2):
+            return {"error": "'between' must be [A, B] — two object names to connect"}
+        from .introspect import _prepare
+        from .queries import _nearest_surface_pair
+        preps = []
+        for nm in between:
+            o = bpy.data.objects.get(nm)
+            if o is None:
+                return {"error": f"'between' anchor '{nm}' not found"}
+            p = _prepare(o)
+            if p is None:
+                return {"error": f"'between' anchor '{nm}' has no geometry to connect"}
+            preps.append(p)
+        d, pt_a, pt_b = _nearest_surface_pair(preps[0], preps[1])
+        if pt_a is None:
+            return {"error": f"no surface path found between '{between[0]}' and '{between[1]}'"}
+        raw_points = [[pt_a[0], pt_a[1], pt_a[2]], [pt_b[0], pt_b[1], pt_b[2]]]
+
     if not isinstance(raw_points, list) or len(raw_points) < 2:
-        return {"error": "'points' must be a list of at least 2 control points"}
+        return {"error": "'points' must be a list of at least 2 control points (or use 'between')"}
     # G20: the old cap of 32 blocked legitimate hand-authored swept paths (a 9-turn
     # coil needs ~73). The per-point resolve is cheap; 256 is a generous ceiling that
     # still guards against a runaway payload. For a CONTINUOUS helix/coil use

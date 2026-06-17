@@ -9,11 +9,17 @@ So "front" = -Y, "back" = +Y, "left" = -X, "right" = +X.
 
 Whole-object placements (set all three axes):
   {"on": "name"}            -- rests on top of target, centered XY
+  {"on": ["a", "b", ...]}   -- rests across the COMBINED top of several supports,
+                               centered on their span (e.g. a rail on two posts)
   {"under": "name"}         -- rests under target, centered XY
+  {"under": ["a", "b", ...]}-- hangs beneath the COMBINED footprint of several
+                               anchors, centered on their span (e.g. a ball between two rails)
   {"centered_on": "name"}   -- match XYZ centers of target
   {"between": ["a", "b"]}   -- centered on midpoint of two object centers
-  {"at_corner": {"of": "name", "corner": "front_left"|"front_right"|"back_left"|"back_right"}}
-                            -- bottom-{corner} of new aligns with bottom-{corner} of target
+  {"at_corner": {"of": "name", "corner": "front_left"|"front_right"|"back_left"|"back_right",
+                 "top": False}}
+                            -- {corner} of new aligns with {corner} of target; Z embeds at
+                               the target's bottom, or rests on its TOP when "top": True
   {"at": [x, y, z]}         -- center at the literal world coordinate (full ripcord;
                                prefer relational keys when an anchor object exists)
 
@@ -77,11 +83,22 @@ def resolve_placement(spec, dims):
 
     gap = spec.get("gap", 0.0)
 
-    def bbox(name):
-        o = bpy.data.objects.get(name)
-        if o is None:
-            raise ValueError(f"Placement target '{name}' not found")
-        return world_bbox(o)
+    def bbox(names):
+        """World bbox enclosing one anchor (str) or several (list) — the union.
+        A list lets a member span multiple supports (a rail across two posts) or
+        hang centered between several anchors (a ball between two rails)."""
+        if isinstance(names, str):
+            names = [names]
+        if not names:
+            raise ValueError("placement anchor list is empty")
+        boxes = []
+        for n in names:
+            o = bpy.data.objects.get(n)
+            if o is None:
+                raise ValueError(f"Placement target '{n}' not found")
+            boxes.append(world_bbox(o))
+        return (min(b[0] for b in boxes), min(b[1] for b in boxes), min(b[2] for b in boxes),
+                max(b[3] for b in boxes), max(b[4] for b in boxes), max(b[5] for b in boxes))
 
     def center(name):
         xmin, ymin, zmin, xmax, ymax, zmax = bbox(name)
@@ -132,7 +149,9 @@ def resolve_placement(spec, dims):
             cx = xmax - w / 2
         else:
             cx = (xmin + xmax) / 2
-        cz = zmin + h / 2
+        # Z: rest ON the target's top (a post standing on a base) when top=True,
+        # else embed at the target's bottom (a leg sunk to the same floor).
+        cz = (zmax + h / 2) if ac.get("top") else (zmin + h / 2)
 
     # Adjacency placements (override the above if present)
     if "left_of" in spec:

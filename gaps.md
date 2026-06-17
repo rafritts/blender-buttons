@@ -4,7 +4,11 @@ _A **live worklist of OPEN gaps** — fixable limitations in the MCP surface, no
 historical. Shipped/fixed items are **removed** (they live in git history), so this file
 is only ever "what's still wrong." G-numbers are **stable across rewrites**: a number
 missing from the sequence (G1–G8, G10–G13, G15–G22, G24–G29) means that gap shipped and
-was retired. Last updated 2026-06-17 — G23 moves 1–3 shipped (the per-verb scan tax:
+was retired. Last updated 2026-06-17 — relational-placement primitives shipped (dogfooded
+by a Newton's-cradle build that refused to dead-reckon): `on`/`under` accept an anchor LIST
+(span across / hang between supports), `at_corner` gains `top:true` (rest on the target's
+top, not embed), and `add type=tube between=[A,B]` (strut between two anchors on
+nearest-surface endpoints) — all covered by `tests/e2e_relational.py`. Also G23 moves 1–3 shipped (the per-verb scan tax:
 polymorphic-param split, per-op param manifests, and teaching errors via
 `server/verbs/_common.py:teach()`, covered by `tests/g23_teaching.py`); move 4 (splitting
 fat verbs) deferred as unwarranted. Earlier: G24–G29 shipped (render preflight, aim_axis,

@@ -249,7 +249,8 @@ def add_circle(name: str, radius: float,
 
 @mcp.tool()
 def spline_tube(name: str, points: list, radius: Union[float, list] = 0.02,
-                resolution: int = 8, sides: int = 4, label: str = "") -> str:
+                resolution: int = 8, sides: int = 4, label: str = "",
+                between: list = None) -> str:
     """
     Create a tube mesh swept along a smooth curve that passes THROUGH every
     control point (interpolating spline — no Bezier handles). The go-to tool for
@@ -260,6 +261,9 @@ def spline_tube(name: str, points: list, radius: Union[float, list] = 0.02,
              [x, y, z] world coords (ripcord), or
              {"near": "object_name", "offset": [dx, dy, dz]} — anchored to an
              existing object's bbox center, resolved once at creation.
+    between: [A, B] — INSTEAD of points: connect two named objects with a straight
+             tube, endpoints at the nearest surface points between them (BVH). The
+             generic strut/cable/wire — no offset math, no dead-reckoned endpoints.
     radius:  tube radius in meters. A single number, OR a list with one radius
              per control point for taper (e.g. [0.03, 0.02, 0.005] = thick root
              to thin tip — a hair strand).
@@ -278,7 +282,7 @@ def spline_tube(name: str, points: list, radius: Union[float, list] = 0.02,
     """
     result = call_blender("spline_tube", {
         "name": name, "points": points, "radius": radius,
-        "resolution": resolution, "sides": sides,
+        "resolution": resolution, "sides": sides, "between": between,
     }, label=label)
     if result.get("success"):
         main = (f"Added SPLINE_TUBE as '{result['object_name']}' through "
