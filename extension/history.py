@@ -110,9 +110,54 @@ def undo_to(params):
     return undo_steps({"steps": steps})
 
 
+def mark_checkpoint(params):
+    """G12 — name the current history head so a later `restore` rolls back to exactly
+    here. NOT a parallel snapshot store: it records the head op_id and leans on the
+    existing op-log / Blender-undo 1:1 mapping. The workflow the gap asks for — mark
+    before a risky edit, try it, restore if the modifier stack screams."""
+    name = (params.get("name") or "").strip()
+    if not name:
+        return {"error": "history op=mark needs name=<checkpoint>"}
+    head_id = state._history[-1]["id"] if state._history else None
+    state._marks[name] = head_id
+    return {"success": True, "mark": name, "at": head_id,
+            "history_depth": len(state._history)}
+
+
+def restore_checkpoint(params):
+    """Roll the scene back to a named mark — undo to the op that was the history head
+    when the mark was set. Verifies the landed scene like undo_to; refuses if newer
+    edits have already replaced the marked op (it forked off the live branch)."""
+    name = (params.get("name") or "").strip()
+    if not name:
+        return {"error": "history op=restore needs name=<checkpoint>"}
+    if name not in state._marks:
+        return {"error": f"no checkpoint '{name}' — set one with "
+                         f"history op=mark name={name}"}
+    head_id = state._marks[name]
+    if head_id is None:
+        # Marked at the empty baseline → undo everything back to it.
+        steps = len(state._history)
+        if steps == 0:
+            return {"success": True, "steps": 0,
+                    "note": f"already at checkpoint '{name}' (empty baseline)"}
+        result = undo_steps({"steps": steps})
+        result["restored"] = name
+        return result
+    if not any(h["id"] == head_id for h in state._history):
+        return {"error": f"checkpoint '{name}' (op [{head_id}]) is no longer in the "
+                         "history log — newer edits forked past it, so restore is "
+                         "unavailable. Recover from a save_design checkpoint instead."}
+    result = undo_to({"id": head_id})
+    result["restored"] = name
+    return result
+
+
 TOOLS = {
     "get_history": get_history,
     "undo_steps":  undo_steps,
     "redo_steps":  redo_steps,
     "undo_to":     undo_to,
+    "mark_checkpoint":    mark_checkpoint,
+    "restore_checkpoint": restore_checkpoint,
 }

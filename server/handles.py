@@ -90,6 +90,26 @@ def accept_handle(name: str) -> str:
     )
 
 
+def prune_handles() -> str:
+    """G15 — delete every orphaned handle (owner/vgroup gone). Clean and dirty handles
+    are kept; only the unresolvable Empties are collected."""
+    result = call_blender("prune_handles", {})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    pruned = result.get("pruned", [])
+    if not pruned:
+        return "no orphaned handles to prune — registry is clean"
+    return f"pruned {len(pruned)} orphaned handle(s): " + ", ".join(pruned)
+
+
+def forget_handle(name: str) -> str:
+    """Delete one named handle regardless of state (the targeted prune)."""
+    result = call_blender("forget_handle", {"name": name})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    return f"forgot handle '{result['forgot']}' (Empty + vgroup removed)"
+
+
 def resolve_point(name: str):
     """Resolve a handle to its live world point for a consuming verb. Returns
     (point_list, error_str, note_str): error on orphaned/missing; note is a drift

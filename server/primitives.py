@@ -290,6 +290,43 @@ def spline_tube(name: str, points: list, radius: Union[float, list] = 0.02,
     return main + _status(result)
 
 
+def helix_coil(name: str, turns: float = 3, height: float = 0.2, radius: float = 0.05,
+               tube_radius: float = 0.02, taper: float = 1.0, handedness: str = "right",
+               axis: str = "Z", center: list = None, segments_per_turn: int = 24,
+               sides: int = 4, label: str = "") -> str:
+    """
+    Create a continuous helix / coil swept into a tube mesh (add type=helix). The
+    primitive behind wire wraps, springs, screw threads, coiled cable/rope, and
+    twist-fluting — one parametric call instead of stacking rings by hand. It samples
+    its own dense path, so it has no control-point cap.
+
+    name:        REQUIRED, unique.
+    turns:       full revolutions (float ok).
+    height:      total rise along the axis (m); 0 = a flat spiral.
+    radius:      coil radius — centreline distance from the axis.
+    tube_radius: wire cross-section radius (m).
+    taper:       end/start wire-thickness ratio (1.0 = uniform; <1 thins, >1 thickens).
+    handedness:  'right' (default) | 'left'.
+    axis:        coil axis X|Y|Z (default Z).
+    center:      [x,y,z] base centre (default origin).
+    segments_per_turn / sides: smoothness of the path / the tube cross-section.
+    """
+    result = call_blender("helix_coil", {
+        "name": name, "turns": turns, "height": height, "radius": radius,
+        "tube_radius": tube_radius, "taper": taper, "handedness": handedness,
+        "axis": axis, "center": center or [0.0, 0.0, 0.0],
+        "segments_per_turn": segments_per_turn, "sides": sides,
+    }, label=label)
+    if result.get("success"):
+        main = (f"Added HELIX as '{result['object_name']}' — {result['turns']} turns "
+                f"{result['handedness']}-handed on {result['axis']}, wire "
+                f"{result['wire_length']}m, dims={result.get('dimensions')} "
+                f"[{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 @mcp.tool()
 def add_curve(name: str, points: list, type: str = "BEZIER", cyclic: bool = False,
               resolution: int = 12, bevel_depth: float = 0.0, label: str = "") -> str:

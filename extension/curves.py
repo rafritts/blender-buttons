@@ -189,8 +189,13 @@ def spline_tube(params):
     raw_points = params.get("points")
     if not isinstance(raw_points, list) or len(raw_points) < 2:
         return {"error": "'points' must be a list of at least 2 control points"}
-    if len(raw_points) > 32:
-        return {"error": f"'points' supports at most 32 control points (got {len(raw_points)})"}
+    # G20: the old cap of 32 blocked legitimate hand-authored swept paths (a 9-turn
+    # coil needs ~73). The per-point resolve is cheap; 256 is a generous ceiling that
+    # still guards against a runaway payload. For a CONTINUOUS helix/coil use
+    # `add type=helix`, which generates its own dense samples and ignores this cap.
+    if len(raw_points) > 256:
+        return {"error": f"'points' supports at most 256 control points (got "
+                         f"{len(raw_points)}); for a continuous coil use add type=helix"}
 
     points = []
     for i, entry in enumerate(raw_points):
@@ -385,7 +390,114 @@ def add_curve(params):
     }
 
 
+_AXES = {"X": 0, "Y": 1, "Z": 2}
+
+
+def helix_coil(params):
+    """G20 — a continuous parametric helix / coil swept into a tube mesh. Subsumes
+    wire wraps, springs, screw threads, coiled cable/rope, twist-fluting — the thing
+    11 stacked torus rings only faked. Generates its OWN dense sample polyline, so it
+    sidesteps the control-point cap entirely instead of fighting it.
+
+    name:        required, unique.
+    turns:       number of full revolutions (float ok, e.g. 9 or 4.5).
+    height:      total rise along the axis in meters (0 = a flat spiral).
+    radius:      helix radius — distance of the coil centreline from the axis.
+    tube_radius: cross-section radius of the swept wire (default 0.02).
+    taper:       end/start tube_radius ratio (1.0 = uniform; 0.5 = wire halves along
+                 its length; >1 = thickens). Tapers the wire thickness, not the coil.
+    handedness:  'right' (default, CCW rising) | 'left'.
+    axis:        coil axis X|Y|Z (default Z).
+    center:      [x,y,z] base centre of the coil (default origin = world cursor 0).
+    segments_per_turn: samples per revolution (default 24; higher = rounder).
+    sides:       tube cross-section resolution (default 4 → 16-sided)."""
+    name = params.get("name")
+    if not name:
+        return {"error": "'name' is required"}
+    if bpy.data.objects.get(name) is not None:
+        return {"error": f"Object '{name}' already exists — choose a different name"}
+
+    import math
+    turns = float(params.get("turns", 3))
+    if turns <= 0:
+        return {"error": "'turns' must be > 0"}
+    height = float(params.get("height", 0.2))
+    radius = float(params.get("radius", 0.05))
+    if radius <= 0:
+        return {"error": "'radius' must be > 0"}
+    tube_radius = float(params.get("tube_radius", 0.02))
+    if tube_radius <= 0:
+        return {"error": "'tube_radius' must be > 0"}
+    taper = float(params.get("taper", 1.0))
+    if taper <= 0:
+        return {"error": "'taper' must be > 0 (end/start thickness ratio)"}
+    handed = (params.get("handedness") or "right").lower()
+    sign = -1.0 if handed.startswith("l") else 1.0
+    axis = (params.get("axis") or "Z").upper()
+    if axis not in _AXES:
+        return {"error": "'axis' must be X, Y, or Z"}
+    ai = _AXES[axis]
+    ui, vi = [i for i in range(3) if i != ai]   # the two in-plane axes
+    center = params.get("center") or [0.0, 0.0, 0.0]
+    if not (isinstance(center, (list, tuple)) and len(center) == 3):
+        return {"error": "'center' must be [x, y, z]"}
+    spt = max(3, min(int(params.get("segments_per_turn", 24)), 128))
+    sides = max(2, min(int(params.get("sides", 4)), 16))
+
+    n = max(2, int(round(turns * spt)))
+    samples, radii = [], []
+    for i in range(n + 1):
+        t = i / n
+        ang = sign * 2.0 * math.pi * turns * t
+        p = [0.0, 0.0, 0.0]
+        p[ui] = center[ui] + radius * math.cos(ang)
+        p[vi] = center[vi] + radius * math.sin(ang)
+        p[ai] = center[ai] + height * t
+        samples.append(p)
+        radii.append(tube_radius * (1.0 + (taper - 1.0) * t))
+
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    cu = bpy.data.curves.new(name, type='CURVE')
+    cu.dimensions = '3D'
+    cu.bevel_depth = 1.0
+    cu.bevel_resolution = sides
+    cu.use_fill_caps = True
+    spline = cu.splines.new('POLY')
+    spline.points.add(len(samples) - 1)
+    for pt, r, cpt in zip(samples, radii, spline.points):
+        cpt.co = (pt[0], pt[1], pt[2], 1.0)
+        cpt.radius = r
+
+    obj = bpy.data.objects.new(name, cu)
+    bpy.context.scene.collection.objects.link(obj)
+    bpy.ops.object.select_all(action='DESELECT')
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.convert(target='MESH')
+    obj = bpy.context.active_object
+    bpy.ops.object.shade_smooth()
+
+    bpy.context.view_layer.update()
+    xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
+    return {
+        "success": True,
+        "object_name": obj.name,
+        "turns": turns, "handedness": "left" if sign < 0 else "right",
+        "axis": axis,
+        "wire_length": round(_polyline_length(samples), 4),
+        "dimensions": [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)],
+        "world_bounds": {
+            "x": [round(xmin, 4), round(xmax, 4)],
+            "y": [round(ymin, 4), round(ymax, 4)],
+            "z": [round(zmin, 4), round(zmax, 4)],
+        },
+    }
+
+
 TOOLS = {
     "spline_tube": spline_tube,
     "add_curve":   add_curve,
+    "helix_coil":  helix_coil,
 }

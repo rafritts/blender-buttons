@@ -19,6 +19,8 @@ coordinate, **never** auto-minted — a point on a smooth face has no topologica
 signature (Class B, agent-minted only). That's the legible-vs-divination line.
 """
 
+import math
+
 import bmesh
 import numpy as np
 
@@ -197,7 +199,75 @@ def feel_map(params):
     return {"success": True, "casts": [_cast_from_handle(n, margin) for n in names]}
 
 
+# ── op=relate ────────────────────────────────────────────────────────────────
+
+def _handle_loop(name):
+    """Resolve a boundary handle to its live world-space loop summary —
+    (centroid, outward plane normal, mean radius, vert count) — or (None, error)."""
+    empty = handles._find_handle(name)
+    if empty is None:
+        return None, f"handle '{name}' not found"
+    owner = bpy.data.objects.get(empty.get("bb_owner", ""))
+    if owner is None:
+        return None, f"handle '{name}' owner is gone (orphaned)"
+    cos, _n = handles._vgroup_geo(owner, empty.get("bb_vgroup", ""))
+    if not cos:
+        return None, f"handle '{name}' is orphaned (vgroup gone/empty)"
+    centroid = handles._centroid(cos)
+    normal = _plane_normal(cos, centroid, Vector(world_center(owner)))
+    radius = sum((c - centroid).length for c in cos) / len(cos)
+    return {"centroid": centroid, "normal": normal, "radius": radius,
+            "count": len(cos)}, None
+
+
+def feel_relate(params):
+    """G16 — the boundary-to-boundary relation: do TWO named openings line up? The
+    read a bridge/weld needs *before* it tries. Reports centre-to-centre gap, axis
+    alignment (do the loop planes face each other?), and the radius/size match. This
+    is op=map's loop-plane math applied to a named handle PAIR instead of a raycast
+    into the scene — measuring two specific openings, not whatever a ray happens to
+    hit."""
+    a_name = (params.get("a") or "").strip()
+    b_name = (params.get("b") or "").strip()
+    if not a_name or not b_name:
+        return {"error": "feel op=relate needs a=<handle> and b=<handle> "
+                         "(mint boundary handles with feel op=assembly)"}
+    a, err = _handle_loop(a_name)
+    if err:
+        return {"error": err}
+    b, err = _handle_loop(b_name)
+    if err:
+        return {"error": err}
+
+    gap = (b["centroid"] - a["centroid"]).length
+    # Both normals point OUT of their owners. Two openings that face each other have
+    # OPPOSED outward normals (dot ≈ -1); coaxial-same (dot ≈ +1) face the same way.
+    dot = max(-1.0, min(1.0, a["normal"].dot(b["normal"])))
+    angle = math.degrees(math.acos(abs(dot)))   # axis misalignment: 0 = parallel axes
+    if angle <= 10.0:
+        facing = "opposed (face each other)" if dot < 0 else "coaxial (face same way)"
+    else:
+        facing = f"skew ({round(angle, 1)}° off-axis)"
+
+    ra, rb = a["radius"], b["radius"]
+    ratio = (min(ra, rb) / max(ra, rb)) if max(ra, rb) > 1e-9 else 0.0
+    # A weld candidate: planes roughly parallel, facing each other, similar size.
+    join_ready = (angle <= 15.0 and dot < 0 and ratio >= 0.8)
+
+    return {
+        "success": True, "a": a_name, "b": b_name,
+        "center_gap_cm": round(gap * 100, 2),
+        "axis_angle_deg": round(angle, 1),
+        "facing": facing,
+        "diam_a_cm": round(ra * 2 * 100, 2),
+        "diam_b_cm": round(rb * 2 * 100, 2),
+        "size_match": round(ratio, 3),
+        "join_ready": join_ready,
+    }
+
+
 TOOLS = {
     "feel_assembly": feel_assembly,
     "feel_map":      feel_map,
+    "feel_relate":   feel_relate,
 }

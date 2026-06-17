@@ -33,10 +33,15 @@ def transform(
     forward: tag(float, "[nudge/move_verts] -Y (m)") = 0.0,
     inward: tag(float, "[move_verts] inward along normal (m)") = 0.0,
     out: tag(float, "[move_verts] outward along normal (m)") = 0.0,
-    # move_to / rotate_to (absolute; omitted axis preserved)
-    to_x: tag(float, "[move_to=world X (m) / rotate_to=X euler (deg)]") = None,
-    to_y: tag(float, "[move_to=world Y (m) / rotate_to=Y euler (deg)]") = None,
-    to_z: tag(float, "[move_to=world Z (m) / rotate_to=Z euler (deg)]") = None,
+    # move_to (absolute world position; omitted axis preserved)
+    to_x: tag(float, "[move_to] absolute world X (m)") = None,
+    to_y: tag(float, "[move_to] absolute world Y (m)") = None,
+    to_z: tag(float, "[move_to] absolute world Z (m)") = None,
+    # rotate_to (absolute euler degrees; omitted axis preserved). Separate from to_*
+    # so no field means two things (G23): a param's meaning is clear from its name.
+    deg_x: tag(float, "[rotate_to] absolute X euler (deg)") = None,
+    deg_y: tag(float, "[rotate_to] absolute Y euler (deg)") = None,
+    deg_z: tag(float, "[rotate_to] absolute Z euler (deg)") = None,
     handle: tag(str, "[move_to/snap_loop] a named handle: move_to moves a whole object "
                      "TO its point; snap_loop seats the selected loop ONTO it") = "",
     # resize (absolute meters)
@@ -112,7 +117,9 @@ def transform(
       move_to  — set ABSOLUTE world position (to_x/to_y/to_z; omitted axis preserved) —
                  drop at a computed point, e.g. a feel op=aim hit, or handle=<name>
                  to move TO a handle's live point
-      rotate_to— set ABSOLUTE euler rotation in degrees (to_x/to_y/to_z; omitted kept)
+      rotate_to— set ABSOLUTE euler rotation in degrees (deg_x/deg_y/deg_z; omitted
+                 kept). Distinct param names from move_to's to_*, so no field is
+                 polymorphic — meaning is unambiguous from the name alone.
       resize   — set absolute dims         (width, depth, height)
       scale    — multiply size             (factor, pivot=center|.., pivot_object)
       rotate   — rotate degrees            (angle, axis, pivot, pivot_object)
@@ -149,7 +156,12 @@ def transform(
             to_z = pt[2] if to_z is None else to_z
         return note + transforms.move_to(targets, to_x, to_y, to_z, label)
     if o == "rotate_to":
-        return transforms.rotate_to(targets, to_x, to_y, to_z, label)
+        # deg_* is the correct field; fall back to the old to_* only if deg_* unset,
+        # so pre-G23 callers still work while the schema steers to the clear name.
+        rx = deg_x if deg_x is not None else to_x
+        ry = deg_y if deg_y is not None else to_y
+        rz = deg_z if deg_z is not None else to_z
+        return transforms.rotate_to(targets, rx, ry, rz, label)
     if o == "resize":
         return transforms.resize(targets, width, depth, height, label)
     if o == "scale":

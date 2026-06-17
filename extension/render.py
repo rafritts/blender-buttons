@@ -97,6 +97,63 @@ def render_to_file(params):
     }
 
 
+def render_settings(params):
+    """G11 — READ the render config (the missing half: the verb could only set).
+    Reports the build's available engines (so the schema never hardcodes them), the
+    current engine, output resolution/format, color management, and the active engine's
+    own params. Stops 'discovery-by-exception' — no need to send a bad engine to learn
+    the list from the error."""
+    scene = bpy.context.scene
+    r = scene.render
+    vs = scene.view_settings
+
+    available = [e.identifier for e in
+                 type(r).bl_rna.properties["engine"].enum_items]
+
+    out = {
+        "success": True,
+        "engine": r.engine,
+        "available_engines": available,
+        "resolution": [r.resolution_x, r.resolution_y],
+        "resolution_percentage": r.resolution_percentage,
+        "pixel_aspect": [round(r.pixel_aspect_x, 4), round(r.pixel_aspect_y, 4)],
+        "format": r.image_settings.file_format,
+        "film_transparent": r.film_transparent,
+        "color": {
+            "view_transform": vs.view_transform,
+            "look": vs.look,
+            "exposure": round(vs.exposure, 4),
+            "gamma": round(vs.gamma, 4),
+        },
+    }
+
+    if r.engine == 'CYCLES' and hasattr(scene, "cycles"):
+        c = scene.cycles
+        cy = {"samples": getattr(c, "samples", None),
+              "device": getattr(c, "device", None),
+              "use_denoising": getattr(c, "use_denoising", None),
+              "denoiser": getattr(c, "denoiser", None)}
+        if getattr(c, "use_adaptive_sampling", False):
+            cy["adaptive_threshold"] = round(getattr(c, "adaptive_threshold", 0.0), 5)
+        out["cycles"] = {k: v for k, v in cy.items() if v is not None}
+    else:
+        eevee = getattr(scene, "eevee", None)
+        if eevee is not None:
+            ev = {}
+            if hasattr(eevee, "taa_render_samples"):
+                ev["samples"] = eevee.taa_render_samples
+            if hasattr(eevee, "use_raytracing"):
+                ev["raytracing"] = eevee.use_raytracing
+            if hasattr(eevee, "use_gtao"):
+                ev["ao"] = eevee.use_gtao
+            if hasattr(eevee, "use_shadows"):
+                ev["shadows"] = eevee.use_shadows
+            out["eevee"] = ev
+
+    return out
+
+
 TOOLS = {
     "render_to_file": render_to_file,
+    "render_settings": render_settings,
 }

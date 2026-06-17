@@ -368,6 +368,18 @@ def eval_world_bmesh(obj):
     behind the tactile-introspection tools — they reason about final rendered
     geometry, so modifiers must be applied and the transform baked in."""
     import bmesh
+    # X6/G19: force a fresh re-evaluation before reading. Socket-driven ops don't run
+    # Blender's normal post-operator depsgraph update, so a prior `transform nudge`
+    # can leave `evaluated_depsgraph_get()` handing back a STALE evaluated mesh — the
+    # symptom G19 caught (contacts reported an unchanged 1.7 mm gap after a 6 mm move).
+    # `eval_world_bbox` already does this; the bmesh path must too, or every tactile
+    # read built on it (contacts, resting, symmetry, overlaps) can lie. Cheap at hobby
+    # poly counts.
+    try:
+        obj.update_tag()
+        bpy.context.view_layer.update()
+    except Exception:
+        pass
     depsgraph = bpy.context.evaluated_depsgraph_get()
     obj_eval = obj.evaluated_get(depsgraph)
     try:

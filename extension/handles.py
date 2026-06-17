@@ -576,9 +576,55 @@ def list_handles(params):
     return {"success": True, "count": len(handles), "handles": handles}
 
 
+def _delete_handle_empty(empty):
+    """Remove a handle Empty and, if it still resolves, its owner's HANDLE_ vgroup.
+    The vgroup normally dies with the mesh; this catches the case where the owner
+    survives but we're forgetting the handle."""
+    owner = bpy.data.objects.get(empty.get("bb_owner", ""))
+    vgname = empty.get("bb_vgroup", "")
+    if owner is not None and vgname:
+        vg = owner.vertex_groups.get(vgname)
+        if vg is not None:
+            owner.vertex_groups.remove(vg)
+    bpy.data.objects.remove(empty, do_unlink=True)
+
+
+def prune_handles(params):
+    """G15 — garbage-collect orphaned handles. Delete the Empties whose provenance can
+    no longer replay (owner gone / vgroup gone / vert-set changed past resolving);
+    clean and dirty handles are KEPT — they still resolve to a live point. Turns the
+    `✗ orphaned` annotation from a permanent stain into something collectable without
+    leaving the chat for the Outliner."""
+    coll = bpy.data.collections.get(HANDLES_COLLECTION)
+    pruned = []
+    if coll is not None:
+        for o in list(coll.objects):  # snapshot — we mutate the collection in the loop
+            if not o.get("bb_handle"):
+                continue
+            if _validate(o)["state"] == "orphaned":
+                pruned.append(o.name)
+                _delete_handle_empty(o)
+    return {"success": True, "pruned": pruned, "count": len(pruned)}
+
+
+def forget_handle(params):
+    """The targeted prune: delete ONE named handle regardless of state (clean ones
+    too). Removes the Empty and its owner's HANDLE_ vgroup."""
+    name = (params.get("name") or "").strip()
+    if not name:
+        return {"error": "feel op=forget needs name=<handle>"}
+    empty = _find_handle(name)
+    if empty is None:
+        return {"error": f"handle '{name}' not found"}
+    _delete_handle_empty(empty)
+    return {"success": True, "forgot": name}
+
+
 TOOLS = {
     "mint_handle":    mint_handle,
     "list_handles":   list_handles,
     "resolve_handle": resolve_handle,
     "accept_handle":  accept_handle,
+    "prune_handles":  prune_handles,
+    "forget_handle":  forget_handle,
 }

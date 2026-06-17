@@ -63,7 +63,7 @@ def check_resting(targets: str = "") -> str:
 
 
 @mcp.tool()
-def check_framing(targets: str = "", camera: str = "") -> str:
+def check_framing(targets: str = "", camera: str = "", aspect: str = "") -> str:
     """
     Camera-space report per target: % of the frame it spans, which edges it clips
     past (and by how much), whether it's behind the camera, and % occluded by other
@@ -72,14 +72,22 @@ def check_framing(targets: str = "", camera: str = "") -> str:
 
     targets: object/group list. Empty = every mesh in the scene.
     camera:  camera object name. Empty = the active scene camera.
+    aspect:  'WxH' (e.g. 1000x1400) or 'W:H' ratio — validate framing against an
+             INTENDED output frame instead of the scene's current resolution. The
+             frame_pct is aspect-relative, so this is what makes readings comparable.
     """
     params = {"targets": _targets(targets)}
     if camera:
         params["camera"] = camera
+    if aspect:
+        params["aspect"] = aspect
     result = call_blender("check_framing", params)
     if not result.get("success"):
         return result.get("error", "failed")
-    lines = [f"camera '{result['camera']}':"]
+    ref = result.get("frame_ref", {})
+    res = ref.get("resolution")
+    ref_str = f" (vs {res[0]}×{res[1]} {ref.get('aspect', '')})" if res else ""
+    lines = [f"camera '{result['camera']}'{ref_str}:"]
     for f in result["framing"]:
         if f["behind_camera"]:
             lines.append(f"  {f['object']}: BEHIND camera")

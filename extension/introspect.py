@@ -241,10 +241,52 @@ def _occlusion_fraction(scene, depsgraph, cam, obj, cap=120):
     return occ / total if total else 0.0
 
 
+def _parse_aspect(spec):
+    """Parse a target-frame spec 'WxH' (pixels) or 'W:H' (ratio) → (res_x, res_y) or
+    None. A ratio keeps a 1000-px long edge so the numbers stay readable."""
+    spec = (spec or "").strip().lower()
+    if not spec:
+        return None
+    sep = "x" if "x" in spec else (":" if ":" in spec else None)
+    if sep is None:
+        return None
+    try:
+        a, b = (float(p) for p in spec.split(sep, 1))
+    except (ValueError, TypeError):
+        return None
+    if a <= 0 or b <= 0:
+        return None
+    if sep == "x":
+        return int(round(a)), int(round(b))
+    # ratio → scale so the long edge is 1000 px
+    scale = 1000.0 / max(a, b)
+    return int(round(a * scale)), int(round(b * scale))
+
+
+def _frame_ref(scene):
+    """The reference frame the coverage % is measured against — resolution + a word.
+    G22: world_to_camera_view fits to the RENDER aspect, so the same camera reads a
+    different frame_pct once the resolution changes. Make that reference explicit so
+    readings are comparable call-to-call instead of silently shifting underfoot."""
+    r = scene.render
+    rx = int(r.resolution_x * (r.pixel_aspect_x or 1.0))
+    ry = int(r.resolution_y * (r.pixel_aspect_y or 1.0))
+    if rx == ry:
+        word = "square"
+    elif rx > ry:
+        word = "landscape"
+    else:
+        word = "portrait"
+    return {"resolution": [r.resolution_x, r.resolution_y], "aspect": word,
+            "aspect_ratio": round(rx / ry, 3) if ry else None}
+
+
 def check_framing(params):
     """Camera-space report per target: frame coverage %, which edges clip (and by
     how much), whether it's behind the camera, and % occluded by other objects.
-    The deterministic answer to 'is it still cropped?' — no test render required."""
+    The deterministic answer to 'is it still cropped?' — no test render required.
+    `aspect`='WxH'|'W:H' validates framing against an INTENDED output before a render
+    (temporarily, then restores the scene's own resolution)."""
     cam_name = params.get("camera")
     scene = bpy.context.scene
     cam = bpy.data.objects.get(cam_name) if cam_name else scene.camera
@@ -256,24 +298,40 @@ def check_framing(params):
         return {"error": err}
     depsgraph = bpy.context.evaluated_depsgraph_get()
 
-    results = []
-    for o in report_objs:
-        cov = camera_coverage(scene, cam, o)
-        clip = {}
-        umin, umax = cov["u_range"]; vmin, vmax = cov["v_range"]
-        if umin < 0: clip["left"] = round(-umin * 100, 1)
-        if umax > 1: clip["right"] = round((umax - 1) * 100, 1)
-        if vmin < 0: clip["bottom"] = round(-vmin * 100, 1)
-        if vmax > 1: clip["top"] = round((vmax - 1) * 100, 1)
-        occ = _occlusion_fraction(scene, depsgraph, cam, o)
-        results.append({
-            "object": o.name,
-            "frame_pct": [round(cov["frac_w"] * 100, 1), round(cov["frac_h"] * 100, 1)],
-            "behind_camera": not cov["in_front"],
-            "clipped": clip,
-            "occluded_pct": round(occ * 100, 1),
-        })
-    return {"success": True, "camera": cam.name, "framing": results}
+    # Optional target aspect: temporarily retarget the render frame so coverage is
+    # computed for the output the agent intends, then restore exactly what was there.
+    want = _parse_aspect(params.get("aspect"))
+    saved = None
+    if want is not None:
+        r = scene.render
+        saved = (r.resolution_x, r.resolution_y)
+        r.resolution_x, r.resolution_y = want
+
+    try:
+        frame_ref = _frame_ref(scene)
+        results = []
+        for o in report_objs:
+            cov = camera_coverage(scene, cam, o)
+            clip = {}
+            umin, umax = cov["u_range"]; vmin, vmax = cov["v_range"]
+            if umin < 0: clip["left"] = round(-umin * 100, 1)
+            if umax > 1: clip["right"] = round((umax - 1) * 100, 1)
+            if vmin < 0: clip["bottom"] = round(-vmin * 100, 1)
+            if vmax > 1: clip["top"] = round((vmax - 1) * 100, 1)
+            occ = _occlusion_fraction(scene, depsgraph, cam, o)
+            results.append({
+                "object": o.name,
+                "frame_pct": [round(cov["frac_w"] * 100, 1), round(cov["frac_h"] * 100, 1)],
+                "behind_camera": not cov["in_front"],
+                "clipped": clip,
+                "occluded_pct": round(occ * 100, 1),
+            })
+    finally:
+        if saved is not None:
+            scene.render.resolution_x, scene.render.resolution_y = saved
+
+    return {"success": True, "camera": cam.name, "framing": results,
+            "frame_ref": frame_ref}
 
 
 # ─────────────────────────── trace_profile (P7) ───────────────────────────

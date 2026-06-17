@@ -876,7 +876,15 @@ def snap_loop(params):
             rel = rot @ rel
         v.co = miw @ (t_centroid + rel * scale)
     bmesh.update_edit_mesh(obj.data)
-    push_undo(f"snap_loop → {target_name}")
+    # G17 undo fix: snap_loop is NOT an EDIT_MODE_TOOLS auto-switch op (it consumes
+    # the live selection, which the auto-target path would deselect), so without this
+    # it would run AND push its undo step while still in EDIT mode — and an in-edit
+    # post-edit checkpoint has no clean object-mode anchor to undo back to (the moved
+    # verts stayed put after `history undo`). Commit the edit by returning to OBJECT
+    # mode here, so the dispatch's push_undo_step lands an object-mode checkpoint like
+    # every other edit verb (see extension/server.py: "each step is an object-mode
+    # checkpoint"). Re-enter edit mode yourself to keep shaping.
+    bpy.ops.object.mode_set(mode='OBJECT')
 
     move = t_centroid - s_centroid
     return {

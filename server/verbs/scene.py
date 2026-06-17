@@ -22,6 +22,7 @@ def scene(
     type: tag(str, "[tree] type filter, e.g. MESH") = "",
     max_depth: tag(int, "[tree] max tree depth") = None,
     summarize: tag(int, "[tree] collapse collections over N objects (0 = expand all)") = 20,
+    parts_only: tag(bool, "[tree] show only real renderable geometry — hide bone-shape widgets + render-hidden helpers") = False,
     # world
     color: tag(list, "[world] solid background [r,g,b] 0..1") = None,
     hex: tag(str, "[world] solid background #RRGGBB") = "",
@@ -35,7 +36,8 @@ def scene(
     """
     Scene-level state — the **Outliner** + scene Properties. `op` selects:
 
-      tree   — the scene collection tree   (filter, type, max_depth, summarize=N)
+      tree   — the scene collection tree   (filter, type, max_depth, summarize=N,
+               parts_only=True for just the real renderable parts on a busy rig)
       world  — set the world background    (color|hex + strength, OR hdri id/path +
                resolution)  — image-based lighting
       new    — start a fresh scene         (empty=True for a truly empty one)
@@ -45,7 +47,7 @@ def scene(
     """
     o = op.lower().strip()
     if o == "tree":
-        return queries.get_scene_tree(filter, type, max_depth, summarize)
+        return queries.get_scene_tree(filter, type, max_depth, summarize, parts_only)
     if o == "world":
         return _scene.set_world_background(color, hex, strength, hdri, resolution, label)
     if o == "new":

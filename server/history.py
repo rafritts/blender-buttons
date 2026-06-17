@@ -106,3 +106,34 @@ def undo_to(id: str) -> str:
     else:
         main = result.get("error", "failed")
     return main + _status(result)
+
+
+def mark_checkpoint(name: str) -> str:
+    """Name the current history head as a checkpoint (G12). Mark before a risky edit;
+    `history op=restore name=…` rolls back to exactly here. Backed by the op-log /
+    Blender-undo mapping, not a parallel snapshot."""
+    result = call_blender("mark_checkpoint", {"name": name})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    at = result.get("at")
+    where = f"at [{at}]" if at else "at the empty baseline"
+    return (f"checkpoint '{result['mark']}' set {where} "
+            f"(history depth {result['history_depth']}) — restore with "
+            f"history op=restore name={result['mark']}")
+
+
+def restore_checkpoint(name: str) -> str:
+    """Roll the scene back to a named checkpoint — undo to where the mark was set.
+    Verified against the history snapshot, like undo_to."""
+    result = call_blender("restore_checkpoint", {"name": name})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    if result.get("steps", 0) == 0:
+        main = result.get("note", f"already at checkpoint '{name}'")
+    else:
+        main = f"restored to checkpoint '{result.get('restored', name)}' ({result['steps']} step(s) undone)"
+        if result.get("verified") is False:
+            main += "\n⚠ " + result.get("warning", "verification FAILED")
+        elif result.get("verified") is True:
+            main += "\n✓ scene verified against history snapshot"
+    return main + _status(result)

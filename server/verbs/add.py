@@ -13,13 +13,14 @@ from server import primitives, scene
 from ._common import tag, unknown
 
 _TYPES = ["box", "plane", "cylinder", "sphere", "cone", "torus", "icosphere",
-          "circle", "tube", "curve", "floor", "light", "camera"]
+          "circle", "tube", "helix", "curve", "floor", "light", "camera"]
 
 
 @mcp.tool(name="add")
 def add(
     type: Literal["box", "plane", "cylinder", "sphere", "cone", "torus",
-                  "icosphere", "circle", "tube", "curve", "floor", "light", "camera"],
+                  "icosphere", "circle", "tube", "helix", "curve", "floor",
+                  "light", "camera"],
     name: tag(str, "object name (required except floor)") = "",
     # ── placement & orientation (the dimensional primitives) ──
     on: tag(dict, "[mesh primitives] placement DSL — {\"on\":\"seat\"}, {\"on_floor\":true}, …") = None,
@@ -49,9 +50,16 @@ def add(
     subtype: tag(str, "[light] POINT|SUN|SPOT|AREA · [curve] BEZIER|NURBS|POLY") = "",
     cyclic: tag(bool, "[curve] close the curve into a loop") = False,
     resolution: tag(int, "[tube/curve] samples per segment") = 0,
-    sides: tag(int, "[tube] cross-section smoothness") = 0,
+    sides: tag(int, "[tube/helix] cross-section smoothness") = 0,
     bevel_depth: tag(float, "[curve] round-bevel radius → solid tube (m)") = 0,
-    tube_radius: tag(Union[float, list], "[tube] radius float OR per-point list for taper") = None,
+    tube_radius: tag(Union[float, list], "[tube] radius float OR per-point list for taper; [helix] wire radius (float)") = None,
+    # ── helix / coil (type=helix) ──
+    turns: tag(float, "[helix] number of full revolutions") = 0,
+    taper: tag(float, "[helix] end/start wire-thickness ratio (1=uniform)") = 0,
+    handedness: tag(str, "[helix] right (default) | left") = "",
+    axis: tag(str, "[helix] coil axis X|Y|Z (default Z)") = "",
+    center: tag(list, "[helix] [x,y,z] base centre (default origin)") = None,
+    segments_per_turn: tag(int, "[helix] samples per revolution (default 24)") = 0,
     # ── light / camera (type=light|camera) ──
     energy: tag(float, "[light] strength (watts; SUN ~5)") = 0,
     color: tag(list, "[light] [r,g,b] 0..1") = None,
@@ -85,6 +93,9 @@ def add(
       CURVES (take name, points):
         tube       — points + tube_radius (float OR per-point list for taper),
                      resolution, sides    (baked tube MESH — hair/cable/handle)
+        helix      — turns, height, radius, tube_radius, taper, handedness, axis,
+                     center, segments_per_turn, sides  (continuous coil MESH — wire
+                     wrap, spring, screw thread, coiled rope; no point cap)
         curve      — points + subtype (BEZIER|NURBS|POLY), cyclic, resolution,
                      bevel_depth          (LIVE curve datablock — dolly path, rope)
       OBJECTS:
@@ -131,6 +142,12 @@ def add(
         return primitives.spline_tube(
             name, points or [], tube_radius if tube_radius is not None else 0.02,
             resolution or 8, sides or 4, label)
+    if t == "helix":
+        return primitives.helix_coil(
+            name, turns or 3, height or 0.2, radius or 0.05,
+            (tube_radius if isinstance(tube_radius, (int, float)) else None) or 0.02,
+            taper or 1.0, handedness or "right", axis or "Z", center,
+            segments_per_turn or 24, sides or 4, label)
     if t == "curve":
         return primitives.add_curve(
             name, points or [], subtype or "BEZIER", cyclic, resolution or 12,

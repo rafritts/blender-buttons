@@ -140,12 +140,26 @@ def bend(params):
     targets: object name, group name, or list (required).
     angle:   bend angle in degrees (required). 30–60 = gentle arc, 90 = quarter
              turn, 180 = U shape. Negative flips direction.
-    axis:    X | Y | Z — the axis to bend AROUND (through each object's origin,
-             local space). A vertical (Z-tall) object bends into a C in the
-             plane perpendicular to this axis: axis=X curls it forward/back,
-             axis=Y curls it left/right. Default X.
+    axis:    X | Y | Z — the axis to bend AROUND (local space). A vertical (Z-tall)
+             object bends into a C in the plane perpendicular to this axis: axis=X
+             curls it forward/back, axis=Y curls it left/right. Default X.
     apply:   bake the deformation into the mesh (default True). Pass False to
              keep the modifier live for tweaking via modify_modifier.
+
+    PIVOT & SHAPE (G21 — the legibility this verb owes you). SimpleDeform BEND
+    pivots about the object's ORIGIN and is SYMMETRIC about it: geometry on BOTH
+    sides of the origin (along the span perpendicular to `axis`) curls by the same
+    amount, the curl growing with distance from the origin. So a bar CENTRED on its
+    origin does NOT make a simple one-way arc — both halves sweep up into a
+    hump/"mustache" (apexes out at the arms, tips recurving). To get a clean
+    one-directional crescent, move the origin to ONE END first (set the 3D-cursor
+    there → object origin to cursor), so the whole span bends the same way; or accept
+    the symmetric arc and design around it. Worked example: an X-aligned bar, origin
+    at its centre, axis=Y, +30° → both arms sweep +Z in the XZ plane, a symmetric
+    smile about the origin (NOT a tilted single arc).
+
+    SIDE EFFECT: apply=True forces OBJECT mode (modifier_apply can't run in Edit) —
+    which doubles as a reliable "leave Edit mode" escape hatch.
 
     Geometry needs segments along its length to bend smoothly — primitives like
     cylinders/cones have them around the circumference but only 2 rings along Z;

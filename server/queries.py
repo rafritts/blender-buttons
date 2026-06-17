@@ -4,7 +4,7 @@ from server._core import mcp, call_blender, _status, _targets
 
 @mcp.tool()
 def get_scene_tree(filter: str = "", type: str = "", max_depth: int = None,
-                   summarize: int = 20) -> str:
+                   summarize: int = 20, parts_only: bool = False) -> str:
     """List the Blender scene as a tree. Call this first to know what exists.
 
     On big production scenes the full dump is unreadable, so it scales:
@@ -14,6 +14,10 @@ def get_scene_tree(filter: str = "", type: str = "", max_depth: int = None,
     summarize: collapse any collection holding more than this many objects into a
                per-type count line (default 20; pass 0 to force a full listing).
                Setting filter/type disables summarization so matches are listed.
+    parts_only: show only the REAL renderable geometry — hide bone-shape widgets
+               (the cs_*/WGT- meshes referenced as armature custom shapes) and
+               render-hidden helpers. First contact with a rig becomes a map of the
+               ~15 actual parts instead of a wall of hundreds of widgets.
 
     Objects carry tags: (instanced) for shared mesh data, [lib:File.blend] for
     library-linked (read-only) data, [override:File.blend] for a local override.
@@ -22,8 +26,10 @@ def get_scene_tree(filter: str = "", type: str = "", max_depth: int = None,
       get_scene_tree()                       # overview, big collections summarized
       get_scene_tree(filter="hand")          # drill into matching objects
       get_scene_tree(type="ARMATURE")        # just the rigs
+      get_scene_tree(parts_only=True)        # just the real renderable parts
     """
-    params = {"filter": filter, "type": type, "summarize": summarize}
+    params = {"filter": filter, "type": type, "summarize": summarize,
+              "parts_only": parts_only}
     if max_depth is not None:
         params["max_depth"] = max_depth
     result = call_blender("get_scene_tree", params)

@@ -30,7 +30,29 @@ def get_scene_tree(params=None):
         summarize = int(params.get("summarize", 20))
     except (TypeError, ValueError):
         summarize = 20
-    filtering = bool(flt or type_filter)
+    parts_only = bool(params.get("parts_only"))
+    filtering = bool(flt or type_filter or parts_only)
+
+    # G13: "the real parts" — skip the rig's helper geometry (bone-shape widgets, the
+    # cs_*/WGT-* meshes that drown the ~15 real meshes on a production rig). Detected
+    # GENERICALLY: an object is a widget if it's referenced as some armature's pose-bone
+    # custom shape, or it's hidden from render. No name-prefix hardcoding.
+    widget_objs = set()
+    renderable_types = {'MESH', 'CURVE', 'SURFACE', 'META', 'FONT', 'GPENCIL', 'VOLUME'}
+    if parts_only:
+        for arm in bpy.context.scene.objects:
+            if arm.type != 'ARMATURE' or arm.pose is None:
+                continue
+            for pb in arm.pose.bones:
+                if pb.custom_shape is not None:
+                    widget_objs.add(pb.custom_shape.name)
+
+    def is_real_part(obj):
+        if obj.type not in renderable_types:
+            return False
+        if obj.name in widget_objs or obj.hide_render:
+            return False
+        return True
 
     mesh_count = Counter(
         obj.data.name for obj in bpy.context.scene.objects
@@ -42,6 +64,8 @@ def get_scene_tree(params=None):
         # type filter is always honored; a collection-name match satisfies the
         # name-substring filter for everything inside that collection.
         if type_filter and obj.type != type_filter:
+            return False
+        if parts_only and not is_real_part(obj):
             return False
         if flt and not col_match and flt not in obj.name.lower():
             return False

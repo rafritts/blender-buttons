@@ -50,8 +50,27 @@ def feel_assembly(targets: str = "", group: str = "") -> str:
     if handle_names:
         lines.append(
             "  → next: `feel op=map handle=" + handle_names[0] + "` (what an opening "
-            "looks out onto) · `edit op=bridge a=… b=…` (weld two) · "
-            "`transform move_to handle=…` (align by name)")
+            "looks out onto) · `feel op=relate a=… b=…` (do two openings line up?) · "
+            "`edit op=bridge a=… b=…` (weld two) · `transform move_to handle=…`")
+    return "\n".join(lines)
+
+
+def feel_relate(a: str = "", b: str = "") -> str:
+    """Relate two named boundary handles (G16): do these two openings line up? Reports
+    centre gap, axis alignment (do they face each other?), and size match — the read a
+    bridge/weld needs before it tries."""
+    result = call_blender("feel_relate", {"a": a, "b": b})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    lines = [f"relate {result['a']} ↔ {result['b']}:"]
+    lines.append(f"  centre gap:  {result['center_gap_cm']}cm")
+    lines.append(f"  axis:        {result['facing']}  ({result['axis_angle_deg']}° off-parallel)")
+    lines.append(f"  size:        ⌀ {result['diam_a_cm']}cm vs {result['diam_b_cm']}cm "
+                 f"(match {result['size_match']})")
+    verdict = ("✓ join-ready (parallel, facing, similar size) — fit then "
+               "`edit op=bridge`" if result["join_ready"]
+               else "✗ not aligned for a clean weld yet (check axis / size / gap)")
+    lines.append(f"  {verdict}")
     return "\n".join(lines)
 
 

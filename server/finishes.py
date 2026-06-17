@@ -42,11 +42,17 @@ def bend(targets: str, angle: float, axis: str = "X", apply: bool = True,
     targets: object name, group name, or comma-separated list.
     angle:   bend angle in degrees. 30–60 = gentle arc, 90 = quarter turn,
              180 = U shape. Negative flips direction.
-    axis:    the axis to bend AROUND (X | Y | Z, local, through the object's
-             origin). A vertical object bends into a C in the plane
-             perpendicular to this axis: X curls it forward/back, Y left/right.
+    axis:    the axis to bend AROUND (X | Y | Z, local). A vertical object bends
+             into a C in the plane perpendicular to this axis: X curls it
+             forward/back, Y left/right.
     apply:   bake into the mesh (default True). False keeps the modifier live
-             so modify_modifier can adjust the angle later.
+             so modify_modifier can adjust the angle later. (apply=True forces
+             OBJECT mode — handy as an escape hatch out of Edit mode.)
+
+    PIVOT: the bend pivots about the object's ORIGIN and is SYMMETRIC about it —
+    geometry on both sides curls equally, growing with distance from the origin.
+    A part centred on its origin humps both ways (the "mustache"), NOT a single
+    tilted arc; move the origin to one end first for a clean one-way crescent.
 
     Bending needs segments along the length to look smooth — if the result is
     faceted, run loop_cut(axis=Z, cuts=8, target=<name>) first and bend again.

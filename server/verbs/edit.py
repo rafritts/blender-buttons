@@ -122,7 +122,10 @@ def edit(
       proportional_move — soft move with falloff (directional + radius, falloff)
       extrude_along_curve — sweep selection along a curve (curve, segments, taper)
       round       — round named corners    (corners=[...], radius→width, segments)
-      bend        — bend the object        (angle, axis, apply)
+      bend        — bend the object into an arc  (angle, axis, apply). Pivots about
+                    the object ORIGIN and is SYMMETRIC about it — a bar centred on its
+                    origin humps both ways ("mustache"); move the origin to one end
+                    for a one-way crescent. apply=True forces OBJECT mode.
       smooth_edges— bevel+shade for soft edges  (width, segments, angle_limit)
       taper_end   — taper one end to a scale     (axis, end=MAX|MIN, scale)
       taper_section — taper a ring range (axis, from_ring, to_ring, x_start/x_end/

@@ -222,7 +222,10 @@ def snap_loop(handle: str = "", fit_scale: bool = True, fit_rotation: bool = Fal
     """Seat the selected boundary loop onto a target opening (transform op=snap_loop /
     gaps.md G17). Operates on the LIVE edit-mode selection — be in edit mode with the
     source loop selected first. Translates its centroid onto the target handle's point;
-    optionally scales rim→rim and rotates plane→plane."""
+    optionally scales rim→rim and rotates plane→plane. Returns to OBJECT mode on
+    success (so the move is a clean, undoable checkpoint); re-enter edit to keep
+    shaping. Note: seating a rim AT a cage opening leaves a visible gap on Subsurf'd
+    meshes and does not weld — follow with edit op=bridge to actually close it."""
     result = call_blender("snap_loop", {"handle": handle, "fit_scale": fit_scale,
                                         "fit_rotation": fit_rotation}, label=label)
     if result.get("success"):

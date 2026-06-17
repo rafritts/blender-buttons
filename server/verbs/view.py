@@ -41,6 +41,7 @@ def view(
     targets: tag(str, "[frame/check_framing] objects to frame/check") = "",
     include_lights: tag(bool, "[frame] include lights in the frame") = False,
     camera: tag(str, "[check_framing/camera_dof] camera name (empty=scene cam)") = "",
+    aspect: tag(str, "[check_framing] target frame 'WxH'|'W:H' to validate against (empty=scene resolution)") = "",
     # camera_position
     x: tag(float, "[camera_position] camera X") = 0.0,
     y: tag(float, "[camera_position] camera Y") = 0.0,
@@ -61,7 +62,10 @@ def view(
                   target_x/y/z, auto_frame)
       zoom      — zoom to the current selection (—)
       frame     — frame objects in view  (targets, include_lights)
-      check_framing — is everything in the camera frame? (targets, camera)
+      check_framing — is everything in the camera frame? Coverage % is relative to
+                  the frame aspect, so each reading states the reference resolution;
+                  aspect='WxH'|'W:H' validates against an intended output. (targets,
+                  camera, aspect)
       camera_position — move the scene camera to a point aimed at a target
                   (x/y/z, target_x/y/z)
       camera_dof — depth of field on the camera (focus_distance OR focus_object,
@@ -83,7 +87,7 @@ def view(
     if o == "frame":
         return viewport.frame_scene(targets, include_lights)
     if o == "check_framing":
-        return introspect.check_framing(targets, camera)
+        return introspect.check_framing(targets, camera, aspect)
     if o == "camera_position":
         return scene.set_camera_position(x, y, z, target_x, target_y, target_z)
     if o == "camera_dof":

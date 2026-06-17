@@ -10,17 +10,17 @@ from server._core import mcp
 from server import scene
 from ._common import tag, unknown
 
-_OPS = ["image", "quality", "cycles", "color"]
+_OPS = ["image", "settings", "quality", "cycles", "color"]
 
 
 @mcp.tool(name="render")
 def render(
-    op: Literal["image", "quality", "cycles", "color"],
+    op: Literal["image", "settings", "quality", "cycles", "color"],
     # image (render_to_file)
     filepath: tag(str, "[image] output path (~ expanded)") = "",
     resolution_x: tag(int, "[image] pixel width") = None,
     resolution_y: tag(int, "[image] pixel height") = None,
-    engine: tag(str, "[image] CYCLES | BLENDER_EEVEE_NEXT") = "",
+    engine: tag(str, "[image] engine id — `render op=settings` lists this build's (e.g. CYCLES, BLENDER_EEVEE); empty=keep current") = "",
     format: tag(str, "[image] PNG|JPEG|OPEN_EXR|TIFF|WEBP") = "PNG",
     transparent: tag(bool, "[image] transparent background") = None,
     timeout: tag(float, "[image] seconds before giving up") = 300,
@@ -46,7 +46,9 @@ def render(
     Render & look — the **Render** menu. `op` selects:
 
       image   — render the scene camera to a file (filepath, resolution_x/y, samples,
-                engine=CYCLES|BLENDER_EEVEE_NEXT, format, transparent, timeout)
+                engine, format, transparent, timeout)
+                (engine: the build's id, NOT a hardcoded name — Blender 5.x Eevee is
+                `BLENDER_EEVEE`, not `_NEXT`; `render op=settings` lists what's real.)
 
                 ⚠ THE IMAGE IS FOR THE HUMAN, NOT THE AGENT. Do NOT read it back.
                 Why this is a hard rule, not a style note:
@@ -60,8 +62,11 @@ def render(
                 `object info`, modifier lists, the status block. Those are
                 depsgraph-exact and can't be gaslit. Render only when the user asks
                 for a picture, then hand them the path.
-                (engine: EEVEE may be absent in headless builds — if so the error
-                lists the engines this build has; fall back to CYCLES.)
+                (engine: builds vary — CYCLES may be absent, Eevee's id shifts by
+                version. `render op=settings` reports this build's real list.)
+      settings— READ the render config: available engines (the build's own list),
+                current engine, resolution/format, color management, and the active
+                engine's params. The read half of this verb.                  (—)
       quality — Eevee quality toggles (raytracing, ao, shadows, samples)
       cycles  — Cycles controls (device=GPU|CPU, backend=OPTIX|CUDA|…, denoise,
                 denoiser, adaptive_threshold, samples)
@@ -71,6 +76,8 @@ def render(
     if o == "image":
         return scene.render_to_file(filepath, resolution_x, resolution_y, samples,
                                     engine, format, transparent, timeout, label)
+    if o == "settings":
+        return scene.render_settings()
     if o == "quality":
         return scene.set_render_quality(raytracing, ao, shadows, samples, label)
     if o == "cycles":

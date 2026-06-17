@@ -21,6 +21,8 @@ _history = []
 _redo_stack = []        # entries undone and available to redo (cleared on any new op)
 _undo_baseline = None   # scene object-name set captured before the first mutating op
 _snapshots = {}         # op_id -> {obj_name: geometry signature} for diff_since (P11)
+_marks = {}             # G12: checkpoint name -> op_id of the history head when marked
+                        # (None = marked at the empty baseline). `restore` undoes to it.
 
 _VSAMPLE_CAP = 150      # max per-object vertices stored per snapshot (downsampled)
 
@@ -62,6 +64,9 @@ def capture_geometry_snapshot():
 NO_LOG_TOOLS = {
     "get_scene_tree",
     "get_history", "undo_steps", "undo_to", "redo_steps",
+    # G12 checkpoints: mark is pure metadata; restore delegates to undo_to (which is
+    # itself unlogged), so neither should consume a log slot / undo step.
+    "mark_checkpoint", "restore_checkpoint",
 }
 
 # Tools that neither log to history NOR consume an undo step: pure queries,
@@ -78,6 +83,8 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
     # read-only introspection / lint tools (P3-P12) — pure queries, no scene mutation
     "find_coplanar_overlaps", "validate_scene", "check_mesh", "audit_asset",
     "check_contacts", "trace_profile", "check_framing", "check_resting", "diff_since",
+    # render config read (G11) — pure query
+    "render_settings",
     # rig + metadata introspection (U1, U2, U9) — read-only
     "get_bone_tree", "describe_bone", "list_constraints", "get_custom_properties",
     # mesh-data introspection (U8) — read-only
@@ -90,8 +97,8 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
     "get_topology",
     # multi-feel (SPEC-07 Phase 4) — feel_map is a pure raycast read (mints nothing);
     # feel_assembly DOES mint boundary handles, so it stays mutating (logged + undoable)
-    # and is NOT listed here.
-    "feel_map",
+    # and is NOT listed here. feel_relate (G16) is a pure handle-pair measurement.
+    "feel_map", "feel_relate",
     # new_scene reloads the startup file, wiping Blender's undo stack and the
     # scene; it resets the history log itself (designs.new_scene) rather than
     # pushing an undo step that would immediately be desynced.
@@ -102,11 +109,15 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
 # (read-only visual / query tools — the status block would be noise).
 NO_STATUS_TOOLS = {
     "get_blender_status",
-    "get_scene_tree", "get_history", "get_bone_tree",
+    "get_scene_tree", "get_history", "get_bone_tree", "render_settings",
+    "mark_checkpoint",
     "list_handles", "resolve_handle", "accept_handle",
     # multi-feel (SPEC-07 Phase 4) — perception ops; assembly mints as a side effect
     # but is read-shaped, so neither carries the status block.
-    "feel_assembly", "feel_map",
+    "feel_assembly", "feel_map", "feel_relate",
+    # handle GC (G15) — registry tidying; deleting an Empty doesn't move geometry, so
+    # the status block would be noise (matches list/accept). Still mutating/undoable.
+    "prune_handles", "forget_handle",
 }
 
 
@@ -122,6 +133,7 @@ def reset_history_state():
     _history.clear()
     _redo_stack.clear()
     _snapshots.clear()
+    _marks.clear()
     _undo_baseline = None
     _pending_edit_bind = None
     _eval_dirty = set()

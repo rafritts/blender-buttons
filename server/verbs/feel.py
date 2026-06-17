@@ -14,15 +14,15 @@ from ._common import tag, unknown
 
 _OPS = ["topology", "profile", "rings", "distance", "gap", "aligned", "symmetry",
         "mesh", "overlaps", "validate", "audit", "contacts", "resting", "aim",
-        "handle", "handles", "accept", "assembly", "map"]
+        "handle", "handles", "accept", "forget", "assembly", "map", "relate"]
 
 
 @mcp.tool(name="feel")
 def feel(
     op: Literal["topology", "profile", "rings", "distance", "gap", "aligned",
                 "symmetry", "mesh", "overlaps", "validate", "audit", "contacts",
-                "resting", "aim", "handle", "handles", "accept",
-                "assembly", "map"] = "topology",
+                "resting", "aim", "handle", "handles", "accept", "forget",
+                "assembly", "map", "relate"] = "topology",
     target: tag(str, "[topology/rings/symmetry/mesh] mesh object (empty=active); "
                      "[map] cast from every boundary handle on this mesh") = "",
     # topology (SPEC-04)
@@ -40,8 +40,8 @@ def feel(
     full: tag(bool, "[profile] True = raw per-ring dump instead of aggregated bands") = False,
     max_rings: tag(int, "[profile] max rings in full mode (0 = uncap)") = 200,
     # measurements
-    a: tag(str, "[distance/gap/aligned] first object") = "",
-    b: tag(str, "[distance/gap/aligned] second object") = "",
+    a: tag(str, "[distance/gap/aligned] first object; [relate] first boundary handle") = "",
+    b: tag(str, "[distance/gap/aligned] second object; [relate] second boundary handle") = "",
     side: tag(str, "[aligned] TOP|BOTTOM|… side to compare") = "TOP",
     tolerance: tag(float, "[aligned] alignment tolerance (m)") = 0.001,
     # symmetry
@@ -62,6 +62,7 @@ def feel(
     handle: tag(str, "[map] boundary handle to cast FROM (run feel op=assembly first to mint them)") = "",
     source: tag(str, "[handle] addressing mode: selection (the live edit-mode selection)") = "selection",
     vertex_parent: tag(bool, "[handle] vertex-parent the Empty to a tracking vert so it rides pose/deform (default off; the vgroup recompute stays the source of truth)") = False,
+    prune: tag(bool, "[handles] also garbage-collect orphaned handles (delete the ✗ unresolvable Empties), then list what remains") = False,
 ) -> str:
     """
     Feel a mesh — structure, measurements, correctness. Read-only (no status block).
@@ -116,9 +117,12 @@ def feel(
                  orphaned thereafter.      (name, source=selection, vertex_parent)
       handles  — list every handle, each VALIDATED: live point + git-style state
                  (● clean / ⚠ dirty / ✗ orphaned), drift in cm, and attribution
-                 (self = an agent op moved it; external = the human did).
+                 (self = an agent op moved it; external = the human did). prune=True
+                 also garbage-collects the orphaned handles first.    (prune)
       accept   — re-baseline a dirty handle: re-snapshot its provenance from current
                  geometry, clearing the drift (the 'stage it' move).      (name)
+      forget   — delete ONE named handle regardless of state (the targeted prune):
+                 removes the Empty + its HANDLE_ vgroup.                   (name)
       assembly — the RELATIONAL map over a SET of objects (multi-feel): per-object
                  size, each one's open boundary loops (the catalog — verts, cm,
                  region), and the pairwise gaps. Auto-mints every open boundary as a
@@ -130,6 +134,10 @@ def feel(
                  + distance (or a miss). Reports the hit as a coordinate; mints
                  nothing (a smooth-face hit is Class-B, agent-minted only).
                  (handle=<one> OR target=<mesh, all its boundaries>, margin)
+      relate   — relate TWO named boundary handles: centre gap, axis alignment (do
+                 the openings face each other?), and size match — the read a
+                 bridge/weld needs to decide IF two openings can join, before it
+                 tries. op=map's loop-plane math on a named PAIR.        (a, b)
     """
     o = op.lower().strip()
     if o == "topology":
@@ -163,11 +171,18 @@ def feel(
     if o == "handle":
         return handles.mint_handle(name, source, vertex_parent)
     if o == "handles":
+        if prune:
+            pruned = handles.prune_handles()
+            return pruned + "\n" + handles.list_handles()
         return handles.list_handles()
     if o == "accept":
         return handles.accept_handle(name)
+    if o == "forget":
+        return handles.forget_handle(name)
     if o == "assembly":
         return assembly.feel_assembly(targets, group)
     if o == "map":
         return assembly.feel_map(handle, target, margin)
+    if o == "relate":
+        return assembly.feel_relate(a, b)
     return unknown("feel", "op", op, _OPS)

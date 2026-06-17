@@ -171,18 +171,29 @@ def set_mode(params):
     # G7: with an explicit target, select+activate it FIRST so a stray human click
     # can't make a mode switch land on the wrong object. Drop any other object's
     # edit/sculpt mode before re-pointing the active object.
+    prev_mode = None
     if target:
         obj = bpy.data.objects.get(target)
         if obj is None:
             return {"error": f"target '{target}' not found"}
         active = bpy.context.active_object
-        if active is not None and active is not obj and active.mode != 'OBJECT':
+        # Capture the TARGET's pre-switch mode before we touch anything — the bind
+        # check below keys off it, and the G18 exit-to-OBJECT can erase it.
+        prev_mode = obj.mode
+        # G18: object.select_all / select_set / activate are OBJECT-mode operators —
+        # their poll() fails if the active object is still in EDIT/SCULPT/POSE. Exit
+        # to OBJECT first whenever the active object is in any non-OBJECT mode. This
+        # includes the case where the *target* is itself the active edit-mode object
+        # (the old `active is not obj` guard skipped it, so EDIT→OBJECT name=<self>
+        # hit select_all's failing poll and never left Edit mode).
+        if active is not None and active.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.select_all(action='DESELECT')
         obj.select_set(True)
         bpy.context.view_layer.objects.active = obj
     active = bpy.context.active_object
-    prev_mode = active.mode if active is not None else None
+    if prev_mode is None:
+        prev_mode = active.mode if active is not None else None
     # W2: snapshot deform binds when EDIT is entered, so a topology edit spread
     # across separate socket commands (set_mode EDIT → select → delete_geometry →
     # set_mode OBJECT) is still caught when edit mode is exited. The request-scoped

@@ -311,6 +311,29 @@ def render_to_file(filepath: str,
     return main + _status(result)
 
 
+def render_settings() -> str:
+    """G11 — READ the render config (the verb could only write). Reports the build's
+    available engines, current engine, output resolution/format, color management, and
+    the active engine's own params. No more discovery-by-exception on the engine name."""
+    result = call_blender("render_settings", {})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    lines = [f"engine: {result['engine']}   available: {', '.join(result['available_engines'])}"]
+    lines.append(f"output: {result['resolution'][0]}×{result['resolution'][1]} "
+                 f"@{result['resolution_percentage']}%  {result['format']}"
+                 f"{'  transparent' if result.get('film_transparent') else ''}")
+    c = result.get("color", {})
+    lines.append(f"color:  {c.get('view_transform')} / {c.get('look') or 'None'}  "
+                 f"exposure {c.get('exposure')}  gamma {c.get('gamma')}")
+    if "eevee" in result:
+        ev = result["eevee"]
+        lines.append("eevee:  " + "  ".join(f"{k}={v}" for k, v in ev.items()))
+    if "cycles" in result:
+        cy = result["cycles"]
+        lines.append("cycles: " + "  ".join(f"{k}={v}" for k, v in cy.items()))
+    return "\n".join(lines)
+
+
 @mcp.tool()
 def set_camera_position(x: float, y: float, z: float,
                         target_x: float = 0.0, target_y: float = 0.0, target_z: float = 0.0) -> str:
