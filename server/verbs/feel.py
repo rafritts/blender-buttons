@@ -14,16 +14,17 @@ from ._common import tag, unknown
 
 _OPS = ["topology", "profile", "silhouette", "section", "rings", "distance", "gap",
         "aligned", "symmetry", "mesh", "overlaps", "validate", "audit", "contacts",
-        "resting", "aim", "place", "anchor", "verify", "handle", "handles", "accept",
-        "forget", "assembly", "map", "relate"]
+        "resting", "aim", "place", "anchor", "verify", "baseline", "diff", "handle",
+        "handles", "accept", "forget", "assembly", "map", "relate"]
 
 
 @mcp.tool(name="feel")
 def feel(
     op: Literal["topology", "profile", "silhouette", "section", "rings", "distance",
                 "gap", "aligned", "symmetry", "mesh", "overlaps", "validate", "audit",
-                "contacts", "resting", "aim", "place", "anchor", "verify", "handle",
-                "handles", "accept", "forget", "assembly", "map", "relate"] = "topology",
+                "contacts", "resting", "aim", "place", "anchor", "verify", "baseline",
+                "diff", "handle", "handles", "accept", "forget", "assembly", "map",
+                "relate"] = "topology",
     target: tag(str, "[topology/profile/silhouette/section/rings/symmetry/mesh] mesh "
                      "object (empty=active); "
                      "[map] cast from every boundary handle on this mesh") = "",
@@ -147,6 +148,12 @@ def feel(
                  centroid/extent drift + a captured/clipping/slack verdict + bounds
                  aspect, so a clipped/over-grabbed/wrong-form selection reads as off
                  without a viewport (G48).                           (steps)
+      baseline — snapshot the live selection's form (span/projection/curvature/
+                 symmetry/centroid) + its verts as a NAMED baseline (this session).
+                 The 'before' of a local edit.                       (name, base)
+      diff     — signed change per metric over a baseline's SAME verts after an edit —
+                 a local, temporal check a global bbox/symmetry read can't give. 'It
+                 grew 2cm and stayed symmetric' in one read (G45).    (name)
       place    — surface-relative placement: anchor on a handle/landmark + a metric
                  world offset (up/down/front/back/left/right), ray-snap to the surface,
                  get the world point + normal. 'A hand below the bust apex, on the
@@ -219,6 +226,10 @@ def feel(
         return queries.selection_anchor(target)
     if o == "verify":
         return editmode.verify_selection(steps)
+    if o == "baseline":
+        return topology.region_baseline(name, base)
+    if o == "diff":
+        return topology.region_diff(name)
     if o == "place":
         return queries.place_on_surface(target, handle, anchor_x, anchor_y, anchor_z,
                                         up, down, front, back, left, right, snap)

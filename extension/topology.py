@@ -957,6 +957,104 @@ def get_topology(params):
     return result
 
 
+# ── G45: before/after region diff ─────────────────────────────────────────────
+# Session store (cleared on addon reload) mapping a baseline name → the verts it
+# captured + their form metrics. A region diff is inherently a within-session
+# before/after, so a module dict is the right lifetime — no datablock needed.
+_REGION_BASELINES = {}
+
+
+def _region_snapshot(obj, indices, base="cage"):
+    """Compute the selection-scoped form bundle over an explicit vert-index set, by
+    setting select flags on a THROWAWAY world bmesh (never touches the live mesh).
+    Returns (metrics_dict, present_count)."""
+    bm = _topology_bmesh(obj, base)
+    idxset = set(int(i) for i in indices)
+    present = 0
+    cos = []
+    for v in bm.verts:
+        hit = v.index in idxset
+        v.select = hit
+        if hit:
+            present += 1
+            cos.append(v.co.copy())
+    if present < 4:
+        bm.free()
+        return None, present
+    bbox = _bbox(bm)
+    rf = _m_region_form(bm, "low", bbox)
+    pr = _m_protrusion(bm, "low", bbox)
+    bm.free()
+    c = mathutils.Vector((sum(p.x for p in cos), sum(p.y for p in cos),
+                          sum(p.z for p in cos))) / present
+    metrics = {"centroid": [round(x, 5) for x in c], "verts": present}
+    for k in ("span_cm", "projection_out_cm", "projection_in_cm", "center_vs_rim_mm",
+              "curvature_verdict", "lr_mirror_mean_mm"):
+        if k in rf:
+            metrics[k] = rf[k]
+    if "max_protrusion_cm" in pr:
+        metrics["max_protrusion_cm"] = pr["max_protrusion_cm"]
+    return metrics, present
+
+
+def region_baseline(params):
+    """G45 — capture the live selection's form (span/projection/curvature/symmetry/
+    centroid) + its vert indices as a NAMED baseline, to diff after an edit. The
+    'before' half of a local, temporal verification."""
+    import bpy
+    name = (params.get("name") or "").strip()
+    if not name:
+        return {"error": "region baseline needs name=<label>"}
+    obj = bpy.context.active_object
+    if obj is None or obj.type != 'MESH':
+        return {"error": "active object is not a mesh"}
+    base = params.get("base", "cage")
+    bm = _topology_bmesh(obj, base)
+    indices = [v.index for v in bm.verts if v.select]
+    bm.free()
+    if len(indices) < 4:
+        return {"note": f"select a region first (need >=4 verts, found {len(indices)})",
+                "selected": len(indices)}
+    metrics, _ = _region_snapshot(obj, indices, base)
+    _REGION_BASELINES[name] = {"owner": obj.name, "indices": indices,
+                               "base": base, "metrics": metrics}
+    return {"success": True, "name": name, "owner": obj.name,
+            "verts": len(indices), "metrics": metrics}
+
+
+def region_diff(params):
+    """G45 — re-read a named baseline's SAME verts now and report the signed change per
+    metric. The 'after' half: a local edit checked locally and temporally, so 'it grew
+    2cm and stayed symmetric' is one read, not a hand-diff of two global snapshots."""
+    import bpy
+    name = (params.get("name") or "").strip()
+    b = _REGION_BASELINES.get(name)
+    if b is None:
+        return {"error": f"no region baseline named '{name}' — capture one first with "
+                         f"feel op=baseline name={name} (this session only)"}
+    obj = bpy.data.objects.get(b["owner"])
+    if obj is None or obj.type != 'MESH':
+        return {"error": f"baseline owner '{b['owner']}' is gone"}
+    after, present = _region_snapshot(obj, b["indices"], b.get("base", "cage"))
+    if after is None:
+        return {"error": f"baseline '{name}' verts are gone ({present} of "
+                         f"{len(b['indices'])} remain) — the edit changed topology; re-baseline"}
+    before = b["metrics"]
+    delta = {}
+    for k in ("span_cm", "projection_out_cm", "projection_in_cm", "center_vs_rim_mm",
+              "lr_mirror_mean_mm", "max_protrusion_cm"):
+        if k in before and k in after:
+            delta[k] = round(after[k] - before[k], 3)
+    bc, ac = before.get("centroid"), after.get("centroid")
+    if bc and ac:
+        delta["centroid_shift_cm"] = round(math.sqrt(sum((a - b2) ** 2
+                                          for a, b2 in zip(ac, bc))) * 100, 2)
+    return {"success": True, "name": name, "owner": obj.name,
+            "before": before, "after": after, "delta": delta}
+
+
 TOOLS = {
-    "get_topology": get_topology,
+    "get_topology":   get_topology,
+    "region_baseline": region_baseline,
+    "region_diff":    region_diff,
 }

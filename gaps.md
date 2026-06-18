@@ -108,25 +108,6 @@ must report multi-lobed/saddle forms honestly rather than averaging them to "fla
 geometry, not vision. Dogfood: asked whether `feel` can discern face/bust/butt/navel on a base
 female mesh — yes to *measure* each once located, no to *find* them; the butt read "flat."
 
-## G45 — no **before/after region diff** to confirm a local edit did what was intended 🟢 OPEN
-
-A local sculpt edit needs a *local* verification, computed over just the edited region. The
-selection-scoped instruments now exist — `region_form` gives the patch's convex/concave verdict,
-projection, and per-patch L/R mirror error (and reads the live selection correctly), and the
-`── edit ──` status block now reports the selection's centroid, per-axis bbox, and `lr_balance`
-(see the closed G42/G44 work in `git log`). What's still missing is the **temporal** half: there
-is no way to snapshot a region's form *before* an edit and diff it *after*, so "did this region
-grow by 2cm / stay symmetric through the edit" must be reconstructed by hand from two separate
-reads. Global metrics still mislead on a local edit — the +4cm bust pull passed the world-bbox
-front bound and whole-mesh symmetry while being visibly asymmetric and coned — so the agent needs
-a scoped *delta*, not just a scoped *snapshot*.
-
-**General fix:** a before/after region diff — capture a selection's form/symmetry/projection as a
-named baseline, then after an edit report the signed change per metric over the same verts, so a
-local change is checked locally and temporally. Builds directly on the now-live selection-scoped
-reads. Dogfood: the bust edit passed bbox + global-symmetry while being asymmetric and malformed,
-and confirming "it grew, and stayed symmetric" needed the human's viewport.
-
 ## Carried over — bigger build-outs (not yet started)
 
 - **Multires + dyntopo** as real multi-level sculpt targets — the proper organic-sculpt

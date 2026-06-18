@@ -195,3 +195,35 @@ def get_topology(target: str = "", method: str = "", lod: str = "low",
     for name, data in result["topology"].items():
         lines.extend(_fmt_method(name, data))
     return "\n".join(lines) + _status(result)
+
+
+def region_baseline(name: str = "", base: str = "cage") -> str:
+    """G45 — snapshot the live selection's form as a named baseline to diff after an
+    edit. Read-only-ish (no geometry change); no status block."""
+    result = call_blender("region_baseline", {"name": name, "base": base})
+    if not result.get("success"):
+        return result.get("note") or result.get("error", "failed")
+    m = result["metrics"]
+    return (f"baseline '{result['name']}' captured ({result['verts']} verts on "
+            f"{result['owner']}): span {m.get('span_cm','?')}cm, "
+            f"proj +{m.get('projection_out_cm','?')}cm, "
+            f"{m.get('curvature_verdict','?')}, "
+            f"L/R {m.get('lr_mirror_mean_mm','?')}mm\n"
+            f"  → edit, then feel op=diff name={result['name']} for the signed change")
+
+
+def region_diff(name: str = "") -> str:
+    """G45 — signed change per metric over a named baseline's SAME verts. The local,
+    temporal verification a global bbox/symmetry read can't give."""
+    result = call_blender("region_diff", {"name": name})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    d = result["delta"]
+    units = {"span_cm": "cm", "projection_out_cm": "cm", "projection_in_cm": "cm",
+             "center_vs_rim_mm": "mm", "lr_mirror_mean_mm": "mm",
+             "max_protrusion_cm": "cm", "centroid_shift_cm": "cm"}
+    lines = [f"region '{result['name']}' Δ since baseline (same verts):"]
+    for k, v in d.items():
+        sign = f"{v:+}" if k != "centroid_shift_cm" else f"{v}"
+        lines.append(f"  {k}: {sign}{units.get(k,'')}")
+    return "\n".join(lines)
