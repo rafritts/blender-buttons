@@ -286,27 +286,54 @@ landmark discovery (**G38**) and region-coherent selection (**G43**) so a featur
 relative to another feature, never to the origin. Dogfood: the navel's Z was the one number with
 no relational anchor — typed, then nudged in raw centimetres on the human's call.
 
-## G48 — `feel` reports a region's metrics without flagging when the selection is the **wrong scale to trust them** ⚖️ OPEN
+## G48 — a selection-scoped `feel` read certifies *localization*, not *capture*; nothing flags a selection that bounds the wrong **extent** or **form** ⚖️ OPEN
 
-A selection-scoped read (`region_form`, `protrusion`, centroid) returns a confident number
-regardless of whether the selection can actually support it — and it misleads in **both**
-directions. *Too few verts:* my early navel probes (1–7 verts, a tiny sphere) gave noisy
-form verdicts I leaned on. *Too coarse a patch:* the close-up of Body's navel showed a deep
-funnelled well, but my `protrusion` read over a ~5cm sphere reported only −0.92cm because it
-**averaged the drainpipe into the bowl** — the patch was the wrong scale for the feature, and
-the instrument said nothing. Either way the agent acts on a number that looks solid and isn't.
+The centroid is *robust* — it lands on a feature even from a sloppy band (the navel sat at
+the centroid of a wildly-trimmed abdomen band either way). That robustness is double-edged:
+a plausible centroid certifies **where** (localization) but is **blind to what was bounded**
+(extent and form). So "the centroid looks anatomically right" reads as success even when the
+selection clipped the feature or swept in its neighbour — and the agent stops, satisfied, on
+the first read. The single read is *unfalsified, not verified*.
 
-**General fix:** a **trust caveat on the read itself** — not a blanket count warning (5 verts
-is noise on a 16k mesh, plenty on a 200-vert proxy), but a flag tied to whether *this metric*
-over *this selection* is reliable: vert count **relative to local density**, and the
-ring/sample size the metric actually fits (`protrusion` already prints "base plane fit to 14
-ring verts" — that hook should *flag* when the ring is too thin). Should name **both** failure
-modes — too-sparse (noisy) and too-broad (averages the feature away, i.e. "this region may be
-the wrong scale for the feature you're reading"). Must avoid alarm fatigue: tie it to genuine
-unreliability of the returned value, or the agent learns to ignore it. Composes with SPEC-09
-(if the selection is the anchor for *action*, its trustworthiness as a *read* is the same
-question). Dogfood: probed the navel at guessed heights with tiny spheres and missed it; then
-read its depth over too-broad a patch and under-reported it 3–4×.
+Three blind spots, all of which return a confident-looking number:
+
+- **Extent** — clipped or bloated. Dogfood (minting 9 anatomy handles on Body): every
+  centroid looked right on the first read, yet the shoulders swept in the **tricep**
+  (over-capture), the hands **clipped the thumb and stopped short of the wrist**
+  (under-capture), and the buttocks' **top line fell short** (under-capture). A plausible
+  centroid hid all of it.
+- **Form** — the selection's *shape* contradicts the feature's known shape. The collarbones
+  came out a narrow, ~vertical neck patch instead of a wide horizontal shoulder-to-shoulder
+  sweep — my arm-avoidance X-clip removed the very lateral extent that *defines* a collarbone,
+  and nothing flagged that a collarbone selection was taller-than-wide.
+- **Scale** — too-sparse (1–7-vert probes gave noisy verdicts I leaned on) or too-broad (the
+  navel's deep funnel read as −0.92cm because a ~5cm patch averaged the drainpipe into the
+  bowl).
+
+**General fix — server-side, NOT agent discipline** (if the agent has to *remember* to
+re-check, the gap isn't closed):
+
+1. **Convergence / perturbation read** — grow *and* shrink the selection (~±20%) and report
+   the drift in centroid + extent. Stable under perturbation ⇒ the feature is captured; a
+   **jump on growth** ⇒ clipping (the thumb, the wrist, the buttock top); **insensitivity to
+   shrink** ⇒ slack (the tricep). This converts "looks right" (unfalsifiable) into "is stable"
+   (a test) — the dynamic counterpart to the static trust caveat below.
+2. **Shape-vs-form sanity** — surface the selection's bounds-aspect / principal axis (`feel …
+   method=frame`) against the feature's expected form, so a taller-than-wide collarbone reads
+   as obviously wrong without a human eye.
+3. **Static trust caveat** — the cheap first signal: flag count **relative to local density**
+   and the ring/sample size a metric actually fits (`protrusion` already prints "base plane
+   fit to 14 ring verts" — that hook should *flag* when the ring is too thin). Avoid alarm
+   fatigue: tie it to genuine unreliability of the returned value.
+
+The deeper fix is **G43** (region-coherent / boundary-anchored selection): if the selection
+floods to the feature's natural edge — the wrist crease, the deltoid seam, the collarbone
+span — there is no guessed box to over/under-shoot or mis-shape, and the convergence read
+becomes the verify-loop only for where boundary-anchoring isn't available. Composes with
+SPEC-09: the construction bridge is only as good as the selection feeding it — a measured
+anchor on a mis-captured region is still wrong. Dogfood: 9/9 handle centroids passed a
+plausible-eyeball, but the human's viewport caught a clipped thumb, an over-grabbed tricep, a
+short buttock line, and a collarbone selection that was the wrong shape entirely.
 
 ## Carried over — bigger build-outs (not yet started)
 

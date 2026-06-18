@@ -104,6 +104,13 @@ knobs are just a new way to get lost.
   anchor. Selecting the navel *as its rim-bounded feature* makes its centroid/normal
   truer than a coordinate sphere that cuts across the rings.
 - **Composes with G38** (feature discovery): so the seed selection isn't itself guessed.
+- **Gated by G48** (selection certifies localization, not capture): a measured anchor on a
+  *mis-captured* region is still wrong — the centroid is robust enough to look right while the
+  selection has clipped the feature (a thumb) or swept in its neighbour (a tricep) or taken the
+  wrong *form* (a vertical "collarbone"). The bridge is only as good as the selection feeding it,
+  so the anchor must carry a **capture verdict** (G48's perturbation-convergence + shape-vs-form
+  checks), not just a point. Especially for the named/persistent path, where the handle's vgroup
+  *is* the deform region — there, extent errors are not cosmetic.
 - **Built on** the existing handle infra — this is largely *surfacing and defaulting* what
   `extension/handles.py` already does, plus the ray-snap and the parameter-sourcing wiring.
 
