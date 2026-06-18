@@ -110,44 +110,106 @@ SHAPE_KEY_SHADOW_TOOLS = {
 }
 
 
-# G56: geometry-writing edit ops where "byte-identical mesh before and after" genuinely
-# means the op did nothing. Flag-only ops (mark_sharp/crease) and pure selection ops are
-# excluded — they never move verts, so an unchanged signature is expected, not a no-op.
-# Sculpt is excluded too (multires stores displacement off the base verts).
+# G56: every op that's SUPPOSED to change an object's geometry or its transform. A
+# "success" that leaves the signature byte-identical is a no-op — surfaced so it can't
+# launder a mistake. EXCLUDED on purpose: pure selection / flag ops (mark_sharp, crease,
+# select_*, assign_weight) and non-geometry mutations (material, visibility, rename,
+# modifier add/modify/remove without bake) — they don't touch geometry or transform, so
+# an unchanged signature is expected, not a no-op (checking them would cry wolf).
+# Creation ops (add_*, array_*, mirror, scatter, duplicate) are out too — they always
+# yield new geometry, so "unchanged" is meaningless. Sculpt is in; multires (which stores
+# displacement off the base verts) isn't built here, so base-vert reads are valid.
 NOOP_CHECK_TOOLS = {
+    # edit-mode geometry writers
     "move_vertices", "scale_vertices", "snap_loop", "proportional_move",
     "inflate_selection", "jitter_vertices", "bevel", "extrude",
     "extrude_along_curve", "scale_rings", "subdivide_selection",
     "relax_selection", "slide_selection", "poke_faces", "inset_faces",
     "grid_fill", "taper_end", "taper_section", "loop_cut", "merge_by_distance",
+    "delete_geometry", "separate_selection", "bridge_handles",
+    # object transforms (caught via the TRS component of the signature)
+    "nudge", "place", "aim_axis", "rest_on", "move_to", "rotate_to",
+    "resize", "scale_group", "rotate_object", "apply_transform",
+    "snap_to", "snap_to_grid", "set_origin", "match_dimension",
+    # geometry bakers
+    "boolean", "apply_modifiers", "noise_displace", "bend", "smooth_edges",
+    "round_corners", "remesh", "join_objects", "bake_shape_keys_to_basis",
+    # sculpt strokes
+    "sculpt_grab", "sculpt_inflate", "sculpt_draw", "sculpt_smooth",
+    "sculpt_crease", "sculpt_pinch", "sculpt_flatten", "sculpt_gravity",
 }
 
 
-def _geo_signature(obj):
-    """G56 — a cheap geometry fingerprint for no-op detection: vert/face counts plus a
-    sum of per-vertex coordinate HASHES (0.01 mm grid, so float noise never registers
-    but any real move does). The hash must be NON-LINEAR per vertex: a plain coordinate
-    sum is invariant under a symmetric edit (a ring scaled about its centre moves every
-    vert by a mirror-cancelling delta, so Σcoord is unchanged) — which made a real flare
-    read as a no-op. Hashing each quantized position breaks that cancellation while the
-    outer sum stays order-independent. Reads the live edit mesh in EDIT mode, the object
-    mesh otherwise. None for a non-mesh / missing object."""
-    if obj is None or getattr(obj, "type", None) != 'MESH':
-        return None
-    import bmesh
-    if obj.mode == 'EDIT':
-        bm = bmesh.from_edit_mesh(obj.data)
-        vcount, fcount = len(bm.verts), len(bm.faces)
-        coords = [v.co for v in bm.verts]
+# Bakers whose CHANGED object is the `target` param (their other object — cutter /
+# reference — is a separate param). Everywhere else the moved object is `targets` (the
+# moved selection) or `name`/`names`; for snap_to / rest_on the `target` param is the
+# reference/surface, NOT what moves, so it must never be picked.
+_NOOP_TARGET_KEY = {"boolean", "match_dimension", "noise_displace", "round_corners"}
+
+
+def _noop_obj(tool, params, edit_target):
+    """The object a no-op-checked op should change. EDIT_MODE_TOOLS already resolved it
+    into `edit_target` (popped from params). Object-level ops name the moved object in
+    `targets` (preferred — `target` is a reference for snap/rest/boolean), or `name`/
+    `mesh`/`names`, or (bakers) `target`. A list / comma string → its first entry
+    (best-effort on multi-target: if the whole op no-op'd, the first one is unchanged
+    too). Falls back to the active object — which most ops leave as their changed
+    object (activate()) — for sculpt and in-session edits."""
+    if edit_target:
+        name = edit_target
     else:
-        me = obj.data
-        vcount, fcount = len(me.vertices), len(me.polygons)
-        coords = [v.co for v in me.vertices]
+        cand = params.get("targets")
+        if not cand and tool in _NOOP_TARGET_KEY:
+            cand = params.get("target")
+        if not cand:
+            cand = params.get("name") or params.get("mesh") or params.get("names")
+        if isinstance(cand, (list, tuple)):
+            cand = cand[0] if cand else ""
+        if isinstance(cand, str) and "," in cand:
+            cand = cand.split(",")[0].strip()
+        name = cand
+    obj = bpy.data.objects.get(name) if isinstance(name, str) and name else None
+    return obj or bpy.context.active_object
+
+
+def _geo_signature(obj):
+    """G56 — a cheap fingerprint for no-op detection over BOTH halves of "modifies an
+    object": its transform AND its mesh.
+
+    Transform: the raw TRS fields (location / scale / euler + quaternion, quantized),
+    read directly so a pure object move registers even though local vert coords don't —
+    and read immediately (no depsgraph), since the op just set them.
+
+    Mesh: vert/face counts plus a SUM OF PER-VERTEX coordinate HASHES. The per-vertex
+    hash must be non-linear: a plain Σcoord is invariant under a symmetric edit (a ring
+    scaled about its centre moves every vert by a mirror-cancelling delta), which once
+    made a real flare read as a no-op. Hashing each quantized position breaks that while
+    the outer sum stays order-independent. Works for non-mesh objects too (TRS only).
+    None for a missing object."""
+    if obj is None:
+        return None
+    loc, scl = obj.location, obj.scale
+    re_, rq = obj.rotation_euler, obj.rotation_quaternion
+    trs = (int(loc.x * 1e5), int(loc.y * 1e5), int(loc.z * 1e5),
+           int(scl.x * 1e5), int(scl.y * 1e5), int(scl.z * 1e5),
+           int(re_.x * 1e5), int(re_.y * 1e5), int(re_.z * 1e5),
+           int(rq.w * 1e5), int(rq.x * 1e5), int(rq.y * 1e5), int(rq.z * 1e5))
+    vcount = fcount = 0
     acc = 0
-    for co in coords:
-        acc = (acc + hash((int(co.x * 1e5), int(co.y * 1e5), int(co.z * 1e5)))) \
-            & 0xFFFFFFFFFFFFFFFF
-    return (vcount, fcount, acc)
+    if getattr(obj, "type", None) == 'MESH':
+        import bmesh
+        if obj.mode == 'EDIT':
+            bm = bmesh.from_edit_mesh(obj.data)
+            vcount, fcount = len(bm.verts), len(bm.faces)
+            coords = [v.co for v in bm.verts]
+        else:
+            me = obj.data
+            vcount, fcount = len(me.vertices), len(me.polygons)
+            coords = [v.co for v in me.vertices]
+        for co in coords:
+            acc = (acc + hash((int(co.x * 1e5), int(co.y * 1e5), int(co.z * 1e5)))) \
+                & 0xFFFFFFFFFFFFFFFF
+    return (vcount, fcount, acc, trs)
 
 
 def _enter_edit_for_target(target_name):
@@ -233,7 +295,7 @@ def execute_command(command):
     noop_name = None
     geo_before = None
     if tool in NOOP_CHECK_TOOLS:
-        _gobj = bpy.data.objects.get(target) if target else bpy.context.active_object
+        _gobj = _noop_obj(tool, params, target)
         if _gobj is not None:
             noop_name = _gobj.name
             geo_before = _geo_signature(_gobj)
