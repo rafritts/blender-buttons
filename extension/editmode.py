@@ -515,6 +515,11 @@ def select_by_axis(params):
         if action == "DESELECT":
             if matches:
                 vert.select = False
+        elif action == "INTERSECT":
+            # G44: keep only verts BOTH already selected AND matching — turn OFF
+            # non-matches, leave matches as-is (result = prior selection ∩ criterion).
+            if not matches:
+                vert.select = False
         elif extend:
             # additive: turn matching verts ON, never clear the prior selection —
             # so two by_axis calls can union two regions (e.g. both sleeves).
@@ -553,6 +558,10 @@ def select_between(params):
         in_range = lo_thresh <= val <= hi_thresh
         if action == "DESELECT":
             if in_range:
+                vert.select = False
+        elif action == "INTERSECT":
+            # G44: prior selection ∩ band — drop verts outside the band, keep the rest.
+            if not in_range:
                 vert.select = False
         elif extend:
             if in_range:
@@ -1442,6 +1451,12 @@ def select_in_sphere(params):
         elif action == "ADD":
             if inside:
                 v.select = True
+                count += 1
+        elif action == "INTERSECT":
+            # G44: prior selection ∩ sphere — drop verts outside the sphere.
+            if not inside:
+                v.select = False
+            elif v.select:
                 count += 1
         else:
             v.select = inside

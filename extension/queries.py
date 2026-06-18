@@ -564,6 +564,113 @@ def aim_surface(params):
     }
 
 
+def _snap_to_surface(obj, point_world):
+    """Nearest surface point + normal on obj for a world point. Reads the LIVE bmesh in
+    edit mode (the evaluated mesh is stale there), else the evaluated mesh. Returns
+    (point_world, normal_world) or (None, None) on miss. This is the ray-snap SPEC-09
+    Phase 2 / G47 need: a patch centroid bows INSIDE a curved surface, so anchoring a
+    sculpt/select on it must snap back onto the skin or the brush pokes from behind it."""
+    from mathutils import Vector
+    mw = obj.matrix_world
+    if obj.mode == 'EDIT':
+        import bmesh
+        from mathutils.bvhtree import BVHTree
+        bm = bmesh.from_edit_mesh(obj.data)
+        if not bm.faces:
+            return None, None
+        tree = BVHTree.FromBMesh(bm)          # LOCAL space
+        loc, nrm, idx, dist = tree.find_nearest(mw.inverted() @ Vector(point_world))
+        if loc is None:
+            return None, None
+        return mw @ loc, (mw.to_3x3() @ nrm).normalized()
+    from .common import object_bvh
+    tree = object_bvh(obj)                    # WORLD space
+    if tree is None:
+        return None, None
+    loc, nrm, idx, dist = tree.find_nearest(Vector(point_world))
+    if loc is None:
+        return None, None
+    return loc, nrm.normalized()
+
+
+def selection_anchor(params):
+    """SPEC-09 Phase 2 — resolve the LIVE edit-mode vertex selection to a surface anchor:
+    its centroid snapped onto the surface, with the snapped point's normal. The
+    'implicit, ephemeral handle' — zero ceremony, lives exactly as long as the
+    selection. A point-op (sculpt/select) anchored on a selection uses THIS instead of a
+    typed coordinate, so the cheapest path is the measured one (no divined seed)."""
+    from mathutils import Vector
+    import bmesh
+    name = params.get("target")
+    obj = bpy.data.objects.get(name) if name else bpy.context.active_object
+    if obj is None or obj.type != 'MESH':
+        return {"error": "target is not a mesh"}
+    if obj.mode != 'EDIT':
+        return {"error": "no live selection — enter edit mode and select the region "
+                         "(or pass a named handle= instead)"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    sel = [v for v in bm.verts if v.select]
+    if not sel:
+        return {"error": "nothing selected — select the region to anchor on first"}
+    mw = obj.matrix_world
+    centroid = sum((v.co for v in sel), Vector()) / len(sel)
+    centroid_w = mw @ centroid
+    snap_w, nrm_w = _snap_to_surface(obj, centroid_w)
+    if snap_w is None:
+        snap_w = centroid_w
+        nv = Vector((0.0, 0.0, 0.0))
+        for v in sel:
+            nv += mw.to_3x3() @ v.normal
+        nrm_w = nv.normalized() if nv.length > 1e-9 else Vector((0.0, 0.0, 1.0))
+    bbox = world_bbox(obj)
+    return {
+        "success": True,
+        "point": [round(c, 5) for c in snap_w],
+        "normal": [round(c, 4) for c in nrm_w],
+        "centroid": [round(c, 5) for c in centroid_w],
+        "region": region_words(bbox, snap_w),
+        "vert_count": len(sel),
+    }
+
+
+def place_on_surface(params):
+    """G47 — surface-relative placement. Take an ANCHOR world point (the server resolves
+    a handle / feature landmark to this), apply a METRIC world offset (up/down/front/
+    back/left/right, +X=right +Y=back +Z=up, front=-Y), ray-snap onto the target mesh,
+    and return the world point + surface normal. The on-surface analog of `transform
+    place on=`: expresses 'on the front midline, a hand below the bust apex, snapped to
+    the surface' and hands back the coordinate to seed a sculpt/select — no typed Z."""
+    from mathutils import Vector
+    anchor = params.get("anchor")
+    if not (isinstance(anchor, (list, tuple)) and len(anchor) == 3):
+        return {"error": "'anchor' must be a world point [x,y,z] — resolve a handle or "
+                         "feature first (the server does this for handle=/landmark=)"}
+    g = lambda k: float(params.get(k, 0.0) or 0.0)
+    offset = Vector((g("right") - g("left"),
+                     g("back") - g("front"),
+                     g("up") - g("down")))
+    p = Vector((float(anchor[0]), float(anchor[1]), float(anchor[2]))) + offset
+    name = params.get("target")
+    obj = bpy.data.objects.get(name) if name else bpy.context.active_object
+    if obj is None or obj.type != 'MESH':
+        return {"error": f"target '{name}' is not a mesh"}
+    if params.get("snap", True):
+        snap_w, nrm_w = _snap_to_surface(obj, p)
+        if snap_w is None:
+            return {"note": "surface snap missed — no geometry near the offset point "
+                            "(try snap=false to keep the raw offset point)", "hit": False}
+    else:
+        snap_w, nrm_w = p, Vector((0.0, 0.0, 1.0))
+    bbox = world_bbox(obj)
+    return {
+        "success": True, "hit": True,
+        "point": [round(c, 5) for c in snap_w],
+        "normal": [round(c, 4) for c in nrm_w],
+        "offset_point": [round(c, 5) for c in p],
+        "region": region_words(bbox, snap_w),
+    }
+
+
 TOOLS = {
     "describe":         describe,
     "distance_between": distance_between,
@@ -571,4 +678,6 @@ TOOLS = {
     "is_aligned":       is_aligned,
     "check_symmetry":   check_symmetry,
     "aim_surface":      aim_surface,
+    "selection_anchor": selection_anchor,
+    "place_on_surface": place_on_surface,
 }

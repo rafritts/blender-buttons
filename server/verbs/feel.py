@@ -14,16 +14,16 @@ from ._common import tag, unknown
 
 _OPS = ["topology", "profile", "silhouette", "section", "rings", "distance", "gap",
         "aligned", "symmetry", "mesh", "overlaps", "validate", "audit", "contacts",
-        "resting", "aim", "handle", "handles", "accept", "forget", "assembly", "map",
-        "relate"]
+        "resting", "aim", "place", "anchor", "handle", "handles", "accept", "forget",
+        "assembly", "map", "relate"]
 
 
 @mcp.tool(name="feel")
 def feel(
     op: Literal["topology", "profile", "silhouette", "section", "rings", "distance",
                 "gap", "aligned", "symmetry", "mesh", "overlaps", "validate", "audit",
-                "contacts", "resting", "aim", "handle", "handles", "accept", "forget",
-                "assembly", "map", "relate"] = "topology",
+                "contacts", "resting", "aim", "place", "anchor", "handle", "handles",
+                "accept", "forget", "assembly", "map", "relate"] = "topology",
     target: tag(str, "[topology/profile/silhouette/section/rings/symmetry/mesh] mesh "
                      "object (empty=active); "
                      "[map] cast from every boundary handle on this mesh") = "",
@@ -69,6 +69,17 @@ def feel(
     source: tag(str, "[handle] addressing mode: selection (the live edit-mode selection)") = "selection",
     vertex_parent: tag(bool, "[handle] vertex-parent the Empty to a tracking vert so it rides pose/deform (default off; the vgroup recompute stays the source of truth)") = False,
     prune: tag(bool, "[handles] also garbage-collect orphaned handles (delete the ✗ unresolvable Empties), then list what remains") = False,
+    # place — surface-relative placement (G47); anchor — live-selection anchor (SPEC-09)
+    anchor_x: tag(float, "[place] explicit anchor world X (or use handle=)") = None,
+    anchor_y: tag(float, "[place] explicit anchor world Y") = None,
+    anchor_z: tag(float, "[place] explicit anchor world Z") = None,
+    up: tag(float, "[place] offset +Z (m)") = 0.0,
+    down: tag(float, "[place] offset -Z (m)") = 0.0,
+    front: tag(float, "[place] offset -Y (m)") = 0.0,
+    back: tag(float, "[place] offset +Y (m)") = 0.0,
+    left: tag(float, "[place] offset -X (m)") = 0.0,
+    right: tag(float, "[place] offset +X (m)") = 0.0,
+    snap: tag(bool, "[place] ray-snap the offset point onto the surface (default True)") = True,
 ) -> str:
     """
     Feel a mesh — structure, measurements, correctness. Read-only (no status block).
@@ -127,6 +138,14 @@ def feel(
                  normal, to feed sculpt/select/add. The constructive-side
                  `feel structure`: aim in fractions of the form, get the coordinate
                  back instead of dead-reckoning it.   (target, face, u, v, aim_frame, margin)
+      anchor   — read the LIVE edit-mode selection as a surface anchor: its centroid
+                 snapped onto the surface + normal — the measured seed a point-op uses
+                 INSTEAD of a typed coordinate (SPEC-09).            (target)
+      place    — surface-relative placement: anchor on a handle/landmark + a metric
+                 world offset (up/down/front/back/left/right), ray-snap to the surface,
+                 get the world point + normal. 'A hand below the bust apex, on the
+                 surface' with no typed Z (G47).  (target, handle OR anchor_x/y/z,
+                 up/down/front/back/left/right, snap)
       handle   — mint a named spatial anchor from the live edit-mode selection: an
                  Empty in a `Handles` collection + a `HANDLE_<name>` vertex group on
                  the owning mesh, visible/renamable/deletable in the Outliner. The
@@ -190,6 +209,11 @@ def feel(
         return introspect.check_resting(targets)
     if o == "aim":
         return queries.aim_surface(target, face, u, v, margin, aim_frame)
+    if o == "anchor":
+        return queries.selection_anchor(target)
+    if o == "place":
+        return queries.place_on_surface(target, handle, anchor_x, anchor_y, anchor_z,
+                                        up, down, front, back, left, right, snap)
     if o == "handle":
         return handles.mint_handle(name, source, vertex_parent)
     if o == "handles":

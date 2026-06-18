@@ -402,3 +402,60 @@ def aim_surface(target: str = "", face: str = "-Y", u: float = 0.5, v: float = 0
             f"point=[{p[0]}, {p[1]}, {p[2]}]  normal=[{n[0]}, {n[1]}, {n[2]}]\n"
             f"  → sculpt at_x={p[0]} at_y={p[1]} at_z={p[2]} (push along the normal "
             f"to pull out); or select in_sphere center=that point")
+
+
+def selection_anchor(target: str = "") -> str:
+    """SPEC-09 Phase 2 — read the LIVE edit-mode selection as a surface anchor: its
+    centroid snapped onto the surface + that point's normal. The measured seed a
+    point-op should use INSTEAD of a typed coordinate (`sculpt at=selection`,
+    `select in_sphere from_selection=true` do this for you)."""
+    result = call_blender("selection_anchor", {"target": target})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    p = result["point"]; n = result["normal"]
+    return (f"selection anchor @ {result['region']} ({result['vert_count']} verts): "
+            f"point=[{p[0]}, {p[1]}, {p[2]}]  normal=[{n[0]}, {n[1]}, {n[2]}]\n"
+            f"  → sculpt at=selection / select in_sphere from_selection=true use this point")
+
+
+def resolve_selection_anchor(target: str = ""):
+    """Resolve the live edit-mode selection to (point, normal, error) for a consuming
+    point-op (SPEC-09 Phase 2). The implicit ephemeral handle: centroid snapped to the
+    surface. Mirror of handles.resolve_point, but for the unnamed live selection."""
+    result = call_blender("selection_anchor", {"target": target})
+    if not result.get("success"):
+        return None, None, result.get("error", "no live selection to anchor on")
+    return result["point"], result["normal"], None
+
+
+def place_on_surface(target: str, handle: str = "",
+                     anchor_x: float = None, anchor_y: float = None, anchor_z: float = None,
+                     up: float = 0.0, down: float = 0.0, front: float = 0.0, back: float = 0.0,
+                     left: float = 0.0, right: float = 0.0, snap: bool = True) -> str:
+    """G47 — surface-relative placement. Anchor on a measured landmark (a handle's live
+    point, or an explicit anchor_x/y/z) + a METRIC world offset (up/down/front/back/
+    left/right, in m; front=-Y), ray-snap to the target surface, and hand back the
+    world point + normal to seed a sculpt/select. 'On the front midline, a hand below
+    the bust apex, snapped to the surface' — no typed Z."""
+    from server import handles as _h
+    if handle:
+        pt, err, drift = _h.resolve_point(handle)
+        if err:
+            return err
+        anchor = list(pt)
+        note = drift or ""
+    elif None not in (anchor_x, anchor_y, anchor_z):
+        anchor = [anchor_x, anchor_y, anchor_z]
+        note = ""
+    else:
+        return "place: need an anchor — pass handle=<name> or anchor_x/y/z"
+    result = call_blender("place_on_surface", {
+        "target": target, "anchor": anchor, "snap": snap,
+        "up": up, "down": down, "front": front, "back": back, "left": left, "right": right})
+    if not result.get("success"):
+        return note + (result.get("note") or result.get("error", "failed"))
+    p = result["point"]; n = result["normal"]
+    return note + (
+        f"placed @ {result['region']}: point=[{p[0]}, {p[1]}, {p[2]}]  "
+        f"normal=[{n[0]}, {n[1]}, {n[2]}]\n"
+        f"  → sculpt at_x={p[0]} at_y={p[1]} at_z={p[2]}; or select in_sphere center=that point")

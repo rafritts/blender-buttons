@@ -22,7 +22,7 @@ def select(
     # object selection
     name: tag(str, "[object] object name to select") = "",
     # generic
-    action: tag(str, "[all/by_axis/between/boundary/in_sphere/ring/rings] SELECT|DESELECT|INVERT|TOGGLE") = "SELECT",
+    action: tag(str, "[all/by_axis/between/boundary/in_sphere/ring/rings] SELECT|DESELECT|INVERT|TOGGLE; on by_axis/between/in_sphere also INTERSECT (keep only verts BOTH already selected AND matching — 'frontmost ∩ chest-band' in one call instead of a deselect dance)") = "SELECT",
     extend: tag(bool, "[by_axis/between/in_sphere] True = ADD to current selection (union regions across calls) instead of replacing") = False,
     axis: tag(str, "[by_axis/between/ring/rings] axis X|Y|Z") = "Z",
     target: tag(str, "[edit-mode ops: all/none/by_axis/between/boundary/limb/grow/shrink/in_sphere/ring/rings/component_mode] mesh object to auto-select + enter edit on (empty=active); pass it so a stray click can't hijack the op") = "",
@@ -61,8 +61,10 @@ def select(
       none        — deselect everything
       object      — select an object by name (Object Mode)        (name)
       by_axis     — verts past an axis threshold  (axis, factor 0..1, comparison=
-                    GREATER|LESS, action, extend)
-      between     — verts in an axis band         (axis, lo, hi, action, extend)
+                    GREATER|LESS, action, extend). action=INTERSECT keeps only verts
+                    already selected AND past the threshold.
+      between     — verts in an axis band         (axis, lo, hi, action, extend).
+                    action=INTERSECT keeps only already-selected verts inside the band.
       boundary    — open-edge boundary loop        (from_selection, action)
       limb        — a whole protrusion (sleeve/limb/finger), anchored to the mesh's
                     OWN topology — selects out to its base ring (the armhole), no

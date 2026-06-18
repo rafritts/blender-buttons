@@ -7,7 +7,7 @@ brush shares the at_x/at_y/at_z + radius targeting. Auto-enters Sculpt Mode.
 from typing import Literal
 
 from server._core import mcp
-from server import sculpt as _s, handles
+from server import sculpt as _s, handles, queries
 from ._common import tag, unknown
 
 _BRUSHES = ["grab", "draw", "inflate", "smooth", "crease", "pinch", "flatten", "gravity"]
@@ -18,11 +18,13 @@ def sculpt(
     brush: Literal["grab", "draw", "inflate", "smooth", "crease", "pinch", "flatten", "gravity"],
     target: tag(str, "mesh to sculpt"),
     radius: tag(float, "brush radius (m); optional for gravity (omit = whole mesh)") = None,
-    at_x: tag(float, "brush world X (or use handle=)") = None,
-    at_y: tag(float, "brush world Y (or use handle=)") = None,
-    at_z: tag(float, "brush world Z (or use handle=)") = None,
-    handle: tag(str, "brush at a named handle's live point (recomputed); "
-                     "overrides at_x/y/z") = "",
+    at: tag(str, "WHERE to brush — 'selection' uses the LIVE edit-mode selection's "
+                 "surface-snapped centroid (the measured, no-coordinate default; "
+                 "SPEC-09). Prefer this or handle= over typing at_x/y/z.") = "",
+    handle: tag(str, "brush at a named handle's live point (recomputed)") = "",
+    at_x: tag(float, "[ripcord] brush world X — prefer at=selection / handle=") = None,
+    at_y: tag(float, "[ripcord] brush world Y — prefer at=selection / handle=") = None,
+    at_z: tag(float, "[ripcord] brush world Z — prefer at=selection / handle=") = None,
     # amount (draw/inflate/crease/pinch/flatten)
     amount: tag(float, "[draw/inflate/crease/pinch/flatten] strength") = 1.0,
     # grab displacement — absolute to_* OR relative directions
@@ -54,9 +56,11 @@ def sculpt(
     label: str = "",
 ) -> str:
     """
-    Sculpt a mesh — **Sculpt Mode** brushes. Strokes at a world point (at_x/y/z,
-    or handle=<name> to stroke at a handle's live point) within `radius`. `brush`
-    selects:
+    Sculpt a mesh — **Sculpt Mode** brushes. WHERE to stroke, cheapest-correct first:
+    at='selection' (the live selection's surface-snapped centroid — measured, no
+    coordinate), handle=<name> (a named anchor's live point), or the at_x/y/z ripcord
+    (a typed world point — a divined seed an LLM can't see; avoid). Strokes within
+    `radius`. `brush` selects:
 
       grab    — drag verts   (to_x/y/z absolute, OR out/up/left/.. relative)
       draw    — raise/lower along a normal  (amount, normal_x/y/z)
@@ -73,7 +77,12 @@ def sculpt(
     """
     b = brush.lower().strip()
     note = ""
-    if handle:
+    if at.strip().lower() == "selection":
+        pt, nrm, err = queries.resolve_selection_anchor(target)
+        if err:
+            return err
+        at_x, at_y, at_z = pt
+    elif handle:
         pt, err, drift = handles.resolve_point(handle)
         if err:
             return err
