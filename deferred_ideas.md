@@ -6,15 +6,18 @@
 > **How this differs from `gaps.md`:** a gap is *demonstrated pain* — a concrete place the
 > agent was forced out of intent-space, with a general primitive that fixes it. An entry
 > here is a plausible improvement whose **need is unproven** — we haven't felt the pain
-> hard enough, or we've shipped something cheaper that may already cover it. No G-numbers.
+> hard enough, or we've shipped something cheaper that may already cover it.
+>
+> Entries are numbered **DI#** (Deferred Idea), stable and **never reused** — a missing
+> number just means that idea was promoted or dropped (mirrors `gaps.md`'s G-numbers).
 >
 > **Disposition:** when real, repeated pain shows up, promote an entry to `gaps.md` (or a
-> SPEC) and build it. If it gets built, or proves unnecessary, **delete** it. Nothing here
-> is a commitment.
+> SPEC) and build it. If it gets built, or proves unnecessary, **delete** the entry (its
+> DI# is retired, not recycled). Nothing here is a commitment.
 
 ---
 
-## `workflows` verb — a pull-drawer of battle-tested tool-call plays
+## DI1 — `workflows` verb — a pull-drawer of battle-tested tool-call plays
 
 **The idea.** A `workflows` verb that returns named, battle-tested *plays* — multi-step
 tool-call sequences for recurring intents (e.g. *localize a feature*, *build from a
