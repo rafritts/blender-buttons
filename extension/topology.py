@@ -890,9 +890,121 @@ def _m_structure(bm, lod, bbox):
     return out
 
 
+def _m_relief(bm, lod, bbox):
+    """G38 — salient FEATURE DISCOVERY. region_form answers 'what is the form at this
+    patch I already picked?'; this answers the chicken-and-egg other half: 'WHERE are
+    the bumps and dents?' — so anatomy/detail can be found without prior knowledge of
+    where it sits.
+
+    Per vert, relief = displacement from the LOCAL smoothed surface (mean of neighbours
+    within `radius`) along the vertex normal: + sticks out (convex), − dips in (concave).
+    Salient verts (|relief| past a threshold) are clustered BY SIGN into connected
+    features via the edge graph — so two breasts read as two convex features and the
+    cleft between buttocks as its own concave feature, instead of one patch averaging to
+    'flat' (the dogfood failure). Each feature reports world centroid, signed projection,
+    extent, vert count, and whether it has an L/R mirror twin. Deterministic geometry.
+
+    Scale knob: `radius` (m) sets the feature size it's tuned to (default ~4% of the
+    mesh diagonal); a larger radius finds broad masses, a smaller one finds fine relief.
+    Honest about scale — one pass sees one band; re-run with another radius for another."""
+    from mathutils.kdtree import KDTree
+    n = len(bm.verts)
+    if n < 16:
+        return {"note": f"too few verts ({n}) to discover features"}
+    if n > 60000:
+        return {"note": f"{n} verts — relief scan is O(n·neighbours); read base=cage or "
+                        f"a decimated copy, or select a region first"}
+    co = np.array([list(v.co) for v in bm.verts])
+    nrm = np.array([list(v.normal) for v in bm.verts])
+    diag = float(np.linalg.norm(co.max(0) - co.min(0))) or 1.0
+    radius = float(_CALL_PARAMS.get("radius") or 0.0) or 0.04 * diag
+
+    kd = KDTree(n)
+    for i in range(n):
+        kd.insert(mathutils.Vector(co[i]), i)
+    kd.balance()
+    relief = np.zeros(n)
+    for i in range(n):
+        nb = [idx for (_, idx, _) in kd.find_range(mathutils.Vector(co[i]), radius)]
+        if len(nb) < 4:
+            continue
+        relief[i] = float(np.dot(co[i] - co[nb].mean(0), nrm[i]))
+
+    mag = np.abs(relief)
+    thr = max(0.002, float(np.percentile(mag, 80)))   # 2 mm floor, or the top quintile
+    sign = np.where(mag >= thr, np.sign(relief), 0).astype(int)
+
+    # union-find over edges joining same-sign salient verts → connected features
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for e in bm.edges:
+        a, b = e.verts[0].index, e.verts[1].index
+        if sign[a] != 0 and sign[a] == sign[b]:
+            parent[find(a)] = find(b)
+
+    clusters = {}
+    for i in range(n):
+        if sign[i] != 0:
+            clusters.setdefault(find(i), []).append(i)
+
+    cx = (bbox[0] + bbox[3]) / 2.0
+    feats = []
+    for members in clusters.values():
+        if len(members) < 5:           # ignore noise specks
+            continue
+        m = np.array(members)
+        cc = co[m]
+        centroid = cc.mean(0)
+        apex_i = int(m[np.argmax(np.abs(relief[m]))])
+        proj_cm = round(float(relief[apex_i]) * 100, 2)
+        ext = cc.max(0) - cc.min(0)
+        feats.append({
+            "kind": "convex" if relief[apex_i] > 0 else "concave",
+            "centroid": [round(float(x), 4) for x in centroid],
+            "region": region_words(bbox, mathutils.Vector(centroid)),
+            "projection_cm": proj_cm,
+            "extent_cm": [round(float(ext[0]) * 100, 1), round(float(ext[1]) * 100, 1),
+                          round(float(ext[2]) * 100, 1)],
+            "verts": len(members),
+            "_score": abs(proj_cm) * math.sqrt(len(members)),
+        })
+    feats.sort(key=lambda f: f["_score"], reverse=True)
+
+    # L/R twin: mirror each centroid across the mesh X-centre, tag the nearest other
+    # feature centroid within a tolerance (so a symmetric pair is named as such).
+    cents = [mathutils.Vector(f["centroid"]) for f in feats]
+    tol = 0.05 * diag
+    for i, f in enumerate(feats):
+        mirror = mathutils.Vector((2 * cx - cents[i].x, cents[i].y, cents[i].z))
+        best, bj = tol, None
+        for j, cj in enumerate(cents):
+            if j == i:
+                continue
+            d = (cj - mirror).length
+            if d < best:
+                best, bj = d, j
+        f["twin"] = feats[bj]["region"] if bj is not None else None
+        f.pop("_score", None)
+
+    top = int(_CALL_PARAMS.get("top_n") or (8 if lod == "low" else 20))
+    return {
+        "radius_cm": round(radius * 100, 1),
+        "threshold_mm": round(thr * 1000, 2),
+        "feature_count": len(feats),
+        "features": feats[:top],
+    }
+
+
 _METHODS = {
     "components": _m_components,
     "structure": _m_structure,
+    "relief": _m_relief,
     "genus": _m_genus,
     "boundaries": _m_boundaries,
     "poles": _m_poles,
@@ -909,8 +1021,14 @@ _METHODS = {
 
 # ─────────────────────────── dispatcher ───────────────────────────
 
+_CALL_PARAMS = {}   # the current get_topology params, so a method can read extra knobs
+                    # (e.g. relief's radius/top_n) without changing the (bm,lod,bbox) contract
+
+
 def get_topology(params):
     import bpy
+    global _CALL_PARAMS
+    _CALL_PARAMS = params
     name = params.get("target") or params.get("name")
     obj = bpy.data.objects.get(name) if name else bpy.context.active_object
     if obj is None:

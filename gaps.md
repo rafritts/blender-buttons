@@ -75,39 +75,6 @@ must re-apply it to the twin by hand. A one-call `object op=mirror_edit name=<sr
 +25° — mirror it right" a single move. Post-hoc twin-matching, not a live mode — cheaper than
 G14 proper and independently useful.
 
-## G38 — no salient-**feature discovery**; `region_form` reads "what's here?" but nothing reads "where are the features?" 🔎 OPEN
-
-The form scalars `region_form` returns are genuinely good — on a female base mesh it cleanly
-measured the bust (convex, +2.76cm, perfect L/R symmetry), a buttock cheek (convex), and even a
-navel (concave, −3.6mm, symmetric on the centerline). **But every one of those reads only worked
-because the operator already knew a body has a bust at chest height, a navel on the lower
-centerline, etc., and aimed an `in_sphere` there.** There is a chicken-and-egg: `region_form`
-answers *"what is the form at this patch I selected?"* — nothing answers *"where are the
-salient bumps and dents on this surface?"*. So the agent cannot **discover** anatomy/detail
-blind; it can only **confirm** what it already hypothesised. `feel … method=curvature` is the
-nearest thing but is self-flagged *"fuzzy — a guess (v2 = exact)"*, dumps only a top-N extrema
-list with coarse region labels (`top-front`) and **no world coordinates** to act on, and never
-clusters extrema into a *feature*.
-
-Two concrete sub-failures observed:
-- **Single-dome model mislabels multi-lobed regions.** A whole-buttocks patch reported
-  `form: flat (centre−rim 0.37mm)` while simultaneously reporting **±6.8cm** of projection across
-  it — the two cheeks + the centerline cleft averaged the centre-vs-rim verdict to "flat." A
-  feature read that contradicts its own projection range is untrustworthy. It needs to recognise
-  bilobed/saddle forms instead of forcing a centre-vs-rim dome.
-- **Fine structure averages to mush.** The face packed ~14% of all verts into one 8cm sphere
-  (a strong density signal that detail lives there), yet `region_form` collapsed eyes+nose+mouth
-  to a single `convex` verdict. The presence of *a face* is inferable (vert density + curvature
-  spikes), but `feel` never parses or even flags it as structured relief.
-
-**General fix:** a relief/feature-discovery read — scan a surface (or a selected region) and
-return the **ranked salient convex/concave features with world-space locations, projection
-magnitude, extent, and L/R symmetry**, so the agent can find detail without prior knowledge of
-where it sits. This is the "where" half that makes `region_form`'s "what" actionable, and it
-must report multi-lobed/saddle forms honestly rather than averaging them to "flat." Deterministic
-geometry, not vision. Dogfood: asked whether `feel` can discern face/bust/butt/navel on a base
-female mesh — yes to *measure* each once located, no to *find* them; the butt read "flat."
-
 ## Carried over — bigger build-outs (not yet started)
 
 - **Multires + dyntopo** as real multi-level sculpt targets — the proper organic-sculpt

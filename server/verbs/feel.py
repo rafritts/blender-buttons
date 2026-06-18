@@ -31,10 +31,13 @@ def feel(
     # topology (SPEC-04)
     method: tag(str, "[topology] comma list of method tokens (empty = cheap bundle: "
                      "components,genus,boundaries,sections,poles,symmetry,frame). "
-                     "Extra: structure,curvature,region_form,features,thickness") = "",
+                     "Extra: structure,curvature,region_form,features,thickness,relief "
+                     "(relief = salient feature discovery: where are the bumps/dents)") = "",
     lod: tag(str, "[topology] low|medium|high output verbosity") = "low",
     base: tag(str, "[topology] cage | evaluated mesh to read") = "cage",
     seed: tag(str, "[topology] handle for seeded methods (v2)") = "",
+    radius: tag(float, "[topology method=relief] feature scale in m (default ~4% of the mesh diagonal)") = 0.0,
+    top_n: tag(int, "[topology method=relief] cap on features returned (0 = default by lod)") = 0,
     # profile / rings
     axis: tag(str, "[profile/rings/symmetry] axis X|Y|Z (distance: X|Y for 1-axis)") = "Z",
     min: tag(float, "[profile] window start on axis (m, world-space)") = None,
@@ -191,7 +194,7 @@ def feel(
     """
     o = op.lower().strip()
     if o == "topology":
-        return topology.get_topology(target, method, lod, base, seed)
+        return topology.get_topology(target, method, lod, base, seed, radius, top_n)
     if o == "profile":
         return queries.get_mesh_profile(axis, min, max, max_rings, bands, full, target)
     if o == "silhouette":

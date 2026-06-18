@@ -126,6 +126,18 @@ def _fmt_method(name: str, data: dict) -> list:
             lines.append(f"    apex @ {data['apex_world']}  (absolute — diff before/after to confirm growth)")
             if data.get("caveat"):
                 lines.append(f"    ⚠ {data['caveat']}")
+    elif name == "relief":
+        if "note" in data:
+            lines.append(f"  relief: {data['note']}")
+        else:
+            lines.append(f"  relief (feature scan @ {data['radius_cm']}cm scale, "
+                         f"≥{data['threshold_mm']}mm salient): {data['feature_count']} feature(s)")
+            for f in data.get("features", []):
+                ext = f["extent_cm"]
+                twin = f"  twin@{f['twin']}" if f.get("twin") else "  (no L/R twin)"
+                lines.append(f"    {f['kind']:<7} @ {f['region']:<18} "
+                             f"{f['projection_cm']:+}cm  ext {ext[0]}×{ext[1]}×{ext[2]}cm  "
+                             f"{f['verts']}v  →{f['centroid']}{twin}")
     elif name == "features":
         lines.append(f"  features: {data['sharp_edges']} hard edge(s) ≥{data['threshold_deg']}° "
                      f"in {data['chains']} chain(s)")
@@ -142,7 +154,8 @@ def _fmt_method(name: str, data: dict) -> list:
 
 @mcp.tool()
 def get_topology(target: str = "", method: str = "", lod: str = "low",
-                 base: str = "cage", seed: str = "") -> str:
+                 base: str = "cage", seed: str = "",
+                 radius: float = 0.0, top_n: int = 0) -> str:
     """
     Feel a mesh's STRUCTURE — the sense `describe` does not give. Returns named,
     grabbable landmarks (openings, branches, poles, symmetry, curvature, hard
@@ -180,11 +193,18 @@ def get_topology(target: str = "", method: str = "", lod: str = "low",
                    before/after to confirm a size change (needs a selection + a ring).
       features   — hard dihedral edges in chains (the machine sense)
       thickness  — local wall/part diameter (the SDF part-segmentation cue)
+      relief     — salient FEATURE DISCOVERY: scans for bumps/dents and returns the
+                   ranked features (convex/concave) with world location, projection
+                   (cm), extent, and L/R twin — the 'WHERE are the features?' half that
+                   makes region_form's 'what?' actionable. Reports a bilobed region as
+                   two features, not one averaged-to-flat patch. `radius` sets the
+                   feature scale (m; default ~4% of the diagonal), `top_n` caps output.
     """
     methods = [m.strip() for m in method.split(",") if m.strip()] if method else None
     result = call_blender("get_topology", {
         "target": target or None, "method": methods,
         "lod": lod, "base": base, "seed": seed or None,
+        "radius": radius or None, "top_n": top_n or None,
     })
     if not result.get("success"):
         return result.get("error", "failed")
