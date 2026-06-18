@@ -272,6 +272,32 @@ def add_modifier(params):
         wrap_method = params.get("wrap_method", "NEAREST_SURFACEPOINT").upper()
         if hasattr(mod, 'wrap_method'):
             mod.wrap_method = wrap_method
+        # PROJECT casts each vert along ONE axis onto the target, so a bump keeps its
+        # height — unlike NEAREST_SURFACEPOINT, which snaps a tip to the nearest flank
+        # and flattens it. axis= picks the cast axis (default Y = depth); both
+        # directions are enabled so the ray finds the surface whether it sits in front
+        # of or behind the vert.
+        if wrap_method == "PROJECT":
+            paxis = (params.get("axis") or "Y").upper()
+            for ax in ("x", "y", "z"):
+                attr = f"use_project_{ax}"
+                if hasattr(mod, attr):
+                    setattr(mod, attr, ax == paxis.lower())
+            if hasattr(mod, "use_negative_direction"):
+                mod.use_negative_direction = True
+            if hasattr(mod, "use_positive_direction"):
+                mod.use_positive_direction = True
+        # vertex_group confines the wrap to a weighted region and PINS everything at
+        # weight 0 — so a partial transfer (e.g. just the breast) leaves the rest of
+        # the mesh, and its boundary ring, exactly in place: no separate / weld, no
+        # seam. Mint the group from a selection with edit op... assign_weight first.
+        vgroup = params.get("vertex_group")
+        if vgroup:
+            if vgroup not in obj.vertex_groups:
+                obj.modifiers.remove(mod)
+                return {"error": f"vertex_group '{vgroup}' not found on '{obj.name}' "
+                                 f"(have: {[g.name for g in obj.vertex_groups]})"}
+            mod.vertex_group = vgroup
     # Deform modifiers that bind/track another object. All three drive obj's
     # geometry from a partner via mod.object (a cage mesh, an armature, a lattice)
     # — the recovery door for production deform stacks (gaps.md V1). MESH_DEFORM is
@@ -547,6 +573,7 @@ _MODIFIER_PROPS = {
     "angle_limit":   ("angle_limit",  "radians"),  # BEVEL (degrees in → radians)
     "count":         ("count",        int),    # ARRAY
     "wrap_method":   ("wrap_method",  str),    # SHRINKWRAP
+    "vertex_group":  ("vertex_group", str),    # SHRINKWRAP (limit + pin) / others
     "use_clamp":     ("use_clamp_overlap", bool),
     "factor":        ("factor",       float),  # CORRECTIVE_SMOOTH / SMOOTH strength
     "strength":      ("strength",     float),  # DISPLACE strength
@@ -685,6 +712,12 @@ def list_modifiers(params):
             entry["target"] = m.target.name
         if hasattr(m, "wrap_method"):
             entry["wrap_method"] = m.wrap_method
+            if m.wrap_method == "PROJECT":
+                entry["project_axis"] = "".join(
+                    ax.upper() for ax in ("x", "y", "z")
+                    if getattr(m, f"use_project_{ax}", False)) or "none"
+        if getattr(m, "vertex_group", ""):
+            entry["vertex_group"] = m.vertex_group
         stack.append(entry)
     return {"success": True, "target": target, "modifiers": stack}
 

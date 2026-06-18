@@ -26,8 +26,9 @@ def modifier(
     width: tag(float, "[add/modify] bevel/solidify width") = None,
     segments: tag(int, "[add/modify] bevel segments") = None,
     offset: tag(float, "[add/modify] solidify/mirror offset") = None,
-    wrap_method: tag(str, "[add/modify] shrinkwrap method") = "",
-    axis: tag(str, "[add] mirror axis X|Y|Z") = "X",
+    wrap_method: tag(str, "[add/modify] shrinkwrap method: NEAREST_SURFACEPOINT (flattens bumps) | PROJECT (casts along axis, keeps bump height)") = "",
+    vertex_group: tag(str, "[add/modify] SHRINKWRAP region to wrap — pins weight-0 verts so a partial transfer leaves the rest (and the seam) in place; mint via edit/assign_weight") = "",
+    axis: tag(str, "[add] mirror axis X|Y|Z; SHRINKWRAP PROJECT cast axis (default Y)") = "X",
     merge_threshold: tag(float, "[add] mirror merge threshold") = None,
     mirror_object: tag(str, "[add] mirror across this object") = "",
     precision: tag(int, "[add] mesh-deform bind precision") = None,
@@ -76,12 +77,12 @@ def modifier(
             segments if segments is not None else 1,
             target, offset, wrap_method or "NEAREST_SURFACEPOINT", axis,
             merge_threshold, mirror_object, precision, rest_source, factor,
-            iterations, label)
+            iterations, vertex_group, label)
     if o == "modify":
         return modifiers.modify_modifier(
             target, modifier_name or modifier, levels, render_levels, width, segments,
             thickness, offset, angle_limit, count, factor, strength, iterations,
-            show_viewport, show_render, wrap_method, target_object, label)
+            show_viewport, show_render, wrap_method, target_object, vertex_group, label)
     if o == "move":
         return modifiers.move_modifier(target, modifier, index, before, after, label)
     if o == "remove":

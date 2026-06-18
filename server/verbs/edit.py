@@ -170,7 +170,7 @@ def edit(
     if o == "delete":
         return editmode.delete_geometry(mode, label, target)
     if o == "separate":
-        return editmode.separate_selection(new_name, label)
+        return editmode.separate_selection(new_name, label, target)
     if o == "mark_sharp":
         return editmode.mark_sharp(clear, label, target)
     if o == "crease":

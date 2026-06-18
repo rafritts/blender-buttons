@@ -351,6 +351,30 @@ def inflate_selection(amount: float = 0.003, label: str = "", target: str = "") 
 
 
 @mcp.tool()
+def separate_selection(new_name: str = "", label: str = "", target: str = "") -> str:
+    """
+    Separate the current edit-mode selection into a NEW object (the 'P → Selection'
+    shortcut). The split-off geometry leaves the source mesh (source gets a hole).
+
+    new_name: optional name for the new object (else Blender appends '.001').
+    target: optional object name — enters edit mode on it first so the stored
+            selection is live, then separates. Empty = the active object (must
+            already be in edit mode).
+
+    Returns the new object's name. Pair with select_in_sphere/by_axis to lift a
+    patch off a mesh (e.g. for shape transfer), then object op=join to weld it back.
+    """
+    result = call_blender("separate_selection",
+                          {"new_name": new_name or None, "target": target or None},
+                          label=label)
+    if result.get("success"):
+        main = f"separated → {result.get('new_object', '?')} (from {result.get('source', '?')})"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def delete_geometry(mode: str = "VERT", label: str = "", target: str = "") -> str:
     """
     Delete the current selection in edit mode.

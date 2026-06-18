@@ -9,7 +9,7 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
                  axis: str = "X", merge_threshold: float = None,
                  mirror_object: str = "", precision: int = None,
                  rest_source: str = "", factor: float = None, iterations: int = None,
-                 label: str = "") -> str:
+                 vertex_group: str = "", label: str = "") -> str:
     """
     Add a modifier to the active object.
     type: SUBSURF | BEVEL | SOLIDIFY | MIRROR | ARRAY | SCREW | SHRINKWRAP
@@ -25,8 +25,18 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
       LATTICE     : the lattice cage that deforms this mesh.
     offset: SHRINKWRAP only — surface offset in meters (skin distance).
     wrap_method: SHRINKWRAP only —
-                 NEAREST_SURFACEPOINT (default) | PROJECT | NEAREST_VERTEX | TARGET_PROJECT.
-    axis: MIRROR only — any combination of X, Y, Z (default "X"). E.g. "XY" mirrors on both.
+                 NEAREST_SURFACEPOINT (default — snaps each vert to the closest target
+                 point; FLATTENS bumps, since a tip's nearest point is on its flank) |
+                 PROJECT (casts each vert along `axis` onto the target — preserves a
+                 bump's height; the right choice for transferring a raised form) |
+                 NEAREST_VERTEX | TARGET_PROJECT.
+    vertex_group: SHRINKWRAP — confine the wrap to this weighted group and PIN
+                 everything at weight 0. Transfer just a region (e.g. a breast) in
+                 place: the rest of the mesh and the region's boundary ring stay put,
+                 so there's no cut and no seam to weld. Mint it with edit/assign_weight
+                 from a selection first.
+    axis: MIRROR — any combination of X, Y, Z (default "X"); SHRINKWRAP PROJECT —
+          the single cast axis (X|Y|Z, default treat as Y/depth).
     merge_threshold: MIRROR only — weld coincident verts at the mirror plane (typical 0.001).
     mirror_object: MIRROR only — use this object's local axes as the mirror plane (defaults to self).
     precision: MESH_DEFORM only — bind precision 2–10 (higher = sharper, slower bind).
@@ -59,6 +69,8 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
         params["factor"] = factor
     if iterations is not None:
         params["iterations"] = iterations
+    if vertex_group:
+        params["vertex_group"] = vertex_group
     result = call_blender("add_modifier", params, label=label)
     if result.get("success"):
         main = f"{result['modifier']} [{result.get('op_id','')}]"
@@ -204,7 +216,7 @@ def modify_modifier(target: str, modifier_name: str,
                     iterations: int = None,
                     show_viewport: bool = None, show_render: bool = None,
                     wrap_method: str = "", target_object: str = "",
-                    label: str = "") -> str:
+                    vertex_group: str = "", label: str = "") -> str:
     """
     Tweak properties on an existing modifier without rebuilding it.
     Use this to dial in shrinkwrap offset, bevel width, subsurf levels, etc.
@@ -234,6 +246,8 @@ def modify_modifier(target: str, modifier_name: str,
         params["wrap_method"] = wrap_method
     if target_object:
         params["target_object"] = target_object
+    if vertex_group:
+        params["vertex_group"] = vertex_group
     result = call_blender("modify_modifier", params, label=label)
     if result.get("success"):
         applied = result.get("applied", [])
