@@ -130,6 +130,28 @@ def join_objects(names: list, merge_threshold: float = None) -> str:
     return main + _status(result)
 
 
+def remesh(name: str = "", mode: str = "voxel", voxel_size: float = 0.05,
+           target_faces: int = 5000, label: str = "") -> str:
+    """G50 — auto-retopology: rebuild the whole mesh's topology in one call.
+    mode='voxel': uniform voxel grid at voxel_size (m) → even, watertight, sculpt-ready
+                  resolution (kills stretched/poor flow). Smaller = more detail kept.
+    mode='quad' : QuadriFlow → clean mostly-quad flow at ~target_faces faces
+                  (deformation-grade retopo; slower).
+    Destructive (replaces geometry). Refused on rigged/keyed meshes (a full retopo
+    invalidates every shape key + deform bind — duplicate and strip the rig first)."""
+    result = call_blender("remesh", {"name": name, "mode": mode, "voxel_size": voxel_size,
+                                     "target_faces": target_faces}, label=label)
+    if result.get("success"):
+        knob = (f"voxel {result['voxel_size']}m" if result["mode"] == "voxel"
+                else f"~{result['target_faces']} target faces")
+        main = (f"remeshed '{result['object']}' ({result['mode']}, {knob}): "
+                f"{result['verts_before']}v/{result['faces_before']}f → "
+                f"{result['verts_after']}v/{result['faces_after']}f [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 @mcp.tool()
 def separate_selection(new_name: str = "", label: str = "") -> str:
     """

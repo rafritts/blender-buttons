@@ -413,7 +413,12 @@ def selection_anchor(target: str = "") -> str:
     if not result.get("success"):
         return result.get("error", "failed")
     p = result["point"]; n = result["normal"]
-    return (f"selection anchor @ {result['region']} ({result['vert_count']} verts): "
+    # G52: a 'stored' source means the mesh is in Object mode and we read the selection
+    # persisted on obj.data (the cross-object select→act chain) — flag it so a cold agent
+    # knows it isn't the live edit selection (and could be stale if edited since).
+    src = result.get("selection_source", "live")
+    src_note = "" if src == "live" else f", from STORED selection (mesh in Object mode)"
+    return (f"selection anchor @ {result['region']} ({result['vert_count']} verts{src_note}): "
             f"point=[{p[0]}, {p[1]}, {p[2]}]  normal=[{n[0]}, {n[1]}, {n[2]}]  "
             f"radius~{result.get('radius')}m (from extent {result.get('extent')})\n"
             f"  → sculpt at=selection uses this point (radius defaults to the footprint)")

@@ -14,7 +14,8 @@ from ._common import tag, unknown, teach
 _OPS = ["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
         "mark_sharp", "crease", "inflate", "jitter", "proportional_move",
         "extrude_along_curve", "round", "bend", "smooth_edges", "taper_end",
-        "taper_section", "scale_rings", "band", "trace", "boolean", "subdivide", "bridge"]
+        "taper_section", "scale_rings", "band", "trace", "boolean", "subdivide", "bridge",
+        "relax", "slide", "poke", "inset", "grid_fill"]
 
 
 @mcp.tool(name="edit")
@@ -23,7 +24,7 @@ def edit(
                 "mark_sharp", "crease", "inflate", "jitter", "proportional_move",
                 "extrude_along_curve", "round", "bend", "smooth_edges", "taper_end",
                 "taper_section", "scale_rings", "band", "trace", "boolean", "subdivide",
-                "bridge"],
+                "bridge", "relax", "slide", "poke", "inset", "grid_fill"],
     target: tag(str, "mesh object to edit (empty=active)") = "",
     # bridge — weld two boundary handles (SPEC-07 Phase 5 / G10)
     a: tag(str, "[bridge] first boundary handle to weld (order-independent)") = "",
@@ -92,7 +93,7 @@ def edit(
     # band_around
     name: tag(str, "[band] name for the new band object") = "",
     at: tag(float, "[band] position along axis (0..1)") = None,
-    thickness: tag(float, "[band] band thickness (m)") = 0.02,
+    thickness: tag(float, "[band] band thickness (m) / [inset] inset distance (m)") = 0.02,
     # trace_profile
     sections: tag(int, "[trace] number of cross-sections") = 24,
     # boolean
@@ -100,6 +101,16 @@ def edit(
     bool_op: tag(str, "[boolean] DIFFERENCE|UNION|INTERSECT") = "DIFFERENCE",
     solver: tag(str, "[boolean] EXACT|FAST") = "EXACT",
     hide_cutter: tag(bool, "[boolean] hide the cutter afterward") = True,
+    # relax (G49) — redistribute spacing, shape preserved
+    iterations: tag(int, "[relax] smoothing passes") = 5,
+    strength: tag(float, "[relax] per-pass factor 0..1") = 0.5,
+    reproject: tag(bool, "[relax] snap back onto the surface each pass (shape preserved)") = True,
+    # poke / inset / grid_fill (G50) — face authoring
+    offset: tag(float, "[poke] push the new centre vert along the face normal (m)") = 0.0,
+    depth: tag(float, "[inset] push the inset in/out along the normal (m)") = 0.0,
+    individual: tag(bool, "[inset] inset each face separately vs. the region as a whole") = False,
+    span: tag(int, "[grid_fill] grid span (0 = auto)") = 0,
+    grid_offset: tag(int, "[grid_fill] grid offset") = 0,
     label: str = "",
 ) -> str:
     """
@@ -141,6 +152,22 @@ def edit(
                     join cross-object parts first (object op=join), then bridge on the
                     joined mesh. Keyed/rigged meshes refused (topology change corrupts
                     the deform). Order-independent.     (a, b)
+      relax       — RELAX the selection: even out vertex spacing over the form WITHOUT
+                    changing its shape (smooth + reproject onto the pre-relax surface).
+                    Moves verts ALONG the surface — fixes stretched/bunched quads.
+                    (iterations, strength, reproject)
+      slide       — SLIDE the selection along the surface: move by the direction words,
+                    then reproject onto the pre-slide surface (net motion is tangential).
+                    Relocate a pole/loop to a feature without denting the mesh.
+                    (out/inward/up/down/left/right/forward/back)
+      poke        — fan each selected face out from a new centre vert → mints a POLE
+                    (radial centre) where the form wants one. FACE mode.   (offset)
+      inset       — ring the selected faces with a new face band (shrink a copy inward);
+                    adds an edge loop to define/tighten a feature. FACE mode.
+                    (thickness, depth, individual)
+      grid_fill   — fill a selected closed edge loop with a clean quad grid (re-flow a
+                    hole/region instead of a fan). One even-vert loop selected.
+                    (span, grid_offset)
     """
     o = op.lower().strip()
     # G23 move 3 — teaching errors for ops whose key input has no safe default.
@@ -206,4 +233,15 @@ def edit(
         return modifiers.boolean(target, cutter, bool_op, solver, apply, hide_cutter, label)
     if o == "bridge":
         return editmode.bridge(a, b, label)
+    if o == "relax":
+        return editmode.relax_selection(iterations, strength, reproject, label, target)
+    if o == "slide":
+        return editmode.slide_selection(out, inward, up, down, left, right,
+                                        forward, back, label, target)
+    if o == "poke":
+        return editmode.poke_faces(offset, label, target)
+    if o == "inset":
+        return editmode.inset_faces(thickness, depth, individual, label, target)
+    if o == "grid_fill":
+        return editmode.grid_fill(span, grid_offset, label, target)
     return unknown("edit", "op", op, _OPS)

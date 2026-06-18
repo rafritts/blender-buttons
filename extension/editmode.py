@@ -1838,7 +1838,219 @@ def select_limb(params):
                     f"remove — the base ring stays as a clean opening"}
 
 
+# ───────────────────────── surface-tangential moves (G49) ───────────────────
+# The movers above (proportional_move/inflate/jitter) all push verts THROUGH space
+# in a fixed direction. These two move verts ALONG the surface instead: relax
+# redistributes spacing, slide drags a selection over the form — both by snapping
+# every moved vert back onto a BVH snapshot of the surface taken BEFORE the move.
+# That reprojection is what turns a space-move into a surface-move: the shape is
+# preserved (verts can only land on the original surface), only their layout changes.
+
+def _surface_bvh(bm):
+    """A BVHTree snapshot of the bmesh's current geometry (local space). The tree
+    copies geometry at build time, so mutating bm afterward leaves it untouched —
+    exactly what reprojection needs (snap to where the surface WAS before the move)."""
+    from mathutils.bvhtree import BVHTree
+    return BVHTree.FromBMesh(bm)
+
+
+def _reproject(verts, tree):
+    """Snap each vert onto the nearest point of `tree` (the pre-move surface).
+    Returns the number actually moved onto the surface."""
+    n = 0
+    for v in verts:
+        loc, _nrm, _idx, _dist = tree.find_nearest(v.co)
+        if loc is not None:
+            v.co = loc
+            n += 1
+    return n
+
+
+def relax_selection(params):
+    """G49 — RELAX: even out vertex spacing over the existing form without changing
+    its shape. Laplacian-smooths the selected verts (each drifts toward the average of
+    its neighbours), then reprojects every one onto a BVH snapshot of the pre-relax
+    surface so the form is preserved and only the layout improves. The fix for stretched
+    / bunched quads at a feature — the redistribute half of the retopo toolkit.
+
+    iterations: smoothing passes (default 5). factor: 0..1 step per pass (default 0.5).
+    reproject:  snap back onto the original surface each pass (default True). False =
+                a plain Laplacian smooth that also relaxes the shape (shrinks bulges)."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    iterations = max(1, int(params.get("iterations", 5)))
+    factor = float(params.get("factor", 0.5))
+    reproject = params.get("reproject", True)
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    sel = [v for v in bm.verts if v.select]
+    if not sel:
+        return {"error": "No vertices selected"}
+    before = [v.co.copy() for v in sel]
+    tree = _surface_bvh(bm) if reproject else None
+    for _ in range(iterations):
+        bmesh.ops.smooth_vert(bm, verts=sel, factor=factor,
+                              use_axis_x=True, use_axis_y=True, use_axis_z=True)
+        if tree is not None:
+            _reproject(sel, tree)
+    bm.normal_update()
+    bmesh.update_edit_mesh(obj.data)
+    push_undo(f"relax_selection x{iterations}")
+    mw = obj.matrix_world
+    drift = sum(((mw @ v.co) - (mw @ b)).length for v, b in zip(sel, before)) / len(sel)
+    return {"success": True, "verts_relaxed": len(sel), "iterations": iterations,
+            "factor": factor, "reprojected": bool(reproject),
+            "avg_drift_cm": round(drift * 100, 3)}
+
+
+def slide_selection(params):
+    """G49 — SLIDE: drag the selected verts ALONG the surface in a direction, instead of
+    THROUGH space. Moves them by the usual metre direction words, then reprojects onto a
+    BVH snapshot of the pre-slide surface — so the net motion is the tangential component
+    (the verts travel over the form; the form's shape is unchanged). Relocate a pole or a
+    loop to a feature's high point without denting the mesh.
+
+    Direction words (METERS, composable): out/inward (selection normal),
+    up/down/left/right/forward/back (world axes). The displacement should be small
+    relative to the surface's curvature — a slide is a nudge, looped if you need more."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    if not _has_dir_words(params):
+        return {"error": "slide needs a direction — out/inward or up/down/left/right/"
+                         "forward/back (meters)"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    sel = [v for v in bm.verts if v.select]
+    if not sel:
+        return {"error": "No vertices selected"}
+    wv, frame, err = _resolve_world_delta(bm, obj, params)
+    if err:
+        return err
+    local = obj.matrix_world.inverted().to_3x3() @ wv
+    before = [v.co.copy() for v in sel]
+    tree = _surface_bvh(bm)
+    for v in sel:
+        v.co += local
+    _reproject(sel, tree)
+    bm.normal_update()
+    bmesh.update_edit_mesh(obj.data)
+    push_undo("slide_selection")
+    mw = obj.matrix_world
+    drift = sum(((mw @ v.co) - (mw @ b)).length for v, b in zip(sel, before)) / len(sel)
+    result = {"success": True, "verts_slid": len(sel),
+              "requested_world": [round(c, 5) for c in wv],
+              "avg_slide_cm": round(drift * 100, 3)}
+    if frame:
+        result["frame"] = frame
+    return result
+
+
+# ───────────────────────── face authoring / retopo primitives (G50) ──────────
+
+def poke_faces(params):
+    """G50 — POKE: fan each selected face out from a new centre vertex. The centre vert
+    has valence = the face's side count, so poking a quad mints a 4-pole, an n-gon an
+    n-pole — the way to AUTHOR a radial centre where the surface wants one (e.g. under a
+    nipple/dome) and there isn't a pole already. offset: push the new centre along the
+    face normal (m, default 0 = flat)."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    offset = float(params.get("offset", 0.0))
+    bm = bmesh.from_edit_mesh(obj.data)
+    faces = [f for f in bm.faces if f.select]
+    if not faces:
+        return {"error": "No faces selected (switch to FACE mode / select faces to poke)"}
+    n_faces = len(faces)
+    # The new centre's valence = the face's side count — capture it now, because the
+    # poke op REMOVES the original faces (dereferencing faces[0] after would raise).
+    sides = len(faces[0].verts)
+    res = bmesh.ops.poke(bm, faces=faces, offset=offset)
+    new_verts = res.get("verts", [])
+    for v in bm.verts:
+        v.select = False
+    for v in new_verts:
+        v.select = True
+    bm.select_flush(True)
+    bmesh.update_edit_mesh(obj.data)
+    push_undo("poke_faces")
+    return {"success": True, "faces_poked": n_faces,
+            "poles_created": len(new_verts), "offset": offset,
+            "note": f"new centre vert(s) left selected — a poked {sides}-gon mints a "
+                    f"{sides}-pole"}
+
+
+def inset_faces(params):
+    """G50 — INSET: shrink a copy of the selected faces inward, ringing them with a new
+    band of faces (the classic 'I' inset). Adds an edge loop around a region so a feature
+    can be defined/tightened. thickness: inset distance (m). depth: push the inset in/out
+    along the normal (m). individual: inset each face on its own vs. the region as a whole."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    thickness = float(params.get("thickness", 0.01))
+    depth = float(params.get("depth", 0.0))
+    individual = bool(params.get("individual", False))
+    bm = bmesh.from_edit_mesh(obj.data)
+    faces = [f for f in bm.faces if f.select]
+    if not faces:
+        return {"error": "No faces selected (switch to FACE mode / select faces to inset)"}
+    if individual:
+        res = bmesh.ops.inset_individual(bm, faces=faces, thickness=thickness, depth=depth)
+    else:
+        res = bmesh.ops.inset_region(bm, faces=faces, thickness=thickness, depth=depth,
+                                     use_boundary=True, use_even_offset=True)
+    new_faces = res.get("faces", [])
+    bm.normal_update()
+    bmesh.update_edit_mesh(obj.data)
+    push_undo("inset_faces")
+    return {"success": True, "faces_inset": len(faces), "ring_faces": len(new_faces),
+            "thickness": thickness, "depth": depth,
+            "mode": "individual" if individual else "region"}
+
+
+def grid_fill(params):
+    """G50 — GRID FILL: fill a selected closed edge loop with a regular quad grid (the
+    Face menu 'Grid Fill'). Lays clean four-sided flow across a hole/region instead of a
+    fan — the patch primitive for repairing or re-flowing topology. Be in edit mode with
+    a single closed boundary loop selected (even vert count). span/offset tune the grid."""
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    span = int(params.get("span", 0))
+    offset = int(params.get("offset", 0))
+    import bmesh
+    bm = bmesh.from_edit_mesh(obj.data)
+    faces_before = len(bm.faces)
+    try:
+        if span > 0:
+            bpy.ops.mesh.fill_grid(span=span, offset=offset)
+        else:
+            bpy.ops.mesh.fill_grid(offset=offset)
+    except RuntimeError as e:
+        return {"error": f"grid_fill failed: {e}. Needs ONE closed edge loop with an "
+                         f"even vertex count selected."}
+    bm = bmesh.from_edit_mesh(obj.data)
+    added = len(bm.faces) - faces_before
+    if added <= 0:
+        return {"error": "grid_fill added nothing — the selection isn't a fillable grid. "
+                         "Select ONE closed edge loop with an EVEN vertex count (Blender "
+                         "splits it into four sides); an odd or branching loop can't be "
+                         "gridded. Use edit op=bridge for two separate loops."}
+    return {"success": True, "faces_added": added, "faces_total": len(bm.faces)}
+
+
 TOOLS = {
+    "relax_selection":    relax_selection,
+    "slide_selection":    slide_selection,
+    "poke_faces":         poke_faces,
+    "inset_faces":        inset_faces,
+    "grid_fill":          grid_fill,
     "select_limb":        select_limb,
     "bevel":              bevel,
     "extrude":            extrude,

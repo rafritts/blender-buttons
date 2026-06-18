@@ -13,7 +13,7 @@ from ._common import tag, unknown
 
 _OPS = ["info", "describe", "rename", "delete", "duplicate", "duplicate_mirrored",
         "join", "split", "group", "ungroup", "add_to_group", "parts", "convert",
-        "visibility", "particle_visibility", "props", "set_prop", "light", "mode"]
+        "visibility", "particle_visibility", "props", "set_prop", "light", "mode", "remesh"]
 
 
 @mcp.tool(name="object")
@@ -21,7 +21,7 @@ def object_verb(
     op: Literal["info", "describe", "rename", "delete", "duplicate",
                 "duplicate_mirrored", "join", "split", "group", "ungroup",
                 "add_to_group", "parts", "convert", "visibility",
-                "particle_visibility", "props", "set_prop", "light", "mode"],
+                "particle_visibility", "props", "set_prop", "light", "mode", "remesh"],
     name: tag(str, "object name (empty=active for info/describe)") = "",
     # rename / duplicate
     new_name: tag(str, "[rename/duplicate/duplicate_mirrored] new object name") = "",
@@ -44,7 +44,10 @@ def object_verb(
     # describe / info
     posed: tag(bool, "[describe] evaluate the posed/deformed mesh") = False,
     # explicit mode override (auto-switching usually makes this unnecessary)
-    mode: tag(str, "[mode] OBJECT|EDIT|SCULPT|POSE") = "",
+    mode: tag(str, "[mode] OBJECT|EDIT|SCULPT|POSE / [remesh] voxel|quad") = "",
+    # remesh (G50) — auto-retopology of the whole mesh
+    voxel_size: tag(float, "[remesh mode=voxel] voxel grid size (m)") = 0.05,
+    target_faces: tag(int, "[remesh mode=quad] QuadriFlow target face count") = 5000,
     # light tweaks (op=light — modify an existing light)
     energy: tag(float, "[light] strength") = None,
     color: tag(list, "[light] [r,g,b] 0..1") = None,
@@ -82,6 +85,10 @@ def object_verb(
       light       — tweak an existing light  (name, energy/color/hex/size/spot_angle/x/y/z/target)
       mode        — explicit mode switch; pass name to guarantee it lands on that
                     object despite a stray click   (name, mode=OBJECT|EDIT|SCULPT|POSE)
+      remesh      — auto-retopology of the whole mesh (mode=voxel → uniform sculpt-ready
+                    grid at voxel_size; mode=quad → QuadriFlow clean quad flow at
+                    ~target_faces). Destructive; rigged/keyed meshes refused.
+                    (name, mode=voxel|quad, voxel_size, target_faces)
 
     (Object SELECTION is the `select` verb; modifiers are `modifier`; materials
     are `material`; armature/weights/shape-keys are `pose`.)
@@ -126,4 +133,6 @@ def object_verb(
                                    x, y, z, target, label)
     if o == "mode":
         return objects.set_mode(mode, name)
+    if o == "remesh":
+        return objects.remesh(name, mode or "voxel", voxel_size, target_faces, label)
     return unknown("object", "op", op, _OPS)

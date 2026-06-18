@@ -60,8 +60,16 @@ def _fmt_method(name: str, data: dict) -> list:
     elif name == "poles":
         bv = ", ".join(f"val{k}×{v}" for k, v in data["by_valence"].items()) or "none"
         lines.append(f"  poles: {data['count']} ({bv})")
-        for p in data.get("poles", [])[:20]:
-            lines.append(f"    valence {p['valence']} @ {p['region']} (id {p['vert_id']})")
+        rc = data.get("radial_centers", [])
+        if rc:
+            lines.append(f"  radial centres ({len(rc)} — clustered; act at world):")
+            for c in rc[:20]:
+                vals = "/".join(f"v{v}" for v in c["valences"])
+                lines.append(f"    {c['poles']}-pole cluster @ {c['region']} "
+                             f"world={c['world']} ({vals})")
+        for p in data.get("poles_detail", [])[:12]:
+            lines.append(f"    valence {p['valence']} @ {p['region']} "
+                         f"world={p['world']} (id {p['vert_id']})")
     elif name == "symmetry":
         best = data["best_plane"]
         lines.append(f"  symmetry: best mirror = {best} plane, "

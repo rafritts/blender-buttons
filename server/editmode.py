@@ -705,6 +705,104 @@ def select_in_sphere(center_x: float, center_y: float, center_z: float, radius: 
     return main + _status(result)
 
 
+def relax_selection(iterations: int = 5, factor: float = 0.5, reproject: bool = True,
+                    label: str = "", target: str = "") -> str:
+    """G49 — RELAX the selected verts: even out their spacing over the existing form
+    without changing its shape (Laplacian smooth + reproject onto the pre-relax surface).
+    The redistribute primitive for stretched/bunched quads at a feature — moves verts
+    ALONG the surface, not through space.
+
+    iterations: smoothing passes (default 5). factor: 0..1 step per pass (default 0.5).
+    reproject: snap back onto the original surface each pass (default True; False = a
+               plain smooth that also relaxes the shape).
+    target: optional object name — enters edit mode on it first, exits after."""
+    result = call_blender("relax_selection", {
+        "iterations": iterations, "factor": factor, "reproject": reproject,
+        "target": target}, label=label)
+    if result.get("success"):
+        main = (f"relaxed {result['verts_relaxed']} verts ×{result['iterations']} "
+                f"(reproject {result['reprojected']}) — avg drift {result['avg_drift_cm']}cm "
+                f"[{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def slide_selection(out: float = 0.0, inward: float = 0.0,
+                    up: float = 0.0, down: float = 0.0, left: float = 0.0, right: float = 0.0,
+                    forward: float = 0.0, back: float = 0.0,
+                    label: str = "", target: str = "") -> str:
+    """G49 — SLIDE the selected verts ALONG the surface: move them by the metre direction
+    words, then reproject onto the pre-slide surface so the net motion is tangential (the
+    verts travel over the form; its shape is unchanged). Relocate a pole/loop to a
+    feature's high point without denting the mesh. Keep the slide small vs. the curvature.
+
+    Directions (METERS, composable): out/inward (selection normal), up/down/left/right/
+    forward/back (world axes).
+    target: optional object name — enters edit mode on it first, exits after."""
+    result = call_blender("slide_selection", {
+        "out": out, "inward": inward, "up": up, "down": down, "left": left,
+        "right": right, "forward": forward, "back": back, "target": target}, label=label)
+    if result.get("success"):
+        frame = f" ({result['frame']})" if result.get("frame") else ""
+        main = (f"slid {result['verts_slid']} verts along surface — moved "
+                f"{result['avg_slide_cm']}cm{frame} [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def poke_faces(offset: float = 0.0, label: str = "", target: str = "") -> str:
+    """G50 — POKE the selected faces: fan each out from a new centre vertex, minting a
+    pole (the centre's valence = the face's side count). The way to AUTHOR a radial centre
+    where the form wants one and there's no pole — e.g. under a dome. Be in FACE mode with
+    faces selected. offset: push the new centre along the face normal (m). The new centre
+    verts are left selected.
+    target: optional object name — enters edit mode on it first, exits after."""
+    result = call_blender("poke_faces", {"offset": offset, "target": target}, label=label)
+    if result.get("success"):
+        main = (f"poked {result['faces_poked']} face(s) → {result['poles_created']} "
+                f"pole(s) [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def inset_faces(thickness: float = 0.01, depth: float = 0.0, individual: bool = False,
+                label: str = "", target: str = "") -> str:
+    """G50 — INSET the selected faces: ring them with a new band of faces (shrink a copy
+    inward). Adds an edge loop around a region so a feature can be defined/tightened. Be
+    in FACE mode with faces selected.
+    thickness: inset distance (m). depth: push in/out along the normal (m).
+    individual: inset each face separately vs. the region as a whole.
+    target: optional object name — enters edit mode on it first, exits after."""
+    result = call_blender("inset_faces", {"thickness": thickness, "depth": depth,
+                                          "individual": individual, "target": target},
+                          label=label)
+    if result.get("success"):
+        main = (f"inset {result['faces_inset']} face(s) ({result['mode']}) → "
+                f"+{result['ring_faces']} ring faces [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def grid_fill(span: int = 0, offset: int = 0, label: str = "", target: str = "") -> str:
+    """G50 — GRID FILL: fill a selected closed edge loop with a regular quad grid (clean
+    four-sided flow across a hole/region, not a fan). The patch primitive for repairing or
+    re-flowing topology. Be in edit mode with ONE closed boundary loop (even vert count)
+    selected. span/offset tune the grid layout.
+    target: optional object name — enters edit mode on it first, exits after."""
+    result = call_blender("grid_fill", {"span": span, "offset": offset, "target": target},
+                          label=label)
+    if result.get("success"):
+        main = (f"grid-filled +{result['faces_added']} faces → {result['faces_total']} "
+                f"total [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 def verify_selection(steps: int = 1) -> str:
     """G48 — capture verification on the live edit-mode selection. Read-only (perturbs
     then restores), so no status block. Grows + shrinks the selection and reports the

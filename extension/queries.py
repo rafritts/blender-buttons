@@ -605,26 +605,34 @@ def selection_anchor(params):
     obj = bpy.data.objects.get(name) if name else bpy.context.active_object
     if obj is None or obj.type != 'MESH':
         return {"error": "target is not a mesh"}
-    if obj.mode != 'EDIT':
-        return {"error": "no live selection — enter edit mode and select the region "
-                         "(or pass a named handle= instead)"}
-    bm = bmesh.from_edit_mesh(obj.data)
-    sel = [v for v in bm.verts if v.select]
+    # G52: the live edit-mode selection is the primary source, but the select→act
+    # chain across objects leaves the mesh in OBJECT mode with the selection STORED
+    # on obj.data (Blender persists vertex .select flags out of edit mode). Read that
+    # stored selection too, so 'anchor on the selection' works whether or not this
+    # object currently holds the edit session — no manual mode flip needed.
+    if obj.mode == 'EDIT':
+        bm = bmesh.from_edit_mesh(obj.data)
+        sel = [(v.co.copy(), v.normal.copy()) for v in bm.verts if v.select]
+        source = "live"
+    else:
+        sel = [(v.co.copy(), v.normal.copy()) for v in obj.data.vertices if v.select]
+        source = "stored"
     if not sel:
-        return {"error": "nothing selected — select the region to anchor on first"}
+        return {"error": "nothing selected — select the region to anchor on first "
+                         "(or pass a named handle= instead)"}
     mw = obj.matrix_world
-    centroid = sum((v.co for v in sel), Vector()) / len(sel)
+    centroid = sum((co for co, _n in sel), Vector()) / len(sel)
     centroid_w = mw @ centroid
     snap_w, nrm_w = _snap_to_surface(obj, centroid_w)
     if snap_w is None:
         snap_w = centroid_w
         nv = Vector((0.0, 0.0, 0.0))
-        for v in sel:
-            nv += mw.to_3x3() @ v.normal
+        for _co, nloc in sel:
+            nv += mw.to_3x3() @ nloc
         nrm_w = nv.normalized() if nv.length > 1e-9 else Vector((0.0, 0.0, 1.0))
     # extent (world bbox of the selection) → the affordance a brush RADIUS sources from
     # (SPEC-09 Phase 3): act 'over this footprint', not a guessed radius.
-    wco = [mw @ v.co for v in sel]
+    wco = [mw @ co for co, _n in sel]
     xs = [p.x for p in wco]; ys = [p.y for p in wco]; zs = [p.z for p in wco]
     extent = (max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs))
     # suggested radius = half the largest horizontal-ish extent (the footprint radius)
@@ -639,6 +647,7 @@ def selection_anchor(params):
         "radius": round(sugg_r, 5),
         "region": region_words(bbox, snap_w),
         "vert_count": len(sel),
+        "selection_source": source,
     }
 
 

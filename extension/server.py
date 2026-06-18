@@ -90,6 +90,7 @@ EDIT_MODE_TOOLS = {
     "set_edge_crease", "merge_by_distance", "select_in_sphere", "split_by_part",
     "get_rings", "select_ring", "select_rings", "scale_rings", "taper_end", "taper_section",
     "assign_weight", "select_boundary", "select_limb",
+    "relax_selection", "slide_selection", "poke_faces", "inset_faces", "grid_fill",
 }
 
 # Y1: verbs that write VERTEX POSITIONS, so on a keyed mesh they land on the active
@@ -101,7 +102,8 @@ SHAPE_KEY_SHADOW_TOOLS = {
     "move_vertices", "scale_vertices", "snap_loop", "proportional_move",
     "inflate_selection",
     "jitter_vertices", "bevel", "extrude", "extrude_along_curve", "scale_rings",
-    "subdivide_selection",
+    "subdivide_selection", "relax_selection", "slide_selection",
+    "poke_faces", "inset_faces", "grid_fill",
     "taper_end", "taper_section",
     "sculpt_grab", "sculpt_inflate", "sculpt_draw", "sculpt_smooth", "sculpt_crease",
     "sculpt_pinch", "sculpt_flatten", "sculpt_gravity",

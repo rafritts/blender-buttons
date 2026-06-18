@@ -167,7 +167,13 @@ def _m_boundaries(bm, lod, bbox):
 
 def _m_poles(bm, lod, bbox):
     """Valence ≠ 4 verts (quad-flow breaks). Boundary verts excluded (naturally
-    non-4). Poles near a cut line make a cut messy — surface them."""
+    non-4). Poles near a cut line make a cut messy — surface them.
+
+    G51: every pole carries WORLD coords (the bmesh is already world-space), and
+    nearby poles are clustered into the RADIAL CENTRES they form — so a pole is a
+    place you can act on (`feel anchor` / `select in_sphere` / `edit slide`), not a
+    bare id you can't see. A radial layout (e.g. around a poked dome) shows up as one
+    cluster whose centre is the point under the feature."""
     by_val = {}
     poles = []
     for v in bm.verts:
@@ -181,10 +187,55 @@ def _m_poles(bm, lod, bbox):
             poles.append((v, val))
     res = {"count": len(poles),
            "by_valence": {str(k): by_val[k] for k in sorted(by_val)}}
-    if lod != "low":
-        res["poles"] = [{"valence": val, "vert_id": v.index,
-                         "region": region_words(bbox, v.co)}
-                        for v, val in poles[:200]]
+    if not poles or lod == "low":
+        return res
+
+    # cluster threshold: a small multiple of the mean edge length, so only
+    # topologically-neighbouring poles merge into one radial centre.
+    elens = [e.calc_length() for e in bm.edges]
+    mean_edge = (sum(elens) / len(elens)) if elens else 0.0
+    thresh = mean_edge * 2.5 if mean_edge else 0.0
+
+    from mathutils.kdtree import KDTree
+    n = len(poles)
+    kd = KDTree(n)
+    for i, (v, _val) in enumerate(poles):
+        kd.insert(v.co, i)
+    kd.balance()
+    parent = list(range(n))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    if thresh > 0:
+        for i, (v, _val) in enumerate(poles):
+            for (_co, j, _d) in kd.find_range(v.co, thresh):
+                ri, rj = find(i), find(j)
+                if ri != rj:
+                    parent[ri] = rj
+
+    clusters = {}
+    for i, (v, val) in enumerate(poles):
+        clusters.setdefault(find(i), []).append((v, val))
+    centres = []
+    for members in clusters.values():
+        cen = sum((v.co for v, _ in members), mathutils.Vector()) / len(members)
+        centres.append({
+            "world": [round(c, 4) for c in cen],
+            "poles": len(members),
+            "valences": sorted({val for _, val in members}),
+            "vert_ids": [v.index for v, _ in members[:12]],
+            "region": region_words(bbox, cen),
+        })
+    centres.sort(key=lambda c: c["poles"], reverse=True)
+    res["radial_centers"] = centres[:60]
+    res["poles_detail"] = [{"valence": val, "vert_id": v.index,
+                            "world": [round(c, 4) for c in v.co],
+                            "region": region_words(bbox, v.co)}
+                           for v, val in poles[:200]]
     return res
 
 

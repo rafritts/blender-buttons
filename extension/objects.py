@@ -980,7 +980,62 @@ def set_object_visibility(params):
             "render_visible": not obj.hide_render}
 
 
+def remesh(params):
+    """G50 — REMESH: rebuild the whole mesh's topology automatically (the auto-retopology
+    primitive). Two modes:
+      voxel — flood the volume with a uniform voxel grid → an even, watertight all-quad-ish
+              surface at `voxel_size` (m). The sculpt-density remesh: kills stretched/poor
+              flow, gives uniform resolution to sculpt on. Smaller voxel = more detail kept.
+      quad  — QuadriFlow: solve a clean, mostly-quad field at ~`target_faces` faces. The
+              deformation-grade retopo: even quad flow over the form. Slower.
+    Destructive (replaces the geometry); object must be a mesh. Refused on rigged/keyed
+    meshes (a full retopo invalidates every deform bind / shape key)."""
+    from .common import linked_guard, deform_binds
+    name = params.get("name") or params.get("target")
+    obj = bpy.data.objects.get(name) if name else bpy.context.active_object
+    if obj is None or obj.type != 'MESH':
+        return {"error": f"'{name}' is not a mesh"}
+    err = linked_guard(obj)
+    if err:
+        return {"error": err}
+    if obj.data.shape_keys or deform_binds(obj):
+        return {"error": "refusing to remesh a rigged/keyed mesh — a full retopo "
+                         "invalidates every shape key and deform bind. Duplicate it "
+                         "(object op=duplicate), strip the rig, then remesh the copy."}
+    mode = (params.get("mode") or "voxel").lower()
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    activate(obj)
+    v_before = len(obj.data.vertices)
+    f_before = len(obj.data.polygons)
+    if mode == "voxel":
+        vsize = float(params.get("voxel_size", 0.05))
+        if vsize <= 0:
+            return {"error": "voxel_size must be > 0 (meters)"}
+        obj.data.remesh_voxel_size = vsize
+        try:
+            bpy.ops.object.voxel_remesh()
+        except RuntimeError as e:
+            return {"error": f"voxel_remesh failed: {e}"}
+        detail = {"voxel_size": vsize}
+    elif mode == "quad":
+        target = int(params.get("target_faces", 5000))
+        try:
+            bpy.ops.object.quadriflow_remesh(target_faces=target, use_mesh_symmetry=False)
+        except RuntimeError as e:
+            return {"error": f"quadriflow_remesh failed: {e}"}
+        detail = {"target_faces": target}
+    else:
+        return {"error": f"unknown mode '{mode}' — use 'voxel' or 'quad'"}
+    result = {"success": True, "object": obj.name, "mode": mode,
+              "verts_before": v_before, "faces_before": f_before,
+              "verts_after": len(obj.data.vertices), "faces_after": len(obj.data.polygons)}
+    result.update(detail)
+    return result
+
+
 TOOLS = {
+    "remesh":                 remesh,
     "rename_object":          rename_object,
     "select_object":          select_object,
     "delete_object":          delete_object,
