@@ -1654,8 +1654,8 @@ def bridge_handles(params):
     try:
         bpy.ops.mesh.bridge_edge_loops(
             number_cuts=cuts, interpolation=interp, smoothness=smoothness,
-            profile_factor=profile, twist_offset=twist)
-    except RuntimeError as ex:
+            profile_shape_factor=profile, twist_offset=twist)
+    except (RuntimeError, TypeError) as ex:
         bpy.ops.object.mode_set(mode='OBJECT')
         return {"error": f"bridge_edge_loops failed: {ex}"}
 

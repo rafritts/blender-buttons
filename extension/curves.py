@@ -596,9 +596,11 @@ def feel_curve(params):
             cross = (b - a).cross(c - b)
             # turning angle at b
             d0, d1 = (b - a), (c - b)
+            turn_local = 0.0
             if d0.length > 1e-9 and d1.length > 1e-9:
                 cosang = max(-1.0, min(1.0, d0.normalized().dot(d1.normalized())))
-                turning += math.degrees(math.acos(cosang))
+                turn_local = math.degrees(math.acos(cosang))
+                turning += turn_local
             denom = ab * bc * ca
             if denom > 1e-12:
                 area = cross.length / 2.0
@@ -607,8 +609,11 @@ def feel_curve(params):
                 if k > max_k:
                     max_k = k
                     at_frac = cum[i] / length
-            # inflection: the bend's binormal flips to the other side
-            if cross.length > 1e-9:
+            # inflection: the bend-plane normal flips to the other side. ONLY track
+            # where the bend is meaningful — in near-straight stretches the cross
+            # product is numerical noise whose sign flips at random (which used to
+            # mint phantom inflections on a clean planar arc). 2° gate filters it.
+            if turn_local > 2.0 and cross.length > 1e-12:
                 bn = cross.normalized()
                 if prev_bn is not None and bn.dot(prev_bn) < -0.2:
                     inflections += 1
