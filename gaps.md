@@ -286,6 +286,28 @@ landmark discovery (**G38**) and region-coherent selection (**G43**) so a featur
 relative to another feature, never to the origin. Dogfood: the navel's Z was the one number with
 no relational anchor — typed, then nudged in raw centimetres on the human's call.
 
+## G48 — `feel` reports a region's metrics without flagging when the selection is the **wrong scale to trust them** ⚖️ OPEN
+
+A selection-scoped read (`region_form`, `protrusion`, centroid) returns a confident number
+regardless of whether the selection can actually support it — and it misleads in **both**
+directions. *Too few verts:* my early navel probes (1–7 verts, a tiny sphere) gave noisy
+form verdicts I leaned on. *Too coarse a patch:* the close-up of Body's navel showed a deep
+funnelled well, but my `protrusion` read over a ~5cm sphere reported only −0.92cm because it
+**averaged the drainpipe into the bowl** — the patch was the wrong scale for the feature, and
+the instrument said nothing. Either way the agent acts on a number that looks solid and isn't.
+
+**General fix:** a **trust caveat on the read itself** — not a blanket count warning (5 verts
+is noise on a 16k mesh, plenty on a 200-vert proxy), but a flag tied to whether *this metric*
+over *this selection* is reliable: vert count **relative to local density**, and the
+ring/sample size the metric actually fits (`protrusion` already prints "base plane fit to 14
+ring verts" — that hook should *flag* when the ring is too thin). Should name **both** failure
+modes — too-sparse (noisy) and too-broad (averages the feature away, i.e. "this region may be
+the wrong scale for the feature you're reading"). Must avoid alarm fatigue: tie it to genuine
+unreliability of the returned value, or the agent learns to ignore it. Composes with SPEC-09
+(if the selection is the anchor for *action*, its trustworthiness as a *read* is the same
+question). Dogfood: probed the navel at guessed heights with tiny spheres and missed it; then
+read its depth over too-broad a patch and under-reported it 3–4×.
+
 ## Carried over — bigger build-outs (not yet started)
 
 - **Multires + dyntopo** as real multi-level sculpt targets — the proper organic-sculpt
