@@ -119,7 +119,7 @@ centred front-to-back mass (→ front sign withheld). Kept OUT of the cheap bund
 is a distinct question the agent asks once, not per structure-read. Not yet wired into `object
 describe` (deferred; `feel method=facing` covers the need).
 
-## G58 — `bridge` is straight-only; the one cheap win for curved welds 🌉
+## G58 — `bridge` is straight-only; the one cheap win for curved welds 🌉 🛠️ IMPLEMENTED — pending live dogfood
 
 Welding two open loops (`edit op=bridge`) lays a **single ring of shortest-path quads** — no
 curvature, no segments, no twist, no profile. Native Blender *Bridge Edge Loops* already
@@ -139,6 +139,14 @@ arch directly, on the real loops, with a dial.
 **smallest change with the biggest payoff** in the whole curve story — a parameter
 pass-through, not new machinery. The expressive, geometry-bound version is [[SPEC-10]];
 this is the 80% that ships in an afternoon.
+
+**Implemented** as new args on `edit op=bridge`: `bridge_cuts` (0=straight, the
+unchanged default), `smoothness`, `interpolation` (linear|path|surface), `profile`
+(profile_factor bulge), `twist` (rim-to-rim vertex offset, kills the spiral). Pure
+pass-through to `bpy.ops.mesh.bridge_edge_loops` in `extension/editmode.py:bridge_handles`,
+threaded through `server/editmode.py:bridge` and `server/verbs/edit.py`; the shape used
+is echoed in the status line. Offline (teaching/dispatch) verified; **delete this entry
+once the curved weld is dogfooded live** (needs addon reinstall + MCP reconnect).
 
 ## G59 — no geometry-bound curve: the agent is the only glue between curve and mesh → SPEC-10 ✍️
 

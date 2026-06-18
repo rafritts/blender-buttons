@@ -1489,7 +1489,17 @@ def bridge_handles(params):
     on the joined mesh. Keyed/rigged meshes are refused: bridging adds faces, which
     corrupts a shape-key block or a deform bind (the honest G10 limit).
 
-    a, b: the two boundary handles to weld (order-independent — bridging is symmetric)."""
+    a, b: the two boundary handles to weld (order-independent — bridging is symmetric).
+
+    Curvature dials (gaps.md G58 — pass-through to Bridge Edge Loops). Default `cuts=0`
+    is the original straight single-ring weld; raise `cuts` to subdivide the span so it
+    can bow:
+      cuts          int   intermediate loops across the span (0 = straight strut)
+      smoothness    float tangent bow of the interpolated cuts (native default 1.0)
+      interpolation str   LINEAR | PATH | SURFACE — how the cuts follow the rims
+      profile       float profile_factor: bulge the cross-section out (0 = none)
+      twist         int   twist_offset: rotate vert-to-vert mapping when the two rims
+                          face different ways (kills the spiral); units = verts."""
     import bmesh
     from . import handles as H
     a = (params.get("a") or "").strip()
@@ -1561,9 +1571,21 @@ def bridge_handles(params):
             f"no open boundary edges on those handles — '{a}'/'{b}' may not be open "
             f"loops (bridge needs two rims of one-face edges)"}
 
+    cuts = max(0, min(int(params.get("cuts", 0) or 0), 1000))
+    smoothness = max(0.0, min(float(params.get("smoothness", 1.0) or 1.0), 1000.0))
+    profile = float(params.get("profile", 0.0) or 0.0)
+    twist = int(params.get("twist", 0) or 0)
+    interp = str(params.get("interpolation", "PATH") or "PATH").strip().upper()
+    if interp not in ("LINEAR", "PATH", "SURFACE"):
+        bpy.ops.object.mode_set(mode='OBJECT')
+        return {"error":
+            f"interpolation '{interp}' invalid — use LINEAR, PATH, or SURFACE"}
+
     faces_before = len(bm.faces)
     try:
-        bpy.ops.mesh.bridge_edge_loops()
+        bpy.ops.mesh.bridge_edge_loops(
+            number_cuts=cuts, interpolation=interp, smoothness=smoothness,
+            profile_factor=profile, twist_offset=twist)
     except RuntimeError as ex:
         bpy.ops.object.mode_set(mode='OBJECT')
         return {"error": f"bridge_edge_loops failed: {ex}"}
@@ -1574,7 +1596,9 @@ def bridge_handles(params):
     push_undo(f"bridge {a} ↔ {b}")
     return {"success": True, "owner": obj.name, "a": a, "b": b,
             "edges_bridged": sel_edges, "faces_created": faces_after - faces_before,
-            "faces_total": faces_after}
+            "faces_total": faces_after,
+            "bridge": {"cuts": cuts, "smoothness": smoothness,
+                       "interpolation": interp, "profile": profile, "twist": twist}}
 
 
 def select_in_sphere(params):

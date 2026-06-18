@@ -30,6 +30,12 @@ def edit(
     # bridge — weld two boundary handles (SPEC-07 Phase 5 / G10)
     a: tag(str, "[bridge] first boundary handle to weld (order-independent)") = "",
     b: tag(str, "[bridge] second boundary handle to weld") = "",
+    # bridge curvature dials (G58 — pass-through to Bridge Edge Loops; defaults = straight)
+    bridge_cuts: tag(int, "[bridge] intermediate loops across the span (0=straight strut; raise to bow it)") = 0,
+    smoothness: tag(float, "[bridge] tangent bow of the cuts (native default 1.0; needs bridge_cuts>0)") = 1.0,
+    interpolation: tag(str, "[bridge] how cuts follow the rims: linear|path|surface") = "path",
+    profile: tag(float, "[bridge] bulge the cross-section outward (profile_factor; 0=none)") = 0.0,
+    twist: tag(int, "[bridge] rotate rim-to-rim vertex mapping (verts) to kill the spiral when rims face apart") = 0,
     # directional amounts (extrude / move-style ops; meters, local frame)
     out: tag(float, "[extrude/proportional_move] push out along normal (m)") = 0.0,
     inward: tag(float, "[extrude/proportional_move] push inward (m)") = 0.0,
@@ -161,7 +167,11 @@ def edit(
                     with feel op=assembly); their rims get bridged. SAME-OBJECT only —
                     join cross-object parts first (object op=join), then bridge on the
                     joined mesh. Keyed/rigged meshes refused (topology change corrupts
-                    the deform). Order-independent.     (a, b)
+                    the deform). Order-independent. Defaults to a STRAIGHT strut; raise
+                    bridge_cuts to subdivide the span so it can bow (smoothness=tangent
+                    bow, profile=outward bulge, interpolation=linear|path|surface), and
+                    twist to align rims that face apart (kills the spiral).
+                    (a, b, bridge_cuts, smoothness, interpolation, profile, twist)
       relax       — RELAX the selection: even out vertex spacing over the form WITHOUT
                     changing its shape (smooth + reproject onto the pre-relax surface).
                     Moves verts ALONG the surface — fixes stretched/bunched quads.
@@ -245,7 +255,8 @@ def edit(
     if o == "boolean":
         return modifiers.boolean(target, cutter, bool_op, solver, apply, hide_cutter, label)
     if o == "bridge":
-        return editmode.bridge(a, b, label)
+        return editmode.bridge(a, b, label, bridge_cuts, smoothness,
+                               interpolation, profile, twist)
     if o == "relax":
         return editmode.relax_selection(iterations, strength, reproject, label, target)
     if o == "slide":

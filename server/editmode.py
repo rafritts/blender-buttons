@@ -658,7 +658,9 @@ def merge_by_distance(threshold: float = 0.001, selected_only: bool = False,
     return main + _status(result)
 
 
-def bridge(a: str = "", b: str = "", label: str = "") -> str:
+def bridge(a: str = "", b: str = "", label: str = "", bridge_cuts: int = 0,
+           smoothness: float = 1.0, interpolation: str = "path",
+           profile: float = 0.0, twist: int = 0) -> str:
     """Weld two open boundary loops into a continuous surface — the bridge-edge-loops
     primitive (SPEC-07 Phase 5, closing gaps.md G10). `a` and `b` are two boundary
     handles (mint them with `feel op=assembly`); their rims get selected and bridged.
@@ -666,12 +668,27 @@ def bridge(a: str = "", b: str = "", label: str = "") -> str:
     SAME-OBJECT only — `edit` acts on one mesh. Two parts on separate objects: run
     `object op=join names=A,B` first, then bridge the loops on the joined mesh. Keyed/
     rigged meshes are refused (adding faces corrupts the shape-key block / deform bind).
-    Bridging is symmetric, so a/b order doesn't matter."""
-    result = call_blender("bridge_handles", {"a": a, "b": b}, label=label)
+    Bridging is symmetric, so a/b order doesn't matter.
+
+    Curvature dials (G58 — Bridge Edge Loops pass-through). `bridge_cuts=0` is the
+    original straight single-ring weld; raise it to subdivide the span so it can bow.
+    `smoothness` sets the tangent bow of those cuts, `interpolation` (linear|path|
+    surface) how they follow the rims, `profile` bulges the cross-section out, `twist`
+    rotates the rim-to-rim vertex mapping (in verts) to kill the spiral when the two
+    rims face different directions."""
+    result = call_blender("bridge_handles", {
+        "a": a, "b": b, "cuts": bridge_cuts, "smoothness": smoothness,
+        "interpolation": interpolation, "profile": profile, "twist": twist,
+    }, label=label)
     if result.get("success"):
+        br = result.get("bridge", {})
+        shape = (f", {br['cuts']} cuts/sm{br['smoothness']:g}/{br['interpolation'].lower()}"
+                 + (f"/twist{br['twist']}" if br.get('twist') else "")
+                 + (f"/prof{br['profile']:g}" if br.get('profile') else "")
+                 ) if br.get("cuts") else ""
         main = (f"bridged {result['a']} ↔ {result['b']} on {result['owner']} — "
-                f"+{result['faces_created']} faces ({result['edges_bridged']} edge pairs) "
-                f"→ {result['faces_total']} faces [{result.get('op_id','')}]")
+                f"+{result['faces_created']} faces ({result['edges_bridged']} edge pairs)"
+                f"{shape} → {result['faces_total']} faces [{result.get('op_id','')}]")
         # G9 follow-up: a fresh weld usually wants a seam-weld + a lint pass.
         main += ("\n  → next: `edit op=merge target=" + result['owner']
                  + "` to weld any coincident seam verts · `feel op=mesh target="
