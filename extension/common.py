@@ -415,6 +415,31 @@ def scene_mesh_objects():
     return [o for o in bpy.context.scene.objects if o.type == 'MESH']
 
 
+def resolve_camera(name=None, scene=None):
+    """Resolve the camera a camera-consuming op should act on — one rule, shared by
+    every such op so a preflight (check_framing) and the action (render, camera_position)
+    can never disagree on the default (G35/G36).
+
+    Order: an explicitly-named camera → the scene's active camera → the sole/first
+    camera in the scene. Returns (cam, error_msg); exactly one is non-None. A named
+    camera that's missing or not a CAMERA is an error (no silent fallback) — but an
+    UNSET scene camera falls back to an available one, matching what render does.
+    """
+    scene = scene or bpy.context.scene
+    if name:
+        cam = bpy.data.objects.get(name)
+        if cam is None or cam.type != 'CAMERA':
+            return None, f"Camera '{name}' not found"
+        return cam, None
+    cam = scene.camera
+    if cam is not None and cam.type == 'CAMERA':
+        return cam, None
+    cam = next((o for o in scene.objects if o.type == 'CAMERA'), None)
+    if cam is None:
+        return None, "no camera in scene (add_camera first, or pass camera=<name>)"
+    return cam, None
+
+
 def world_bbox_corners(obj):
     """The 8 world-space corners of obj's local bounding box."""
     return [obj.matrix_world @ mathutils.Vector(c) for c in obj.bound_box]

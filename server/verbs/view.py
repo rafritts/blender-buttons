@@ -11,13 +11,13 @@ from server import viewport, introspect, scene
 from ._common import tag, unknown
 
 _OPS = ["shading", "angle", "overlays", "orbit", "zoom", "frame", "check_framing",
-        "camera_position", "camera_dof"]
+        "camera_position", "camera_dof", "active_camera"]
 
 
 @mcp.tool(name="view")
 def view(
     op: Literal["shading", "angle", "overlays", "orbit", "zoom", "frame",
-                "check_framing", "camera_position", "camera_dof"],
+                "check_framing", "camera_position", "camera_dof", "active_camera"],
     # shading / angle
     mode: tag(str, "[shading] WIREFRAME|SOLID|MATERIAL|RENDERED") = "MATERIAL",
     angle: tag(str, "[angle] FRONT|BACK|TOP|… or persp/ortho") = "",
@@ -46,6 +46,7 @@ def view(
     x: tag(float, "[camera_position] camera X") = 0.0,
     y: tag(float, "[camera_position] camera Y") = 0.0,
     z: tag(float, "[camera_position] camera Z") = 0.0,
+    # camera_position / active_camera — camera= names which camera to act on (empty=scene cam)
     # camera_dof
     focus_distance: tag(float, "[camera_dof] focus distance (m)") = None,
     aperture: tag(float, "[camera_dof] f-stop (lower = shallower)") = None,
@@ -66,10 +67,11 @@ def view(
                   the frame aspect, so each reading states the reference resolution;
                   aspect='WxH'|'W:H' validates against an intended output. (targets,
                   camera, aspect)
-      camera_position — move the scene camera to a point aimed at a target
-                  (x/y/z, target_x/y/z)
+      camera_position — move a camera to a point aimed at a target
+                  (x/y/z, target_x/y/z, camera — empty=scene cam)
       camera_dof — depth of field on the camera (focus_distance OR focus_object,
                   aperture f-stop, camera)
+      active_camera — make an existing camera the active scene/render camera (camera)
     """
     o = op.lower().strip()
     if o == "shading":
@@ -89,7 +91,9 @@ def view(
     if o == "check_framing":
         return introspect.check_framing(targets, camera, aspect)
     if o == "camera_position":
-        return scene.set_camera_position(x, y, z, target_x, target_y, target_z)
+        return scene.set_camera_position(x, y, z, target_x, target_y, target_z, camera)
     if o == "camera_dof":
         return scene.set_camera_dof(focus_distance, aperture, focus_object, camera)
+    if o == "active_camera":
+        return scene.set_active_camera(camera)
     return unknown("view", "op", op, _OPS)

@@ -92,9 +92,10 @@ def render_to_file(params):
     scene = bpy.context.scene
 
     if scene.camera is None:
-        cam = next((o for o in scene.objects if o.type == 'CAMERA'), None)
-        if cam is None:
-            return {"error": "No camera in scene — add_camera first."}
+        from .common import resolve_camera
+        cam, err = resolve_camera(None, scene)
+        if err:
+            return {"error": err}
         scene.camera = cam
 
     engine = params.get("engine")

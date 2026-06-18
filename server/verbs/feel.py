@@ -58,9 +58,10 @@ def feel(
     group: tag(str, "[audit/assembly] group/collection (assembly: read this collection's meshes)") = "",
     tri_budget: tag(int, "[audit] triangle budget") = 5000,
     # aim — surface-relative addressing (G1 / SPEC-06)
-    face: tag(str, "[aim] local bbox face to cast FROM: -Y +Y -X +X -Z +Z (-Y = ray travels +Y into the volume)") = "-Y",
-    u: tag(float, "[aim] 0..1 on the face, first of the other two local axes (X<Y<Z)") = 0.5,
-    v: tag(float, "[aim] 0..1 on the face, second of the other two local axes") = 0.5,
+    face: tag(str, "[aim] bbox face to cast FROM: -Y +Y -X +X -Z +Z (-Y = ray travels +Y into the volume)") = "-Y",
+    u: tag(float, "[aim] 0..1 on the face, first of the other two axes (X<Y<Z)") = 0.5,
+    v: tag(float, "[aim] 0..1 on the face, second of the other two axes") = 0.5,
+    aim_frame: tag(str, "[aim] world (default; face/u/v are world axes like every other read) | local (mesh's rotation-baked bbox frame, G39)") = "world",
     margin: tag(float, "[aim/map] extra cast start distance outside the face/opening (m)") = 0.0,
     # handles — named spatial anchors (SPEC-07)
     name: tag(str, "[handle/accept] handle name (optional at mint — auto-named handle.001-style if empty)") = "",
@@ -125,7 +126,7 @@ def feel(
       aim      — cast a normalized bbox-face aim onto the surface → world point +
                  normal, to feed sculpt/select/add. The constructive-side
                  `feel structure`: aim in fractions of the form, get the coordinate
-                 back instead of dead-reckoning it.   (target, face, u, v, margin)
+                 back instead of dead-reckoning it.   (target, face, u, v, aim_frame, margin)
       handle   — mint a named spatial anchor from the live edit-mode selection: an
                  Empty in a `Handles` collection + a `HANDLE_<name>` vertex group on
                  the owning mesh, visible/renamable/deletable in the Outliner. The
@@ -188,7 +189,7 @@ def feel(
     if o == "resting":
         return introspect.check_resting(targets)
     if o == "aim":
-        return queries.aim_surface(target, face, u, v, margin)
+        return queries.aim_surface(target, face, u, v, margin, aim_frame)
     if o == "handle":
         return handles.mint_handle(name, source, vertex_parent)
     if o == "handles":

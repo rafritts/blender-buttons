@@ -369,30 +369,36 @@ def is_aligned(a: str, b: str, side: str = "TOP", tolerance: float = 0.001) -> s
 
 
 def aim_surface(target: str = "", face: str = "-Y", u: float = 0.5, v: float = 0.5,
-                margin: float = 0.0) -> str:
+                margin: float = 0.0, frame: str = "world") -> str:
     """Cast a normalized bbox-face aim onto the surface — the constructive-side analog
     of `feel structure` → handles (gaps.md G1 / SPEC-06). Turns a framing you CAN
-    reason about (a face of the local bbox + two 0..1 coords) into the world point +
+    reason about (a face of the bbox + two 0..1 coords) into the world point +
     surface normal the coordinate-hungry verbs need — and hands the coordinate back so
     you LEARN it instead of dead-reckoning it.
 
-    face: which local bbox face to cast FROM, as a signed axis — -Y +Y -X +X -Z +Z.
+    face: which bbox face to cast FROM, as a signed axis — -Y +Y -X +X -Z +Z.
           '-Y' = origin on the −Y face, ray travels +Y INTO the volume.
-    u, v: 0..1 on that face over the OTHER two local axes (ascending, X<Y<Z).
+    u, v: 0..1 on that face over the OTHER two axes (ascending, X<Y<Z).
           face=-Y → u:X, v:Z. face=-Z → u:X, v:Y. 0=min, 0.5=centre, 1=max.
+    frame: 'world' (default) — face/u/v are WORLD axes, like every other read.
+          'local' uses the mesh's rotation-baked bbox frame; on a rotated import the
+          two diverge (face=-Y can cast world +Z), which silently missed the head (G39).
+          The response echoes the world direction the cast resolved to.
 
     Then feed the returned point to a constructive verb:
       sculpt … at_x/y/z=point, radius=…   (push along the returned normal to pull out)
       select op=in_sphere center=point     |   add … on={"at": point}
     Casts onto the EVALUATED surface (subsurf included)."""
     result = call_blender("aim_surface",
-                          {"target": target, "face": face, "u": u, "v": v, "margin": margin})
+                          {"target": target, "face": face, "u": u, "v": v,
+                           "margin": margin, "frame": frame})
     if not result.get("success"):
         if "note" in result:
             return result["note"]
         return result.get("error", "failed")
     p = result["point"]; n = result["normal"]
-    return (f"surface @ {result['region']} (cast {result['cast_axis']}): "
+    return (f"surface @ {result['region']} (cast {result['cast_axis']} [{result.get('frame','world')}] "
+            f"→ world {result.get('world_dir','?')}): "
             f"point=[{p[0]}, {p[1]}, {p[2]}]  normal=[{n[0]}, {n[1]}, {n[2]}]\n"
             f"  → sculpt at_x={p[0]} at_y={p[1]} at_z={p[2]} (push along the normal "
             f"to pull out); or select in_sphere center=that point")

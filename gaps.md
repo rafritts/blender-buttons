@@ -75,54 +75,6 @@ must re-apply it to the twin by hand. A one-call `object op=mirror_edit name=<sr
 +25° — mirror it right" a single move. Post-hoc twin-matching, not a live mode — cheaper than
 G14 proper and independently useful.
 
-## G33 — `edit op=taper_section` ignores `from_ring`→`to_ring` direction 🔀 OPEN
-
-The param docs read `x_start` = "X scale at **from_ring**", `x_end` = "X scale at **to_ring**".
-But empirically the endpoints bind to **ascending ring index**, not to the from→to order
-passed: calling `from_ring=16, to_ring=1, x_start=1.0, x_end=0.16` put the `0.16` pinch at
-ring 1 (the lower index) and `1.0` at ring 16 — i.e. it behaved as if `from_ring=1`. A
-directional taper "narrow toward the **from** end" silently inverts, and you only catch it
-by reading `feel op=profile` afterward. The operator is forced out of intent-space ("pinch
-the bottom toward the mouth") into "which ring index is numerically smaller, and does that
-match my from/to?" trial-and-error.
-
-**General fix:** honor the caller's from→to ordering — `x_start` lands on `from_ring`
-whichever end that is — OR, if ascending-index binding is intentional, say so in the param
-docs and reject/ignore a descending `from_ring`>`to_ring` with a `teach()` note. Either way
-the meaning must be unambiguous from op+param name (the G23 litmus). Dogfood: hot-air-balloon
-envelope — first taper produced an upside-down silhouette (pinch under the equator, bulge at
-the base); only the profile read revealed the flip.
-
-## G35 — camera-write ops can't address a **named** camera; no "set active camera" primitive 🎥 OPEN
-
-`view op=camera_position` and `op=camera_dof` write to the scene's **active** camera and have
-no `camera=` param — yet the *read* sibling `check_framing` does take `camera=`. With two
-cameras present (the default `Camera` + an added `hero_cam`), `camera_position` silently moved
-`Camera` while I was checking `hero_cam`, so the framing readout never changed and the move
-looked like a no-op. Worse, there is **no primitive to set the active scene camera** at all:
-`add type=camera` doesn't make the new camera active, and nothing else does, so a freshly-added
-hero camera can't be driven by the camera-write ops or become the render camera without
-deleting every other camera and hoping.
-
-**General fix:** (a) give `camera_position`/`camera_dof` a `camera=` param symmetric with
-`check_framing`; (b) add a "set active scene camera" primitive (or an `active=true` flag on
-`add type=camera`). Dogfood: positioning the balloon hero shot — three `camera_position` calls
-moved the wrong camera before the cause was found.
-
-## G36 — `check_framing` and `render op=image` disagree on the default (unset) camera 🧭 OPEN
-
-With no explicit `camera=` and `scene.camera` unset, `check_framing` returns
-`no camera (pass camera=<name> or set the scene camera)` — but `render op=image` with the same
-state **succeeds**, falling back to an available camera and producing a correct image. Two
-tools, two different default-camera resolutions: a preflight (`check_framing`) that says the
-shot is unshootable, and a render that shoots it fine. The preflight can't be trusted as the
-render's ground truth, which is the whole point of having it.
-
-**General fix:** unify default-camera resolution across the camera-consuming tools — both
-fall back to the sole/active camera, or both require explicit naming with the same `teach()`
-message. Dogfood: balloon hero render — `check_framing` (no arg) reported "no camera" seconds
-before `render` (no arg) wrote a 1.97 MB frame.
-
 ## G38 — no salient-**feature discovery**; `region_form` reads "what's here?" but nothing reads "where are the features?" 🔎 OPEN
 
 The form scalars `region_form` returns are genuinely good — on a female base mesh it cleanly
@@ -155,24 +107,6 @@ where it sits. This is the "where" half that makes `region_form`'s "what" action
 must report multi-lobed/saddle forms honestly rather than averaging them to "flat." Deterministic
 geometry, not vision. Dogfood: asked whether `feel` can discern face/bust/butt/navel on a base
 female mesh — yes to *measure* each once located, no to *find* them; the butt read "flat."
-
-## G39 — `feel op=aim` casts in the object's **local (rotation-baked) frame** while every other read is world-space 🧭 OPEN
-
-`aim`'s `face` (`-Y/+Y/...`) and `u`/`v` parameters are interpreted in the mesh's **local bbox
-frame**, but `object info`, `profile`, bounds, and `in_sphere` all speak **world space**. On the
-imported base mesh (rotated 90° about X, a routine Maya Y-up→Z-up import), casting `face=-Y v=0.93`
-expecting the top of the head hit mid-torso instead — local +Y had been rotated onto world +Z, so
-the "vertical" v-axis was actually world depth. The operator gets no warning; the ray just lands
-somewhere unrelated, and the only tell is that the returned world coordinate doesn't match the
-intended feature. Mixing frames across sibling reads is exactly the kind of silent
-coordinate-trap the server exists to remove.
-
-**General fix:** either accept `aim` targets in world space (symmetric with `in_sphere`/`profile`),
-or have it **state the world direction each `face` resolves to** in the response (e.g. `face=-Y →
-world +Z`) and/or honour a `frame=world|local` flag. Whichever — the meaning of `face`/`u`/`v` must
-be unambiguous without the operator first checking `rotation_deg` and mentally un-rotating. Dogfood:
-locating the nose on the base mesh — two casts missed the head entirely because the bbox frame was
-rotated.
 
 ## G43 — no **region-coherent feature selection**; you can't select "a breast / its lower half" as a unit 🫳 OPEN
 
@@ -222,46 +156,6 @@ named baseline, then after an edit report the signed change per metric over the 
 local change is checked locally and temporally. Builds directly on the now-live selection-scoped
 reads. Dogfood: the bust edit passed bbox + global-symmetry while being asymmetric and malformed,
 and confirming "it grew, and stayed symmetric" needed the human's viewport.
-
-## G46 — no **region-parametric / physics deformers**; organic shaping must be hand-sculpted blind 🜄 SPEC-08 — Tier A SHIPPED & verified (de-cones), Tiers B–E open
-
-The only deformers are stroke brushes (`sculpt` grab/draw/inflate) and `edit
-proportional_move` — *expressive* tools whose correctness lives in a seeing operator's
-hand. Driven by reasoning, enlarging the bust "organically" produced a forward-projecting
-**cone** "held up by invisible hands," not a hanging teardrop — and the numeric
-instruments *misreported* it: bbox + `region_form` said "fullest point dropped, lower pole
-filled → teardrop" because they measure *bigger* and *lower* but are blind to
-**drape-vs-projection**, the axis that defines organic. There is also no physics path: a
-Cloth/Soft-Body modifier can't be added with its dials, there is no pin/goal vertex-group
-authoring, and — decisively — **no frame-step/bake** anywhere in the 15 verbs, so any
-physics modifier is inert. "Flat out use gravity" is impossible today.
-
-**General fix:** expose deformers whose correctness is in the **algorithm, not the eye** —
-region (mask/selection) + parameter (gravity / strength / stiffness) → physically-plausible
-**by construction**, which also reduces the agent's job from *invent the shape* (needs eyes)
-to *tune the magnitude* (the reads can verify). Ranked: **Mesh Filter incl. gravity (+
-mask)** as the lead primitive, then Cloth Filter, Elastic Deform brush, Lattice cage, and
-full Soft-Body/Cloth+bake last. Shared infra: **selection→vgroup/mask**, **frame-step/bake**,
-**apply-sim-to-mesh**. Full plan in `docs/SPEC-08`. Composes with G37 (silhouette) and G41
-(absolute protrusion) — the reads that would let the eyeless verify-loop actually close.
-Dogfood: enlarging the bust to a *hanging* G cup — the hand-grab coned it, and the gravity
-the human asked for had no tool to run.
-
-**Progress:** Tier A (the lead) is shipped and **dogfood-verified**: `sculpt brush=gravity` — pins
-the top of the region and translates the free mass down world -Z (full fall below a transition
-band just under the pin line; lateral-only falloff softens the sphere's horizontal seam without
-pinning the lower pole). On the coned G-cup bust it **de-coned** it: the apex Z sank 1.349 → 1.296
-(−5.25cm) while the front projection held, and the side `silhouette` read top-flat / lower-full /
-bottom-curl — a teardrop, not a cone. Scope with `at`+`radius` (one breast) or omit the point for
-the whole mesh; `strength`=fall in m, `pin`=top fraction frozen (`extension/sculpt.py::sculpt_gravity`).
-The eyeless verify-loop reads it composes with also shipped and verified (now deleted as closed
-gaps): silhouette (`feel op=silhouette`, edge-rasterized so it's gap-free), absolute protrusion
-(`feel method=protrusion`), cross-section perimeter/area (`feel op=section`). **Still open:** Tier B
-Cloth Filter, Tier C Elastic Deform brush, Tier D Lattice cage, Tier E Soft-Body/Cloth+bake — all
-need the **frame-step/bake** + **apply-sim** shared infra (no timeline control exists yet), so they
-stay deferred until the lead proves out further. **selection→vgroup/mask** infra also still TBD
-(gravity scopes by sphere/whole-mesh today; the breast tips sit at the sphere's lateral edge, so
-draping both at once needs one sphere per lobe — a soft mask would let one call do both seamlessly).
 
 ## G47 — no **surface-relative placement from a landmark + offset**; sculpting a feature still dead-reckons the seed point 📍 OPEN
 

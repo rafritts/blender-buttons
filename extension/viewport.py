@@ -193,14 +193,33 @@ def set_camera_position(params):
     ty = params.get("target_y", 0.0)
     tz = params.get("target_z", 0.0)
 
-    cam = next((o for o in bpy.data.objects if o.type == 'CAMERA'), None)
-    if cam is None:
-        return {"error": "No camera in scene"}
+    # G35: address a named camera (symmetric with check_framing/camera_dof). Without
+    # this it grabbed the FIRST camera in the file, so with two cameras present it
+    # silently moved the wrong one while the agent checked framing on the other.
+    from .common import resolve_camera
+    cam, err = resolve_camera(params.get("camera"))
+    if err:
+        return {"error": err}
 
     cam.location = (x, y, z)
     direction = mathutils.Vector((tx, ty, tz)) - mathutils.Vector((x, y, z))
     cam.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()
     return {"success": True, "camera": cam.name}
+
+
+def set_active_camera(params):
+    """G35: make an existing camera the active scene camera, so a freshly-added hero
+    camera can become the render camera (and the target of the camera-write ops) without
+    deleting every other camera. The missing 'set active camera' primitive."""
+    name = params.get("camera") or params.get("name")
+    if not name:
+        return {"error": "'camera' is required"}
+    cam = bpy.data.objects.get(name)
+    if cam is None or cam.type != 'CAMERA':
+        return {"error": f"Camera '{name}' not found"}
+    bpy.context.scene.camera = cam
+    bpy.context.view_layer.update()
+    return {"success": True, "camera": cam.name, "active": True}
 
 
 def add_camera(params):
@@ -338,5 +357,6 @@ TOOLS = {
     "zoom_to_selected":        zoom_to_selected,
     "orbit_viewport":          orbit_viewport,
     "set_camera_position":     set_camera_position,
+    "set_active_camera":       set_active_camera,
     "add_camera":              add_camera,
 }

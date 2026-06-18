@@ -301,7 +301,13 @@ def taper_section(params):
     if from_idx < 0: from_idx = n + from_idx
     if to_idx < 0: to_idx = n + to_idx
     if from_idx > to_idx:
+        # Honor the caller's from→to ordering (G33): the loop runs ascending, so when
+        # from > to we swap the endpoints AND the scale values bound to them, keeping
+        # x_start/y_start on the original `from_ring` whichever index it is. Without
+        # the value swap the taper silently binds to ascending index and inverts.
         from_idx, to_idx = to_idx, from_idx
+        x_start, x_end = x_end, x_start
+        y_start, y_end = y_end, y_start
     if from_idx < 0 or to_idx >= n:
         return {"error": f"Ring range [{from_idx}, {to_idx}] out of [0, {n-1}]"}
     other_idxs = [i for i in range(3) if i != axis_idx]

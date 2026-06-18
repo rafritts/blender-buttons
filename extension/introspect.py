@@ -313,11 +313,15 @@ def check_framing(params):
     The deterministic answer to 'is it still cropped?' — no test render required.
     `aspect`='WxH'|'W:H' validates framing against an INTENDED output before a render
     (temporarily, then restores the scene's own resolution)."""
-    cam_name = params.get("camera")
     scene = bpy.context.scene
-    cam = bpy.data.objects.get(cam_name) if cam_name else scene.camera
-    if cam is None or cam.type != 'CAMERA':
-        return {"error": "no camera (pass camera=<name> or set the scene camera)"}
+    # G36: resolve the default camera the SAME way render does — named → scene camera
+    # → sole/first camera. Previously this preflight errored "no camera" on an unset
+    # scene.camera while render happily fell back and shot the frame, so the preflight
+    # couldn't be trusted as the render's ground truth.
+    from .common import resolve_camera
+    cam, err = resolve_camera(params.get("camera"), scene)
+    if err:
+        return {"error": err}
 
     report_objs, err = _report_targets(params)
     if err:

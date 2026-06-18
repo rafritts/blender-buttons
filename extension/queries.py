@@ -470,14 +470,19 @@ def check_symmetry(params):
 def aim_surface(params):
     """Cast a normalized bbox-face aim onto the surface — the constructive-side
     analog of `feel structure` → handles (gaps.md G1 / SPEC-06). Turns a framing the
-    agent CAN reason about (a face of the local bbox + two 0..1 coords) into the world
+    agent CAN reason about (a face of the bbox + two 0..1 coords) into the world
     point + surface normal the coordinate-hungry verbs (sculpt/select/add) need, and
     hands the coordinate back so the agent learns it instead of inventing it.
 
-    face: which local bbox face to cast FROM, as a signed axis — -Y +Y -X +X -Z +Z.
+    face: which bbox face to cast FROM, as a signed axis — -Y +Y -X +X -Z +Z.
           '-Y' = origin on the −Y face, ray travels +Y INTO the volume.
-    u, v: 0..1 position on that face over the OTHER two local axes (ascending index,
+    u, v: 0..1 position on that face over the OTHER two axes (ascending index,
           X<Y<Z). face=-Y → u:X, v:Z. face=-Z → u:X, v:Y. 0=min, 0.5=centre, 1=max.
+    frame: 'world' (default) interprets face/u/v in WORLD space, symmetric with every
+          other read (in_sphere/profile/bounds). 'local' uses the mesh's own
+          rotation-baked bbox frame. On a rotated import (Maya Y-up→Z-up) the two
+          differ — local +Y can point at world +Z — so a 'local' cast for "the top of
+          the head" landed mid-torso (G39). World removes that silent trap.
     Casts onto the EVALUATED surface (subsurf/modifiers included)."""
     from mathutils import Vector
     name = params.get("target")
@@ -487,34 +492,63 @@ def aim_surface(params):
     face = str(params.get("face", "-Y")).strip().upper()
     if len(face) != 2 or face[0] not in "+-" or face[1] not in "XYZ":
         return {"error": f"face '{face}' invalid — use one of -Y +Y -X +X -Z +Z"}
+    frame = str(params.get("frame", "world")).strip().lower()
+    if frame not in ("world", "local"):
+        return {"error": f"frame '{frame}' invalid — use 'world' or 'local'"}
     u = float(params.get("u", 0.5))
     v = float(params.get("v", 0.5))
     sign = -1.0 if face[0] == "-" else 1.0
     axis = {"X": 0, "Y": 1, "Z": 2}[face[1]]
     other = [i for i in (0, 1, 2) if i != axis]   # ascending → other[0]=u, other[1]=v
-
-    bb = [Vector(c) for c in obj.bound_box]        # 8 corners, LOCAL space
-    mn = Vector((min(c.x for c in bb), min(c.y for c in bb), min(c.z for c in bb)))
-    mx = Vector((max(c.x for c in bb), max(c.y for c in bb), max(c.z for c in bb)))
-    span = mx - mn
+    mw = obj.matrix_world
     margin = max(float(params.get("margin", 0.0)) or 0.0, 1e-4)
 
-    # face plane along `axis`: -X/-Y/-Z face sits at mn[axis], +face at mx[axis].
-    face_pos = mn[axis] if sign < 0 else mx[axis]
-    ray_dir_axis = 1.0 if sign < 0 else -1.0       # into the volume
-    origin = Vector((0.0, 0.0, 0.0))
-    origin[axis] = face_pos - ray_dir_axis * margin   # start just OUTSIDE the face
-    origin[other[0]] = mn[other[0]] + u * span[other[0]]
-    origin[other[1]] = mn[other[1]] + v * span[other[1]]
-    direction = Vector((0.0, 0.0, 0.0))
-    direction[axis] = ray_dir_axis
-    distance = float(span[axis]) + 2 * margin
+    if frame == "world":
+        # Build the cast in WORLD space against the world-aligned bbox, then transform
+        # origin+direction into LOCAL for ray_cast (which operates in object space).
+        corners = [mw @ Vector(c) for c in obj.bound_box]
+        mn = Vector((min(c.x for c in corners), min(c.y for c in corners), min(c.z for c in corners)))
+        mx = Vector((max(c.x for c in corners), max(c.y for c in corners), max(c.z for c in corners)))
+        span = mx - mn
+        face_pos = mn[axis] if sign < 0 else mx[axis]
+        ray_dir_axis = 1.0 if sign < 0 else -1.0
+        o_w = Vector((0.0, 0.0, 0.0))
+        o_w[axis] = face_pos - ray_dir_axis * margin
+        o_w[other[0]] = mn[other[0]] + u * span[other[0]]
+        o_w[other[1]] = mn[other[1]] + v * span[other[1]]
+        d_w = Vector((0.0, 0.0, 0.0))
+        d_w[axis] = ray_dir_axis
+        dist_w = float(span[axis]) + 2 * margin
+        mw_inv = mw.inverted()
+        origin = mw_inv @ o_w
+        seg = (mw_inv @ (o_w + d_w * dist_w)) - origin
+        distance = seg.length
+        direction = seg.normalized()
+        world_dir = ("+" if ray_dir_axis > 0 else "-") + "XYZ"[axis]
+    else:
+        bb = [Vector(c) for c in obj.bound_box]    # 8 corners, LOCAL space
+        mn = Vector((min(c.x for c in bb), min(c.y for c in bb), min(c.z for c in bb)))
+        mx = Vector((max(c.x for c in bb), max(c.y for c in bb), max(c.z for c in bb)))
+        span = mx - mn
+        face_pos = mn[axis] if sign < 0 else mx[axis]
+        ray_dir_axis = 1.0 if sign < 0 else -1.0   # into the volume
+        origin = Vector((0.0, 0.0, 0.0))
+        origin[axis] = face_pos - ray_dir_axis * margin   # start just OUTSIDE the face
+        origin[other[0]] = mn[other[0]] + u * span[other[0]]
+        origin[other[1]] = mn[other[1]] + v * span[other[1]]
+        direction = Vector((0.0, 0.0, 0.0))
+        direction[axis] = ray_dir_axis
+        distance = float(span[axis]) + 2 * margin
+        # What world direction this LOCAL cast actually resolves to (the G39 tell).
+        wd = (mw.to_3x3() @ direction).normalized()
+        dom = max((0, 1, 2), key=lambda i: abs(wd[i]))
+        world_dir = ("+" if wd[dom] > 0 else "-") + "XYZ"[dom]
 
     hit, loc_local, nrm_local, idx = obj.ray_cast(origin, direction, distance=distance)
     if not hit:
         return {"note": f"ray missed — no surface behind face={face} u={u} v={v} "
-                        f"(try other u/v, or the opposite face)", "hit": False}
-    mw = obj.matrix_world
+                        f"(frame={frame}; try other u/v, the opposite face, or frame=local)",
+                "hit": False}
     loc_w = mw @ loc_local
     nrm_w = (mw.to_3x3() @ nrm_local).normalized()
     bbox = world_bbox(obj)
@@ -524,6 +558,8 @@ def aim_surface(params):
         "normal": [round(c, 4) for c in nrm_w],
         "region": region_words(bbox, loc_w),
         "cast_axis": face,
+        "frame": frame,
+        "world_dir": world_dir,
         "push_out": f"move +normal to pull OUT, -normal to push IN",
     }
 
