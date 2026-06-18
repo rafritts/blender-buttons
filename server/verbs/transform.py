@@ -66,7 +66,7 @@ def transform(
     rotation: tag(bool, "[apply] bake rotation") = False,
     location: tag(bool, "[apply] bake location") = False,
     # snap
-    target: tag(str, "[snap/match_dim] object to snap/measure against; [rest_on] surface to rest on") = "",
+    target: tag(str, "[snap/match_dim] object to snap/measure against; [rest_on] surface to rest on; [scatter] the SURFACE to scatter onto") = "",
     side: tag(str, "[snap] target side, e.g. Z_MAX") = "Z_MAX",
     source_side: tag(str, "[snap] moved-object side (AUTO infers)") = "AUTO",
     offset: tag(float, "[snap] gap along the snap axis (m); [rest_on] clearance after contact (m)") = 0.0,
@@ -94,7 +94,7 @@ def transform(
     radius: tag(float, "[array_radial] ring radius (m)") = None,
     align_to_tangent: tag(bool, "[array_radial] rotate copies to the ring tangent") = False,
     # scatter
-    source: tag(str, "[scatter] surface object to scatter onto") = "",
+    source: tag(str, "[scatter] the object to instance across the surface (copies share its mesh data); the surface is target=") = "",
     scale_min: tag(float, "[scatter] min random scale") = 0.8,
     scale_max: tag(float, "[scatter] max random scale") = 1.2,
     align_normal: tag(bool, "[scatter] align copies to surface normal") = True,
