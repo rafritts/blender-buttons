@@ -244,17 +244,26 @@ once dogfooded live.** (Left open: `relate` still takes minted handles only — 
 none — so curve-to-mesh alignment still needs a convert; mirror the eval read into relate
 later if it's worth it.)
 
-## G65 — nothing reads *curve/connection quality*; verification sees watertight, not grace 📐
+## G65 — nothing reads *curve/connection quality*; verification sees watertight, not grace 📐 🛠️ centreline read IMPLEMENTED — pending live dogfood
 
 `feel op=mesh` certifies **watertight** and `feel op=assembly` certifies **contact** — but
-neither judges the connector *as a connector*: **tangent continuity at the seam** (does it
-leave along the opening's normal?), **curvature** (is it a single clean arc or a lump),
-pinching, flow. The agent is aesthetically blind precisely on the axis that is the goal, and
-(told correctly not to read renders back) has **no ground-truth way to see whether a curve is
-elegant before baking it** — and can't even quantify "that's not a curve," having no
-curvature read to cite. Needs a curve-centreline read (curvature κ along length, tangent-vs-
-normal angle at each seam, min bend radius vs. profile radius) — generalising the one good
-diagnostic that already exists (`extrude_along_curve`'s bend-radius-vs-profile preflight).
+neither judges the connector *as a connector*: curvature, flow, pinching, and seam
+continuity. The agent was aesthetically blind precisely on the axis that is the goal, and
+couldn't even quantify "that's not a curve."
+
+**Implemented** as `feel op=curve target=<curve>`: a live (no-bake) centreline read of a
+curve datablock — total length, **min bend radius + where** along the run, **total
+turning angle**, **inflection count** (S-bend sign-flips → "single arc" vs "S-bend"
+vs "straight"), and the **endpoint tangent directions**. `profile_radius=` adds the
+sweep-feasibility flag (min bend radius must exceed the tube radius — generalises
+`extrude_along_curve`'s preflight). Menger-curvature math validated offline (semicircle
+r→radius, S-curve→1 inflection). **Delete the centreline half once dogfooded live.**
+
+**Remaining → [[SPEC-10]]: seam tangent continuity.** "Does it leave along the *opening's*
+normal" needs the curve bound to the handles — the curve isn't anchored to the mesh, so
+`feel op=curve` can only hand back the endpoint tangents for the agent to compare by eye;
+the automatic tangent-vs-opening-normal angle is a SPEC-10 read (the connector knows both
+ends). Stays open here as a pointer.
 
 ## Carried over — bigger build-outs (not yet started)
 

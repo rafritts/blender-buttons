@@ -15,7 +15,7 @@ from ._common import tag, unknown
 _OPS = ["topology", "profile", "silhouette", "section", "rings", "distance", "gap",
         "aligned", "symmetry", "mesh", "overlaps", "validate", "audit", "contacts",
         "resting", "aim", "place", "anchor", "verify", "baseline", "diff", "handle",
-        "handles", "accept", "forget", "assembly", "map", "relate"]
+        "handles", "accept", "forget", "assembly", "map", "relate", "curve"]
 
 
 @mcp.tool(name="feel")
@@ -24,7 +24,7 @@ def feel(
                 "gap", "aligned", "symmetry", "mesh", "overlaps", "validate", "audit",
                 "contacts", "resting", "aim", "place", "anchor", "verify", "baseline",
                 "diff", "handle", "handles", "accept", "forget", "assembly", "map",
-                "relate"] = "topology",
+                "relate", "curve"] = "topology",
     target: tag(str, "[topology/profile/silhouette/section/rings/symmetry/mesh] mesh "
                      "object (empty=active); "
                      "[map] cast from every boundary handle on this mesh") = "",
@@ -47,6 +47,8 @@ def feel(
     full: tag(bool, "[profile] True = raw per-ring dump instead of aggregated bands") = False,
     max_rings: tag(int, "[profile] max rings in full mode (0 = uncap)") = 200,
     res: tag(int, "[silhouette] occupancy-grid resolution on the wider axis (default 32)") = 32,
+    resolution: tag(int, "[curve] samples per Bezier segment (default 24)") = 24,
+    profile_radius: tag(float, "[curve] tube radius to test the bend against — min bend radius must exceed it") = None,
     sections: tag(int, "[section] number of evenly spaced slices (default 12)") = 12,
     selection: tag(bool, "[silhouette] project only the live selection's verts") = False,
     # measurements
@@ -197,6 +199,11 @@ def feel(
                  the openings face each other?), and size match — the read a
                  bridge/weld needs to decide IF two openings can join, before it
                  tries. op=map's loop-plane math on a named PAIR.        (a, b)
+      curve    — a CURVE's centreline quality: length, tightest bend (min radius +
+                 where), total turning, inflections (S-bends), endpoint tangent
+                 directions. 'Clean arc or lump' as numbers; profile_radius= adds the
+                 sweep-feasibility preflight. Live read, no bake. (target, resolution,
+                 profile_radius)
     """
     o = op.lower().strip()
     if o == "topology":
@@ -259,4 +266,6 @@ def feel(
         return assembly.feel_map(handle, target, margin)
     if o == "relate":
         return assembly.feel_relate(a, b)
+    if o == "curve":
+        return queries.curve_quality(target, resolution, profile_radius)
     return unknown("feel", "op", op, _OPS)

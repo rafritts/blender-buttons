@@ -220,6 +220,39 @@ def get_section(axis: str = "Z", sections: int = 12,
     return f"{head}:\n" + "\n".join(lines)
 
 
+def curve_quality(target: str = "", resolution: int = 24,
+                  profile_radius: float = None) -> str:
+    """Read a curve's CENTRELINE quality (G65): length, the tightest bend (min radius
+    + where), total turning, inflections (S-bends), and the endpoint tangent
+    directions — 'is this a clean arc or a lump' as numbers, not a guess. Read-only,
+    on a LIVE curve (no bake).
+
+    target: curve object name (empty = active).
+    resolution: samples per Bezier segment (default 24).
+    profile_radius: if set, flags whether a tube of that radius can sweep the bend
+                    (min bend radius must exceed it) — the extrude_along_curve preflight.
+    """
+    params = {"target": target, "resolution": resolution}
+    if profile_radius is not None:
+        params["profile_radius"] = profile_radius
+    result = call_blender("feel_curve", params)
+    if not result.get("success"):
+        return result.get("error", "failed")
+    lines = [f"curve {result['curve']} — {len(result['splines'])} spline(s):"]
+    for s in result["splines"]:
+        r = s["min_bend_radius_cm"]
+        rtxt = f"{r}cm @ {int(s['tightest_at'] * 100)}%" if r is not None else "∞ (no bend)"
+        lines.append(
+            f"  [{s['index']}] {s['shape']:<22} len {s['length_cm']}cm  "
+            f"turn {s['turning_deg']}°  tightest bend r={rtxt}")
+        lines.append(
+            f"       tangents: start {s['start_tangent']} → end {s['end_tangent']}")
+        if "sweep_feasible" in s:
+            mark = "✓" if s["sweep_feasible"] else "✗ bend tighter than profile — will pinch"
+            lines.append(f"       profile r={s['profile_radius_cm']}cm  sweep {mark}")
+    return "\n".join(lines)
+
+
 @mcp.tool()
 def get_object_info(name: str = "") -> str:
     """

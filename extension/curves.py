@@ -525,8 +525,126 @@ def helix_coil(params):
     }
 
 
+def _spline_centreline(spline, resolution):
+    """World-LOCAL centreline samples of one spline as a list of mathutils.Vector
+    (object space — caller applies matrix_world). Bezier segments are sampled with
+    interpolate_bezier; poly/nurbs fall back to their points. Pure read."""
+    from mathutils import Vector
+    from mathutils.geometry import interpolate_bezier
+    pts = []
+    if spline.type == 'BEZIER' and len(spline.bezier_points) >= 2:
+        bp = spline.bezier_points
+        for k in range(len(bp) - 1):
+            a, b = bp[k], bp[k + 1]
+            seg = interpolate_bezier(a.co, a.handle_right, b.handle_left, b.co,
+                                     max(2, resolution + 1))
+            pts.extend(seg[1:] if k > 0 else seg)
+    elif len(spline.points) >= 2:
+        pts = [p.co.to_3d() for p in spline.points]
+    else:
+        pts = [Vector(bp.co) for bp in spline.bezier_points]
+    return pts
+
+
+def feel_curve(params):
+    """G65 — read a curve's CENTRELINE quality, the read 'is this a clean arc or a
+    lump' needs and that nothing emitted before. Reports total length, curvature κ
+    along the run, the TIGHTEST bend (min radius + where, as a fraction along),
+    total turning angle, the count of inflections (S-bend sign-flips of the bend
+    direction), and the endpoint tangent DIRECTIONS (so the agent can check 'does it
+    leave the way the opening points'). Read-only, works on a LIVE curve (no bake).
+    Generalises extrude_along_curve's bend-radius-vs-profile preflight; pass
+    profile_radius= to get a feasibility flag against it."""
+    import math
+    from mathutils import Vector
+    name = (params.get("target") or "").strip()
+    obj = bpy.data.objects.get(name)
+    if obj is None:
+        return {"error": f"curve '{name}' not found"}
+    if obj.type != 'CURVE':
+        return {"error": f"'{name}' is a {obj.type.lower()}, not a curve — "
+                         f"feel op=curve reads curve centrelines"}
+    resolution = max(2, int(params.get("resolution", 24)))
+    profile_radius = params.get("profile_radius")
+    profile_radius = float(profile_radius) if profile_radius is not None else None
+    mw = obj.matrix_world
+
+    splines = []
+    for si, spline in enumerate(obj.data.splines):
+        local = _spline_centreline(spline, resolution)
+        if len(local) < 2:
+            continue
+        P = [mw @ Vector(p) for p in local]
+        # cumulative arclength
+        seglens = [(P[i + 1] - P[i]).length for i in range(len(P) - 1)]
+        length = sum(seglens)
+        if length < 1e-9:
+            continue
+        cum = [0.0]
+        for L in seglens:
+            cum.append(cum[-1] + L)
+
+        max_k = 0.0
+        at_frac = 0.0
+        turning = 0.0
+        inflections = 0
+        prev_bn = None
+        mean_k_num = 0.0
+        for i in range(1, len(P) - 1):
+            a, b, c = P[i - 1], P[i], P[i + 1]
+            ab, bc, ca = (b - a).length, (c - b).length, (a - c).length
+            cross = (b - a).cross(c - b)
+            # turning angle at b
+            d0, d1 = (b - a), (c - b)
+            if d0.length > 1e-9 and d1.length > 1e-9:
+                cosang = max(-1.0, min(1.0, d0.normalized().dot(d1.normalized())))
+                turning += math.degrees(math.acos(cosang))
+            denom = ab * bc * ca
+            if denom > 1e-12:
+                area = cross.length / 2.0
+                k = 4.0 * area / denom    # Menger curvature 1/R
+                mean_k_num += k * (ab + bc) / 2.0
+                if k > max_k:
+                    max_k = k
+                    at_frac = cum[i] / length
+            # inflection: the bend's binormal flips to the other side
+            if cross.length > 1e-9:
+                bn = cross.normalized()
+                if prev_bn is not None and bn.dot(prev_bn) < -0.2:
+                    inflections += 1
+                prev_bn = bn
+
+        min_radius = (1.0 / max_k) if max_k > 1e-9 else None
+        t0 = (P[1] - P[0]).normalized()
+        t1 = (P[-1] - P[-2]).normalized()
+        sp = {
+            "index": si,
+            "length_cm": round(length * 100, 2),
+            "min_bend_radius_cm": round(min_radius * 100, 2) if min_radius else None,
+            "tightest_at": round(at_frac, 2),
+            "turning_deg": round(turning, 1),
+            "inflections": inflections,
+            "shape": ("straight" if turning < 5 else
+                      "single arc" if inflections == 0 else
+                      f"S-bend ({inflections} inflection(s))"),
+            "start": [round(c, 4) for c in P[0]],
+            "end": [round(c, 4) for c in P[-1]],
+            "start_tangent": [round(c, 4) for c in t0],
+            "end_tangent": [round(c, 4) for c in t1],
+        }
+        if profile_radius is not None and min_radius is not None:
+            sp["profile_radius_cm"] = round(profile_radius * 100, 2)
+            sp["sweep_feasible"] = min_radius > profile_radius
+        splines.append(sp)
+
+    if not splines:
+        return {"error": f"'{name}' has no samplable spline (need ≥2 points)"}
+    return {"success": True, "curve": name, "splines": splines}
+
+
 TOOLS = {
     "spline_tube": spline_tube,
     "add_curve":   add_curve,
     "helix_coil":  helix_coil,
+    "feel_curve":  feel_curve,
 }
