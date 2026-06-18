@@ -2,27 +2,27 @@
 
 _Status: Proposed 2026-06-17. **Phase 1 (Tier A — gravity drape) + the eyeless verify
 reads (G37 silhouette, G41 protrusion, G47 section) shipped and DOGFOOD-VERIFIED
-2026-06-17 — the gravity drape de-coned the G-cup bust (apex sank −5.25cm, silhouette
-read teardrop). Those three reads are now closed/deleted in gaps.md.** Tiers B–E and the
+2026-06-17 — the gravity drape de-coned an over-enlarged pendant mass (apex sank −5.25cm,
+silhouette read a natural drape). Those three reads are now closed/deleted in gaps.md.** Tiers B–E and the
 selection→mask / frame-step-bake / apply-sim shared infra remain open. Sourced from the
-bust enlarge → gravity-shaping dogfood — see gaps.md G46 (and the "cone, not teardrop"
+organic-mass enlarge → gravity-shaping dogfood — see gaps.md G46 (and the "cone, not drape"
 reflection)._
 
 ## The problem
 
-Two walls, compounding, both hit head-on this session trying to shape a breast
-**organically** (enlarge it to a G cup that *hangs* like real tissue):
+Two walls, compounding, both hit head-on this session trying to shape a soft pendant mass
+**organically** (enlarge it so it *hangs* like real tissue):
 
 1. **Hand-driven strokes need a seeing operator, and the agent isn't one.** The
    `sculpt` brushes (grab, draw, inflate, …) are *expressive* tools — their correctness
    lives in the human's eye-hand loop, not in the algorithm. Driven by reasoning they
-   produced a forward-projecting cone "held up by invisible hands," not a hanging
-   teardrop. No amount of brush *access* fixes this: the missing part is the eye, not
+   produced a forward-projecting cone "held up by invisible hands," not a natural
+   hanging drape. No amount of brush *access* fixes this: the missing part is the eye, not
    the brush.
 
 2. **The numeric instruments are blind to the quality that failed — worse, they
    misreported it.** bbox cross-sections + `region_form` said "fullest point dropped,
-   lower pole filled → teardrop"; the actual surface was a torpedo. A teardrop and a
+   lower pole filled → a hanging drape"; the actual surface was a torpedo. A natural drape and a
    cone share the same fullest-Z and the same lower-pole depth. The instruments measure
    *bigger* and *lower*; they cannot see *drape vs. projection* — which is the entire
    axis that defines "organic."
@@ -57,10 +57,10 @@ Sculpt-mode **Mesh Filters** apply one operation to a whole region in a single s
 stroke aiming, just a region + a strength. The set: **gravity**, inflate, smooth, relax,
 sharpen. The **Gravity filter is literally "apply gravity to these verts"** — the thing
 the human reached for, and lighter than any sim. The region comes from a **mask**
-(sculpt-mode's "don't-touch" set): pin the chest, filter the breast.
+(sculpt-mode's "don't-touch" set): pin the supporting surface, filter the pendant mass.
 
 - *Why it leads:* a region + a number, zero brush skill, native, often one call. The
-  teardrop was plausibly one `mesh_filter gravity` away.
+  natural drape was plausibly one `mesh_filter gravity` away.
 - *Shape:* `sculpt op=mesh_filter type=gravity|inflate|smooth|relax strength=… target=…`,
   honoring an active mask.
 - *Needs:* mask authoring from a selection (Shared infra).
@@ -119,7 +119,7 @@ verify **magnitude** with the instruments it has. After a gravity filter/sim, th
 measurable signatures of "it actually *hung*":
 
 - fullest-Z **below** the attachment ring (the mass sagged) — `feel profile`.
-- lowest-front vert **forward of** the inframammary fold (the under-curl) — wants **G41**
+- lowest-front vert **forward of** the lower attachment crease (the under-curl) — wants **G41**
   (absolute protrusion) to read cleanly.
 - upper pole **concave/flat**, not convex-bulging — `region_form` on the upper patch (the
   exact read that *would* have caught the cone this session — it reported convex, which
@@ -127,7 +127,7 @@ measurable signatures of "it actually *hung*":
 - symmetry preserved — `feel symmetry`.
 
 So this spec composes with, and argues for, two open gaps: **G37** (projected silhouette)
-would show teardrop-vs-cone *directly* in one read; **G41** (absolute protrusion) gives
+would show drape-vs-cone *directly* in one read; **G41** (absolute protrusion) gives
 the under-curl number. Build those and the eyeless verify-loop for organic forms actually
 closes — without them the agent is tuning magnitude against partial proxies.
 
@@ -141,10 +141,10 @@ closes — without them the agent is tuning magnitude against partial proxies.
    transition band (so the fullest point descends, not just the bottom stretching), and the
    sphere's falloff is **lateral-only** (horizontal distance from the gravity axis) so the
    lower pole isn't pinned for being low. Per-lobe spheres for a symmetric pair (the tips sit
-   at the lateral edge of a single centered sphere). Verified on the bust: one sphere per
-   breast at `strength=0.05 pin=0.3` sank the apex −5.25cm into a teardrop (`feel op=silhouette
+   at the lateral edge of a single centered sphere). Verified on the test mass: one sphere per
+   lobe at `strength=0.05 pin=0.3` sank the apex −5.25cm into a natural drape (`feel op=silhouette
    axis=X` read top-flat/lower-full/bottom-curl).
-2. **Mask from selection** → filters respect a pinned region (chest stays, breast falls).
+2. **Mask from selection** → filters respect a pinned region (the support stays, the mass falls).
    Still TODO — gravity scopes by sphere/whole-mesh today, not by an arbitrary selection mask.
 3. **Elastic Deform brush** — drop-in `brush=elastic` on `sculpt`.
 4. **Lattice deform** — cage + named-point moves.
@@ -161,7 +161,7 @@ each. Confirm the live server⇄extension layout before editing — don't trust 
   push hard without lumping), but it **rebuilds topology** — destroying UVs, shape keys,
   and the imported cage's vert identity, and breaking every existing handle/vgroup. A
   separate decision with real cost; not bundled here.
-- **Cross-section perimeter / area read** (the cup-size measurement gap, gaps.md G47) — a
+- **Cross-section perimeter / area read** (the cross-section size measurement gap, gaps.md G47) — a
   *measurement* sibling, not a deformer. Tracked separately.
 - **Rig-driven jiggle / animated soft-body.** This spec is **static shaping** (settle →
   bake → apply), not secondary animation.
