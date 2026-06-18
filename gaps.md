@@ -163,25 +163,23 @@ parametric, weld-aware connectors). Both human prompts that exercised it — "ma
 singular elegant curve" and "connect it with a sequence of crazy curves" — are squarely
 SPEC-10, not any existing verb.
 
-## G60 — deformation falloff is Euclidean/topology-blind, and you can't freeze geometry 🧊
+## G60 — `proportional_move` bulges, not paths: no "lay geometry along a centreline" 🧊 🛠️ region-constraint half IMPLEMENTED — pending live dogfood
 
-`edit op=proportional_move` (and the soft deforms generally) fall off by **straight-line
-distance, blind to topology / object membership**. There is no way to say "deform only this
-connector, hold the cylinders rigid" — no vertex-freeze/lock, no geodesic falloff, no
-"restrict to this object/shell." So any displacement big enough to shape a connection is
-big enough to drag its neighbours.
+**Region-constraint sub-gap — IMPLEMENTED.** `edit op=proportional_move` fell off by
+**straight-line distance, blind to topology / membership**, with no way to "deform this
+connector, hold the cylinders rigid." Added `connected=true` (geodesic edge-distance
+falloff — a different shell is unreachable, so a big pull can't drag it) and
+`freeze=<handle>` (those verts held rigid, and in connected mode they wall off the
+flood). Witness: `radius=1.7` dragged cylinder-wall verts and deformed a cylinder; freeze
+now holds them. In `extension/editmode.py:proportional_move`, threaded through the server
+verb. **Delete this half once dogfooded live** (addon reinstall + reconnect).
 
-**Witness (2026-06-18).** Bowing the welded band with `radius=1.7` pulled in cylinder-wall
-verts that were merely *near* in space (not part of the connector) and **visibly deformed a
-cylinder** — collateral damage the agent couldn't prevent with the dials available.
-
-**Two sub-gaps:**
-- **No region constraint** — geodesic/topological falloff and/or a `freeze=<selection|object>`
-  guard so a soft move respects boundaries instead of a blind sphere.
-- **Displacement ≠ path.** Even constrained, `proportional_move` makes a *bulge*, not a
-  *curve*: it pushes a blob in one direction. There is no "lay this ring of geometry **along
-  a centreline**, cross-sections kept perpendicular to the tangent." Bulging a weld will
-  never read as a swept curve — that's why the hand-sculpted arch still "isn't a curve."
+**Remaining sub-gap → [[SPEC-10]]: displacement ≠ path.** Even constrained,
+`proportional_move` makes a *bulge*, not a *curve*: it pushes a blob in one direction.
+There is no "lay this ring of geometry **along a centreline**, cross-sections kept
+perpendicular to the tangent." Bulging a weld will never read as a swept curve — that's
+why the hand-sculpted arch still "isn't a curve." This is the SPEC-10 sweep engine, not a
+falloff dial; it stays open here as a pointer.
 
 ## G61 — no sweep yields a hollow, weldable, vert-count-matched tube 🪈
 

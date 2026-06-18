@@ -252,6 +252,7 @@ def proportional_move(out: float = 0.0, inward: float = 0.0,
                       forward: float = 0.0, back: float = 0.0,
                       x: float = 0.0, y: float = 0.0, z: float = 0.0,
                       radius: float = 0.01, falloff: str = "SMOOTH",
+                      connected: bool = False, freeze: str = "",
                       label: str = "", target: str = "") -> str:
     """
     Move selected verts with a falloff — drags nearby verts along (proportional editing).
@@ -266,6 +267,13 @@ def proportional_move(out: float = 0.0, inward: float = 0.0,
     radius: falloff radius in meters (default 1cm).
     falloff: SMOOTH (default — rounded shape) | LINEAR | SPHERE | SHARP | ROOT | CONSTANT.
 
+    Topology-aware shaping (G60):
+    connected: measure the falloff as GEODESIC distance along edges, not straight-line —
+               so a big pull can't drag a different shell (or anything merely near in
+               space) it isn't connected to. Default false (Euclidean, original).
+    freeze:    a handle name whose verts are held RIGID and (in connected mode) wall off
+               the falloff. Use it to shape one part while holding a neighbour still.
+
     For icing drips: select sparse boundary verts, proportional_move(down=0.01, radius=0.005)
     gives bulbous rounded drops instead of triangular spikes.
     target: optional object name — enters edit mode on it first (acts on its live
@@ -275,11 +283,15 @@ def proportional_move(out: float = 0.0, inward: float = 0.0,
         "out": out, "inward": inward, "up": up, "down": down, "left": left,
         "right": right, "forward": forward, "back": back,
         "x": x, "y": y, "z": z, "radius": radius, "falloff": falloff,
+        "connected": connected, "freeze": freeze,
         "target": target,
     }, label=label)
     if result.get("success"):
         frame = f" ({result['frame']})" if result.get("frame") else ""
-        main = (f"pulled {result['handles']} handles, dragged {result['affected']} verts "
+        mode = " geodesic" if result.get("connected") else ""
+        frz = f" froze {result['frozen']}" if result.get("frozen") else ""
+        main = (f"pulled {result['handles']} handles, dragged {result['affected']} verts"
+                f"{mode}{frz} "
                 f"r={result['radius']}m {result['falloff']} delta_world={result['delta_world']}{frame} "
                 f"[{result.get('op_id','')}]")
     else:

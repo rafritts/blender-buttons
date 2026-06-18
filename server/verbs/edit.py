@@ -75,6 +75,8 @@ def edit(
     direction: tag(str, "[noise_displace] push axis NORMAL|X|Y|Z") = "NORMAL",
     radius: tag(float, "[proportional_move] falloff radius (m)") = 0.01,
     falloff: tag(str, "[proportional_move] SMOOTH|SHARP|…") = "SMOOTH",
+    connected: tag(bool, "[proportional_move] geodesic (along-edges) falloff — won't drag a disconnected shell") = False,
+    freeze: tag(str, "[proportional_move] handle whose verts are held rigid (and wall off the falloff)") = "",
     # separate
     new_name: tag(str, "[separate] name for the split-off object") = "",
     # extrude_along_curve
@@ -146,7 +148,8 @@ def edit(
                     neighbouring verts move together → real LUMPS (foliage, terrain,
                     bark, rock). Needs surface resolution to show. (amount, feature_size,
                     detail, direction, apply)
-      proportional_move — soft move with falloff (directional + radius, falloff)
+      proportional_move — soft move with falloff (directional + radius, falloff;
+                    connected=geodesic falloff, freeze=hold a handle rigid)
       extrude_along_curve — sweep selection along a curve (curve, segments, taper)
       round       — round named corners    (corners=[...], radius→width, segments)
       bend        — bend the object into an arc  (angle, axis, apply). Pivots about
@@ -231,8 +234,8 @@ def edit(
                                        apply, label)
     if o == "proportional_move":
         return editmode.proportional_move(out, inward, up, down, left, right,
-                                          forward, back, x, y, z, radius, falloff, label,
-                                          target)
+                                          forward, back, x, y, z, radius, falloff,
+                                          connected, freeze, label, target)
     if o == "extrude_along_curve":
         return editmode.extrude_along_curve(curve, segments, taper, label)
     if o == "round":

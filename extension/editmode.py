@@ -1090,6 +1090,15 @@ def proportional_move(params):
     falloff: SMOOTH (default — smoothstep, soft round shape) | LINEAR | SPHERE |
              SHARP (sharp at edge) | ROOT | CONSTANT (no falloff — full move within radius).
 
+    Topology-aware shaping (gaps.md G60):
+    connected: when true, falloff is measured as GEODESIC distance along edges from
+               the selection — not straight-line. Verts on a different shell (or a
+               topological detour) are unreachable, so a big move stops dragging
+               whatever merely sits near in space. Default false (Euclidean, original).
+    freeze:    a handle name whose verts are held RIGID — never moved, and (in
+               connected mode) treated as walls the falloff can't flow through. The
+               way to say "shape the connector, hold the cylinder still."
+
     Use case: icing drips. Select a sparse set of boundary verts, then
     proportional_move(z=-0.5, radius=0.005, falloff=SMOOTH) — each pulled vert
     drags its neighbors down with it, making round bulbous drips instead of
@@ -1106,6 +1115,7 @@ def proportional_move(params):
     falloff = (params.get("falloff") or "SMOOTH").upper()
     if falloff not in _FALLOFFS:
         return {"error": f"Invalid falloff '{falloff}'. Use {sorted(_FALLOFFS)}"}
+    connected = bool(params.get("connected", False))
 
     scale = obj.scale
     sx = abs(scale.x) or 1.0
@@ -1141,45 +1151,104 @@ def proportional_move(params):
     r2 = radius_local * radius_local
 
     bm = bmesh.from_edit_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
     handles = [v for v in bm.verts if v.select]
     if not handles:
         return {"error": "No vertices selected"}
-    handle_cos = [v.co.copy() for v in handles]
+
+    # G60 — freeze a named handle's verts rigid. Resolve its vgroup via the bmesh
+    # deform layer (an edit-mode-safe read; obj.data.vertices is stale here).
+    freeze_name = (params.get("freeze") or "").strip()
+    frozen = set()
+    if freeze_name:
+        from . import handles as H
+        ent = H._find_handle(freeze_name)
+        if ent is None:
+            return {"error": f"freeze handle '{freeze_name}' not found "
+                             f"(mint with feel op=assembly / structure)"}
+        vg = obj.vertex_groups.get(ent.get("bb_vgroup", ""))
+        if vg is None:
+            return {"error": f"freeze handle '{freeze_name}' has no live vgroup — re-mint it"}
+        gi = vg.index
+        dl = bm.verts.layers.deform.active
+        if dl is not None:
+            frozen = {v.index for v in bm.verts if gi in v[dl]}
+        if not frozen:
+            return {"error": f"freeze handle '{freeze_name}' resolved to 0 verts — re-mint it"}
+
+    def _weight(t):
+        if falloff == "SMOOTH":
+            return 1.0 - t * t * (3.0 - 2.0 * t)
+        if falloff == "LINEAR":
+            return 1.0 - t
+        if falloff == "SPHERE":
+            inner = 1.0 - t * t
+            return inner ** 0.5 if inner > 0 else 0.0
+        if falloff == "SHARP":
+            return (1.0 - t) ** 2
+        if falloff == "ROOT":
+            return 1.0 - t ** 0.5
+        return 1.0  # CONSTANT
+
+    # dist[vi] = distance (Euclidean-nearest-handle, or geodesic along edges) within
+    # radius. Frozen verts are excluded as movers; in connected mode they're also
+    # walls the flood can't cross.
+    dist = {}
+    if connected:
+        import heapq
+        heap = []
+        for h in handles:
+            if h.index in frozen:
+                continue
+            dist[h.index] = 0.0
+            heap.append((0.0, h.index))
+        heapq.heapify(heap)
+        while heap:
+            d, vi = heapq.heappop(heap)
+            if d > dist.get(vi, r2):  # stale heap entry
+                continue
+            if d >= radius_local:
+                continue
+            v = bm.verts[vi]
+            for e in v.link_edges:
+                w = e.other_vert(v)
+                if w.index in frozen:
+                    continue
+                nd = d + e.calc_length()
+                if nd < dist.get(w.index, radius_local):
+                    dist[w.index] = nd
+                    heapq.heappush(heap, (nd, w.index))
+    else:
+        handle_cos = [v.co.copy() for v in handles]
+        for v in bm.verts:
+            if v.index in frozen:
+                continue
+            best2 = r2
+            for h in handle_cos:
+                d2 = (v.co - h).length_squared
+                if d2 < best2:
+                    best2 = d2
+            if best2 < r2:
+                dist[v.index] = best2 ** 0.5
 
     affected = 0
-    for v in bm.verts:
-        # Find nearest handle — squared distance keeps the hot loop sqrt-free.
-        best2 = r2
-        for h in handle_cos:
-            d2 = (v.co - h).length_squared
-            if d2 < best2:
-                best2 = d2
-        if best2 >= r2:
-            continue
-        d = best2 ** 0.5
+    for vi, d in dist.items():
         t = d / radius_local  # 0 at handle, 1 at radius edge
-        if falloff == "SMOOTH":
-            w = 1.0 - t * t * (3.0 - 2.0 * t)
-        elif falloff == "LINEAR":
-            w = 1.0 - t
-        elif falloff == "SPHERE":
-            inner = 1.0 - t * t
-            w = inner ** 0.5 if inner > 0 else 0.0
-        elif falloff == "SHARP":
-            w = (1.0 - t) ** 2
-        elif falloff == "ROOT":
-            w = 1.0 - t ** 0.5
-        else:  # CONSTANT
-            w = 1.0
+        w = _weight(t)
+        v = bm.verts[vi]
         v.co.x += dx * w
         v.co.y += dy * w
         v.co.z += dz * w
         affected += 1
 
     bmesh.update_edit_mesh(obj.data)
-    push_undo(f"proportional_move r={radius} {falloff}")
+    push_undo(f"proportional_move r={radius} {falloff}"
+              + (" connected" if connected else "")
+              + (f" freeze={freeze_name}" if freeze_name else ""))
     result = {
         "success": True,
+        "connected": connected,
+        "frozen": len(frozen),
         "handles": len(handles),
         "affected": affected,
         "radius": radius,
