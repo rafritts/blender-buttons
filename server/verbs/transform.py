@@ -86,6 +86,8 @@ def transform(
     count: tag(int, "[array_along/array_radial] number of copies") = 0,
     standing_on_floor: tag(bool, "[array_corners] keep copies on the floor") = True,
     keep_original: tag(bool, "[array_*] keep the prototype") = False,
+    linked: tag(bool, "[array_*] make INSTANCES sharing the prototype's mesh — one mesh "
+                      "for the whole array (pickets, balusters, spokes); edit one, all change") = False,
     name_prefix: tag(str, "[array_*/scatter] name prefix for copies") = "",
     center: tag(list, "[array_radial] ring center [x,y,z]") = None,
     center_object: tag(str, "[array_radial] object at the ring center") = "",
@@ -95,12 +97,16 @@ def transform(
     align_to_tangent: tag(bool, "[array_radial] rotate copies to the ring tangent") = False,
     # scatter
     source: tag(str, "[scatter] the object to instance across the surface (copies share its mesh data); the surface is target=") = "",
+    sources: tag(str, "[scatter] comma-separated source objects for variety (each instance picks one)") = "",
     scale_min: tag(float, "[scatter] min random scale") = 0.8,
     scale_max: tag(float, "[scatter] max random scale") = 1.2,
     align_normal: tag(bool, "[scatter] align copies to surface normal") = True,
     rotate_z: tag(bool, "[scatter] random Z rotation") = True,
     parent_to_target: tag(bool, "[scatter] parent copies to the surface") = True,
     seed: tag(int, "[scatter] random seed") = 0,
+    density: tag(float, "[scatter] instances per m² (overrides count)") = 0.0,
+    within: tag(str, "[scatter] region MASK — keep instances inside this object/region's XY footprint") = "",
+    within_margin: tag(float, "[scatter] within-mask margin (m)") = 0.0,
     avoid: tag(str, "[scatter] object/region to avoid") = "",
     avoid_margin: tag(float, "[scatter] avoidance margin (m)") = 0.0,
     # move_verts / scale_verts (edit-mode component transforms)
@@ -153,7 +159,8 @@ def transform(
       array_along  — N copies between two   (prototype, count, between=[a,b], axis)
       array_radial — N copies in a ring (prototype, count, center|center_object, axis,
                    start_angle, end_angle, radius, align_to_tangent)
-      scatter  — scatter copies on a surface (target, source, count, scale_min/max, …)
+      scatter  — scatter copies on a surface (target, source/sources, count OR density,
+                 within=region mask, avoid, scale_min/max, …)
       move_verts — move selected verts (edit) (out/up/.. or x/y/z, target)
       scale_verts— scale selected verts (edit) (sx/sy/sz, in_plane, vert_pivot, target)
       snap_loop  — seat the SELECTED boundary loop onto a target opening (handle):
@@ -202,9 +209,9 @@ def transform(
         "array_radial":  (bool(prototype and count and (center or center_object)),
                           "prototype, count, center=[x,y,z] or center_object",
                           "transform op=array_radial prototype=spoke count=8 center_object=hub axis=Z"),
-        "scatter":       (bool(target and source),
-                          "target=<prototype> and source=<surface to scatter onto>",
-                          "transform op=scatter target=rock source=terrain count=50"),
+        "scatter":       (bool(target and (source or sources)),
+                          "target=<surface to scatter onto> and source=<object to instance> (or sources=)",
+                          "transform op=scatter target=lawn source=tuft density=40 within=bed"),
         "snap_loop":     (bool(handle),
                           "handle=<target opening> (be in edit mode, loop selected)",
                           "transform op=snap_loop handle=jar.rim"),
@@ -268,19 +275,20 @@ def transform(
         return relational.distribute_evenly(targets, between or [], axis, label)
     if o == "array_corners":
         return relational.array_at_corners(prototype, of, standing_on_floor,
-                                           keep_original, name_prefix, label)
+                                           keep_original, name_prefix, linked, label)
     if o == "array_along":
         return relational.array_along(prototype, count, between or [], axis,
-                                      keep_original, name_prefix, label)
+                                      keep_original, name_prefix, linked, label)
     if o == "array_radial":
         return relational.array_radial(prototype, count, center, center_object, axis,
                                        start_angle, end_angle, radius, align_to_tangent,
-                                       keep_original, name_prefix, label)
+                                       keep_original, name_prefix, linked, label)
     if o == "scatter":
         return relational.scatter_on_surface(target, source, count or 100, scale_min,
                                              scale_max, align_normal, rotate_z,
                                              parent_to_target, seed, name_prefix,
-                                             avoid, avoid_margin, label)
+                                             avoid, avoid_margin, sources, within,
+                                             within_margin, density, label)
     if o == "move_verts":
         return editmode.move_vertices(out, inward, up, down, left, right, forward,
                                       back, x, y, z, label, target)

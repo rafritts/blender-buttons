@@ -113,10 +113,12 @@ def taper_end(axis: str = "Z", end: str = "MAX", scale: float = 0.0, label: str 
     scale:  0.0 (default) collapses the ring fully to a point.
             0.5 leaves the ring at half its original spread (partial taper / chamfer).
             1.0 is a no-op.
+            >1 FLARES the ring outward (1.5 = a trumpet/bell lip). The upper end is NOT
+            clamped — scale=1.5 really flares (it used to be silently clamped to 1.0).
     target: optional object name — auto-selects it, enters edit mode, exits after.
 
-    Use scale=0 for a sword tip; scale=0.4 for "narrow this end a bit" without committing
-    to a single point. Faster than the two-ring taper_section equivalent.
+    Use scale=0 for a sword tip; scale=0.4 to narrow an end; scale=1.4 to flare a cuff/bell.
+    Faster than the two-ring taper_section equivalent.
     Must be in edit mode (or provide target).
     """
     result = call_blender("taper_end", {"axis": axis, "end": end, "scale": scale,

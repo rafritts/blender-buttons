@@ -51,6 +51,10 @@ def _status(result: dict) -> str:
     bind = "\n" + result["bind_warning"] if result.get("bind_warning") else ""
     if result.get("shape_key_warning"):
         bind += "\n" + result["shape_key_warning"]
+    # G56: a mutating geometry op that changed nothing — surfaced ahead of the status
+    # block so a no-op can never masquerade as a successful edit.
+    if result.get("no_op_warning"):
+        bind += "\n⚠ " + result["no_op_warning"]
     # Generalized postcondition-notes channel (SPEC-05 Improvement #4): any handler
     # can attach a `notes` list — e.g. an auto mode-switch the agent should know
     # happened. Surfaced ahead of the block like the bind/shape-key warnings.

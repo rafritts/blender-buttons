@@ -12,7 +12,7 @@ from server import editmode, finishes, rings, bands, introspect, modifiers
 from ._common import tag, unknown, teach
 
 _OPS = ["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
-        "mark_sharp", "crease", "inflate", "jitter", "proportional_move",
+        "mark_sharp", "crease", "inflate", "jitter", "noise_displace", "proportional_move",
         "extrude_along_curve", "round", "bend", "smooth_edges", "taper_end",
         "taper_section", "scale_rings", "band", "trace", "boolean", "subdivide", "bridge",
         "relax", "slide", "poke", "inset", "grid_fill"]
@@ -21,7 +21,8 @@ _OPS = ["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
 @mcp.tool(name="edit")
 def edit(
     op: Literal["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
-                "mark_sharp", "crease", "inflate", "jitter", "proportional_move",
+                "mark_sharp", "crease", "inflate", "jitter", "noise_displace",
+                "proportional_move",
                 "extrude_along_curve", "round", "bend", "smooth_edges", "taper_end",
                 "taper_section", "scale_rings", "band", "trace", "boolean", "subdivide",
                 "bridge", "relax", "slide", "poke", "inset", "grid_fill"],
@@ -58,10 +59,14 @@ def edit(
     mode: tag(str, "[delete] VERT|EDGE|FACE|ONLY_FACE|EDGE_FACE") = "VERT",
     clear: tag(bool, "[mark_sharp] clear instead of mark") = False,
     weight: tag(float, "[crease] crease weight 0..1") = 1.0,
-    # inflate / jitter / proportional
-    amount: tag(float, "[inflate/jitter] displacement amount (m)") = 0.003,
+    # inflate / jitter / noise_displace / proportional
+    amount: tag(float, "[inflate/jitter/noise_displace] displacement amount (m); noise wants ~0.03–0.1") = 0.003,
     seed: tag(int, "[jitter] random seed") = 0,
     only_positive: tag(bool, "[jitter] jitter outward only") = False,
+    # noise_displace (coherent organic surface break-up)
+    feature_size: tag(float, "[noise_displace] noise feature size (bigger = broader lumps)") = 0.5,
+    detail: tag(int, "[noise_displace] extra noise octaves on top of the big lumps") = 2,
+    direction: tag(str, "[noise_displace] push axis NORMAL|X|Y|Z") = "NORMAL",
     radius: tag(float, "[proportional_move] falloff radius (m)") = 0.01,
     falloff: tag(str, "[proportional_move] SMOOTH|SHARP|…") = "SMOOTH",
     # separate
@@ -78,7 +83,7 @@ def edit(
     angle_limit: tag(float, "[smooth_edges] shade-smooth angle limit (deg)") = 30.0,
     # taper / rings
     end: tag(str, "[taper_end] which end MAX|MIN") = "MAX",
-    scale: tag(float, "[taper_end] end scale factor") = 0.0,
+    scale: tag(float, "[taper_end] end scale: 0=collapse to a point, <1 taper, 1 no-op, >1 flare (e.g. 1.5=bell lip)") = 0.0,
     indices: tag(list, "[scale_rings] ring indices to scale") = None,
     from_ring: tag(int, "[taper_section] first ring") = 0,
     to_ring: tag(int, "[taper_section] last ring (-1 = end)") = -1,
@@ -129,7 +134,12 @@ def edit(
       mark_sharp  — mark/clear sharp edges               (clear)
       crease      — set edge crease weight               (weight)
       inflate     — push verts along normals             (amount)
-      jitter      — randomize verts        (amount, axis, seed, only_positive)
+      jitter      — randomize verts (per-vertex WHITE noise → spiky)  (amount, axis,
+                    seed, only_positive)
+      noise_displace — COHERENT organic surface break-up: a noise-textured DISPLACE so
+                    neighbouring verts move together → real LUMPS (foliage, terrain,
+                    bark, rock). Needs surface resolution to show. (amount, feature_size,
+                    detail, direction, apply)
       proportional_move — soft move with falloff (directional + radius, falloff)
       extrude_along_curve — sweep selection along a curve (curve, segments, taper)
       round       — round named corners    (corners=[...], radius→width, segments)
@@ -206,6 +216,9 @@ def edit(
         return editmode.inflate_selection(amount, label, target)
     if o == "jitter":
         return editmode.jitter_vertices(amount, axis, seed, only_positive, label, target)
+    if o == "noise_displace":
+        return finishes.noise_displace(target, amount, feature_size, detail, direction,
+                                       apply, label)
     if o == "proportional_move":
         return editmode.proportional_move(out, inward, up, down, left, right,
                                           forward, back, x, y, z, radius, falloff, label,

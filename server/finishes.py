@@ -73,6 +73,45 @@ def bend(targets: str, angle: float, axis: str = "X", apply: bool = True,
 
 
 @mcp.tool()
+def noise_displace(target: str = "", strength: float = 0.05, scale: float = 0.5,
+                   detail: int = 2, direction: str = "NORMAL", apply: bool = True,
+                   label: str = "") -> str:
+    """
+    Coherent organic surface noise (G55) — break a soft form up into LUMPS with a
+    DISPLACE modifier driven by a procedural noise texture.
+
+    The difference from edit op=jitter: jitter is per-vertex WHITE noise (each vert
+    hops on its own → spiky, incoherent), this samples a SMOOTH noise field so
+    neighbouring verts move together → real lumps. The move for foliage canopies,
+    terrain, bark, rock. Noise is sampled in WORLD space, so copies at different
+    positions break up differently for free (scattered bushes won't look identical).
+
+    target:    mesh to break up (empty = active).
+    strength:  ≈ peak displacement in meters (default 0.05). The amount.
+    scale:     feature size (default 0.5). Larger = bigger, broader lumps; smaller =
+               finer, busier detail.
+    detail:    extra octaves of finer noise on top of the big lumps (default 2).
+    direction: NORMAL (default — push along each vert's normal, the organic puff) |
+               X | Y | Z.
+    apply:     bake into the mesh (default True). False keeps the modifier live.
+
+    NEEDS RESOLUTION: displacement only moves existing verts — a coarse primitive
+    barely ripples. remesh / loop_cut / subdivide first. Rigged/keyed meshes refused
+    when apply=True (duplicate + strip first, or apply=False).
+    """
+    result = call_blender("noise_displace", {
+        "target": target, "strength": strength, "scale": scale, "detail": detail,
+        "direction": direction, "apply": apply,
+    }, label=label)
+    if result.get("success"):
+        state = "baked" if result.get("applied") else f"live modifier '{result.get('modifier')}'"
+        return (f"noise_displace '{result['object']}' strength={strength}m scale={scale} "
+                f"dir={result['direction']} ({state}): dims {result['dims_before']} → "
+                f"{result['dims_after']} [{result.get('op_id','')}]" + _status(result))
+    return result.get("error", "failed")
+
+
+@mcp.tool()
 def smooth_edges(targets: str = "", width: float = 0.002, segments: int = 2,
                  angle_limit: float = 30.0, label: str = "") -> str:
     """

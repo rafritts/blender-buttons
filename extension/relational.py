@@ -127,6 +127,7 @@ def array_at_corners(params):
     standing_on_floor = params.get("standing_on_floor", True)
     keep_original = params.get("keep_original", False)
     name_prefix = params.get("name_prefix", prototype)
+    linked = bool(params.get("linked", False))  # G54: share the prototype's mesh
 
     proto = bpy.data.objects.get(prototype) if prototype else None
     target = bpy.data.objects.get(of) if of else None
@@ -151,15 +152,16 @@ def array_at_corners(params):
     if bpy.context.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
 
+    shared_mesh = proto.data.name if (linked and proto.data) else None
     placed = []
     for corner_name, cx, cy in corners:
         activate(proto)
-        bpy.ops.object.duplicate(linked=False)
+        bpy.ops.object.duplicate(linked=linked)
         dup = bpy.context.active_object
         new_name = f"{name_prefix}_{corner_name}"
         if bpy.data.objects.get(new_name) is None:
             dup.name = new_name
-            if dup.data:
+            if dup.data and not linked:
                 dup.data.name = new_name
         cz = (p_h / 2) if standing_on_floor else world_center(proto)[2]
         dup.location = (cx, cy, cz)
@@ -169,7 +171,8 @@ def array_at_corners(params):
     if not keep_original:
         bpy.data.objects.remove(proto, do_unlink=True)
 
-    return {"success": True, "placed": placed, "of": of, "removed_prototype": not keep_original}
+    return {"success": True, "placed": placed, "of": of, "removed_prototype": not keep_original,
+            "linked": linked, "shared_mesh": shared_mesh}
 
 
 def array_along(params):
@@ -180,6 +183,7 @@ def array_along(params):
     axis = params.get("axis", "X").upper()
     keep_original = params.get("keep_original", False)
     name_prefix = params.get("name_prefix", prototype)
+    linked = bool(params.get("linked", False))  # G54: share the prototype's mesh
 
     proto = bpy.data.objects.get(prototype) if prototype else None
     if proto is None:
@@ -202,16 +206,17 @@ def array_along(params):
     if bpy.context.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
 
+    shared_mesh = proto.data.name if (linked and proto.data) else None
     placed = []
     for i in range(count):
         target_pos = lo + step * (i + 1)
         activate(proto)
-        bpy.ops.object.duplicate(linked=False)
+        bpy.ops.object.duplicate(linked=linked)
         dup = bpy.context.active_object
         new_name = f"{name_prefix}_{i + 1}"
         if bpy.data.objects.get(new_name) is None:
             dup.name = new_name
-            if dup.data:
+            if dup.data and not linked:
                 dup.data.name = new_name
         loc = list(dup.location)
         cur = world_center(dup)[axis_idx]
@@ -224,7 +229,8 @@ def array_along(params):
         bpy.data.objects.remove(proto, do_unlink=True)
 
     return {"success": True, "axis": axis, "count": count, "spacing": round(step, 5),
-            "placed": placed, "removed_prototype": not keep_original}
+            "placed": placed, "removed_prototype": not keep_original,
+            "linked": linked, "shared_mesh": shared_mesh}
 
 
 def array_radial(params):
@@ -265,6 +271,7 @@ def array_radial(params):
     align = bool(params.get("align_to_tangent", False))
     keep_original = bool(params.get("keep_original", False))
     name_prefix = params.get("name_prefix") or prototype
+    linked = bool(params.get("linked", False))  # G54: share the prototype's mesh
 
     proto = bpy.data.objects.get(prototype) if prototype else None
     if proto is None:
@@ -319,13 +326,14 @@ def array_radial(params):
     base_rot = rot0.to_matrix().to_4x4()
     base_scale = Matrix.Diagonal(scale0.to_4d())
 
+    shared_mesh = proto.data.name if (linked and proto.data) else None
     placed = []
     for i in range(count):
         ang = math.radians(start_angle + step * i)
         R = Matrix.Rotation(ang, 4, axis)
         pos = center + (R.to_3x3() @ base_arm)
         activate(proto)
-        bpy.ops.object.duplicate(linked=False)
+        bpy.ops.object.duplicate(linked=linked)
         dup = bpy.context.active_object
         if align:
             dup.matrix_world = Matrix.Translation(pos) @ R @ base_rot @ base_scale
@@ -334,7 +342,7 @@ def array_radial(params):
         new_name = f"{name_prefix}_{i + 1}"
         if bpy.data.objects.get(new_name) is None:
             dup.name = new_name
-            if dup.data:
+            if dup.data and not linked:
                 dup.data.name = new_name
         placed.append(dup.name)
 
@@ -347,7 +355,8 @@ def array_radial(params):
             "start_angle": start_angle, "end_angle": end_angle,
             "step_deg": round(step, 4), "radius": round(r_report, 5),
             "align_to_tangent": align, "full_circle": full_circle,
-            "removed_prototype": not keep_original}
+            "removed_prototype": not keep_original,
+            "linked": linked, "shared_mesh": shared_mesh}
 
 
 TOOLS = {

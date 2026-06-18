@@ -56,17 +56,24 @@ def delete_object(name: str, label: str = "") -> str:
 
 
 @mcp.tool()
-def duplicate_object(name: str, new_name: str = "") -> str:
+def duplicate_object(name: str, new_name: str = "", linked: bool = False) -> str:
     """
     Duplicate an object in place. The duplicate becomes the active object.
     name: object to duplicate (must exist in the scene)
     new_name: name for the duplicate — if omitted, Blender appends .001
+    linked: True = an INSTANCE (Alt+D) — the copy shares the source's mesh datablock,
+            so N copies cost ONE mesh and an edit to one shows on all. False (default)
+            = an independent copy with its own mesh. Reach for linked when repeating
+            identical geometry (rivets, slats, leaves) — orders of magnitude lighter.
     Returns both the original and duplicate names.
     Must be in Object Mode.
     """
-    result = call_blender("duplicate_object", {"name": name, "new_name": new_name})
+    result = call_blender("duplicate_object",
+                          {"name": name, "new_name": new_name, "linked": linked})
     if result.get("success"):
         main = f"Duplicated '{result['original']}' → '{result['duplicate']}'"
+        if result.get("linked"):
+            main += f" (instance — shares mesh '{result.get('shared_mesh')}')"
     else:
         main = result.get("error", "failed")
     return main + _status(result)

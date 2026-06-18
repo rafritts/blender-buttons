@@ -183,16 +183,18 @@ def scale_rings(params):
 
 
 def taper_end(params):
-    """Scale the extreme ring on an axis toward its own centroid in the two non-axis directions.
+    """Scale the extreme ring on an axis about its own centroid in the two non-axis directions.
     scale=0 (default) fully collapses to a point. scale=0.5 leaves the ring at half its original
-    spread (partial taper). scale=1 is a no-op."""
+    spread (partial taper). scale=1 is a no-op. scale>1 FLARES the ring outward (e.g. 1.5 = a
+    trumpet/bell lip) — the upper end is NOT clamped (a former clamp to [0,1] silently turned an
+    intended flare into a no-op, gaps.md G56)."""
     import bmesh
     obj = bpy.context.active_object
     if obj is None or obj.mode != 'EDIT':
         return {"error": "Must be in edit mode"}
     axis = params.get("axis", "Z").upper()
     end = params.get("end", "MAX").upper()
-    scale = max(0.0, min(1.0, params.get("scale", 0.0)))
+    scale = max(0.0, float(params.get("scale", 0.0)))
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
     bm, rings = _compute_rings(obj, axis_idx)
     if not rings:

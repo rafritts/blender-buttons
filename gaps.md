@@ -33,6 +33,13 @@ the **next read**, the way `feel structure` hands back a named limb handle. Call
 **follow-up** (hypermedia control, named-tool not URL). Principle: the server should never
 feel like a dark cave.
 
+**Further witnesses (yard build).** The agent deleted-and-re-added a camera to reframe the
+scene instead of reaching for `view op=camera_position` (it existed; nothing pointed at it),
+and reasoned about picket/rail z-fighting by hand instead of running `feel op=overlaps`. Both
+capabilities were present and went unused — the response payloads never surfaced them, and
+under deferred tool-loading their docstrings weren't in context either. Discoverability, not a
+missing primitive.
+
 **Mechanism (cheap — machinery exists).** `_status()` in `_core.py` already drains ride-along
 channels (`notes`, `bind_warning`, …). Add a fourth: one new **`server/followups.py`** with a
 single *pure* function — given the result dict + verb/op, return 0–2 follow-up lines —

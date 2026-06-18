@@ -213,6 +213,95 @@ def bend(params):
     return out
 
 
+def noise_displace(params):
+    """G55 — coherent organic surface noise via a DISPLACE modifier driven by a
+    procedural noise texture.
+
+    Unlike edit op=jitter (per-vertex WHITE noise — every vert moves independently, so
+    the result is spiky and uncorrelated), a texture-driven displace samples a noise
+    field that varies SMOOTHLY across space, so neighbouring verts move together → real
+    LUMPS. The move for foliage canopies, terrain, bark, rock — any soft irregular
+    surface. The noise is sampled in WORLD space, so copies at different positions get
+    different break-up for free (no two scattered bushes look identical).
+
+    target:    mesh to break up (empty = active).
+    strength:  ≈ peak displacement in meters (default 0.05). The amount.
+    scale:     feature size — noise texture scale (default 0.5). Larger = bigger, broader
+               lumps; smaller = finer, busier detail.
+    detail:    extra octaves of finer noise layered on the big lumps (default 2).
+    direction: NORMAL (default — push along each vert's normal, the organic puff) |
+               X | Y | Z (push along a world axis).
+    apply:     bake the displacement into the mesh (default True). False keeps the
+               DISPLACE modifier + texture live for tweaking via modify_modifier.
+
+    NEEDS RESOLUTION: displacement only shows where there are verts to move — a coarse
+    primitive barely ripples. remesh / subdivide first so the surface has verts to break
+    up. This is BREAK-UP (positional/textured), distinct from inflate (normal push on a
+    dense mesh). Refused on rigged/keyed meshes when apply=True (modifier_apply can't
+    bake over shape keys / deform binds — duplicate and strip first, or pass apply=False).
+    """
+    from .common import linked_guard, deform_binds
+    name = params.get("target") or params.get("name")
+    obj = bpy.data.objects.get(name) if name else bpy.context.active_object
+    if obj is None or obj.type != 'MESH':
+        return {"error": f"'{name}' is not a mesh" if name else "No active mesh object"}
+    err = linked_guard(obj)
+    if err:
+        return {"error": err}
+    strength = float(params.get("strength", 0.05))
+    scale = float(params.get("scale", 0.5))
+    detail = max(0, int(params.get("detail", 2)))
+    direction = (params.get("direction") or "NORMAL").upper()
+    do_apply = bool(params.get("apply", True))
+    if direction not in ("NORMAL", "X", "Y", "Z"):
+        return {"error": "direction must be NORMAL | X | Y | Z"}
+    if scale <= 0:
+        return {"error": "scale must be > 0 (noise feature size, meters)"}
+    if do_apply and (obj.data.shape_keys or deform_binds(obj)):
+        return {"error": "refusing to bake a displace over a rigged/keyed mesh "
+                         "(modifier_apply can't run with shape keys / deform binds). "
+                         "Duplicate it and strip the rig, or pass apply=False to keep "
+                         "the modifier live."}
+
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    activate(obj)
+    xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
+    dims_before = [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)]
+
+    # CLOUDS = multi-octave Perlin — coherent, organic, fast. noise_scale sets the
+    # feature size; noise_depth adds finer octaves on top.
+    tex = bpy.data.textures.new(name=f"{obj.name}_noise", type='CLOUDS')
+    if hasattr(tex, "noise_scale"):
+        tex.noise_scale = scale
+    if hasattr(tex, "noise_depth"):
+        tex.noise_depth = detail
+
+    mod = obj.modifiers.new(name="Noise_Displace", type='DISPLACE')
+    mod.texture = tex
+    mod.strength = strength
+    mod.mid_level = 0.5            # CLOUDS ~0..1; mid 0.5 displaces both in and out
+    mod.texture_coords = 'GLOBAL'  # world-space → placed copies break up differently
+    mod.direction = direction
+
+    applied = False
+    if do_apply:
+        try:
+            bpy.ops.object.modifier_apply(modifier=mod.name)
+            applied = True
+            bpy.data.textures.remove(tex)  # baked in — the texture is now an orphan
+        except RuntimeError as e:
+            return {"error": f"displace apply failed: {e}"}
+
+    xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
+    dims_after = [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)]
+    push_undo(f"noise_displace {obj.name} strength={strength} scale={scale}")
+    return {"success": True, "object": obj.name, "strength": strength, "scale": scale,
+            "detail": detail, "direction": direction, "applied": applied,
+            "modifier": None if applied else mod.name,
+            "dims_before": dims_before, "dims_after": dims_after}
+
+
 def add_modifier(params):
     mod_type = params.get("type", "SUBSURF").upper()
     name     = params.get("name", mod_type.capitalize())
@@ -989,6 +1078,7 @@ TOOLS = {
     "smooth_edges":    smooth_edges,
     "round_corners":   round_corners,
     "bend":            bend,
+    "noise_displace":  noise_displace,
     "add_modifier":    add_modifier,
     "bind_mesh_deform": bind_mesh_deform,
     "rebind_deform":   rebind_deform,

@@ -105,6 +105,11 @@ def _delete_collection(coll):
 def duplicate_object(params):
     name     = params.get("name")
     new_name = params.get("new_name")
+    # G54: linked=True is the Alt+D INSTANCE — the copy shares the source mesh
+    # datablock instead of getting its own. N instances cost one mesh, not N, and
+    # edits to one propagate to all. linked=False (default) keeps the old
+    # independent-copy behaviour.
+    linked   = bool(params.get("linked", False))
     if name:
         obj = bpy.data.objects.get(name)
         if obj is None:
@@ -116,13 +121,17 @@ def duplicate_object(params):
     if active is None:
         return {"error": "No active object to duplicate"}
     original = active.name
-    bpy.ops.object.duplicate(linked=False)
+    bpy.ops.object.duplicate(linked=linked)
     dup = bpy.context.active_object
     if new_name and dup:
         dup.name = new_name
-        if dup.data:
+        # A linked duplicate SHARES the source mesh, so renaming dup.data would
+        # rename that shared datablock — only rename data on a full (independent) copy.
+        if dup.data and not linked:
             dup.data.name = new_name
-    return {"success": True, "original": original, "duplicate": dup.name if dup else None}
+    return {"success": True, "original": original, "duplicate": dup.name if dup else None,
+            "linked": linked,
+            "shared_mesh": (dup.data.name if (linked and dup and dup.data) else None)}
 
 
 def join_objects(params):

@@ -110,6 +110,43 @@ SHAPE_KEY_SHADOW_TOOLS = {
 }
 
 
+# G56: geometry-writing edit ops where "byte-identical mesh before and after" genuinely
+# means the op did nothing. Flag-only ops (mark_sharp/crease) and pure selection ops are
+# excluded — they never move verts, so an unchanged signature is expected, not a no-op.
+# Sculpt is excluded too (multires stores displacement off the base verts).
+NOOP_CHECK_TOOLS = {
+    "move_vertices", "scale_vertices", "snap_loop", "proportional_move",
+    "inflate_selection", "jitter_vertices", "bevel", "extrude",
+    "extrude_along_curve", "scale_rings", "subdivide_selection",
+    "relax_selection", "slide_selection", "poke_faces", "inset_faces",
+    "grid_fill", "taper_end", "taper_section", "loop_cut", "merge_by_distance",
+}
+
+
+def _geo_signature(obj):
+    """G56 — a cheap geometry fingerprint for no-op detection: vert/face counts plus a
+    quantized coordinate checksum (0.01 mm grid, so float noise never registers but any
+    real edit does). Reads the live edit mesh in EDIT mode, the object mesh otherwise.
+    None for a non-mesh / missing object."""
+    if obj is None or getattr(obj, "type", None) != 'MESH':
+        return None
+    import bmesh
+    if obj.mode == 'EDIT':
+        bm = bmesh.from_edit_mesh(obj.data)
+        vcount, fcount = len(bm.verts), len(bm.faces)
+        coords = [v.co for v in bm.verts]
+    else:
+        me = obj.data
+        vcount, fcount = len(me.vertices), len(me.polygons)
+        coords = [v.co for v in me.vertices]
+    acc = 0
+    for co in coords:
+        acc = (acc + (int(co.x * 1e5) * 73856093)
+                   + (int(co.y * 1e5) * 19349663)
+                   + (int(co.z * 1e5) * 83492791)) & 0xFFFFFFFFFFFFFFFF
+    return (vcount, fcount, acc)
+
+
 def _enter_edit_for_target(target_name):
     """Select target and enter EDIT mode. Returns (switched, error)."""
     active = bpy.context.active_object
@@ -186,6 +223,18 @@ def execute_command(command):
     if is_mutating and not state._history and state._undo_baseline is None:
         state._undo_baseline = state.scene_object_names()
 
+    # G56: snapshot a cheap geometry signature for the no-op detector. A mutating
+    # geometry op that reports success while changing nothing LAUNDERS the mistake —
+    # the corrosive failure for a trust-the-status-block system. Captured here (after
+    # the target= edit-mode entry, so we read the right object) and compared post-op.
+    noop_name = None
+    geo_before = None
+    if tool in NOOP_CHECK_TOOLS:
+        _gobj = bpy.data.objects.get(target) if target else bpy.context.active_object
+        if _gobj is not None:
+            noop_name = _gobj.name
+            geo_before = _geo_signature(_gobj)
+
     try:
         result = fn(params)
     except Exception as e:
@@ -231,6 +280,21 @@ def execute_command(command):
                 # shadow already explained the vanished edit (Y1c precedence).
                 result["bind_shadowed"] = True
                 result["bind_warning"] = rest_shadow_warning(binds)
+
+    # G56: compare the post-op signature. Identical geometry under a reported success
+    # means the op was a no-op — surface it rather than let the success launder it. The
+    # warning rides the same channel as the bind/shape-key warnings (see _core._status).
+    if (geo_before is not None and noop_name and isinstance(result, dict)
+            and result.get("success")):
+        _gobj2 = bpy.data.objects.get(noop_name)
+        geo_after = _geo_signature(_gobj2) if _gobj2 is not None else None
+        if geo_after is not None and geo_after == geo_before:
+            result["no_op"] = True
+            result["no_op_warning"] = (
+                "no-op: this op reported success but the geometry is byte-identical "
+                "before and after — nothing moved. Check the selection captured what "
+                "you intended and the parameters are non-trivial (e.g. scale≠1, "
+                "amount≠0, a ring that actually has spread to scale).")
 
     # Log + push the undo step AFTER edit-mode tools have returned to OBJECT mode,
     # so each step is an object-mode checkpoint (undoable from object mode) and

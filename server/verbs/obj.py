@@ -26,6 +26,8 @@ def object_verb(
     # rename / duplicate
     new_name: tag(str, "[rename/duplicate/duplicate_mirrored] new object name") = "",
     old_name: tag(str, "[rename] source name (alias of name)") = "",
+    linked: tag(bool, "[duplicate] make an INSTANCE (Alt+D) sharing the source mesh — "
+                      "N copies cost one mesh; edit one, all change") = False,
     # join / group membership
     names: tag(list, "[join] objects to weld together") = None,
     parts: tag(list, "[group/add_to_group] member object names") = None,
@@ -67,7 +69,7 @@ def object_verb(
       describe    — fuller report; posed=True evaluates the rig    (name)
       rename      — name → new_name                                (name, new_name)
       delete      — remove the object                              (name)
-      duplicate   — copy it                                        (name, new_name)
+      duplicate   — copy it  (name, new_name, linked=True for a mesh-sharing instance)
       duplicate_mirrored — mirrored copy   (name, axis=X|Y|Z, pivot=WORLD|.., new_name)
       join        — weld several into one  (names=[...], merge_threshold)
       split       — split active by loose parts into objects       (—)
@@ -103,7 +105,7 @@ def object_verb(
     if o == "delete":
         return objects.delete_object(name, label)
     if o == "duplicate":
-        return objects.duplicate_object(name, new_name)
+        return objects.duplicate_object(name, new_name, linked)
     if o == "duplicate_mirrored":
         return objects.duplicate_mirrored(name, axis, pivot, new_name, label)
     if o == "join":
