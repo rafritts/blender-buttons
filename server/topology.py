@@ -81,6 +81,22 @@ def _fmt_method(name: str, data: dict) -> list:
         lines.append("  frame (principal axes):")
         for k, a in enumerate(data["principal_axes"]):
             lines.append(f"    {k+1}. {a['extent_m']}m along ~{a['aligns_world']} {a['direction']}")
+    elif name == "facing":
+        if "abstain" in data:
+            lines.append(f"  facing: no defensible frame — {data['abstain']}")
+        else:
+            lines.append("  facing (signed orientation frame — geometry's own, don't re-derive):")
+            lines.append(f"    up     {data['up']:<3}  — {data['up_evidence']}")
+            if data.get("front"):
+                lines.append(f"    front  {data['front']:<3}  — {data['front_evidence']}")
+            elif data.get("front_note"):
+                lines.append(f"    front   ?   — {data['front_note']}")
+            if data.get("right"):
+                lines.append(f"    right  {data['right']:<3}  left {data['left']}  — {data['handed_evidence']}")
+            elif data.get("lateral_note"):
+                lines.append(f"    left/right  ?  — {data['lateral_note']}")
+            if data.get("lateral"):
+                lines.append(f"    bilateral plane: {data['lateral']}  ({data.get('lateral_evidence', '')})")
     elif name == "sections":
         lines.append("  sections (slice the mesh & read each slice's shape — "
                      "O = closed ring/full wrap, C = open arc/partial coverage):")
@@ -188,6 +204,9 @@ def get_topology(target: str = "", method: str = "", lod: str = "low",
       poles      — valence≠4 verts (quad-flow breaks; messy to cut through)
       symmetry   — best mirror plane + error, per axis
       frame      — intrinsic principal axes (never assumes world-up)
+      facing     — SIGNED orientation frame (up/front/left/right world axes + evidence),
+                   synthesised from frame+symmetry. Stop dead-reckoning 'front=-Y,
+                   left=+X' by hand. Abstains when geometry won't support it.
       sections   — cross-section sweep: where the material IS (voids, partial wraps,
                    branch splits). The COVERAGE sense topology is blind to.
       curvature  — flats/ridges/domes/saddles (fuzzy; v2 = exact)

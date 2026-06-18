@@ -31,8 +31,9 @@ def feel(
     # topology (SPEC-04)
     method: tag(str, "[topology] comma list of method tokens (empty = cheap bundle: "
                      "components,genus,boundaries,sections,poles,symmetry,frame). "
-                     "Extra: structure,curvature,region_form,features,thickness,relief "
-                     "(relief = salient feature discovery: where are the bumps/dents)") = "",
+                     "Extra: structure,facing,curvature,region_form,features,thickness,relief "
+                     "(facing = signed up/front/left/right frame; relief = salient feature "
+                     "discovery: where are the bumps/dents)") = "",
     lod: tag(str, "[topology] low|medium|high output verbosity") = "low",
     base: tag(str, "[topology] cage | evaluated mesh to read") = "cage",
     seed: tag(str, "[topology] handle for seeded methods (v2)") = "",
@@ -104,6 +105,11 @@ def feel(
                    poles      — valence≠4 verts (quad-flow breaks)
                    symmetry   — best mirror plane + error, per axis
                    frame      — intrinsic principal axes
+                   facing     — SIGNED orientation frame: which world axis is up /
+                                front / left / right, each with its evidence (or an
+                                honest abstain). Synthesised from frame + symmetry —
+                                ask it once instead of re-deriving the handedness
+                                cross-product by hand every read. (not in bundle)
                    curvature  — flats/ridges/domes/saddles  (not in bundle)
                    region_form— FORM of the current SELECTION: convex/concave verdict,
                                 projection (cm), L/R mirror error — the form scalars a

@@ -75,7 +75,7 @@ must re-apply it to the twin by hand. A one-call `object op=mirror_edit name=<sr
 +25° — mirror it right" a single move. Post-hoc twin-matching, not a live mode — cheaper than
 G14 proper and independently useful.
 
-## G53 — a mesh's facing/orientation isn't handed back; the agent re-derives it every read 🧭 OPEN
+## G53 — a mesh's facing/orientation isn't handed back; the agent re-derives it every read 🧭 ✅ SHIPPED
 
 Every read this session, the agent burned reasoning re-deriving the same fact — "front = −Y,
 up = +Z, right = −X" — from the world bbox plus a handedness cross-product done in its head.
@@ -102,6 +102,15 @@ pretend every mesh has a front.
 name its signed local axes (which world axis is its long/up axis, which is its
 symmetry/lateral axis, the sign of its front) with the evidence, or abstain. Natural home: a
 line in `object describe` and/or `feel method=frame`.
+
+**Shipped** as `feel method=facing` (`_m_facing` in `extension/topology.py`): up = the
+principal axis most aligned to world +Z; lateral = the centroid-relative mirror plane when one
+axis is a clear bilateral winner; front = the remaining axis signed toward the vertex-dense
+(feature) side; left/right = `front × up`. Each axis prints its evidence; it abstains on a
+rotated/near-isotropic mesh, on no clear mirror plane (→ left/right undefined), and on near-
+centred front-to-back mass (→ front sign withheld). Kept OUT of the cheap bundle — orientation
+is a distinct question the agent asks once, not per structure-read. Not yet wired into `object
+describe` (deferred; `feel method=facing` covers the need).
 
 ## Carried over — bigger build-outs (not yet started)
 

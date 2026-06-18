@@ -7,7 +7,7 @@ never a raw vertex dump. This is the concrete tool that realizes SPEC-02's
 does not provide.
 
 v1 methods (numpy + bmesh + native BVH/KDTree, zero extra deps):
-  components  genus  boundaries  poles  symmetry  frame  sections  curvature  features  thickness
+  components  genus  boundaries  poles  symmetry  frame  facing  sections  curvature  features  thickness
 v2 methods (need scipy — heat-method geodesics / spectral cut):
   geodesic  skeleton  segments
 """
@@ -426,6 +426,116 @@ def _m_frame(bm, lod, bbox):
                      "direction": [round(float(x), 3) for x in vec],
                      "aligns_world": _AXES[int(np.argmax(np.abs(vec)))]})
     return {"principal_axes": axes}
+
+
+def _m_facing(bm, lod, bbox):
+    """G53 — a SIGNED orientation frame, synthesised from the same PCA + mirror
+    data the cheap bundle already pays for: which world axis is up / lateral /
+    front, and each one's sign, so the agent stops re-deriving (and mis-flipping)
+    'front=-Y, up=+Z, right=-X' from the bbox by hand on every read. A flipped
+    hand-derivation silently poisons every downstream left/right call — this is
+    ground truth the geometry already determines.
+
+    Legible, not divining (per feel_legibility_not_divination): every axis carries
+    its evidence, and where the geometry doesn't support an inference — a rotated
+    or near-isotropic mesh, no clear bilateral plane, mass near-centred front-to-
+    back — it ABSTAINS rather than inventing a front. The point is a defensible
+    frame, not the pretence that every mesh has one.
+
+    Recipe:  up   = the principal axis pointing most steeply along world Z (+Z-ward).
+             lateral = the centroid-relative mirror plane, when one axis is a clear
+                       bilateral winner.
+             front  = the remaining world axis, signed toward the vertex-dense
+                      (feature-dense) side — face/chest carry more verts than a
+                      smooth back.
+             left/right = front × up, once front and lateral are both pinned."""
+    n = len(bm.verts)
+    if n < 8:
+        return {"abstain": "too few verts to infer an orientation frame"}
+    co = np.array([list(v.co) for v in bm.verts])
+    centroid = co.mean(0)
+    mn, mx = co.min(0), co.max(0)
+    bbcenter = (mn + mx) / 2.0
+    extent = mx - mn
+    diag = float(np.linalg.norm(extent)) or 1.0
+
+    # principal axes — the same PCA _m_frame runs
+    cov = np.cov((co - centroid).T)
+    evals, evecs = np.linalg.eigh(cov)
+    order = np.argsort(evals)[::-1]
+    evecs = evecs[:, order]
+    world_of_pa = [int(np.argmax(np.abs(evecs[:, k]))) for k in range(3)]
+    if len(set(world_of_pa)) < 3:
+        return {"abstain": "principal axes don't separate onto distinct world axes "
+                "(mesh is rotated off-axis or near-isotropic) — no clean world-aligned "
+                "frame; read method=frame for the intrinsic axes instead"}
+
+    def signed(idx, sgn):
+        return f"{'+' if sgn > 0 else '-'}{_AXES[idx]}"
+
+    def world_vec(idx, sgn):
+        v = np.zeros(3)
+        v[idx] = sgn
+        return v
+
+    # up: principal axis most aligned to world Z, oriented +Z-ward (the convention).
+    # PCA eigenvector signs are arbitrary, so the sign comes from the convention, not
+    # the eigenvector — up_world is the Z-aligned axis (distinct-cover guarantees one),
+    # so +Z-ward means its own +direction.
+    pa_z = [abs(float(evecs[2, k])) for k in range(3)]
+    up_pa = int(np.argmax(pa_z))
+    up_world = world_of_pa[up_pa]
+    up_sign = 1 if up_world == 2 else (1 if float(evecs[2, up_pa]) >= 0 else -1)
+    up_vec = world_vec(up_world, up_sign)
+    out = {
+        "up": signed(up_world, up_sign),
+        "up_evidence": f"principal axis {up_pa + 1} (extent {round(float(extent[up_world]), 3)}m) "
+                       f"is the most vertical — {round(pa_z[up_pa], 2)} of 1.0 along world Z",
+    }
+
+    # lateral: the centroid-relative mirror plane, if one axis is a clear winner
+    sym = _m_symmetry(bm, lod, bbox)
+    lateral_world = None
+    if "per_axis" in sym:
+        best = sym["best_plane"]
+        best_err = sym["per_axis"][best]["mean_error_mm"]
+        others = sorted(sym["per_axis"][a]["mean_error_mm"] for a in _AXES if a != best)
+        # credible only if low in absolute terms AND clearly beating the runner-up
+        clear = best_err < 0.02 * diag * 1000 and best_err < 0.5 * others[0]
+        if clear and _AXES.index(best) != up_world:
+            lateral_world = _AXES.index(best)
+        out["lateral_evidence"] = (f"{best} plane {best_err}mm mean mirror error vs "
+                                    f"{'/'.join(str(o) for o in others)}mm for the others")
+    if lateral_world is None:
+        out["lateral_note"] = "no clear bilateral plane — left/right is undefined"
+    else:
+        out["lateral"] = _AXES[lateral_world]
+
+    # front: the remaining world axis, signed toward the vertex-dense side
+    if lateral_world is not None:
+        front_world = ({0, 1, 2} - {up_world, lateral_world}).pop()
+        out["front_axis"] = _AXES[front_world]
+        off = float(centroid[front_world] - bbcenter[front_world])
+        ext = float(extent[front_world]) or 1.0
+        skew_pct = round(100 * off / ext, 1)
+        if abs(off) / ext > 0.04:
+            front_sign = 1 if off > 0 else -1
+            out["front"] = signed(front_world, front_sign)
+            out["front_evidence"] = (f"vertex mass skews {signed(front_world, front_sign)} by "
+                                     f"{abs(skew_pct)}% of the {round(ext * 100, 1)}cm depth — "
+                                     f"the feature-dense side")
+            # left/right falls out of the right-hand rule, once front + up are pinned
+            front_vec = world_vec(front_world, front_sign)
+            right_vec = np.cross(front_vec, up_vec)
+            r_idx = int(np.argmax(np.abs(right_vec)))
+            r_sign = 1 if right_vec[r_idx] > 0 else -1
+            out["right"] = signed(r_idx, r_sign)
+            out["left"] = signed(r_idx, -r_sign)
+            out["handed_evidence"] = "right = front × up (right-hand rule)"
+        else:
+            out["front_note"] = (f"front-back axis is {_AXES[front_world]} but its sign is unclear "
+                                 f"(vertex mass near-centred, {skew_pct}%) — not naming front/back")
+    return out
 
 
 def _corner_angle(f, v):
@@ -1061,6 +1171,7 @@ _METHODS = {
     "poles": _m_poles,
     "symmetry": _m_symmetry,
     "frame": _m_frame,
+    "facing": _m_facing,
     "sections": _m_sections,
     "curvature": _m_curvature,
     "region_form": _m_region_form,

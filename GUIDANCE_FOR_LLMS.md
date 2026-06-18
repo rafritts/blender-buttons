@@ -65,7 +65,12 @@ destructive path uses (`feel structure → select limb → delete`), turned to c
    `by_axis`/`between` INTERSECT keeps only verts *already selected AND* matching, so
    "band ∩ front-half ∩ one side" is three calls, not a select-deselect dance. The mesh's
    own symmetry centre (reported as `lr_balance`) splits left from right; you never type a
-   centreline.
+   centreline. And before you reason about which way is *front* or which side is *left*, run
+   **`feel method=facing`** — it hands back the signed orientation frame (up / front / left /
+   right world axes, each with its evidence) so you don't re-derive the handedness cross-
+   product in your head and silently flip it. It abstains when the geometry is ambiguous;
+   when it commits, trust it over your guess. (It can't certify *identity* — left-vs-right
+   on a near-symmetric body is still worth a human eyeball before a destructive edit.)
 3. **Measure the selection.** `feel op=anchor` returns the selection's **surface-snapped
    apex point + outward normal + footprint radius** — the exact point and direction you
    could never dead-reckon on a curved surface. The normal is your honesty check: a real
