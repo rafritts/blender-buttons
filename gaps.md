@@ -145,55 +145,6 @@ local change is checked locally and temporally. Builds directly on the now-live 
 reads. Dogfood: the bust edit passed bbox + global-symmetry while being asymmetric and malformed,
 and confirming "it grew, and stayed symmetric" needed the human's viewport.
 
-## G48 — a selection-scoped `feel` read certifies *localization*, not *capture*; nothing flags a selection that bounds the wrong **extent** or **form** ⚖️ OPEN
-
-The centroid is *robust* — it lands on a feature even from a sloppy band (the navel sat at
-the centroid of a wildly-trimmed abdomen band either way). That robustness is double-edged:
-a plausible centroid certifies **where** (localization) but is **blind to what was bounded**
-(extent and form). So "the centroid looks anatomically right" reads as success even when the
-selection clipped the feature or swept in its neighbour — and the agent stops, satisfied, on
-the first read. The single read is *unfalsified, not verified*.
-
-Three blind spots, all of which return a confident-looking number:
-
-- **Extent** — clipped or bloated. Dogfood (minting 9 anatomy handles on Body): every
-  centroid looked right on the first read, yet the shoulders swept in the **tricep**
-  (over-capture), the hands **clipped the thumb and stopped short of the wrist**
-  (under-capture), and the buttocks' **top line fell short** (under-capture). A plausible
-  centroid hid all of it.
-- **Form** — the selection's *shape* contradicts the feature's known shape. The collarbones
-  came out a narrow, ~vertical neck patch instead of a wide horizontal shoulder-to-shoulder
-  sweep — my arm-avoidance X-clip removed the very lateral extent that *defines* a collarbone,
-  and nothing flagged that a collarbone selection was taller-than-wide.
-- **Scale** — too-sparse (1–7-vert probes gave noisy verdicts I leaned on) or too-broad (the
-  navel's deep funnel read as −0.92cm because a ~5cm patch averaged the drainpipe into the
-  bowl).
-
-**General fix — server-side, NOT agent discipline** (if the agent has to *remember* to
-re-check, the gap isn't closed):
-
-1. **Convergence / perturbation read** — grow *and* shrink the selection (~±20%) and report
-   the drift in centroid + extent. Stable under perturbation ⇒ the feature is captured; a
-   **jump on growth** ⇒ clipping (the thumb, the wrist, the buttock top); **insensitivity to
-   shrink** ⇒ slack (the tricep). This converts "looks right" (unfalsifiable) into "is stable"
-   (a test) — the dynamic counterpart to the static trust caveat below.
-2. **Shape-vs-form sanity** — surface the selection's bounds-aspect / principal axis (`feel …
-   method=frame`) against the feature's expected form, so a taller-than-wide collarbone reads
-   as obviously wrong without a human eye.
-3. **Static trust caveat** — the cheap first signal: flag count **relative to local density**
-   and the ring/sample size a metric actually fits (`protrusion` already prints "base plane
-   fit to 14 ring verts" — that hook should *flag* when the ring is too thin). Avoid alarm
-   fatigue: tie it to genuine unreliability of the returned value.
-
-The deeper fix is **G43** (region-coherent / boundary-anchored selection): if the selection
-floods to the feature's natural edge — the wrist crease, the deltoid seam, the collarbone
-span — there is no guessed box to over/under-shoot or mis-shape, and the convergence read
-becomes the verify-loop only for where boundary-anchoring isn't available. Composes with
-SPEC-09: the construction bridge is only as good as the selection feeding it — a measured
-anchor on a mis-captured region is still wrong. Dogfood: 9/9 handle centroids passed a
-plausible-eyeball, but the human's viewport caught a clipped thumb, an over-grabbed tricep, a
-short buttock line, and a collarbone selection that was the wrong shape entirely.
-
 ## Carried over — bigger build-outs (not yet started)
 
 - **Multires + dyntopo** as real multi-level sculpt targets — the proper organic-sculpt

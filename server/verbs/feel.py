@@ -9,21 +9,21 @@ feel; op="topology" (default) is the structural sense.
 from typing import Literal
 
 from server._core import mcp
-from server import topology, queries, rings, introspect, lint, handles, assembly
+from server import topology, queries, rings, introspect, lint, handles, assembly, editmode
 from ._common import tag, unknown
 
 _OPS = ["topology", "profile", "silhouette", "section", "rings", "distance", "gap",
         "aligned", "symmetry", "mesh", "overlaps", "validate", "audit", "contacts",
-        "resting", "aim", "place", "anchor", "handle", "handles", "accept", "forget",
-        "assembly", "map", "relate"]
+        "resting", "aim", "place", "anchor", "verify", "handle", "handles", "accept",
+        "forget", "assembly", "map", "relate"]
 
 
 @mcp.tool(name="feel")
 def feel(
     op: Literal["topology", "profile", "silhouette", "section", "rings", "distance",
                 "gap", "aligned", "symmetry", "mesh", "overlaps", "validate", "audit",
-                "contacts", "resting", "aim", "place", "anchor", "handle", "handles",
-                "accept", "forget", "assembly", "map", "relate"] = "topology",
+                "contacts", "resting", "aim", "place", "anchor", "verify", "handle",
+                "handles", "accept", "forget", "assembly", "map", "relate"] = "topology",
     target: tag(str, "[topology/profile/silhouette/section/rings/symmetry/mesh] mesh "
                      "object (empty=active); "
                      "[map] cast from every boundary handle on this mesh") = "",
@@ -80,6 +80,7 @@ def feel(
     left: tag(float, "[place] offset -X (m)") = 0.0,
     right: tag(float, "[place] offset +X (m)") = 0.0,
     snap: tag(bool, "[place] ray-snap the offset point onto the surface (default True)") = True,
+    steps: tag(int, "[verify] rings to grow/shrink the selection when perturbing (default 1)") = 1,
 ) -> str:
     """
     Feel a mesh — structure, measurements, correctness. Read-only (no status block).
@@ -141,6 +142,11 @@ def feel(
       anchor   — read the LIVE edit-mode selection as a surface anchor: its centroid
                  snapped onto the surface + normal — the measured seed a point-op uses
                  INSTEAD of a typed coordinate (SPEC-09).            (target)
+      verify   — CAPTURE check on the live selection: a plausible centroid certifies
+                 WHERE, not WHAT was bounded. Perturbs (grow+shrink) and reports the
+                 centroid/extent drift + a captured/clipping/slack verdict + bounds
+                 aspect, so a clipped/over-grabbed/wrong-form selection reads as off
+                 without a viewport (G48).                           (steps)
       place    — surface-relative placement: anchor on a handle/landmark + a metric
                  world offset (up/down/front/back/left/right), ray-snap to the surface,
                  get the world point + normal. 'A hand below the bust apex, on the
@@ -211,6 +217,8 @@ def feel(
         return queries.aim_surface(target, face, u, v, margin, aim_frame)
     if o == "anchor":
         return queries.selection_anchor(target)
+    if o == "verify":
+        return editmode.verify_selection(steps)
     if o == "place":
         return queries.place_on_surface(target, handle, anchor_x, anchor_y, anchor_z,
                                         up, down, front, back, left, right, snap)

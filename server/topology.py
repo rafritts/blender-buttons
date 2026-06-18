@@ -112,6 +112,8 @@ def _fmt_method(name: str, data: dict) -> list:
                          f"{data['projection_in_cm']}cm in, over the patch")
             lines.append(f"    L/R mirror (across X): {data['lr_mirror_mean_mm']}mm mean / "
                          f"{data['lr_mirror_max_mm']}mm max to nearest twin vert")
+            if data.get("caveat"):
+                lines.append(f"    ⚠ {data['caveat']}")
     elif name == "protrusion":
         if "note" in data:
             lines.append(f"  protrusion: {data['note']}")
@@ -122,6 +124,8 @@ def _fmt_method(name: str, data: dict) -> list:
                          f"{data['mean_protrusion_cm']}cm mean above the surrounding surface "
                          f"(recess {data['base_recess_cm']}cm)")
             lines.append(f"    apex @ {data['apex_world']}  (absolute — diff before/after to confirm growth)")
+            if data.get("caveat"):
+                lines.append(f"    ⚠ {data['caveat']}")
     elif name == "features":
         lines.append(f"  features: {data['sharp_edges']} hard edge(s) ≥{data['threshold_deg']}° "
                      f"in {data['chains']} chain(s)")

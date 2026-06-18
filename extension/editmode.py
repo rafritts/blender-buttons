@@ -706,6 +706,107 @@ def grow_selection(params):
     return {"success": True, "direction": direction, "steps": steps}
 
 
+def verify_selection(params):
+    """G48 — capture verification. A plausible centroid certifies WHERE the selection
+    sits, not WHAT it bounded; a sloppy band lands its centroid on the feature anyway,
+    so a single read is *unfalsified, not verified*. This PERTURBS the selection (grow
+    + shrink by `steps` rings) and reports how far the centroid and extent move:
+
+      • stable under both        ⇒ the feature is CAPTURED (boundary sits at its edge);
+      • big jump on GROW         ⇒ CLIPPING — the feature continues past the boundary
+                                   (the clipped thumb, the short buttock line);
+      • extent barely drops on SHRINK ⇒ SLACK — the border verts swept in a neighbour
+                                   (the tricep on the shoulder).
+
+    Also surfaces the bounds aspect (world W×D×H) + dominant axis, so a wrong-FORM
+    selection (a taller-than-wide 'collarbone') reads as obviously off without a
+    viewport. Restores the original selection before returning."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode with a selection to verify"}
+    steps = max(1, int(params.get("steps", 1)))
+    mw = obj.matrix_world
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    sel0 = [v.index for v in bm.verts if v.select]
+    n0 = len(sel0)
+    if n0 < 4:
+        return {"note": f"select a region first — verify reads the live selection "
+                        f"(need >=4 verts, found {n0})", "selected": n0}
+
+    def measure():
+        b = bmesh.from_edit_mesh(obj.data)
+        cos = [mw @ v.co for v in b.verts if v.select]
+        n = len(cos)
+        c = Vector((sum(p.x for p in cos) / n, sum(p.y for p in cos) / n,
+                    sum(p.z for p in cos) / n))
+        xs = [p.x for p in cos]; ys = [p.y for p in cos]; zs = [p.z for p in cos]
+        ext = (max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs))
+        return c, ext, n
+
+    def restore():
+        b = bmesh.from_edit_mesh(obj.data)
+        b.verts.ensure_lookup_table()
+        for v in b.verts:
+            v.select = False
+        for i in sel0:
+            b.verts[i].select = True
+        _flush_vert_selection(b)
+        bmesh.update_edit_mesh(obj.data)
+
+    c0, ext0, _ = measure()
+    diag0 = math.sqrt(ext0[0] ** 2 + ext0[1] ** 2 + ext0[2] ** 2) or 1e-6
+
+    for _ in range(steps):
+        bpy.ops.mesh.select_more()
+    cg, extg, ng = measure()
+    grow_shift = (cg - c0).length
+    diag_g = math.sqrt(extg[0] ** 2 + extg[1] ** 2 + extg[2] ** 2)
+    grow_ext_pct = (diag_g - diag0) / diag0 * 100.0
+
+    restore()
+    for _ in range(steps):
+        bpy.ops.mesh.select_less()
+    cs, exts, ns = measure()
+    shrink_shift = (cs - c0).length
+    diag_s = math.sqrt(exts[0] ** 2 + exts[1] ** 2 + exts[2] ** 2)
+    shrink_ext_pct = (diag_s - diag0) / diag0 * 100.0
+    restore()
+
+    # Verdict heuristic — drift relative to the selection's own size. A captured
+    # feature barely moves its centroid when the boundary wiggles; a clipped one drags
+    # toward the un-captured mass on growth; a slack one loses little extent on shrink.
+    grow_rel = grow_shift / diag0
+    flags = []
+    if grow_rel > 0.10:
+        flags.append("clipping? centroid jumped on GROW — the feature likely continues "
+                     "past the boundary (under-capture)")
+    if abs(shrink_ext_pct) < 8.0 and ns > 4:
+        flags.append("slack? extent barely shrank — border verts may be redundant "
+                     "(over-capture sweeping in a neighbour)")
+    if not flags:
+        flags.append("stable under perturbation — the boundary sits near the feature's edge")
+
+    dims = {"W_x_cm": round(ext0[0] * 100, 2), "D_y_cm": round(ext0[1] * 100, 2),
+            "H_z_cm": round(ext0[2] * 100, 2)}
+    dom = max((("X", ext0[0]), ("Y", ext0[1]), ("Z", ext0[2])), key=lambda t: t[1])[0]
+
+    return {
+        "success": True,
+        "selected": n0,
+        "steps": steps,
+        "grow": {"verts": ng, "centroid_shift_cm": round(grow_shift * 100, 2),
+                 "extent_change_pct": round(grow_ext_pct, 1)},
+        "shrink": {"verts": ns, "centroid_shift_cm": round(shrink_shift * 100, 2),
+                   "extent_change_pct": round(shrink_ext_pct, 1)},
+        "bounds": dims,
+        "longest_axis": dom,
+        "verdict": flags,
+    }
+
+
 def move_vertices(params):
     import bmesh
     obj = bpy.context.active_object
@@ -1684,6 +1785,7 @@ TOOLS = {
     "select_by_axis":     select_by_axis,
     "select_between":     select_between,
     "grow_selection":     grow_selection,
+    "verify_selection":   verify_selection,
     "move_vertices":      move_vertices,
     "scale_vertices":     scale_vertices,
     "snap_loop":          snap_loop,

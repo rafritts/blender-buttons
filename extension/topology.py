@@ -276,7 +276,7 @@ def _m_region_form(bm, lod, bbox):
         m = mathutils.Vector(co[i]); m[0] = 2 * px - m[0]
         _, _, dist = kd.find(m)
         errs[i] = dist
-    return {
+    out = {
         "selected": n,
         "region": region_words(bbox, mathutils.Vector(c)),
         "span_cm": span_cm,
@@ -287,6 +287,16 @@ def _m_region_form(bm, lod, bbox):
         "lr_mirror_mean_mm": round(float(errs.mean()) * 1000, 3),
         "lr_mirror_max_mm": round(float(errs.max()) * 1000, 3),
     }
+    # G48 prong 3 — static trust caveat: a tiny patch gives a noisy verdict, and a very
+    # wide one averages distinct features together (the navel funnel read shallow). Flag
+    # the value's reliability rather than silently returning a confident number.
+    if n < 12:
+        out["caveat"] = (f"only {n} verts — verdict is noisy; grow the selection or run "
+                         f"feel op=verify to test capture")
+    elif span_cm > 12.0:
+        out["caveat"] = (f"~{span_cm}cm patch is broad — distinct features may be "
+                         f"averaging together; tighten the selection if reading one feature")
+    return out
 
 
 def _m_protrusion(bm, lod, bbox):
@@ -327,7 +337,7 @@ def _m_protrusion(bm, lod, bbox):
     sco = np.array([list(v.co) for v in sel])
     d = (sco - base_c) @ normal                 # signed dist from the base plane (m)
     apex = sco[int(np.argmax(d))]
-    return {
+    out = {
         "selected": n,
         "ring_verts": len(ring),
         "region": region_words(bbox, mathutils.Vector(base_c)),
@@ -337,6 +347,12 @@ def _m_protrusion(bm, lod, bbox):
         "apex_world": [round(float(x), 4) for x in apex],
         "base_normal": [round(float(x), 3) for x in normal],
     }
+    # G48 prong 3 — a base plane fit to too few ring verts is unreliable; flag it
+    # instead of returning a confident protrusion off a noisy plane.
+    if len(ring) < 8:
+        out["caveat"] = (f"base plane fit to only {len(ring)} ring verts — protrusion "
+                         f"is unreliable; widen the selection so it has a fuller border")
+    return out
 
 
 def _m_frame(bm, lod, bbox):

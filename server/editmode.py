@@ -688,3 +688,25 @@ def select_in_sphere(center_x: float, center_y: float, center_z: float, radius: 
     else:
         main = result.get("error", "failed")
     return main + _status(result)
+
+
+def verify_selection(steps: int = 1) -> str:
+    """G48 — capture verification on the live edit-mode selection. Read-only (perturbs
+    then restores), so no status block. Grows + shrinks the selection and reports the
+    centroid/extent drift + a captured/clipping/slack verdict + the bounds aspect."""
+    result = call_blender("verify_selection", {"steps": steps})
+    if not result.get("success"):
+        return result.get("note") or result.get("error", "failed")
+    g = result["grow"]; s = result["shrink"]; b = result["bounds"]
+    lines = [
+        f"capture check ({result['selected']} verts, ±{result['steps']} ring):",
+        f"  grow   → +{g['verts'] - result['selected']} verts  "
+        f"centroid {g['centroid_shift_cm']}cm  extent {g['extent_change_pct']:+}%",
+        f"  shrink → {s['verts'] - result['selected']} verts  "
+        f"centroid {s['centroid_shift_cm']}cm  extent {s['extent_change_pct']:+}%",
+        f"  bounds  W×D×H = {b['W_x_cm']}×{b['D_y_cm']}×{b['H_z_cm']}cm  "
+        f"(longest: {result['longest_axis']})",
+    ]
+    for v in result["verdict"]:
+        lines.append(f"  • {v}")
+    return "\n".join(lines)
