@@ -79,7 +79,8 @@ def get_blender_status() -> str:
 
 @mcp.tool()
 def get_mesh_profile(axis: str = "Z", min: float = None, max: float = None,
-                     max_rings: int = 200, bands: int = 0, full: bool = False) -> str:
+                     max_rings: int = 200, bands: int = 0, full: bool = False,
+                     target: str = "") -> str:
     """
     Sweep the active mesh's cross-section along an axis. BY DEFAULT this aggregates
     into evenly spaced bands and reports each band's real cross-section width, with
@@ -94,10 +95,12 @@ def get_mesh_profile(axis: str = "Z", min: float = None, max: float = None,
     full: True = SHOW_ME_EVERYTHING — one ring per distinct axis position, capped by
           max_rings (evenly resampled, first/last kept). The old raw table.
     max_rings: cap for full mode (default 200; 0 = uncap).
+    target: mesh object name. Empty = active object.
 
     Use this to find WHERE the section changes before a cut — no coordinate guessing.
     """
-    params = {"axis": axis, "max_rings": max_rings, "bands": bands, "full": full}
+    params = {"axis": axis, "max_rings": max_rings, "bands": bands, "full": full,
+              "target": target or None}
     if min is not None:
         params["min"] = min
     if max is not None:
@@ -149,7 +152,8 @@ def get_mesh_profile(axis: str = "Z", min: float = None, max: float = None,
 
 
 @mcp.tool()
-def get_silhouette(axis: str = "X", res: int = 32, selection: bool = False) -> str:
+def get_silhouette(axis: str = "X", res: int = 32, selection: bool = False,
+                   target: str = "") -> str:
     """Orthographic projected OUTLINE of the active mesh along a view axis — the 2D
     shape read directly, not cross-multiplied from two 1D profile sweeps (gaps.md G37).
 
@@ -160,9 +164,11 @@ def get_silhouette(axis: str = "X", res: int = 32, selection: bool = False) -> s
     axis: view axis to look ALONG (X|Y|Z). Default X = side view (depth × height).
     res: grid resolution on the wider plane axis (default 32, 4..120).
     selection: True = only the live selection's verts.
+    target: mesh object name. Empty = active object.
     """
     result = call_blender("get_silhouette",
-                          {"axis": axis, "res": res, "selection": selection})
+                          {"axis": axis, "res": res, "selection": selection,
+                           "target": target or None})
     if not result.get("success"):
         return result.get("error", "failed")
     ur, vr = result["u_range"], result["v_range"]
@@ -175,7 +181,7 @@ def get_silhouette(axis: str = "X", res: int = 32, selection: bool = False) -> s
 
 @mcp.tool()
 def get_section(axis: str = "Z", sections: int = 12,
-                min: float = None, max: float = None) -> str:
+                min: float = None, max: float = None, target: str = "") -> str:
     """True cross-section PERIMETER + enclosed AREA along an axis (gaps.md G47).
 
     Unlike profile (bbox width per band), this slices the actual mesh with a plane at
@@ -186,8 +192,9 @@ def get_section(axis: str = "Z", sections: int = 12,
     axis: slice axis (X|Y|Z, default Z).
     sections: number of evenly spaced slices (default 12).
     min, max: optional world-space window on the axis.
+    target: mesh object name. Empty = active object.
     """
-    params = {"axis": axis, "sections": sections}
+    params = {"axis": axis, "sections": sections, "target": target or None}
     if min is not None:
         params["min"] = min
     if max is not None:

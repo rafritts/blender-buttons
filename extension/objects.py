@@ -292,9 +292,10 @@ _PROFILE_MAX_RINGS = 200
 
 def get_mesh_profile(params):
     import bmesh
-    obj = bpy.context.active_object
+    tgt = params.get("target")
+    obj = bpy.data.objects.get(tgt) if tgt else bpy.context.active_object
     if obj is None or obj.type != 'MESH':
-        return {"error": "No active mesh object"}
+        return {"error": f"Object '{tgt}' not found" if tgt else "No active mesh object"}
     axis = params.get("axis", "Z").upper()
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
     other = [(i, n) for i, n in enumerate(['X', 'Y', 'Z']) if i != axis_idx]
@@ -432,9 +433,10 @@ def get_silhouette(params):
     res:       grid resolution on the wider plane axis (default 32, 4..120).
     selection: True = only the live selection's verts (default whole mesh)."""
     import bmesh
-    obj = bpy.context.active_object
+    tgt = params.get("target")
+    obj = bpy.data.objects.get(tgt) if tgt else bpy.context.active_object
     if obj is None or obj.type != 'MESH':
-        return {"error": "No active mesh object"}
+        return {"error": f"Object '{tgt}' not found" if tgt else "No active mesh object"}
     axis = params.get("axis", "X").upper()
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 0)
     others = [(i, n) for i, n in enumerate(['X', 'Y', 'Z']) if i != axis_idx]
@@ -552,9 +554,10 @@ def get_section(params):
     sections: number of evenly spaced slices (default 12).
     min, max: optional world-space window on the axis."""
     import bmesh
-    obj = bpy.context.active_object
+    tgt = params.get("target")
+    obj = bpy.data.objects.get(tgt) if tgt else bpy.context.active_object
     if obj is None or obj.type != 'MESH':
-        return {"error": "No active mesh object"}
+        return {"error": f"Object '{tgt}' not found" if tgt else "No active mesh object"}
     axis = params.get("axis", "Z").upper()
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
     n = max(1, int(params.get("sections") or 12))

@@ -24,7 +24,8 @@ def feel(
                 "gap", "aligned", "symmetry", "mesh", "overlaps", "validate", "audit",
                 "contacts", "resting", "aim", "handle", "handles", "accept", "forget",
                 "assembly", "map", "relate"] = "topology",
-    target: tag(str, "[topology/rings/symmetry/mesh] mesh object (empty=active); "
+    target: tag(str, "[topology/profile/silhouette/section/rings/symmetry/mesh] mesh "
+                     "object (empty=active); "
                      "[map] cast from every boundary handle on this mesh") = "",
     # topology (SPEC-04)
     method: tag(str, "[topology] comma list of method tokens (empty = cheap bundle: "
@@ -159,11 +160,11 @@ def feel(
     if o == "topology":
         return topology.get_topology(target, method, lod, base, seed)
     if o == "profile":
-        return queries.get_mesh_profile(axis, min, max, max_rings, bands, full)
+        return queries.get_mesh_profile(axis, min, max, max_rings, bands, full, target)
     if o == "silhouette":
-        return queries.get_silhouette(axis, res, selection)
+        return queries.get_silhouette(axis, res, selection, target)
     if o == "section":
-        return queries.get_section(axis, sections, min, max)
+        return queries.get_section(axis, sections, min, max, target)
     if o == "rings":
         return rings.get_rings(axis, target)
     if o == "distance":
