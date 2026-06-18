@@ -263,6 +263,29 @@ stay deferred until the lead proves out further. **selection→vgroup/mask** inf
 (gravity scopes by sphere/whole-mesh today; the breast tips sit at the sphere's lateral edge, so
 draping both at once needs one sphere per lobe — a soft mask would let one call do both seamlessly).
 
+## G47 — no **surface-relative placement from a landmark + offset**; sculpting a feature still dead-reckons the seed point 📍 OPEN
+
+The unclosed remainder of SPEC-06. Placing a navel on `polySurface25`, two of the three
+seed coordinates were *derived* — `x=0` from the symmetry plane, `y` from the measured belly
+apex (`feel method=protrusion`) — but the **third, the Z height, was hand-typed** (1.02, then
+"up 10cm" → 1.11). There is no way to express the intent *"on the front midline, a set distance
+below the bust apex, snapped to the surface"* and get a world point back. The destructive side
+never dead-reckons (`feel structure` → `select op=limb` → `edit delete`); the constructive side
+still does, for the *seed of every sculpt*. `feel op=aim` (SPEC-06 Phase 1) is the embryo but
+falls short twice: it addresses only a **normalized bbox-face framing** (fractions of the form),
+not an **anchor landmark + metric offset**; and per **G39** it casts in the mesh's *local,
+rotation-baked* frame, so on the 90°-rotated `polySurface25` the framing axes don't map to world
+up/front — "above the navel / below the bust" is unaddressable through it. So the agent types a Z.
+
+**General fix:** a surface-relative placement primitive that takes an **anchor** (a measured
+landmark — bust apex, a handle, a feature centroid) **+ an offset** (metric or fractional, in
+world up/front), **ray-snaps to the mesh**, and **hands back the world point + normal** to seed a
+`sculpt`/`select` op — the on-surface analogue of `transform place on=` (which already closes
+dead-reckoning for whole objects). Must resolve in **world space** (folds in G39) and compose with
+landmark discovery (**G38**) and region-coherent selection (**G43**) so a feature is placed
+relative to another feature, never to the origin. Dogfood: the navel's Z was the one number with
+no relational anchor — typed, then nudged in raw centimetres on the human's call.
+
 ## Carried over — bigger build-outs (not yet started)
 
 - **Multires + dyntopo** as real multi-level sculpt targets — the proper organic-sculpt
