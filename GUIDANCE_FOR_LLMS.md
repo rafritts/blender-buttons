@@ -35,6 +35,66 @@ last status block.
 are a bug, not a coincidence: coplanar faces from different objects z-fight.
 
 
+## How to find specific geometry (you judge *where*, the server measures it)
+
+There is no "find me the feature" tool, and reaching for one is the most expensive
+mistake in this doc. The division of labor is fixed: **your vision judges *where* a
+feature roughly is; the server *measures* it precisely.** Do not ask the server to
+*discover* a part/region for you — it can't, and that was never its job.
+
+In particular, **don't reach for a salience finder to locate a broad, smooth swell**
+(a belly, a calf, a bicep, a cheek, a brow, any soft mass). `feel … method=relief`
+finds features with an *edge* — a local contrast: a nose, a fingertip, a ridge, an
+eye-socket, a cut-line. A broad swell has *no* local contrast — every point on it is
+surrounded by more of the same swell — so it never registers at any single radius, and
+`method=curvature` is fuzzy and won't localize it either. You will burn a dozen calls
+and conclude the mesh is featureless. It isn't; you're using an edge-detector to find a
+hill.
+
+The workflow that works is the same **feel → select → measure → act** loop the
+destructive path uses (`feel structure → select limb → delete`), turned to construction:
+
+1. **Judge the band** from a geometric read you *can* trust. `feel op=profile axis=Z`
+   gives per-slice `X_width`/`Y_width`/girth up the body — a forward swell shows as the
+   cross-axis width *climbing out of a landmark* (front-to-back depth growing up out of a
+   waist pinch pins the chest band; girth exploding marks where the limbs enter the
+   slice). `feel op=section` is the sibling read. These measure real cross-sections — no
+   guessing.
+2. **Select it** by composing `select` ops with **`action=INTERSECT`**. Take the band on
+   one axis (`select op=between axis=Z`), then AND in each further constraint —
+   `by_axis`/`between` INTERSECT keeps only verts *already selected AND* matching, so
+   "band ∩ front-half ∩ one side" is three calls, not a select-deselect dance. The mesh's
+   own symmetry centre (reported as `lr_balance`) splits left from right; you never type a
+   centreline.
+3. **Measure the selection.** `feel op=anchor` returns the selection's **surface-snapped
+   apex point + outward normal + footprint radius** — the exact point and direction you
+   could never dead-reckon on a curved surface. The normal is your honesty check: a real
+   swell's normal points *outward along the bulge*, the way the feature actually faces; if
+   it points sideways or inward, the selection is wrong, not the tool.
+4. **Save it as a handle.** `feel op=handle source=selection name=<feature>` mints a
+   *named* anchor from that selection — it recomputes its point+normal on every read, so
+   it rides deformation and survives a stray deselect, and it lets you address the feature
+   (and its mirror twin) **by name** instead of re-selecting. Prefer the named handle over
+   the bare live selection for anything you'll touch more than once.
+5. **Act at the handle/selection, never at a coordinate.** `sculpt at=selection` or the
+   placement verbs via `handle=<name>` consume that anchor directly — no typed `at_x/y/z`.
+   Then mirror to the twin.
+
+**Confirm capture before you commit:** `feel op=verify` perturbs the selection and reports
+whether it actually *caught* the feature or clipped it / bled into a neighbour. A
+perfectly-measured anchor on a mis-captured region is still wrong. But note what `verify`
+can and can't tell you: it certifies **capture** (did the selection cohere on a single
+feature), *not* **identity** (is it the *right* feature — the brow and not the cheek). The
+server cannot judge identity. So when `verify` passes but you are still genuinely unsure
+you landed on the intended feature, **ask the human to eyeball the handle** before you
+sculpt. Confirming identity by eye is the one judgement a human makes more reliably than
+any ground-truth read — and it is far cheaper than discovering a misplaced edit afterward.
+
+And do **not** fall back to *rendering* the mesh to hunt for the feature. LLM vision
+self-confirms — you will see what you expected and report success whether or not it's
+true — so a render launders the mistake instead of catching it. Locate by the
+ground-truth reads above.
+
 ## Scene dressing
 
 - `search_textures` / `search_hdris` → Poly Haven ids; `set_textured_material`
