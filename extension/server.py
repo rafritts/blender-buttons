@@ -125,9 +125,13 @@ NOOP_CHECK_TOOLS = {
 
 def _geo_signature(obj):
     """G56 — a cheap geometry fingerprint for no-op detection: vert/face counts plus a
-    quantized coordinate checksum (0.01 mm grid, so float noise never registers but any
-    real edit does). Reads the live edit mesh in EDIT mode, the object mesh otherwise.
-    None for a non-mesh / missing object."""
+    sum of per-vertex coordinate HASHES (0.01 mm grid, so float noise never registers
+    but any real move does). The hash must be NON-LINEAR per vertex: a plain coordinate
+    sum is invariant under a symmetric edit (a ring scaled about its centre moves every
+    vert by a mirror-cancelling delta, so Σcoord is unchanged) — which made a real flare
+    read as a no-op. Hashing each quantized position breaks that cancellation while the
+    outer sum stays order-independent. Reads the live edit mesh in EDIT mode, the object
+    mesh otherwise. None for a non-mesh / missing object."""
     if obj is None or getattr(obj, "type", None) != 'MESH':
         return None
     import bmesh
@@ -141,9 +145,8 @@ def _geo_signature(obj):
         coords = [v.co for v in me.vertices]
     acc = 0
     for co in coords:
-        acc = (acc + (int(co.x * 1e5) * 73856093)
-                   + (int(co.y * 1e5) * 19349663)
-                   + (int(co.z * 1e5) * 83492791)) & 0xFFFFFFFFFFFFFFFF
+        acc = (acc + hash((int(co.x * 1e5), int(co.y * 1e5), int(co.z * 1e5)))) \
+            & 0xFFFFFFFFFFFFFFFF
     return (vcount, fcount, acc)
 
 
