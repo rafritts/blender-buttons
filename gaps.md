@@ -119,6 +119,119 @@ centred front-to-back mass (→ front sign withheld). Kept OUT of the cheap bund
 is a distinct question the agent asks once, not per structure-read. Not yet wired into `object
 describe` (deferred; `feel method=facing` covers the need).
 
+## G58 — `bridge` is straight-only; the one cheap win for curved welds 🌉
+
+Welding two open loops (`edit op=bridge`) lays a **single ring of shortest-path quads** — no
+curvature, no segments, no twist, no profile. Native Blender *Bridge Edge Loops* already
+exposes **Number of Cuts, Smoothness, Profile Factor, Twist, Merge**; none are surfaced. So
+the only weld the agent can make between two openings is a straight strut, and "organic"
+is impossible at the weld step itself.
+
+**Witness (two-cylinder connect, 2026-06-18).** Two capped cylinders, openings 75.8°
+off-parallel and 2:1 in size. Removing the caps + `bridge` produced a clean watertight
+manifold — but dead straight. To curve it, the agent had to subdivide that band and
+`proportional_move` it by hand (5 destructive steps, no path control, and it deformed a
+cylinder — see G60). One `cuts=`/`smoothness=` pair on `bridge` would have produced the
+arch directly, on the real loops, with a dial.
+
+**Fix (cheap, mechanical).** Pass through to the existing Bridge Edge Loops operator's
+`number_cuts` / `interpolation` / `smoothness` / `profile_factor` / `twist`. This is the
+**smallest change with the biggest payoff** in the whole curve story — a parameter
+pass-through, not new machinery. The expressive, geometry-bound version is [[SPEC-10]];
+this is the 80% that ships in an afternoon.
+
+## G59 — no geometry-bound curve: the agent is the only glue between curve and mesh → SPEC-10 ✍️
+
+The deepest gap. The `curve`/`tube` primitives are **blind to the geometry they connect**;
+`feel` reads the geometry but emits no curve. So to connect two openings the agent must, by
+hand: read each opening's centre + outward normal, do the trig in a script, and feed raw
+coordinates to a Bézier that has no idea the cylinders exist. There is **no primitive that
+anchors a curve endpoint to a handle with tangent = the opening's normal** — and that
+binding *is* every "organic" quality (leaving the pipe the way the pipe points, tangent
+continuity at the seam). Without it, "organic" reduces to dead-reckoned control points.
+
+This is net-new capability, not a fix — promoted to **[[SPEC-10]]** (geometry-bound,
+parametric, weld-aware connectors). Both human prompts that exercised it — "make it a
+singular elegant curve" and "connect it with a sequence of crazy curves" — are squarely
+SPEC-10, not any existing verb.
+
+## G60 — deformation falloff is Euclidean/topology-blind, and you can't freeze geometry 🧊
+
+`edit op=proportional_move` (and the soft deforms generally) fall off by **straight-line
+distance, blind to topology / object membership**. There is no way to say "deform only this
+connector, hold the cylinders rigid" — no vertex-freeze/lock, no geodesic falloff, no
+"restrict to this object/shell." So any displacement big enough to shape a connection is
+big enough to drag its neighbours.
+
+**Witness (2026-06-18).** Bowing the welded band with `radius=1.7` pulled in cylinder-wall
+verts that were merely *near* in space (not part of the connector) and **visibly deformed a
+cylinder** — collateral damage the agent couldn't prevent with the dials available.
+
+**Two sub-gaps:**
+- **No region constraint** — geodesic/topological falloff and/or a `freeze=<selection|object>`
+  guard so a soft move respects boundaries instead of a blind sphere.
+- **Displacement ≠ path.** Even constrained, `proportional_move` makes a *bulge*, not a
+  *curve*: it pushes a blob in one direction. There is no "lay this ring of geometry **along
+  a centreline**, cross-sections kept perpendicular to the tangent." Bulging a weld will
+  never read as a swept curve — that's why the hand-sculpted arch still "isn't a curve."
+
+## G61 — no sweep yields a hollow, weldable, vert-count-matched tube 🪈
+
+Connecting two *different-sized* openings needs one operation that **sweeps + tapers +
+matches each opening's ring count (32→32) + welds both ends**. All three sweep paths fail a
+different way:
+- **`edit op=extrude_along_curve`** sweeps the *filled* face → a solid, non-manifold rod
+  (read back `genus -24`); it's face-only, so it won't sweep an *open* rim into a hollow
+  tube, and it ignores the curve's world placement (relaunches it along the face normal).
+- **`add type=tube` (SPLINE_TUBE)** **creases** — no roll control on the cross-section, so
+  the minimal-twist frame flips at a sharp bend — **forces 36 sides** (ignores `sides=`, so
+  it can't 1:1 weld to a 32-vert hole), and **fragments into multiple shells** with doubled
+  boundary loops (witnessed again 2026-06-18: 3 shells / 4 boundaries on a gentle arc).
+- **`add type=curve` + `bevel_depth`** is clean and continuous but **constant-radius** (no
+  taper to reconcile a 2:1 size mismatch), its **cross-section count is uncontrollable**
+  (defaulted to a 12-gon → faceting that reads as creases; no param exposed), and it's a
+  **separate, un-welded mesh**.
+
+The need is a hollow profiled sweep with controllable section count, end-taper, and a stable
+frame — the swept-geometry engine under [[SPEC-10]].
+
+## G62 — a handle doesn't know if it's on an open boundary or a closed cap 🕳️
+
+Boundary handles minted on the end of a *capped* cylinder read **"● clean"**, and `relate`
+happily proposes welding them — but they sit on **closed walls** (`feel op=assembly`:
+"closed — no open boundaries"), so there is nothing to weld into. The agent connected to
+capped ends for three iterations before `assembly` surfaced the truth. A handle should carry
+its **boundary-ness** (open loop vs. interior face-ring on a closed shell), and `relate`
+should refuse / warn when an endpoint is on a closed cap.
+
+## G63 — `object op=join` orphans handles instead of migrating them 🔗
+
+After joining two meshes, their handles still claim their **old owners** (`big_cyl_face1` →
+`Cylinder.001`, now gone), so `edit op=bridge` refused the loops as "cross-object" even
+though they were now in one mesh. The agent had to prune and re-mint via `feel op=assembly`.
+Handles should **follow their verts into the merged object** on join (re-point owner, keep
+the name), or join should report which handles it re-homed.
+
+## G64 — `feel op=assembly` (and the connection reads) are mesh-only, blind to live curves 👁️
+
+You author a connector as a **curve datablock** but can only *verify* it as a **mesh** —
+`feel op=assembly` returns "not a mesh / not found" for a live curve, so the agent must
+`object op=convert` to even see the connection it just made. The authoring representation
+and the verification representation don't overlap. Assembly/relate should evaluate a curve's
+*beveled* surface (its `to_mesh()` eval) without a destructive bake.
+
+## G65 — nothing reads *curve/connection quality*; verification sees watertight, not grace 📐
+
+`feel op=mesh` certifies **watertight** and `feel op=assembly` certifies **contact** — but
+neither judges the connector *as a connector*: **tangent continuity at the seam** (does it
+leave along the opening's normal?), **curvature** (is it a single clean arc or a lump),
+pinching, flow. The agent is aesthetically blind precisely on the axis that is the goal, and
+(told correctly not to read renders back) has **no ground-truth way to see whether a curve is
+elegant before baking it** — and can't even quantify "that's not a curve," having no
+curvature read to cite. Needs a curve-centreline read (curvature κ along length, tangent-vs-
+normal angle at each seam, min bend radius vs. profile radius) — generalising the one good
+diagnostic that already exists (`extrude_along_curve`'s bend-radius-vs-profile preflight).
+
 ## Carried over — bigger build-outs (not yet started)
 
 - **Multires + dyntopo** as real multi-level sculpt targets — the proper organic-sculpt
@@ -135,3 +248,11 @@ describe` (deferred; `feel method=facing` covers the need).
   geometry) vs the socket window.
 - bbox-vs-`sel_z` self-contradiction flag (a stale-eval-cache symptom — may already be cured by
   the G19 depsgraph-refresh fix; needs re-checking on dense geo).
+- status-block `dims`/`bounds` **inflate after joining a rotated multi-shell mesh** (reported
+  7.73 m for geometry that was actually unchanged; `feel` shell sizes were correct). Looks like
+  an OBB-in-rotated-local-frame projection, not real distortion — but the convenience bbox lied
+  while ground-truth reads held. (Witnessed 2026-06-18, same family as the bbox item above.)
+- **selection/mode silently resets to OBJECT between calls** — `select op=current` errored
+  ("must be in edit mode") right after `select` ops that appeared to act; the edit selection
+  survives on the mesh but mode does not, so multi-step edit sequences need an explicit
+  `object op=mode mode=EDIT` re-entry. Workflow friction, re-confirmed 2026-06-18.
