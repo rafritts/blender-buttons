@@ -201,14 +201,19 @@ different way:
 The need is a hollow profiled sweep with controllable section count, end-taper, and a stable
 frame — the swept-geometry engine under [[SPEC-10]].
 
-## G62 — a handle doesn't know if it's on an open boundary or a closed cap 🕳️
+## G62 — a handle doesn't know if it's on an open boundary or a closed cap 🕳️ 🛠️ IMPLEMENTED — pending live dogfood
 
 Boundary handles minted on the end of a *capped* cylinder read **"● clean"**, and `relate`
 happily proposes welding them — but they sit on **closed walls** (`feel op=assembly`:
 "closed — no open boundaries"), so there is nothing to weld into. The agent connected to
-capped ends for three iterations before `assembly` surfaced the truth. A handle should carry
-its **boundary-ness** (open loop vs. interior face-ring on a closed shell), and `relate`
-should refuse / warn when an endpoint is on a closed cap.
+capped ends for three iterations before `assembly` surfaced the truth.
+
+**Implemented** in `feel op=relate`: each endpoint is classified **open rim vs closed
+cap** by counting open-boundary edges (one adjacent face) within the handle's vert-set —
+computed **live** (capping/uncapping changes it, so a stored flag would go stale). A
+closed cap is reported per-endpoint, forces `join_ready=false`, and emits a warning naming
+which handle and to uncap it first. **Delete once dogfooded live.** (Left for later: the
+same open/closed line on the generic `feel op=handle` read — relate is where the bug bit.)
 
 ## G63 — `object op=join` orphans handles instead of migrating them 🔗
 

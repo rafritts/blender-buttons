@@ -67,10 +67,15 @@ def feel_relate(a: str = "", b: str = "") -> str:
     lines.append(f"  axis:        {result['facing']}  ({result['axis_angle_deg']}° off-parallel)")
     lines.append(f"  size:        ⌀ {result['diam_a_cm']}cm vs {result['diam_b_cm']}cm "
                  f"(match {result['size_match']})")
+    if result.get("a_boundary"):
+        lines.append(f"  boundary:    {result['a']} {result['a_boundary']} · "
+                     f"{result['b']} {result['b_boundary']}")
     verdict = ("✓ join-ready (parallel, facing, similar size) — fit then "
                "`edit op=bridge`" if result["join_ready"]
                else "✗ not aligned for a clean weld yet (check axis / size / gap)")
     lines.append(f"  {verdict}")
+    if result.get("warning"):
+        lines.append(f"  ⚠ {result['warning']}")
     return "\n".join(lines)
 
 

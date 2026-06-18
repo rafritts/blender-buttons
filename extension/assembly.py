@@ -220,13 +220,37 @@ def _handle_loop(name):
             "count": len(cos)}, None
 
 
+def _open_edge_count(owner, vgname):
+    """G62 — does this handle's vert-set lie on an OPEN boundary (a weldable rim:
+    edges with one adjacent face) or on CLOSED geometry (a cap / interior face-ring —
+    nothing to weld into)? Computed LIVE, not stored: capping/uncapping changes the
+    answer, so a stored flag would go stale. Returns the count of open-boundary edges
+    within the set, or None if unresolvable."""
+    import bmesh
+    if owner is None or owner.type != 'MESH':
+        return None
+    vset = handles._vgroup_vertset(owner, vgname)
+    if not vset:
+        return None
+    bm = bmesh.new()
+    bm.from_mesh(owner.data)
+    n = 0
+    for e in bm.edges:
+        if (len(e.link_faces) == 1
+                and e.verts[0].index in vset and e.verts[1].index in vset):
+            n += 1
+    bm.free()
+    return n
+
+
 def feel_relate(params):
     """G16 — the boundary-to-boundary relation: do TWO named openings line up? The
     read a bridge/weld needs *before* it tries. Reports centre-to-centre gap, axis
     alignment (do the loop planes face each other?), and the radius/size match. This
     is op=map's loop-plane math applied to a named handle PAIR instead of a raycast
     into the scene — measuring two specific openings, not whatever a ray happens to
-    hit."""
+    hit. G62: each endpoint is classified open-rim vs closed-cap, and a closed cap
+    forces join_ready false with a warning — you can't weld into a wall."""
     a_name = (params.get("a") or "").strip()
     b_name = (params.get("b") or "").strip()
     if not a_name or not b_name:
@@ -251,10 +275,24 @@ def feel_relate(params):
 
     ra, rb = a["radius"], b["radius"]
     ratio = (min(ra, rb) / max(ra, rb)) if max(ra, rb) > 1e-9 else 0.0
-    # A weld candidate: planes roughly parallel, facing each other, similar size.
-    join_ready = (angle <= 15.0 and dot < 0 and ratio >= 0.8)
 
-    return {
+    # G62 — open rim vs closed cap. A handle on a closed cap has no boundary edges to
+    # bridge into; relate must say so rather than green-light a weld onto a wall.
+    ha, hb = handles._find_handle(a_name), handles._find_handle(b_name)
+    owner_a = bpy.data.objects.get(ha.get("bb_owner", "")) if ha else None
+    owner_b = bpy.data.objects.get(hb.get("bb_owner", "")) if hb else None
+    oea = _open_edge_count(owner_a, ha.get("bb_vgroup", "")) if ha else None
+    oeb = _open_edge_count(owner_b, hb.get("bb_vgroup", "")) if hb else None
+    a_open = oea is None or oea > 0   # unknown → don't cry wolf
+    b_open = oeb is None or oeb > 0
+    a_bnd = "open rim" if a_open else "closed cap"
+    b_bnd = "open rim" if b_open else "closed cap"
+
+    # A weld candidate: planes roughly parallel, facing each other, similar size —
+    # AND both endpoints are open rims (can't bridge into a wall).
+    join_ready = (angle <= 15.0 and dot < 0 and ratio >= 0.8 and a_open and b_open)
+
+    out = {
         "success": True, "a": a_name, "b": b_name,
         "center_gap_cm": round(gap * 100, 2),
         "axis_angle_deg": round(angle, 1),
@@ -262,8 +300,15 @@ def feel_relate(params):
         "diam_a_cm": round(ra * 2 * 100, 2),
         "diam_b_cm": round(rb * 2 * 100, 2),
         "size_match": round(ratio, 3),
+        "a_boundary": a_bnd,
+        "b_boundary": b_bnd,
         "join_ready": join_ready,
     }
+    if not (a_open and b_open):
+        which = ", ".join(n for n, ok in ((a_name, a_open), (b_name, b_open)) if not ok)
+        out["warning"] = (f"{which} sits on a CLOSED cap — no open rim to weld into. "
+                          f"Uncap it (delete the cap face) before bridging.")
+    return out
 
 
 TOOLS = {
