@@ -75,6 +75,47 @@ must re-apply it to the twin by hand. A one-call `object op=mirror_edit name=<sr
 +25° — mirror it right" a single move. Post-hoc twin-matching, not a live mode — cheaper than
 G14 proper and independently useful.
 
+## G49 — no surface-tangential vertex move (edge slide / relax) 🪡
+
+Every vertex mover the `edit` verb has — `proportional_move`, `inflate`, `jitter` — displaces
+verts in a fixed direction (an axis, or the per-vert normal). None moves verts **along the
+surface**: there is no **edge/vertex slide** (slide a loop or vert tangentially, shape
+preserved) and no **relax/redistribute** (even out vertex spacing over the existing form). So
+edge flow can only be changed by changing the shape. Surfaced trying to relocate a radial
+topology anchor ~1cm to a surface's natural high point: `proportional_move` toward the target
+just dragged the skin forward and across the symmetry plane (a *shape* edit) and never
+reflowed the topology. The agent can say "move these verts *through space*" but never "move
+them *over the surface*" — the move every retopo task actually needs.
+
+## G50 — no retopology / face-authoring primitives 🧵
+
+There is no way to **author or relocate edge flow** on an existing surface: no poke/inset/spin
+to create a radial center (a pole), no grid-fill, no poly-build (hand-place verts/faces), no
+guided or automatic retopology, no remesh. With G49 this closes the door completely — the
+agent cannot move a pole, lay a clean radial layout where the form wants one, or repair
+stretched quads at a feature. This is the concrete, primitive-level content of the long-carried
+**Retopology** build-out below; logging it separately because it blocks a real, recurring task
+(clean local edge flow at a feature you've located) long before the full-character pipeline.
+
+## G51 — `poles` (and id-based reads) hand back ids, not locations 📍
+
+`feel method=poles` lists poles by vertex **id** and a coarse region word ("top-front"); on a
+1380-pole base mesh that is unactionable — you cannot find or target *a specific* pole (e.g.,
+the radial center sitting under a feature). Same failure shape as the broad-swell discussion:
+a read **names** structure it cannot **point at**. A localizing read would carry world
+coordinates (and ideally cluster adjacent poles into the radial centers they form), so the
+agent can act on the one it means instead of being handed an id it can't see.
+
+## G52 — `target=` doesn't move the edit target across objects 🔀
+
+With one mesh already in Edit Mode, running `select`/`edit` ops with `target=<other mesh>`
+reported bmesh selection counts but left the other mesh in OBJECT mode — so the result was not
+a *live edit-mode selection*, and `feel op=anchor` returned "no live selection." Recovery
+needed an explicit `object op=mode name=… mode=EDIT`. `target=X` is meant to guarantee X is the
+thing being edited; across a mode boundary (another object holding Edit Mode) it silently
+doesn't. Multi-object edit state isn't reconciled — found while moving from `Body` to its
+imported copy `Body2`.
+
 ## Carried over — bigger build-outs (not yet started)
 
 - **Multires + dyntopo** as real multi-level sculpt targets — the proper organic-sculpt
