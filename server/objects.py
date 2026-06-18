@@ -132,6 +132,10 @@ def join_objects(names: list, merge_threshold: float = None) -> str:
         m = result.get("merged")
         if m:
             main += f"  merged {m['merged']} verts (welded to {m['verts_after']})"
+        rh = result.get("rehomed_handles")
+        if rh:
+            main += (f"  re-homed {len(rh)} handle(s) → '{result['result_object']}'"
+                     f" ({', '.join(rh)})")
     else:
         main = result.get("error", "failed")
     return main + _status(result)

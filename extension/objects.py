@@ -168,9 +168,25 @@ def join_objects(params):
         merged = {"threshold": threshold, "verts_before": before,
                   "verts_after": after, "merged": before - after}
 
+    # G63 — re-home handles. join() deletes the consumed objects and folds their verts
+    # (and vertex groups — names are globally unique, so no collision) into `result`.
+    # A handle whose owner was a consumed object is now orphaned; re-point its bb_owner
+    # to the surviving result, keeping its name + vgroup so bridge/relate find it again.
+    rehomed = []
+    if result is not None:
+        consumed = {n for n in names if n != result.name}
+        coll = bpy.data.collections.get("Handles")
+        if coll and consumed:
+            for h in coll.objects:
+                if h.get("bb_handle") and h.get("bb_owner") in consumed:
+                    h["bb_owner"] = result.name
+                    rehomed.append(h.name)
+
     out = {"success": True, "result_object": result.name if result else None, "joined": names}
     if merged is not None:
         out["merged"] = merged
+    if rehomed:
+        out["rehomed_handles"] = rehomed
     return out
 
 

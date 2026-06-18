@@ -215,13 +215,17 @@ closed cap is reported per-endpoint, forces `join_ready=false`, and emits a warn
 which handle and to uncap it first. **Delete once dogfooded live.** (Left for later: the
 same open/closed line on the generic `feel op=handle` read — relate is where the bug bit.)
 
-## G63 — `object op=join` orphans handles instead of migrating them 🔗
+## G63 — `object op=join` orphans handles instead of migrating them 🔗 🛠️ IMPLEMENTED — pending live dogfood
 
 After joining two meshes, their handles still claim their **old owners** (`big_cyl_face1` →
 `Cylinder.001`, now gone), so `edit op=bridge` refused the loops as "cross-object" even
 though they were now in one mesh. The agent had to prune and re-mint via `feel op=assembly`.
-Handles should **follow their verts into the merged object** on join (re-point owner, keep
-the name), or join should report which handles it re-homed.
+
+**Implemented** in `object op=join`: after the join, every handle whose owner was a
+consumed object is re-pointed to the surviving result (name + vgroup kept — vgroups carry
+into the joined mesh and their names are globally unique, so no collision). The status
+line reports which handles were re-homed. `bridge`/`relate` now find them on the merged
+mesh without a re-mint. **Delete once dogfooded live.**
 
 ## G64 — `feel op=assembly` (and the connection reads) are mesh-only, blind to live curves 👁️
 
