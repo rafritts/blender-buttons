@@ -22,17 +22,24 @@ def feel_assembly(targets: str = "", group: str = "") -> str:
         return result.get("error", "failed")
 
     objs = result["objects"]
-    minted = sum(1 for o in objs for b in o.get("boundaries", []) if not b["reused"])
+    minted = sum(1 for o in objs for b in o.get("boundaries", []) if not b.get("reused") and b.get("handle"))
     lines = [f"assembly — {len(objs)} object(s), {minted} new handle(s) minted:"]
     for o in objs:
         if o.get("skipped"):
             lines.append(f"  {o['name']:<18} — skipped ({o['skipped']})")
             continue
         s = o["size_m"]
-        lines.append(f"  {o['name']:<18} {s[0]} × {s[1]} × {s[2]} m")
+        kind = f"  [{o['kind']}]" if o.get("kind") else ""
+        lines.append(f"  {o['name']:<18} {s[0]} × {s[1]} × {s[2]} m{kind}")
         if not o["boundaries"]:
             lines.append("      (closed — no open boundaries)")
         for b in o["boundaries"]:
+            if b.get("evaluated"):  # G64 — curve surface, read-only (no handle minted)
+                lines.append(
+                    f"      ↳ {'(curve rim)':<22} ◌ read-only  {b['verts']:>3} verts  "
+                    f"{b['circ_cm']:>6}cm  {_pt(b['point'])}"
+                )
+                continue
             mark = "↻ exists" if b["reused"] else "✚ minted"
             lines.append(
                 f"      ↳ {b['handle']:<22} {mark}  {b['verts']:>3} verts  "
@@ -46,7 +53,7 @@ def feel_assembly(targets: str = "", group: str = "") -> str:
             lines.append(f"      {p['a']} ↔ {p['b']:<14} {t}")
     # G9 follow-up: the minted boundary handles are now addressable — point at the ops
     # that consume them, so the read isn't a dead end.
-    handle_names = [b["handle"] for o in objs for b in o.get("boundaries", [])]
+    handle_names = [b["handle"] for o in objs for b in o.get("boundaries", []) if b.get("handle")]
     if handle_names:
         lines.append(
             "  → next: `feel op=map handle=" + handle_names[0] + "` (what an opening "

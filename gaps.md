@@ -227,13 +227,22 @@ into the joined mesh and their names are globally unique, so no collision). The 
 line reports which handles were re-homed. `bridge`/`relate` now find them on the merged
 mesh without a re-mint. **Delete once dogfooded live.**
 
-## G64 — `feel op=assembly` (and the connection reads) are mesh-only, blind to live curves 👁️
+## G64 — `feel op=assembly` (and the connection reads) are mesh-only, blind to live curves 👁️ 🛠️ IMPLEMENTED — pending live dogfood
 
 You author a connector as a **curve datablock** but can only *verify* it as a **mesh** —
 `feel op=assembly` returns "not a mesh / not found" for a live curve, so the agent must
-`object op=convert` to even see the connection it just made. The authoring representation
-and the verification representation don't overlap. Assembly/relate should evaluate a curve's
-*beveled* surface (its `to_mesh()` eval) without a destructive bake.
+`object op=convert` to even see the connection it just made.
+
+**Implemented** in `feel op=assembly`: the target resolver now accepts meshable non-mesh
+types (CURVE/SURFACE/FONT/META); a non-mesh object's boundaries are read from its
+**evaluated, beveled `to_mesh()`** (non-destructive — `to_mesh_clear()` after) and
+reported read-only, marked `[curve (evaluated, read-only)]` with `◌ read-only` rims. They
+are **not minted** — the eval mesh is ephemeral, so there's no persistent vgroup to anchor
+a Class-A handle (the honest limit; `object op=convert` is still the path to mintable,
+bridgeable geometry). The agent can now *see* the connection without baking it. **Delete
+once dogfooded live.** (Left open: `relate` still takes minted handles only — a curve has
+none — so curve-to-mesh alignment still needs a convert; mirror the eval read into relate
+later if it's worth it.)
 
 ## G65 — nothing reads *curve/connection quality*; verification sees watertight, not grace 📐
 

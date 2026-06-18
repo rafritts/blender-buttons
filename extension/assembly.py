@@ -34,38 +34,56 @@ from .topology import _boundary_loops
 
 # ── target resolution ─────────────────────────────────────────────────────────
 
+# G64 — types that yield a surface via to_mesh(): a live curve/surface/text/meta can
+# be READ (its beveled boundaries reported) without a destructive object op=convert.
+_MESHABLE = {'MESH', 'CURVE', 'SURFACE', 'FONT', 'META'}
+
+
 def _mesh_targets(targets, group):
     """Resolve the object set: explicit `targets` (comma names) > `group` (collection)
-    > all visible scene meshes. Returns (objects, error)."""
+    > all visible scene meshes/curves. Returns (objects, error). Includes meshable
+    non-mesh types (curves &c) so assembly can read a live connector's surface."""
     if targets:
         objs, missing = [], []
         for nm in (t.strip() for t in targets.split(",")):
             if not nm:
                 continue
             o = bpy.data.objects.get(nm)
-            if o is None or o.type != 'MESH':
+            if o is None or o.type not in _MESHABLE:
                 missing.append(nm)
             else:
                 objs.append(o)
         if missing:
-            return [], f"not a mesh / not found: {', '.join(missing)}"
+            return [], f"not a mesh/curve / not found: {', '.join(missing)}"
         return objs, None
     if group:
         coll = bpy.data.collections.get(group)
         if coll is None:
             return [], f"collection '{group}' not found"
-        return [o for o in coll.objects if o.type == 'MESH'], None
-    return [o for o in bpy.context.scene.objects if o.type == 'MESH'], None
+        return [o for o in coll.objects if o.type in _MESHABLE], None
+    return [o for o in bpy.context.scene.objects if o.type in _MESHABLE], None
 
 
 # ── op=assembly ────────────────────────────────────────────────────────────────
 
 def _object_loops(obj):
-    """Open boundary loops of obj's cage, each as {indices, centroid (world),
-    circ_cm, region}. Indices are into obj.data.vertices (the mint path reads them
-    back the same way)."""
+    """Open boundary loops of obj's surface, each as {indices, centroid (world),
+    circ_cm, region}. For a MESH the indices are into obj.data.vertices (the mint
+    path reads them back the same way). For a CURVE/SURFACE/&c (G64) the surface is
+    its evaluated, beveled `to_mesh()` — read non-destructively, so the indices are
+    EPHEMERAL (eval-only) and must NOT be used to mint a persistent handle."""
     bm = bmesh.new()
-    bm.from_mesh(obj.data)
+    eval_obj = None
+    if obj.type == 'MESH':
+        bm.from_mesh(obj.data)
+    else:
+        dg = bpy.context.evaluated_depsgraph_get()
+        eval_obj = obj.evaluated_get(dg)
+        me = eval_obj.to_mesh()
+        if me is None:
+            bm.free()
+            return []
+        bm.from_mesh(me)
     bm.verts.ensure_lookup_table()
     bm.edges.ensure_lookup_table()
     bm.faces.ensure_lookup_table()
@@ -80,6 +98,8 @@ def _object_loops(obj):
                     "circ_cm": round(per * 100, 1),
                     "region": region_words(bbox, centroid)})
     bm.free()
+    if eval_obj is not None:
+        eval_obj.to_mesh_clear()
     return out
 
 
@@ -99,15 +119,27 @@ def feel_assembly(params):
             continue
         bb = world_bbox(obj)
         size = [round(bb[3] - bb[0], 3), round(bb[4] - bb[1], 3), round(bb[5] - bb[2], 3)]
+        # G64 — a non-mesh surface (curve/&c) is read from an ephemeral evaluated mesh,
+        # so its loops can be REPORTED but not minted (no persistent vgroup to anchor).
+        meshable_nonmesh = obj.type != 'MESH'
         loops = []
         for lp in _object_loops(obj):
+            if meshable_nonmesh:
+                loops.append({"handle": None, "evaluated": True,
+                              "verts": len(lp["indices"]), "circ_cm": lp["circ_cm"],
+                              "region": lp["region"],
+                              "point": [round(c, 5) for c in lp["centroid"]]})
+                continue
             base = f"{obj.name}.{lp['region']}"
             m = handles.mint_boundary_handle(obj, lp["indices"], base)
             loops.append({"handle": m.get("name", base), "reused": m.get("reused", False),
                           "verts": len(lp["indices"]), "circ_cm": lp["circ_cm"],
                           "region": lp["region"],
                           "point": [round(c, 5) for c in lp["centroid"]]})
-        per_object.append({"name": obj.name, "size_m": size, "boundaries": loops})
+        rec = {"name": obj.name, "size_m": size, "boundaries": loops}
+        if meshable_nonmesh:
+            rec["kind"] = f"{obj.type.lower()} (evaluated, read-only — object op=convert to mint/bridge)"
+        per_object.append(rec)
 
     pairs = []
     for i in range(len(objs)):
