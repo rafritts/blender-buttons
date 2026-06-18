@@ -75,6 +75,34 @@ must re-apply it to the twin by hand. A one-call `object op=mirror_edit name=<sr
 +25° — mirror it right" a single move. Post-hoc twin-matching, not a live mode — cheaper than
 G14 proper and independently useful.
 
+## G53 — a mesh's facing/orientation isn't handed back; the agent re-derives it every read 🧭 OPEN
+
+Every read this session, the agent burned reasoning re-deriving the same fact — "front = −Y,
+up = +Z, right = −X" — from the world bbox plus a handedness cross-product done in its head.
+That's repeated, error-prone (the cross-product is easy to flip), and exactly the
+dead-reckoning the server exists to kill: a *signed local frame* is ground truth the geometry
+already determines, but no read states it. So the agent guesses orientation, and a flipped
+guess silently poisons every downstream left/right/front call (e.g. grabbing the wrong half
+of a mirrored pair, or casting `feel op=aim` from the wrong face).
+
+**The ingredients are already computed.** `feel`'s cheap bundle includes `symmetry` (best
+mirror plane) and `frame` (intrinsic principal axes). A facing read is a thin synthesis on
+top: lateral axis = the symmetry plane's normal; up axis = the principal axis nearest world Z;
+front = the remaining axis, *signed* toward the feature-dense / mass-forward side. Near-free —
+it rides data the bundle already pays for.
+
+**Discipline (legible, not divining — per [[feel_legibility_not_divination]]).** Report the
+frame only when the geometry *supports* an inference (a clear symmetry plane + separated
+principal axes), and **state the evidence** ("front −Y: shallowest axis, opposite the
+symmetry-broken feature mass"). When ambiguous — a mug, a sphere, a radially-symmetric part —
+say "no clear facing," don't invent one. The point is to hand back a defensible frame, not to
+pretend every mesh has a front.
+
+**General primitive, not "character facing."** An *orientation-frame* read: given any mesh,
+name its signed local axes (which world axis is its long/up axis, which is its
+symmetry/lateral axis, the sign of its front) with the evidence, or abstain. Natural home: a
+line in `object describe` and/or `feel method=frame`.
+
 ## Carried over — bigger build-outs (not yet started)
 
 - **Multires + dyntopo** as real multi-level sculpt targets — the proper organic-sculpt
