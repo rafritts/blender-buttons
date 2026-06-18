@@ -2,10 +2,15 @@ import socket
 import json
 from mcp.server.fastmcp import FastMCP
 
+from server._instructions import INSTRUCTIONS
+
 ADDON_HOST = "localhost"
 ADDON_PORT = 8765
 
-mcp = FastMCP("blender-buttons")
+# `instructions` is returned at MCP initialize; the spec lets the client inject it
+# into the model's system prompt. It bootstraps baseline knowledge of this server
+# and points at the `guidance://llms` resource (server/resources.py) for depth.
+mcp = FastMCP("blender-buttons", instructions=INSTRUCTIONS)
 
 # SPEC-05 cutover switch. When False (default) the 137 flat tools are pruned from
 # the MCP surface after the verbs register, leaving ~15 verb tools. Set True to

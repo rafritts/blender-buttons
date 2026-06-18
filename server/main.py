@@ -52,6 +52,7 @@ from server import (  # noqa: F401
 # else so `tools/list` is ~15 schemas instead of 137. Flip EXPOSE_FLAT_TOOLS in
 # _core to keep the flat tools registered alongside the verbs (debug / staging).
 from server import verbs  # noqa: F401  — registers the verbs
+from server import resources  # noqa: F401  — registers the guidance:// resource
 from server._core import EXPOSE_FLAT_TOOLS
 
 if not EXPOSE_FLAT_TOOLS:
