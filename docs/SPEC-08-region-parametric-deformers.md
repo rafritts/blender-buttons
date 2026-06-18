@@ -1,9 +1,12 @@
 # SPEC-08 — Region-parametric deformers: put the sculpt skill in the tool
 
 _Status: Proposed 2026-06-17. **Phase 1 (Tier A — gravity drape) + the eyeless verify
-reads implemented 2026-06-17, untested — awaiting a live-build dogfood.** Tiers B–E and
-the mask/bake shared infra remain open. Sourced from the bust enlarge → gravity-shaping
-dogfood — see gaps.md G46 (and the "cone, not teardrop" reflection)._
+reads (G37 silhouette, G41 protrusion, G47 section) shipped and DOGFOOD-VERIFIED
+2026-06-17 — the gravity drape de-coned the G-cup bust (apex sank −5.25cm, silhouette
+read teardrop). Those three reads are now closed/deleted in gaps.md.** Tiers B–E and the
+selection→mask / frame-step-bake / apply-sim shared infra remain open. Sourced from the
+bust enlarge → gravity-shaping dogfood — see gaps.md G46 (and the "cone, not teardrop"
+reflection)._
 
 ## The problem
 
@@ -130,12 +133,17 @@ closes — without them the agent is tuning magnitude against partial proxies.
 
 ## Build order — by tryability
 
-1. **Mesh Filter `gravity`, region = whole active mesh or a sphere.** ✅ DONE (untested) —
-   shipped as `sculpt brush=gravity` (a bmesh drape: pin the top, ramp the fall by height),
-   not Blender's modal mesh-filter operator, to match the programmatic-bmesh sculpt family
-   and stay reliable headless. inflate/smooth already exist as brushes. Re-run the bust:
-   `sculpt brush=gravity target=… at_x/y/z=<breast apex> radius=… strength=0.03 pin=0.3`,
-   then `feel op=silhouette axis=X` to see if it hangs.
+1. **Mesh Filter `gravity`, region = whole active mesh or a sphere.** ✅ DONE & VERIFIED —
+   shipped as `sculpt brush=gravity` (a bmesh drape), not Blender's modal mesh-filter
+   operator, to match the programmatic-bmesh sculpt family and stay reliable headless.
+   Weight model (v2, after the first dogfood showed a height-ramp + 3D radial falloff did
+   NOT de-cone): the free mass below the pin line falls at **full strength** past a short
+   transition band (so the fullest point descends, not just the bottom stretching), and the
+   sphere's falloff is **lateral-only** (horizontal distance from the gravity axis) so the
+   lower pole isn't pinned for being low. Per-lobe spheres for a symmetric pair (the tips sit
+   at the lateral edge of a single centered sphere). Verified on the bust: one sphere per
+   breast at `strength=0.05 pin=0.3` sank the apex −5.25cm into a teardrop (`feel op=silhouette
+   axis=X` read top-flat/lower-full/bottom-curl).
 2. **Mask from selection** → filters respect a pinned region (chest stays, breast falls).
    Still TODO — gravity scopes by sphere/whole-mesh today, not by an arbitrary selection mask.
 3. **Elastic Deform brush** — drop-in `brush=elastic` on `sculpt`.

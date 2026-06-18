@@ -123,33 +123,6 @@ fall back to the sole/active camera, or both require explicit naming with the sa
 message. Dogfood: balloon hero render — `check_framing` (no arg) reported "no camera" seconds
 before `render` (no arg) wrote a 1.97 MB frame.
 
-## G37 — no projected-**silhouette** read; 2D shape must be reconstructed from orthogonal 1D sweeps 👤 🔨 IMPLEMENTED (`feel op=silhouette`) — awaiting dogfood
-
-`feel op=profile` gives a **1D** width sweep (bounding girth per band along one axis) and
-`op=sections` gives slice **contour counts** — but nothing returns the **2D projected outline**
-of the form along a view axis (its orthographic shadow). To answer the most natural perception
-question — "what is the gross shape of this?" — the agent must fire several reads and then
-*mentally cross-multiply two orthogonal width-tables into a 2D silhouette*. That reconstruction
-is exactly the dead-reckon-from-scalars the server exists to eliminate, and it's lossy: the
-per-band girth is a **bounding** width, so it can't by itself tell a thin horizontal crossbar
-from a tapering V — a concavity is invisible until you correlate it against the other axis's
-sweep. It happened to be enough here, but it's brittle (a different pose defeats the
-bounding-width heuristic).
-
-**Implemented (untested):** `feel op=silhouette axis=X|Y|Z [res] [selection]` — projects every
-vert onto the plane perpendicular to the view axis and rasterizes a coarse `#`/`.` occupancy
-grid (`extension/objects.py::get_silhouette`). Pure geometry, no render; reads drape-vs-projection
-(teardrop vs cone) directly. Still to verify on the live build, then delete this entry. *Original:*
-
-**General fix:** a `feel op=silhouette` (a.k.a. `outline`) — deterministic orthographic
-projection of the mesh onto a plane (`axis=X|Y|Z`), returned as a **coarse occupancy grid or a
-boundary polygon**, coarse-to-fine, in scene units. Pure geometry, **not** vision — it keeps the
-no-render-readback thesis intact while letting the agent read the projected form *directly*
-instead of triangulating it. Complements `profile` (1D girth) and `sections` (slice counts) with
-the missing 2D read. Dogfood: identifying an unnamed imported mesh (`polySurface25`) blind from
-ground truth — correctly read as a T-posed human figure, but only by hand-assembling the
-silhouette from a Z-profile + an X-profile + section counts + curvature + symmetry.
-
 ## G38 — no salient-**feature discovery**; `region_form` reads "what's here?" but nothing reads "where are the features?" 🔎 OPEN
 
 The form scalars `region_form` returns are genuinely good — on a female base mesh it cleanly
@@ -201,32 +174,6 @@ be unambiguous without the operator first checking `rotation_deg` and mentally u
 locating the nose on the base mesh — two casts missed the head entirely because the bbox frame was
 rotated.
 
-## G41 — no **absolute protrusion** read; `region_form` is shape-relative and can't confirm a size change 📏 🔨 IMPLEMENTED (`feel method=protrusion`) — awaiting dogfood
-
-`region_form` measures a patch's form **relative to its own re-fitted plane** — so after
-`edit op=inflate` grew the bust ~1.4cm along normals, it reported **byte-identical** numbers
-(centre−rim 22.36mm, +2.76cm/−4.44cm) because the cap grew roughly self-similarly and its plane
-re-fit with it. Correct by its own definition, but it means **`region_form` cannot answer "did
-this region get bigger / how far does it now stick out?"** The only reason "bigger" was
-verifiable here is that the bust is the mesh's global front-most point, so the **world bbox**
-front bound shifted (−0.1258 → −0.1398) and exposed the delta. That trick only works when the
-edited region is the global extremum on some axis; enlarge a non-extreme bulge (one breast, a
-cheek, a belly) and neither `region_form` nor the bbox reports the change.
-
-**Implemented (untested):** `feel method=protrusion` (a topology method, sibling of `region_form`
-— `extension/topology.py::_m_protrusion`). Fits the base plane to the **neighbourhood ring** (the
-unselected verts bordering the selection, *not* the patch itself), then reports the selection's
-signed rise above it in cm (max / mean / recess + apex). An absolute ruler that moves when the form
-grows — snapshot before, read after, diff. Verify on the live build, then delete this entry. *Original:*
-
-**General fix:** an **absolute protrusion** read — the signed distance of a selected region from
-the surrounding body surface (or a fitted base plane of the *neighbourhood*, not the patch
-itself), as a before/after-able scalar in cm. That's the measure that makes "make it 2cm bigger"
-and "confirm it grew" first-class, and it complements `region_form` (relative shape) the way an
-absolute ruler complements a curvature gauge. Deterministic geometry, not vision. Dogfood:
-enlarging the bust — the change was real but only on-axis-lucky to catch (front bbox bound shifted
-−0.1258 → −0.1381); an off-axis edit would have been invisible to every existing read.
-
 ## G43 — no **region-coherent feature selection**; you can't select "a breast / its lower half" as a unit 🫳 OPEN
 
 The action-side twin of G38. Even *knowing* a feature is there, there is no way to select it **as a
@@ -276,7 +223,7 @@ local change is checked locally and temporally. Builds directly on the now-live 
 reads. Dogfood: the bust edit passed bbox + global-symmetry while being asymmetric and malformed,
 and confirming "it grew, and stayed symmetric" needed the human's viewport.
 
-## G46 — no **region-parametric / physics deformers**; organic shaping must be hand-sculpted blind 🜄 SPEC-08 — Tier A SHIPPED (untested), Tiers B–E open
+## G46 — no **region-parametric / physics deformers**; organic shaping must be hand-sculpted blind 🜄 SPEC-08 — Tier A SHIPPED & verified (de-cones), Tiers B–E open
 
 The only deformers are stroke brushes (`sculpt` grab/draw/inflate) and `edit
 proportional_move` — *expressive* tools whose correctness lives in a seeing operator's
@@ -300,39 +247,21 @@ full Soft-Body/Cloth+bake last. Shared infra: **selection→vgroup/mask**, **fra
 Dogfood: enlarging the bust to a *hanging* G cup — the hand-grab coned it, and the gravity
 the human asked for had no tool to run.
 
-**Progress:** Tier A (the lead) is implemented (untested): `sculpt brush=gravity` — pins the top
-of the region and lets the lower mass fall along world -Z, ramped by height (top frozen → bottom
-falls), producing a hanging/teardrop form by construction. Scope with `at`+`radius` (one breast)
-or omit the point to drape the whole mesh; `strength`=fall in m, `pin`=top fraction frozen
-(`extension/sculpt.py::sculpt_gravity`). The eyeless verify-loop reads it composes with also
-landed (untested): G37 `feel op=silhouette`, G41 `feel method=protrusion`. **Still open:** Tier B
+**Progress:** Tier A (the lead) is shipped and **dogfood-verified**: `sculpt brush=gravity` — pins
+the top of the region and translates the free mass down world -Z (full fall below a transition
+band just under the pin line; lateral-only falloff softens the sphere's horizontal seam without
+pinning the lower pole). On the coned G-cup bust it **de-coned** it: the apex Z sank 1.349 → 1.296
+(−5.25cm) while the front projection held, and the side `silhouette` read top-flat / lower-full /
+bottom-curl — a teardrop, not a cone. Scope with `at`+`radius` (one breast) or omit the point for
+the whole mesh; `strength`=fall in m, `pin`=top fraction frozen (`extension/sculpt.py::sculpt_gravity`).
+The eyeless verify-loop reads it composes with also shipped and verified (now deleted as closed
+gaps): silhouette (`feel op=silhouette`, edge-rasterized so it's gap-free), absolute protrusion
+(`feel method=protrusion`), cross-section perimeter/area (`feel op=section`). **Still open:** Tier B
 Cloth Filter, Tier C Elastic Deform brush, Tier D Lattice cage, Tier E Soft-Body/Cloth+bake — all
 need the **frame-step/bake** + **apply-sim** shared infra (no timeline control exists yet), so they
-stay deferred until the lead primitive proves out. **selection→vgroup/mask** infra also still TBD
-(gravity scopes by sphere/whole-mesh today, not by an arbitrary mask).
-
-## G47 — no cross-section **perimeter / area** read; circumference must be guessed from bbox widths 📐 🔨 IMPLEMENTED (`feel op=section`) — awaiting dogfood
-
-`feel op=profile` reports each slice's bbox `X_width + Y_width` (their sum, labelled
-"girth"); `op=sections` reports open/closed coverage % — neither gives the actual **contour
-perimeter** or **enclosed area**. Gauging the bust's cup size (bust − underbust
-*circumference*) forced an ellipse-perimeter approximation over the bbox widths (circ ≈
-bbox_sum × ~1.57) — good to ±a cup, not a measurement. Over-fine profile bands made it worse:
-bands thinner than the vert spacing sampled partial rings, so "girth" bounced 0.30 → 0.52m
-on the same torso.
-
-**Implemented (untested):** `feel op=section axis=X|Y|Z [sections] [min] [max]`
-(`extension/objects.py::get_section`). Slices the actual mesh with a plane at each position
-(`bmesh.ops.bisect_plane`), sums the cut-contour edge lengths (perimeter ≈ circumference) and
-shoelaces the enclosed area, per slice, with narrowest/widest flagged and a multi-loop flag for
-branching sections. Verify on the live build (esp. multi-loop area on a torso), then delete. *Original:*
-
-**General fix:** a true cross-section **perimeter + enclosed-area** read along an axis (sum
-the edge lengths of the actual section contour; shoelace for area), so
-girth / circumference / cross-sectional area are first-class — useful far beyond bust math
-(pipe girth, limb circumference, any volume or structural reasoning). Deterministic geometry,
-not vision. Dogfood: estimating cup size from Blender dims — the difference that *defines* a
-cup is a circumference difference, and there was no circumference to read.
+stay deferred until the lead proves out further. **selection→vgroup/mask** infra also still TBD
+(gravity scopes by sphere/whole-mesh today; the breast tips sit at the sphere's lateral edge, so
+draping both at once needs one sphere per lobe — a soft mask would let one call do both seamlessly).
 
 ## Carried over — bigger build-outs (not yet started)
 

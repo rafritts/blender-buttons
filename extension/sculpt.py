@@ -550,24 +550,40 @@ def sculpt_gravity(params):
         return {"error": "no verts in region"}
 
     mat = obj.matrix_world
-    zs = [(mat @ v.co).z for v, _ in hits]
+    world = [(v, mat @ v.co) for v, _ in hits]
+    zs = [w.z for _, w in world]
     zmin, zmax = min(zs), max(zs)
     pin_z = zmax - pin * (zmax - zmin)
-    span = pin_z - zmin
-    if span <= 1e-9:
+    free_span = pin_z - zmin
+    if free_span <= 1e-9:
         _exit_edit(obj)
         return {"error": "region has no vertical extent below the pin line to drape"}
+    # Transition band just below the pin line: the free mass ramps in over the top
+    # 30% of the free span, then falls at FULL strength below that. This translates
+    # the mass DOWN as a body (the fullest point descends) rather than only stretching
+    # the bottom — the fix for "gravity didn't de-cone" (the old linear-to-bottom ramp
+    # under-moved the apex).
+    band = 0.3 * free_span
 
     moved = 0
     max_drop = 0.0
-    for v, t in hits:
-        wz = (mat @ v.co).z
-        if wz >= pin_z:
+    for v, w in world:
+        if w.z >= pin_z:
             continue  # frozen attachment
-        # 0 at the pin line → 1 at the region bottom, smoothstepped for a soft seam.
-        vw = (pin_z - wz) / span
+        vw = min(1.0, (pin_z - w.z) / band)
         vw = vw * vw * (3.0 - 2.0 * vw)
-        rw = _falloff_weight(t, falloff) if scoped else 1.0
+        if scoped:
+            # LATERAL falloff only — horizontal distance from the gravity axis through
+            # `center`, ignoring Z. The old 3D falloff pinned the lower pole (far from
+            # center because it's LOW), killing exactly the verts that should fall most.
+            # Horizontal-only softens just the lateral seam; the vertical drape is the
+            # pin gradient's job.
+            dx = w.x - center.x
+            dy = w.y - center.y
+            th = min(1.0, ((dx * dx + dy * dy) ** 0.5) / radius)
+            rw = _falloff_weight(th, falloff)
+        else:
+            rw = 1.0
         drop = strength * vw * rw
         if drop == 0.0:
             continue

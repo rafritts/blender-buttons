@@ -421,9 +421,11 @@ def get_silhouette(params):
     """Orthographic projected outline along a view axis (gaps.md G37) — the 2D shape,
     read directly instead of cross-multiplying two 1D profile sweeps.
 
-    Pure geometry, NOT a render: project every vert onto the plane perpendicular to
-    `axis`, rasterize into a coarse occupancy grid, return it as a text map of '#'
-    (filled) / '.' (empty). Shows drape-vs-projection (teardrop vs cone) in one read.
+    Pure geometry, NOT a render: rasterize the mesh's EDGES onto the plane
+    perpendicular to `axis` into a coarse occupancy grid, returned as a text map of
+    '#' (filled) / '.' (empty). Shows drape-vs-projection (teardrop vs cone) in one
+    read. Edges (not just verts) are walked so the outline is gap-free — a vert-only
+    raster aliases to empty bands where vert-rings are spaced wider than a cell.
 
     axis:      view axis to look ALONG (X|Y|Z). Default X = the side view (Y-depth ×
                Z-height plane). The silhouette is the other two axes.
@@ -436,6 +438,7 @@ def get_silhouette(params):
     axis = params.get("axis", "X").upper()
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 0)
     others = [(i, n) for i, n in enumerate(['X', 'Y', 'Z']) if i != axis_idx]
+    ui, vi = others[0][0], others[1][0]
     res = max(4, min(120, int(params.get("res") or 32)))
     sel_only = bool(params.get("selection", False))
 
@@ -444,16 +447,15 @@ def get_silhouette(params):
     bm = bmesh.new()
     bm.from_mesh(obj.data)
     bm.transform(obj.matrix_world)
-    verts = [v for v in bm.verts if (v.select if sel_only else True)]
-    if not verts:
+    pts = [(v.co[ui], v.co[vi]) for v in bm.verts if (v.select if sel_only else True)]
+    if not pts:
         bm.free()
         return {"error": "no verts" + (" selected" if sel_only else "")}
-    us = [v.co[others[0][0]] for v in verts]
-    vs = [v.co[others[1][0]] for v in verts]
-    bm.free()
 
-    umin, umax = min(us), max(us)
-    vmin, vmax = min(vs), max(vs)
+    umin = min(p[0] for p in pts)
+    umax = max(p[0] for p in pts)
+    vmin = min(p[1] for p in pts)
+    vmax = max(p[1] for p in pts)
     uext = (umax - umin) or 1e-9
     vext = (vmax - vmin) or 1e-9
     # square-ish cells: res cells on the wider axis, the other axis proportional.
@@ -466,10 +468,27 @@ def get_silhouette(params):
         cell = vext / rows
         cols = max(1, round(uext / cell))
     grid = [[False] * cols for _ in range(rows)]
-    for u, w in zip(us, vs):
-        ci = min(cols - 1, int((u - umin) / uext * cols))
-        ri = min(rows - 1, int((w - vmin) / vext * rows))
+
+    def mark(u, w):
+        ci = min(cols - 1, max(0, int((u - umin) / uext * cols)))
+        ri = min(rows - 1, max(0, int((w - vmin) / vext * rows)))
         grid[ri][ci] = True
+
+    # Walk every (qualifying) edge in cell-sized steps so the projected outline is
+    # connected — no empty bands between vert-rings.
+    for e in bm.edges:
+        a, b = e.verts
+        if sel_only and not (a.select and b.select):
+            continue
+        ua, wa = a.co[ui], a.co[vi]
+        ub, wb = b.co[ui], b.co[vi]
+        steps = max(1, int(((ua - ub) ** 2 + (wa - wb) ** 2) ** 0.5 / cell) + 1)
+        for s in range(steps + 1):
+            f = s / steps
+            mark(ua + (ub - ua) * f, wa + (wb - wa) * f)
+    for u, w in pts:  # stray edgeless verts
+        mark(u, w)
+    bm.free()
     filled = sum(c for row in grid for c in row)
     # rows emitted high-v first so the text map reads top-down like the viewport.
     return {"success": True, "axis": axis, "u_label": others[0][1], "v_label": others[1][1],
