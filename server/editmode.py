@@ -569,6 +569,21 @@ def grow_selection(direction: str = "GROW", steps: int = 1, target: str = "") ->
     return main + _status(result)
 
 
+def flood_to_crease(angle: float = 25.0, max_verts: int = 20000) -> str:
+    """G43 — region-coherent selection. Flood out from the current seed selection across
+    the surface, halting at creases (dihedral ≥ angle) and mesh boundaries, so a feature
+    fills to its natural edge instead of a guessed box. Tune `angle` down for subtler
+    organic creases. Confirm capture with feel op=verify afterward."""
+    result = call_blender("flood_to_crease", {"angle": angle, "max_verts": max_verts})
+    if not result.get("success"):
+        return result.get("note") or result.get("error", "failed")
+    main = (f"flooded {result['seed_verts']} seed → {result['selected']} verts "
+            f"(crease ≥{result['angle_deg']}°)")
+    if result.get("capped"):
+        main += f"\n  ⚠ {result['note']}"
+    return main + _status(result)
+
+
 @mcp.tool()
 def select_between(axis: str = "Z", lo: float = 0.0, hi: float = 1.0,
                    action: str = "SELECT", extend: bool = False, target: str = "") -> str:

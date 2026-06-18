@@ -706,6 +706,71 @@ def grow_selection(params):
     return {"success": True, "direction": direction, "steps": steps}
 
 
+def flood_to_crease(params):
+    """G43 — region-coherent selection. Flood OUT from the current selection (the seed)
+    across the surface, halting at a CREASE (an edge whose dihedral angle ≥ `angle`) or a
+    mesh boundary, so a feature fills to its own natural edge — the under-breast crease,
+    the deltoid seam, a hard-surface panel — instead of a guessed coordinate box that
+    over/under-shoots (the band-bleeds-into-the-midriff failure).
+
+    angle: crease threshold in degrees (default 25). Lower = stops at subtler creases
+           (organic forms); higher = only hard edges halt it (the flood spreads further).
+    max_verts: safety cap (default 20000). If the flood hits it, the region did NOT
+           close — reported so it's not mistaken for a captured feature.
+
+    Reads + writes the live selection; needs a seed selected first. Pairs with
+    feel op=verify to confirm the flood actually bounded the feature."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode with a seed selection to flood from"}
+    thr = math.radians(float(params.get("angle", 25.0)))
+    max_verts = int(params.get("max_verts", 20000))
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    seed = [v for v in bm.verts if v.select]
+    if not seed:
+        return {"note": "nothing selected — select a seed vert/patch inside the feature first",
+                "selected": 0}
+
+    visited = {v.index for v in seed}
+    frontier = list(seed)
+    capped = False
+    while frontier:
+        v = frontier.pop()
+        for e in v.link_edges:
+            # A crease (or a mesh boundary) is a wall the flood does not cross.
+            if len(e.link_faces) == 2:
+                try:
+                    ang = e.calc_face_angle(0.0)
+                except (ValueError, RuntimeError):
+                    ang = 0.0
+            else:
+                ang = math.pi   # open boundary edge — hard stop
+            if ang >= thr:
+                continue
+            o = e.other_vert(v)
+            if o.index not in visited:
+                if len(visited) >= max_verts:
+                    capped = True
+                    break
+                visited.add(o.index)
+                o.select = True
+                frontier.append(o)
+        if capped:
+            break
+
+    _flush_vert_selection(bm)
+    bmesh.update_edit_mesh(obj.data)
+    out = {"success": True, "seed_verts": len(seed), "selected": len(visited),
+           "angle_deg": round(math.degrees(thr), 1), "capped": capped}
+    if capped:
+        out["note"] = (f"hit the {max_verts}-vert cap — the region did NOT close at a "
+                       f"crease; lower `angle` so a subtler crease halts the flood, or "
+                       f"the feature has no enclosing crease at this threshold")
+    return out
+
+
 def verify_selection(params):
     """G48 — capture verification. A plausible centroid certifies WHERE the selection
     sits, not WHAT it bounded; a sloppy band lands its centroid on the feature anyway,
@@ -1786,6 +1851,7 @@ TOOLS = {
     "select_between":     select_between,
     "grow_selection":     grow_selection,
     "verify_selection":   verify_selection,
+    "flood_to_crease":    flood_to_crease,
     "move_vertices":      move_vertices,
     "scale_vertices":     scale_vertices,
     "snap_loop":          snap_loop,

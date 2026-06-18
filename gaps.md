@@ -108,24 +108,6 @@ must report multi-lobed/saddle forms honestly rather than averaging them to "fla
 geometry, not vision. Dogfood: asked whether `feel` can discern face/bust/butt/navel on a base
 female mesh — yes to *measure* each once located, no to *find* them; the butt read "flat."
 
-## G43 — no **region-coherent feature selection**; you can't select "a breast / its lower half" as a unit 🫳 OPEN
-
-The action-side twin of G38. Even *knowing* a feature is there, there is no way to select it **as a
-feature**. The only routes are (a) dead-reckon coordinates into `select op=in_sphere center=…` —
-which failed outright: guessed bust-apex centers landed asymmetrically (one sphere on the breast
-flank, not the tip), and a 4cm pull coned it; or (b) a band+subtract dance (`by_axis` frontmost →
-`between` deselect below → deselect above) that **inevitably grabs the connecting torso** — the
-"under both breasts" selection swept up the whole sternum/upper-abdomen midriff and could not
-isolate the two lobes from the flesh bridging them. Blender's human answer is "click the lobe /
-select-linked / soft-select under the cursor" — the agent has no cursor and no form-aware select.
-
-**General fix:** region-coherent selection that snaps to a form's natural boundary — grow-to-crease,
-select-by-curvature-basin, or a **lobe handle** minted from one seed point that floods out to the
-feature's own edge (the under-breast crease), so "this breast's lower half" is a single addressable
-op rather than a coordinate guess or a band that bleeds into its neighbours. Dogfood: enlarging the
-bust — every attempt to select just the breast geometry either missed (guessed coords) or over-grabbed
-(band caught the midriff between/under the breasts).
-
 ## G45 — no **before/after region diff** to confirm a local edit did what was intended 🟢 OPEN
 
 A local sculpt edit needs a *local* verification, computed over just the edited region. The

@@ -11,13 +11,14 @@ from server import editmode, objects, rings, queries, handles
 from ._common import tag, unknown
 
 _OPS = ["all", "none", "object", "by_axis", "between", "boundary", "limb", "grow",
-        "shrink", "random", "in_sphere", "ring", "rings", "component_mode", "current"]
+        "shrink", "flood", "random", "in_sphere", "ring", "rings", "component_mode",
+        "current"]
 
 
 @mcp.tool(name="select")
 def select(
     op: Literal["all", "none", "object", "by_axis", "between", "boundary", "limb",
-                "grow", "shrink", "random", "in_sphere", "ring", "rings",
+                "grow", "shrink", "flood", "random", "in_sphere", "ring", "rings",
                 "component_mode", "current"],
     # object selection
     name: tag(str, "[object] object name to select") = "",
@@ -38,6 +39,9 @@ def select(
     which: tag(str, "[limb] cap-region substring filter (e.g. 'top-left'); empty = every protrusion") = "",
     # grow / shrink
     steps: tag(int, "[grow/shrink] number of steps") = 1,
+    # flood (grow-to-crease)
+    angle: tag(float, "[flood] crease threshold (deg) the flood halts at (default 25; lower = subtler creases stop it)") = 25.0,
+    max_verts: tag(int, "[flood] safety cap; hitting it means the region didn't close at a crease") = 20000,
     # random
     fraction: tag(float, "[random] fraction 0..1 to select") = 0.2,
     seed: tag(int, "[random] random seed") = 0,
@@ -71,6 +75,10 @@ def select(
                     coordinates. delete it to remove the limb cleanly.  (which, extend)
       grow        — grow the selection             (steps)
       shrink      — shrink the selection           (steps)
+      flood       — region-coherent grow: flood from the seed selection out to the
+                    feature's natural edge, halting at creases (dihedral ≥ angle) and
+                    mesh boundaries — snaps to a form instead of a guessed box
+                    (angle, max_verts). Confirm with feel op=verify.
       random      — a random fraction              (fraction, seed)
       in_sphere   — verts inside a sphere   (center_x/y/z OR handle=<name>, radius,
                     action, extend) — extend=True unions onto the current selection.
@@ -98,6 +106,8 @@ def select(
         return editmode.grow_selection("GROW", steps, target)
     if o == "shrink":
         return editmode.grow_selection("SHRINK", steps, target)
+    if o == "flood":
+        return editmode.flood_to_crease(angle, max_verts)
     if o == "random":
         return editmode.random_select(fraction, seed)
     if o == "in_sphere":
