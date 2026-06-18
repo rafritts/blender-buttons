@@ -1,9 +1,21 @@
 # SPEC-09 — Selection as the construction anchor: no divined coordinates
 
-_Status: Proposed 2026-06-17. Sourced from the navel place-by-hand exercise on Body —
-and the divined-vs-measured thread that fell out of it (see gaps.md G47, G43, G38, and
-the "dead-reckoning a feel probe" reflection). Builds directly on the existing handle
-system (`extension/handles.py`, `feel op=handle`)._
+_Status: **IMPLEMENTED 2026-06-18** (Phases 1–3). Sourced from the navel place-by-hand
+exercise on Body — and the divined-vs-measured thread that fell out of it. Builds on the
+existing handle system (`extension/handles.py`, `feel op=handle`). What shipped:_
+
+- _**Phase 1** — `sculpt`'s `at_x/at_y/at_z` demoted to a clearly-marked ripcord; the
+  verb leads with `at=selection` / `handle=`._
+- _**Phase 2** — the live selection IS an implicit ephemeral handle: `feel op=anchor`
+  reads it (centroid snapped to surface + normal), and `sculpt at=selection` brushes
+  there. The ray-snap (`_snap_to_surface`, BVH find-nearest) lands the anchor ON the
+  skin instead of behind it. Backed by G47's `feel op=place` for the named/offset path._
+- _**Phase 3** — the selection is a bundle of affordances: `at=selection` also sources
+  the brush **radius** from the selection's extent and the push **direction** from its
+  normal when not given. Closed vocabulary (centroid · normal · extent), not infinite knobs._
+- _**Gating** — `feel op=verify` (G48) lets the agent confirm the selection captured the
+  feature before anchoring on it; `select op=flood` (G43) snaps the selection to the
+  feature's natural edge first. A measured anchor on a mis-captured region is still wrong._
 
 ## The problem
 

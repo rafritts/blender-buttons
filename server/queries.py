@@ -414,18 +414,20 @@ def selection_anchor(target: str = "") -> str:
         return result.get("error", "failed")
     p = result["point"]; n = result["normal"]
     return (f"selection anchor @ {result['region']} ({result['vert_count']} verts): "
-            f"point=[{p[0]}, {p[1]}, {p[2]}]  normal=[{n[0]}, {n[1]}, {n[2]}]\n"
-            f"  → sculpt at=selection / select in_sphere from_selection=true use this point")
+            f"point=[{p[0]}, {p[1]}, {p[2]}]  normal=[{n[0]}, {n[1]}, {n[2]}]  "
+            f"radius~{result.get('radius')}m (from extent {result.get('extent')})\n"
+            f"  → sculpt at=selection uses this point (radius defaults to the footprint)")
 
 
 def resolve_selection_anchor(target: str = ""):
-    """Resolve the live edit-mode selection to (point, normal, error) for a consuming
-    point-op (SPEC-09 Phase 2). The implicit ephemeral handle: centroid snapped to the
-    surface. Mirror of handles.resolve_point, but for the unnamed live selection."""
+    """Resolve the live edit-mode selection to (point, normal, radius, error) for a
+    consuming point-op (SPEC-09 Phase 2/3). The implicit ephemeral handle: centroid
+    snapped to the surface, with the selection's normal (push direction) and a radius
+    sourced from its extent. Mirror of handles.resolve_point, for the live selection."""
     result = call_blender("selection_anchor", {"target": target})
     if not result.get("success"):
-        return None, None, result.get("error", "no live selection to anchor on")
-    return result["point"], result["normal"], None
+        return None, None, None, result.get("error", "no live selection to anchor on")
+    return result["point"], result["normal"], result.get("radius"), None
 
 
 def place_on_surface(target: str, handle: str = "",

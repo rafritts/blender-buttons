@@ -78,10 +78,17 @@ def sculpt(
     b = brush.lower().strip()
     note = ""
     if at.strip().lower() == "selection":
-        pt, nrm, err = queries.resolve_selection_anchor(target)
+        pt, nrm, sugg_r, err = queries.resolve_selection_anchor(target)
         if err:
             return err
         at_x, at_y, at_z = pt
+        # Phase 3 — the selection is a bundle of affordances: source the brush RADIUS
+        # from its extent and the push DIRECTION from its normal when not given.
+        if radius is None and sugg_r:
+            radius = sugg_r
+            note += f"radius {round(sugg_r,4)}m from selection extent\n"
+        if b == "draw" and (normal_x, normal_y, normal_z) == (0.0, 0.0, 0.0) and nrm:
+            normal_x, normal_y, normal_z = nrm
     elif handle:
         pt, err, drift = handles.resolve_point(handle)
         if err:

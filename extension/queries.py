@@ -622,12 +622,21 @@ def selection_anchor(params):
         for v in sel:
             nv += mw.to_3x3() @ v.normal
         nrm_w = nv.normalized() if nv.length > 1e-9 else Vector((0.0, 0.0, 1.0))
+    # extent (world bbox of the selection) → the affordance a brush RADIUS sources from
+    # (SPEC-09 Phase 3): act 'over this footprint', not a guessed radius.
+    wco = [mw @ v.co for v in sel]
+    xs = [p.x for p in wco]; ys = [p.y for p in wco]; zs = [p.z for p in wco]
+    extent = (max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs))
+    # suggested radius = half the largest horizontal-ish extent (the footprint radius)
+    sugg_r = max(extent) / 2.0
     bbox = world_bbox(obj)
     return {
         "success": True,
         "point": [round(c, 5) for c in snap_w],
         "normal": [round(c, 4) for c in nrm_w],
         "centroid": [round(c, 5) for c in centroid_w],
+        "extent": [round(e, 5) for e in extent],
+        "radius": round(sugg_r, 5),
         "region": region_words(bbox, snap_w),
         "vert_count": len(sel),
     }
