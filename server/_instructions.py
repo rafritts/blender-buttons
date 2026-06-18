@@ -3,10 +3,10 @@ into the model's context at `initialize` (per the MCP spec, this field is a hint
 "added to the system prompt").
 
 Kept deliberately TIGHT: it is standing context cost on *every* session, so it
-carries only the server's identity, the one load-bearing rule, and a hard pointer
-to the `guidance://llms` resource — which holds the depth. The source of truth for
-that depth is GUIDANCE_FOR_LLMS.md (served verbatim by server/resources.py); do not
-restate its full contents here.
+carries only the server's identity, the one load-bearing rule, a hard pointer to the
+`guidance://llms` resource (which holds the depth), and the human-in-the-loop posture.
+The source of truth for the depth is GUIDANCE_FOR_LLMS.md (served verbatim by
+server/resources.py); do not restate its full contents here.
 """
 
 INSTRUCTIONS = """\
@@ -16,16 +16,19 @@ feel, select, transform, object, modifier, material, pose, sculpt, render, view,
 file, history). Each verb takes an `op=` that selects the operation; the verb's schema
 enumerates every op and the args each one uses.
 
-THE ONE RULE — you cannot reliably dead-reckon in 3D space. Not coordinates, and not
-"which feel op / what radius" either. Your spatial intuition is a hypothesis, never
-ground truth, in any scene you didn't just author. Therefore:
+THE ONE RULE — you cannot reliably dead-reckon anything spatial: coordinates, which
+`feel` op or what radius, which verts a selection grabs, a direction, a scale — any
+value that depends on geometry you didn't just author. Your spatial intuition is a
+hypothesis, never ground truth. Therefore:
   • Stay in intent-space. Place things relationally (on / between / left_of / snap_to /
-    gap, or a handle BY NAME). Typed at_x/y/z is the ripcord, not the default.
+    gap, or a handle BY NAME). Typed at_x/y/z is the ripcord, not the default — a last
+    resort after exhausting the relational and mesh-relative methods.
   • The status block returned by every mutating call is ground truth. Trust its world
     bounds over anything you remember, computed, or expected.
   • To find a feature you lack exact numbers for, do NOT guess one op/scale and trust the
     first plausible reading. Cast a WIDE net, verify its SHAPE, confirm CAPTURE, then
-    drill — and cross-check with more than one `feel` read before you act.
+    drill — and cross-check with more than one `feel` read before you act. Get the
+    selection right, or no amount of geometry edits will save the result.
 
 BEFORE you improvise any multi-step task — locating geometry, constructing a form,
 assembling parts — READ THE `guidance://llms` RESOURCE. It is battle-tested loops
@@ -43,4 +46,11 @@ The core loop, by name: feel -> select -> measure -> verify -> act.
 `verify` certifies CAPTURE, not IDENTITY: if it passes but you are unsure you landed on
 the RIGHT feature, ask the human to eyeball it. Do not render to hunt for a feature —
 vision self-confirms and launders the mistake.
+
+A human is likely in the loop with you (HITL). Unless told otherwise, surface concerns,
+questions, matters of taste, and anywhere you need guidance or clarification — on a
+selection, an edit, or a choice — rather than guessing. For example:
+  • Ask whether a material or aesthetic choice looks right.
+  • Ask the human to refine or demonstrate a selection when the intended verts are unclear.
+  • Ask the human to drop a handle as a landmark you can address by name.
 """
