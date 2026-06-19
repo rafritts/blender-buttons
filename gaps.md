@@ -119,63 +119,17 @@ centred front-to-back mass (→ front sign withheld). Kept OUT of the cheap bund
 is a distinct question the agent asks once, not per structure-read. Not yet wired into `object
 describe` (deferred; `feel method=facing` covers the need).
 
-## G59 — no geometry-bound curve: the agent is the only glue between curve and mesh → SPEC-10 ✍️
-
-The deepest gap. The `curve`/`tube` primitives are **blind to the geometry they connect**;
-`feel` reads the geometry but emits no curve. So to connect two openings the agent must, by
-hand: read each opening's centre + outward normal, do the trig in a script, and feed raw
-coordinates to a Bézier that has no idea the cylinders exist. There is **no primitive that
-anchors a curve endpoint to a handle with tangent = the opening's normal** — and that
-binding *is* every "organic" quality (leaving the pipe the way the pipe points, tangent
-continuity at the seam). Without it, "organic" reduces to dead-reckoned control points.
-
-This is net-new capability, not a fix — promoted to **[[SPEC-10]]** (geometry-bound,
-parametric, weld-aware connectors). Both human prompts that exercised it — "make it a
-singular elegant curve" and "connect it with a sequence of crazy curves" — are squarely
-SPEC-10, not any existing verb.
-
-## G60 — `proportional_move` bulges, not paths: no "lay geometry along a centreline" 🧊 → SPEC-10
-
-The region-constraint half shipped (`connected=` geodesic falloff + `freeze=<handle>`,
-verified live: a big pull on one shell drags 119 verts Euclidean → 64 geodesic, freeze
-holds the named rim). What's **still open → [[SPEC-10]]: displacement ≠ path.** Even
-constrained, `proportional_move` makes a *bulge*, not a *curve* — it pushes a blob one
-direction. There is no "lay this ring of geometry **along a centreline**, cross-sections
-kept perpendicular to the tangent." Bulging a weld will never read as a swept curve;
-that's the SPEC-10 sweep engine, not a falloff dial.
-
-## G61 — no sweep yields a hollow, weldable, vert-count-matched tube 🪈
-
-Connecting two *different-sized* openings needs one operation that **sweeps + tapers +
-matches each opening's ring count (32→32) + welds both ends**. All three sweep paths fail a
-different way:
-- **`edit op=extrude_along_curve`** sweeps the *filled* face → a solid, non-manifold rod
-  (read back `genus -24`); it's face-only, so it won't sweep an *open* rim into a hollow
-  tube, and it ignores the curve's world placement (relaunches it along the face normal).
-- **`add type=tube` (SPLINE_TUBE)** **creases** — no roll control on the cross-section, so
-  the minimal-twist frame flips at a sharp bend — **forces 36 sides** (ignores `sides=`, so
-  it can't 1:1 weld to a 32-vert hole), and **fragments into multiple shells** with doubled
-  boundary loops (witnessed again 2026-06-18: 3 shells / 4 boundaries on a gentle arc).
-- **`add type=curve` + `bevel_depth`** is clean and continuous but **constant-radius** (no
-  taper to reconcile a 2:1 size mismatch), its **cross-section count is uncontrollable**
-  (defaulted to a 12-gon → faceting that reads as creases; no param exposed), and it's a
-  **separate, un-welded mesh**.
-
-The need is a hollow profiled sweep with controllable section count, end-taper, and a stable
-frame — the swept-geometry engine under [[SPEC-10]].
-
-## G65 — seam tangent continuity: does the connector leave along the opening's normal? 📐 → SPEC-10
-
-The centreline-quality read shipped (`feel op=curve`: length, min bend radius + where,
-turning, inflections via lobe-segmentation → "single arc | S-bend | straight", endpoint
-tangents, `profile_radius=` sweep-feasibility; verified live — a clean arch reads "single
-arc", a real S reads "S-bend (1 inflection)"). What's **still open → [[SPEC-10]]:** the
-*seam* check — "does it leave along the **opening's** normal" — needs the curve bound to
-the handles. `feel op=curve` hands back the endpoint tangents for the agent to compare by
-eye, but the automatic tangent-vs-opening-normal angle is a connector read (knows both
-ends), so it rides SPEC-10.
-
 ## Carried over — bigger build-outs (not yet started)
+
+- **SPEC-10 connector — expressive + editable tiers (Phases 4–5).** The core connector
+  shipped (`edit op=connect`: geometry-bound, normal-continuous, taper-matched hollow
+  sweep, weld-aware, with the seam-angle/bend-radius quality reads — closing G59/G60/G61/
+  G65, verified live on the 2:1 55°-off-axis two-pipe case). What's **still open**: (4)
+  EDITABLE parameters — re-evaluate `tension`/`style`/`profile` against the live handles
+  instead of re-running the bake; and (5) the EXPRESSIVE strand tier — sub-address a rim
+  into N outlets, `count`/`jitter`/`seed` strands between two openings, bundle-weld a set
+  of strand ends. Also a v1 limit to lift: `connect` requires **equal rim vertex counts**
+  (refuses 32-vs-16 with a re-ring pointer) — auto-rering one end would close it.
 
 - **Multires + dyntopo** as real multi-level sculpt targets — the proper organic-sculpt
   resolution story (distinct from the local-subdivide that shipped under G3).

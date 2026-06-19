@@ -710,6 +710,73 @@ def bridge(a: str = "", b: str = "", label: str = "", bridge_cuts: int = 0,
     return main + _status(result)
 
 
+def connect(a: str = "", b: str = "", style: str = "arc", tension: float = -1.0,
+            sections: int = 12, profile: str = "match", weld: bool = True,
+            name: str = "connector", label: str = "") -> str:
+    """Weld two open rims with a swept, tapered, tangent-continuous tube — the
+    geometry-bound connector (SPEC-10, closing gaps.md G59/G60/G61/G65). `a` and `b`
+    are two boundary handles (mint with `feel op=assembly`); the connector binds to
+    them, not to coordinates.
+
+    Unlike `edit op=bridge` (one ring of shortest-path quads with curvature dials),
+    connect leaves each opening along its OWN OUTWARD NORMAL (G1 continuity at the
+    seam), sweeps a hollow cross-section that matches each rim's vertex count 1:1 and
+    tapers radius/shape between them on a minimum-twist frame (no crease, no spiral),
+    and fuses both ends into one watertight mesh. The thing the agent could not
+    express: a curve that leaves the pipe the way the pipe points.
+
+    a, b:     the two boundary handles to connect (order-independent).
+    style:    arc (default) | s_curve | direct | slack. arc/s_curve/slack honour the
+              openings' normals — a single arc emerges when they face each other, an S
+              when they face the same way. direct relaxes toward the straight chord.
+    tension:  0..1 — how much it bows (control-handle length as a fraction of the gap).
+              -1 (default) uses the style's default.
+    sections: rings along the span (length resolution). Default 12.
+    profile:  match (default — sweep each rim's own cross-section, tapering between) |
+              round (force a clean matched circle mid-span).
+    weld:     fuse both ends into the owning shell(s) → one watertight manifold
+              (default). False leaves the connector as a separate mesh.
+    name:     connector object name (shows only when weld=False; a weld keeps a's owner).
+
+    Cross-object is fine — connect joins the owners itself (re-homing their handles).
+    Keyed/rigged meshes and unequal rim vertex counts are refused (the honest v1 limit:
+    re-ring one opening to match first). The status block carries the G65 quality reads:
+    length, min bend radius, per-seam tangent-vs-normal angle, and sweep feasibility."""
+    result = call_blender("connect_handles", {
+        "a": a, "b": b, "style": style, "tension": tension, "sections": sections,
+        "profile": profile, "weld": weld, "name": name,
+    }, label=label)
+    if result.get("success"):
+        seams = (f"seams {result['seam_angle_a_deg']}°/{result['seam_angle_b_deg']}° "
+                 f"off-normal")
+        bend = result.get("min_bend_radius_cm")
+        bend_str = f", tightest bend {bend}cm" if bend is not None else ""
+        twist = (f", twist {result['twist_offset']}"
+                 + ("/reversed" if result.get("winding") == "reversed" else "")) \
+            if result.get("twist_offset") or result.get("winding") == "reversed" else ""
+        if result.get("welded"):
+            seam = result.get("seam_merged", 0)
+            head = (f"connected {result['a']} ↔ {result['b']} → {result['result_object']} "
+                    f"(welded, {seam} seam verts fused)")
+        else:
+            head = (f"connected {result['a']} ↔ {result['b']} → {result['connector']} "
+                    f"(unwelded)")
+        main = (f"{head} — {result['style']} t{result['tension']}, {result['sides']}-side, "
+                f"{result['length_cm']}cm, taper ⌀{result['diam_a_cm']}→{result['diam_b_cm']}cm"
+                f"{bend_str}{twist}; {seams} [{result.get('op_id','')}]")
+        if result.get("rehomed_handles"):
+            main += f"\n  re-homed {len(result['rehomed_handles'])} handle(s) onto the join"
+        if result.get("warning"):
+            main += f"\n  ⚠ {result['warning']}"
+        if result.get("welded"):
+            main += ("\n  → next: `feel op=mesh target=" + result['result_object']
+                     + "` to lint the weld (watertight / normals) · `feel op=curve` peers "
+                     "won't help here — the connector is baked; re-run connect to reshape")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 @mcp.tool()
 def select_in_sphere(center_x: float, center_y: float, center_z: float, radius: float,
                      action: str = "SELECT", extend: bool = False, target: str = "") -> str:

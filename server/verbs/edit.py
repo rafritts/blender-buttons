@@ -15,7 +15,7 @@ _OPS = ["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
         "mark_sharp", "crease", "inflate", "jitter", "noise_displace", "proportional_move",
         "extrude_along_curve", "round", "bend", "smooth_edges", "taper_end",
         "taper_section", "scale_rings", "band", "trace", "boolean", "subdivide", "bridge",
-        "relax", "slide", "poke", "inset", "grid_fill"]
+        "connect", "relax", "slide", "poke", "inset", "grid_fill"]
 
 
 @mcp.tool(name="edit")
@@ -25,7 +25,7 @@ def edit(
                 "proportional_move",
                 "extrude_along_curve", "round", "bend", "smooth_edges", "taper_end",
                 "taper_section", "scale_rings", "band", "trace", "boolean", "subdivide",
-                "bridge", "relax", "slide", "poke", "inset", "grid_fill"],
+                "bridge", "connect", "relax", "slide", "poke", "inset", "grid_fill"],
     target: tag(str, "mesh object to edit (empty=active)") = "",
     # bridge — weld two boundary handles (SPEC-07 Phase 5 / G10)
     a: tag(str, "[bridge] first boundary handle to weld (order-independent)") = "",
@@ -36,6 +36,11 @@ def edit(
     interpolation: tag(str, "[bridge] how cuts follow the rims: linear|path|surface") = "path",
     profile: tag(float, "[bridge] bulge the cross-section outward (profile_factor; 0=none)") = 0.0,
     twist: tag(int, "[bridge] rotate rim-to-rim vertex mapping (verts) to kill the spiral when rims face apart") = 0,
+    # connect — geometry-bound swept connector (SPEC-10; a/b are two boundary handles)
+    style: tag(str, "[connect] arc | s_curve | direct | slack — the gesture (normal-honoring vs straight)") = "arc",
+    tension: tag(float, "[connect] 0..1 how much it bows (handle length as fraction of the gap); -1=style default") = -1.0,
+    connect_profile: tag(str, "[connect] cross-section: match (sweep each rim's shape, tapering) | round") = "match",
+    weld: tag(bool, "[connect] fuse both ends into one watertight mesh (False = leave a separate connector)") = True,
     # directional amounts (extrude / move-style ops; meters, local frame)
     out: tag(float, "[extrude/proportional_move] push out along normal (m)") = 0.0,
     inward: tag(float, "[extrude/proportional_move] push inward (m)") = 0.0,
@@ -175,6 +180,15 @@ def edit(
                     bow, profile=outward bulge, interpolation=linear|path|surface), and
                     twist to align rims that face apart (kills the spiral).
                     (a, b, bridge_cuts, smoothness, interpolation, profile, twist)
+      connect     — GEOMETRY-BOUND swept connector (SPEC-10): weld two rims with a
+                    tube that leaves each opening along its OWN outward normal (G1
+                    continuity), sweeps a hollow cross-section matched 1:1 to each rim
+                    and tapered between them on a minimum-twist frame, and fuses both
+                    ends into one watertight mesh. The organic-curve weld that `bridge`
+                    (straight quads) and hand-typed Béziers couldn't do. Cross-object OK
+                    (joins the owners itself). a/b are two boundary handles.
+                    (a, b, style=arc|s_curve|direct|slack, tension, sections,
+                    connect_profile=match|round, weld)
       relax       — RELAX the selection: even out vertex spacing over the form WITHOUT
                     changing its shape (smooth + reproject onto the pre-relax surface).
                     Moves verts ALONG the surface — fixes stretched/bunched quads.
@@ -197,6 +211,8 @@ def edit(
     bad = teach("edit", "op", o, {
         "bridge":  (bool(a and b), "a and b (two boundary handles)",
                     "edit op=bridge a=torso.neck b=head.base"),
+        "connect": (bool(a and b), "a and b (two boundary handles)",
+                    "edit op=connect a=pipe.top b=spout.base style=arc"),
         "boolean": (bool(cutter), "cutter=<object to cut with>",
                     "edit op=boolean target=block cutter=drill bool_op=DIFFERENCE"),
         "extrude_along_curve": (bool(curve), "curve=<curve to sweep along>",
@@ -260,6 +276,9 @@ def edit(
     if o == "bridge":
         return editmode.bridge(a, b, label, bridge_cuts, smoothness,
                                interpolation, profile, twist)
+    if o == "connect":
+        return editmode.connect(a, b, style, tension, sections, connect_profile,
+                                weld, name or "connector", label)
     if o == "relax":
         return editmode.relax_selection(iterations, strength, reproject, label, target)
     if o == "slide":

@@ -1,9 +1,14 @@
 # SPEC-10 — Geometry-bound parametric connectors: curves that know the openings
 
-_Status: Proposed 2026-06-18. Sourced from the two-cylinder "connect with an organic curve"
-dogfood — three failed approaches (SPLINE_TUBE, curve+bevel, bridge-then-sculpt), see gaps.md
-G58–G65. This SPEC is the geometry-bound, parametric, weld-aware connector that G59 promotes;
-G58 (curved `bridge`) is the cheap 80% that ships independently and first._
+_Status: Phases 2–3 SHIPPED 2026-06-18 as `edit op=connect` (`extension/connectors.py`):
+geometry-bound anchoring + normal-continuous launch, the hollow taper-matched stable-frame
+sweep, weld-into-shell(s), and the G65 quality reads (length, min bend radius, per-seam
+tangent-vs-normal angle, sweep feasibility) emitted in the status block. Closes gaps.md
+G59/G60/G61/G65; verified live on the 2:1, 55°-off-axis two-pipe case (watertight 1-shell
+weld, both seams 0.0° off-normal). Phases 4 (editable params) and 5 (expressive strand tier)
+remain open — see "Phasing" + gaps.md "Carried over". v1 limit: equal rim vertex counts only.
+Proposed 2026-06-18 from the two-cylinder dogfood — three failed approaches (SPLINE_TUBE,
+curve+bevel, bridge-then-sculpt). G58 (curved `bridge`) shipped first as the cheap 80%._
 
 ## The problem
 
@@ -129,15 +134,18 @@ afternoons. This tier rides entirely on the single-connector engine — build th
 
 ## Phasing
 
-1. **G58 first (not this SPEC).** Curved `bridge` parameter pass-through. Ships the cheap win.
-2. **Connector v1 — `edit op=connect`, `style=arc|direct`, `profile=match|round`,
-   `weld=true`, stable-frame sweep, normal-continuous launch.** One curve, two openings,
-   welded, watertight, tangent-continuous. Dogfood: redo the two cylinders in one call.
-3. **Quality reads (G65).** Curvature κ along length, tangent-vs-normal angle per seam, min
-   bend radius vs. profile radius — emitted in the connect status block and available as a
-   `feel` read so the agent can *see* the curve as ground truth before/after baking.
-4. **Editability.** Stored params, re-evaluation against live handles.
-5. **Expressive tier.** Sub-address rims, `count`/`jitter`/`seed` strands, bundle-weld.
+1. ✅ **G58 (not this SPEC).** Curved `bridge` parameter pass-through. Shipped the cheap win.
+2. ✅ **Connector v1 — `edit op=connect`, `style=arc|s_curve|direct|slack`,
+   `profile=match|round`, `weld=true`, stable-frame sweep, normal-continuous launch.** One
+   curve, two openings, welded, watertight, tangent-continuous. Dogfooded the two-pipe case
+   in one call. (`connect_handles` in `extension/connectors.py`.)
+3. ✅ **Quality reads (G65).** Per-seam tangent-vs-normal angle, min bend radius + where,
+   taper, sweep feasibility — emitted in the connect status block. (The standalone `feel
+   op=curve` centreline read shipped under G65 earlier; the connector adds the seam angles
+   that need both ends bound.)
+4. **Editability.** Stored params, re-evaluation against live handles. (OPEN — v1 bakes; to
+   reshape, re-run `connect`.)
+5. **Expressive tier.** Sub-address rims, `count`/`jitter`/`seed` strands, bundle-weld. (OPEN.)
 
 ## Open questions
 
