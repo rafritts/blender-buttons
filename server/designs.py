@@ -62,3 +62,21 @@ def list_designs() -> str:
     if not designs:
         return f"No saved designs in {result.get('dir', '?')}."
     return f"{result['dir']}:\n" + "\n".join(f"  {d}" for d in designs)
+
+
+def import_mesh(path: str) -> str:
+    """
+    Import a mesh file into the current scene — the File > Import menu. Generic
+    over the common formats (.obj/.stl/.ply/.glb/.gltf/.fbx); the importer is
+    picked by extension. Returns the imported objects with vert/face/edge counts.
+    """
+    result = call_blender("import_mesh", {"path": path})
+    if result.get("error"):
+        return result["error"]
+    meshes = result.get("meshes") or []
+    if meshes:
+        summary = "; ".join(
+            f"{m['name']} {m['verts']}v/{m['faces']}f/{m['edges']}e" for m in meshes)
+    else:
+        summary = ", ".join(result.get("imported", [])) or "(nothing imported)"
+    return f"imported: {summary}" + _status(result)

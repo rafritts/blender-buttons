@@ -95,9 +95,64 @@ def new_scene(params):
             "removed": removed}
 
 
+def _imp_stl(p):
+    try:
+        bpy.ops.wm.stl_import(filepath=p)
+    except AttributeError:
+        bpy.ops.import_mesh.stl(filepath=p)
+
+
+def _imp_ply(p):
+    try:
+        bpy.ops.wm.ply_import(filepath=p)
+    except AttributeError:
+        bpy.ops.import_mesh.ply(filepath=p)
+
+
+_IMPORTERS = {
+    ".obj":  lambda p: bpy.ops.wm.obj_import(filepath=p),
+    ".stl":  _imp_stl,
+    ".ply":  _imp_ply,
+    ".glb":  lambda p: bpy.ops.import_scene.gltf(filepath=p),
+    ".gltf": lambda p: bpy.ops.import_scene.gltf(filepath=p),
+    ".fbx":  lambda p: bpy.ops.import_scene.fbx(filepath=p),
+}
+
+
+def import_mesh(params):
+    """Import a mesh file into the current scene (File > Import). Generic over
+    the common formats; the importer is chosen by file extension."""
+    path = os.path.expanduser(params.get("path", "").strip())
+    if not path:
+        return {"error": "path is required"}
+    if not os.path.isfile(path):
+        return {"error": f"no file at {path}"}
+    ext = os.path.splitext(path)[1].lower()
+    imp = _IMPORTERS.get(ext)
+    if imp is None:
+        return {"error": f"unsupported format '{ext}'; supported: "
+                         f"{', '.join(sorted(_IMPORTERS))}"}
+    before = set(bpy.data.objects.keys())
+    try:
+        imp(path)
+    except Exception as e:  # missing io addon, malformed file, ...
+        return {"error": f"import failed: {e}"}
+    new = [n for n in bpy.data.objects.keys() if n not in before]
+    meshes = []
+    for n in new:
+        ob = bpy.data.objects.get(n)
+        if ob is not None and ob.type == 'MESH':
+            meshes.append({"name": n,
+                           "verts": len(ob.data.vertices),
+                           "faces": len(ob.data.polygons),
+                           "edges": len(ob.data.edges)})
+    return {"imported": new, "meshes": meshes, "path": path}
+
+
 TOOLS = {
     "save_design":  save_design,
     "open_design":  open_design,
     "list_designs": list_designs,
     "new_scene":    new_scene,
+    "import_mesh":  import_mesh,
 }
