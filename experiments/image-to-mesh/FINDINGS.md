@@ -8,9 +8,12 @@ clean quad topology and *derived* (legible) geometry instead of a hallucinated
 tri-soup.
 
 The whole point is testing whether this is even possible — climbing a ladder
-of cheap experiments, each gating the next. Verdict so far: **the easy halves
-all work; the hard half (correspondence) now tested SYNTHETICALLY and works —
-with one decisive caveat about which views to generate (rung 5).**
+of cheap experiments, each gating the next. Verdict so far: **every feasibility
+question now answers YES.** Triangulation works (rung 0); the correspondence
+solver works (rung 5); and — the keystone — **Image Edit produces metrically
+coherent multi-views from a single front** (rung 6: corr +0.999, angle recovered
+to within a few degrees). What remains is engineering (graph extraction +
+occlusion), not open feasibility risk.
 
 ## Triangulation, in one paragraph
 
@@ -33,6 +36,7 @@ incoherence metric.
 | 3 | Can we extract the grid GRAPH (nodes+edges) from one clean view? | 🟡 partial — regular grid extracts cleanly (dot-to-dot rebuild reads as the head, ~531 edges); dense feature regions (eyes/nose/mouth) degrade; some false-positive vertex dots. Graph saved to `graph_front.json`. |
 | 4 | Can we produce an importable 3D mesh? | ✅ first mesh — `rung4_loft.py` lofts the front grid into 3D (`head.obj`, 464 verts / 184 faces / 653 edges); renders as a recognizable head with depth. Caveats: depth is GENERIC (no matching full-res side yet, so no nose/brow projection); surface holey in dense regions. 4-up quadrants are too low-res (only ~101 verts) — real reconstruction needs a full-res front+side **pair**. |
 | 5 | Does the CORRESPONDENCE SOLVER work? (rung 0 was handed it) | ✅ tested on known head-like geometry (`rung5_correspondence.py`). **front + 3/4 view** reconstructs depth to **~0.8%** mean error and is robust to non-convex relief; **front + one side** only manages 6–9% and breaks on sockets/cheekbones. See the verdict below — this changes which views to generate. |
+| 6 | Can **Image Edit** make COHERENT, metric multi-views from one front? | ✅ **yes — the big one.** Generate one front, edit-rotate it to 3/4 + side (PROMPTS.md §3). Across 3 separate, different-sized canvases the blue guides land at the same landmark heights to **<0.5% of head height**, and the 3/4 green seam tracks the side profile at **corr +0.999** (angle recovered 31°). The edits are true rigid rotations of one head, not redraws. `rung6_realdata.py`. Remaining: occlusion (far side hidden in 3/4 & side → fill by symmetry) and graph extraction. |
 
 ### Key enabling tricks discovered
 - **Control the input, not the detector.** A faint wireframe on a *shaded*
@@ -104,4 +108,6 @@ robustness items for the image version, not refutations of the approach.
 - `rung4_loft.py` — first 3D mesh (front grid + side-silhouette depth)
 - `rung5_correspondence.py` — correspondence SOLVER tested on known geometry
   (front+side vs front+3/4 vs front+side+3/4; angle sensitivity + recovery)
+- `rung6_realdata.py` — Image-Edit coherence on REAL Grok output (green-seam
+  correlation between 3/4 and side; recovers the rotation angle)
 - `*.jpg` — Grok-generated reference sheets used in the tests
