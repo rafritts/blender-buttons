@@ -119,35 +119,6 @@ centred front-to-back mass (→ front sign withheld). Kept OUT of the cheap bund
 is a distinct question the agent asks once, not per structure-read. Not yet wired into `object
 describe` (deferred; `feel method=facing` covers the need).
 
-## G58 — `bridge` is straight-only; the one cheap win for curved welds 🌉 🛠️ IMPLEMENTED — pending live dogfood
-
-Welding two open loops (`edit op=bridge`) lays a **single ring of shortest-path quads** — no
-curvature, no segments, no twist, no profile. Native Blender *Bridge Edge Loops* already
-exposes **Number of Cuts, Smoothness, Profile Factor, Twist, Merge**; none are surfaced. So
-the only weld the agent can make between two openings is a straight strut, and "organic"
-is impossible at the weld step itself.
-
-**Witness (two-cylinder connect, 2026-06-18).** Two capped cylinders, openings 75.8°
-off-parallel and 2:1 in size. Removing the caps + `bridge` produced a clean watertight
-manifold — but dead straight. To curve it, the agent had to subdivide that band and
-`proportional_move` it by hand (5 destructive steps, no path control, and it deformed a
-cylinder — see G60). One `cuts=`/`smoothness=` pair on `bridge` would have produced the
-arch directly, on the real loops, with a dial.
-
-**Fix (cheap, mechanical).** Pass through to the existing Bridge Edge Loops operator's
-`number_cuts` / `interpolation` / `smoothness` / `profile_factor` / `twist`. This is the
-**smallest change with the biggest payoff** in the whole curve story — a parameter
-pass-through, not new machinery. The expressive, geometry-bound version is [[SPEC-10]];
-this is the 80% that ships in an afternoon.
-
-**Implemented** as new args on `edit op=bridge`: `bridge_cuts` (0=straight, the
-unchanged default), `smoothness`, `interpolation` (linear|path|surface), `profile`
-(profile_factor bulge), `twist` (rim-to-rim vertex offset, kills the spiral). Pure
-pass-through to `bpy.ops.mesh.bridge_edge_loops` in `extension/editmode.py:bridge_handles`,
-threaded through `server/editmode.py:bridge` and `server/verbs/edit.py`; the shape used
-is echoed in the status line. Offline (teaching/dispatch) verified; **delete this entry
-once the curved weld is dogfooded live** (needs addon reinstall + MCP reconnect).
-
 ## G59 — no geometry-bound curve: the agent is the only glue between curve and mesh → SPEC-10 ✍️
 
 The deepest gap. The `curve`/`tube` primitives are **blind to the geometry they connect**;
@@ -163,23 +134,15 @@ parametric, weld-aware connectors). Both human prompts that exercised it — "ma
 singular elegant curve" and "connect it with a sequence of crazy curves" — are squarely
 SPEC-10, not any existing verb.
 
-## G60 — `proportional_move` bulges, not paths: no "lay geometry along a centreline" 🧊 🛠️ region-constraint half IMPLEMENTED — pending live dogfood
+## G60 — `proportional_move` bulges, not paths: no "lay geometry along a centreline" 🧊 → SPEC-10
 
-**Region-constraint sub-gap — IMPLEMENTED.** `edit op=proportional_move` fell off by
-**straight-line distance, blind to topology / membership**, with no way to "deform this
-connector, hold the cylinders rigid." Added `connected=true` (geodesic edge-distance
-falloff — a different shell is unreachable, so a big pull can't drag it) and
-`freeze=<handle>` (those verts held rigid, and in connected mode they wall off the
-flood). Witness: `radius=1.7` dragged cylinder-wall verts and deformed a cylinder; freeze
-now holds them. In `extension/editmode.py:proportional_move`, threaded through the server
-verb. **Delete this half once dogfooded live** (addon reinstall + reconnect).
-
-**Remaining sub-gap → [[SPEC-10]]: displacement ≠ path.** Even constrained,
-`proportional_move` makes a *bulge*, not a *curve*: it pushes a blob in one direction.
-There is no "lay this ring of geometry **along a centreline**, cross-sections kept
-perpendicular to the tangent." Bulging a weld will never read as a swept curve — that's
-why the hand-sculpted arch still "isn't a curve." This is the SPEC-10 sweep engine, not a
-falloff dial; it stays open here as a pointer.
+The region-constraint half shipped (`connected=` geodesic falloff + `freeze=<handle>`,
+verified live: a big pull on one shell drags 119 verts Euclidean → 64 geodesic, freeze
+holds the named rim). What's **still open → [[SPEC-10]]: displacement ≠ path.** Even
+constrained, `proportional_move` makes a *bulge*, not a *curve* — it pushes a blob one
+direction. There is no "lay this ring of geometry **along a centreline**, cross-sections
+kept perpendicular to the tangent." Bulging a weld will never read as a swept curve;
+that's the SPEC-10 sweep engine, not a falloff dial.
 
 ## G61 — no sweep yields a hollow, weldable, vert-count-matched tube 🪈
 
@@ -201,69 +164,16 @@ different way:
 The need is a hollow profiled sweep with controllable section count, end-taper, and a stable
 frame — the swept-geometry engine under [[SPEC-10]].
 
-## G62 — a handle doesn't know if it's on an open boundary or a closed cap 🕳️ 🛠️ IMPLEMENTED — pending live dogfood
+## G65 — seam tangent continuity: does the connector leave along the opening's normal? 📐 → SPEC-10
 
-Boundary handles minted on the end of a *capped* cylinder read **"● clean"**, and `relate`
-happily proposes welding them — but they sit on **closed walls** (`feel op=assembly`:
-"closed — no open boundaries"), so there is nothing to weld into. The agent connected to
-capped ends for three iterations before `assembly` surfaced the truth.
-
-**Implemented** in `feel op=relate`: each endpoint is classified **open rim vs closed
-cap** by counting open-boundary edges (one adjacent face) within the handle's vert-set —
-computed **live** (capping/uncapping changes it, so a stored flag would go stale). A
-closed cap is reported per-endpoint, forces `join_ready=false`, and emits a warning naming
-which handle and to uncap it first. **Delete once dogfooded live.** (Left for later: the
-same open/closed line on the generic `feel op=handle` read — relate is where the bug bit.)
-
-## G63 — `object op=join` orphans handles instead of migrating them 🔗 🛠️ IMPLEMENTED — pending live dogfood
-
-After joining two meshes, their handles still claim their **old owners** (`big_cyl_face1` →
-`Cylinder.001`, now gone), so `edit op=bridge` refused the loops as "cross-object" even
-though they were now in one mesh. The agent had to prune and re-mint via `feel op=assembly`.
-
-**Implemented** in `object op=join`: after the join, every handle whose owner was a
-consumed object is re-pointed to the surviving result (name + vgroup kept — vgroups carry
-into the joined mesh and their names are globally unique, so no collision). The status
-line reports which handles were re-homed. `bridge`/`relate` now find them on the merged
-mesh without a re-mint. **Delete once dogfooded live.**
-
-## G64 — `feel op=assembly` (and the connection reads) are mesh-only, blind to live curves 👁️ 🛠️ IMPLEMENTED — pending live dogfood
-
-You author a connector as a **curve datablock** but can only *verify* it as a **mesh** —
-`feel op=assembly` returns "not a mesh / not found" for a live curve, so the agent must
-`object op=convert` to even see the connection it just made.
-
-**Implemented** in `feel op=assembly`: the target resolver now accepts meshable non-mesh
-types (CURVE/SURFACE/FONT/META); a non-mesh object's boundaries are read from its
-**evaluated, beveled `to_mesh()`** (non-destructive — `to_mesh_clear()` after) and
-reported read-only, marked `[curve (evaluated, read-only)]` with `◌ read-only` rims. They
-are **not minted** — the eval mesh is ephemeral, so there's no persistent vgroup to anchor
-a Class-A handle (the honest limit; `object op=convert` is still the path to mintable,
-bridgeable geometry). The agent can now *see* the connection without baking it. **Delete
-once dogfooded live.** (Left open: `relate` still takes minted handles only — a curve has
-none — so curve-to-mesh alignment still needs a convert; mirror the eval read into relate
-later if it's worth it.)
-
-## G65 — nothing reads *curve/connection quality*; verification sees watertight, not grace 📐 🛠️ centreline read IMPLEMENTED — pending live dogfood
-
-`feel op=mesh` certifies **watertight** and `feel op=assembly` certifies **contact** — but
-neither judges the connector *as a connector*: curvature, flow, pinching, and seam
-continuity. The agent was aesthetically blind precisely on the axis that is the goal, and
-couldn't even quantify "that's not a curve."
-
-**Implemented** as `feel op=curve target=<curve>`: a live (no-bake) centreline read of a
-curve datablock — total length, **min bend radius + where** along the run, **total
-turning angle**, **inflection count** (S-bend sign-flips → "single arc" vs "S-bend"
-vs "straight"), and the **endpoint tangent directions**. `profile_radius=` adds the
-sweep-feasibility flag (min bend radius must exceed the tube radius — generalises
-`extrude_along_curve`'s preflight). Menger-curvature math validated offline (semicircle
-r→radius, S-curve→1 inflection). **Delete the centreline half once dogfooded live.**
-
-**Remaining → [[SPEC-10]]: seam tangent continuity.** "Does it leave along the *opening's*
-normal" needs the curve bound to the handles — the curve isn't anchored to the mesh, so
-`feel op=curve` can only hand back the endpoint tangents for the agent to compare by eye;
-the automatic tangent-vs-opening-normal angle is a SPEC-10 read (the connector knows both
-ends). Stays open here as a pointer.
+The centreline-quality read shipped (`feel op=curve`: length, min bend radius + where,
+turning, inflections via lobe-segmentation → "single arc | S-bend | straight", endpoint
+tangents, `profile_radius=` sweep-feasibility; verified live — a clean arch reads "single
+arc", a real S reads "S-bend (1 inflection)"). What's **still open → [[SPEC-10]]:** the
+*seam* check — "does it leave along the **opening's** normal" — needs the curve bound to
+the handles. `feel op=curve` hands back the endpoint tangents for the agent to compare by
+eye, but the automatic tangent-vs-opening-normal angle is a connector read (knows both
+ends), so it rides SPEC-10.
 
 ## Carried over — bigger build-outs (not yet started)
 
