@@ -37,6 +37,7 @@ incoherence metric.
 | 4 | Can we produce an importable 3D mesh? | ✅ first mesh — `rung4_loft.py` lofts the front grid into 3D (`head.obj`, 464 verts / 184 faces / 653 edges); renders as a recognizable head with depth. Caveats: depth is GENERIC (no matching full-res side yet, so no nose/brow projection); surface holey in dense regions. 4-up quadrants are too low-res (only ~101 verts) — real reconstruction needs a full-res front+side **pair**. |
 | 5 | Does the CORRESPONDENCE SOLVER work? (rung 0 was handed it) | ✅ tested on known head-like geometry (`rung5_correspondence.py`). **front + 3/4 view** reconstructs depth to **~0.8%** mean error and is robust to non-convex relief; **front + one side** only manages 6–9% and breaks on sockets/cheekbones. See the verdict below — this changes which views to generate. |
 | 6 | Can **Image Edit** make COHERENT, metric multi-views from one front? | ✅ **yes — the big one.** Generate one front, edit-rotate it to 3/4 + side (PROMPTS.md §3). Across 3 separate, different-sized canvases the blue guides land at the same landmark heights to **<0.5% of head height**, and the 3/4 green seam tracks the side profile at **corr +0.999** (angle recovered 31°). The edits are true rigid rotations of one head, not redraws. `rung6_realdata.py`. Remaining: occlusion (far side hidden in 3/4 & side → fill by symmetry) and graph extraction. |
+| 7 | Can we land a real derived head in Blender from the coherent set? | ✅ `rung7_reconstruct.py` → `head_v3.obj` (249v/318f), imported via `file op=import`. Faces from a density-adaptive Delaunay of the **front dots** (robust; sidesteps the fragile edge graph; long-vs-local edges dropped to keep eye/mouth holes), depth from the **real coherent side** silhouette in the shared head-height unit. Recognizable head with true forward relief. Rough: nose-region spikes, slightly deep proportion, open eye/mouth holes. Next fidelity step: 3/4-per-vertex depth (rung 5 solver) instead of the elliptical cross-section. |
 
 ### Key enabling tricks discovered
 - **Control the input, not the detector.** A faint wireframe on a *shaded*
@@ -110,4 +111,6 @@ robustness items for the image version, not refutations of the approach.
   (front+side vs front+3/4 vs front+side+3/4; angle sensitivity + recovery)
 - `rung6_realdata.py` — Image-Edit coherence on REAL Grok output (green-seam
   correlation between 3/4 and side; recovers the rotation angle)
+- `rung7_reconstruct.py` — first real derived head from the coherent 3-view set
+  (front-dot Delaunay surface + real side-profile depth) -> head_v3.obj
 - `*.jpg` — Grok-generated reference sheets used in the tests
