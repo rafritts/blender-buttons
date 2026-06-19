@@ -11,8 +11,16 @@ it against the LIVE handles (deform a pipe, the connector follows) with a `tensi
 a welded connector is a COMMIT (rims fused → nothing live), reshape it by re-running connect.
 The equal-vertex-count limit is **lifted by composition**: `edit op=resample a=<handle>
 count=N` resamples a rim to N verts (arc-length transition collar, re-homes the handle), so a
-mismatch is equalised in one call and connect stays a clean 1:1 weld. **Phase 5** (expressive
-strand tier) remains open — see "Phasing" + gaps.md "Carried over".
+mismatch is equalised in one call and connect stays a clean 1:1 weld. **Phase 5** (2026-06-19):
+the expressive multi-strand tier — `edit op=strands a b count=N jitter seed` distributes N thin
+capped tubes around the two rims, each leaving along its opening's normal (G1, on the same
+Bézier + parallel-transport engine as the single connector), with a seeded coherent jitter
+bowing each strand its own way → "a sequence of crazy curves" from a count + a seed. Emitted as
+ONE editable object that stores its recipe, so `edit op=reshape` re-bakes the whole bundle
+against the LIVE handles. The two remaining sub-pieces — **sub-addressing a rim into outlets**
+and **bundle-weld** — are coupled (welding strand ends needs carved outlets) and both wait on a
+boundary-loop-partition primitive; strands ship as a clean floating bundle (cables/vines/sinew),
+which keeps connect's exact-weld invariant clean (same reasoning as splitting `resample` out).
 Proposed 2026-06-18 from the two-cylinder dogfood — three failed approaches (SPLINE_TUBE,
 curve+bevel, bridge-then-sculpt). G58 (curved `bridge`) shipped first as the cheap 80%._
 
@@ -159,7 +167,14 @@ afternoons. This tier rides entirely on the single-connector engine — build th
    commit. The equal-vert-count limit is lifted by `edit op=resample` (a standalone rim
    resampler) rather than auto-rering inside connect — a more general primitive that keeps
    connect's 1:1 invariant clean. (`reshape_connector` + `resample_loop`.)
-5. **Expressive tier.** Sub-address rims, `count`/`jitter`/`seed` strands, bundle-weld. (OPEN.)
+5. ⏳ **Expressive tier.** `edit op=strands` — N thin tubes distributed around two rims, each
+   normal-continuous on the connector engine, with seeded coherent `jitter` (a sin²-enveloped
+   midspan displacement that pins endpoints + launch tangents), emitted as one editable,
+   reshape-able bundle of capped tubes. SHIPPED. Still OPEN: **sub-addressing a rim into N
+   addressable outlets** and **bundle-weld** — coupled (welding strand ends into a rim needs
+   carved outlets), both gated on a missing boundary-loop-partition selection primitive. Strands
+   ship floating-but-capped, which is an honest standalone result and preserves connect's exact
+   1:1 weld invariant. (`make_strands` in `extension/connectors.py`.)
 
 ## Open questions
 

@@ -15,7 +15,8 @@ _OPS = ["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
         "mark_sharp", "crease", "inflate", "jitter", "noise_displace", "proportional_move",
         "extrude_along_curve", "round", "bend", "smooth_edges", "taper_end",
         "taper_section", "scale_rings", "band", "trace", "boolean", "subdivide", "bridge",
-        "connect", "reshape", "resample", "relax", "slide", "poke", "inset", "grid_fill"]
+        "connect", "reshape", "resample", "strands", "relax", "slide", "poke", "inset",
+        "grid_fill"]
 
 
 @mcp.tool(name="edit")
@@ -25,8 +26,8 @@ def edit(
                 "proportional_move",
                 "extrude_along_curve", "round", "bend", "smooth_edges", "taper_end",
                 "taper_section", "scale_rings", "band", "trace", "boolean", "subdivide",
-                "bridge", "connect", "reshape", "resample", "relax", "slide", "poke",
-                "inset", "grid_fill"],
+                "bridge", "connect", "reshape", "resample", "strands", "relax", "slide",
+                "poke", "inset", "grid_fill"],
     target: tag(str, "mesh object to edit (empty=active)") = "",
     # bridge — weld two boundary handles (SPEC-07 Phase 5 / G10)
     a: tag(str, "[bridge/connect] first boundary handle (order-independent); [resample] the rim handle to resample") = "",
@@ -38,12 +39,16 @@ def edit(
     profile: tag(float, "[bridge] bulge the cross-section outward (profile_factor; 0=none)") = 0.0,
     twist: tag(int, "[bridge] rotate rim-to-rim vertex mapping (verts) to kill the spiral when rims face apart") = 0,
     # connect — geometry-bound swept connector (SPEC-10; a/b are two boundary handles)
-    style: tag(str, "[connect] arc | s_curve | direct | slack — the gesture (normal-honoring vs straight)") = "arc",
-    tension: tag(float, "[connect] 0..1 how much it bows (handle length as fraction of the gap); -1=style default") = -1.0,
+    style: tag(str, "[connect/strands] arc | s_curve | direct | slack — the gesture (normal-honoring vs straight)") = "arc",
+    tension: tag(float, "[connect/strands] 0..1 how much it bows (handle length as fraction of the gap); -1=style default") = -1.0,
     connect_profile: tag(str, "[connect] cross-section: match (sweep each rim's shape, tapering) | round") = "match",
     weld: tag(bool, "[connect] fuse both ends into one watertight mesh (False = leave a separate connector)") = True,
     # reshape / resample — Phase 4 editability + rim equalising (SPEC-10)
-    count: tag(int, "[resample] target vertex count for the rim (>=3)") = 0,
+    count: tag(int, "[resample] target vertex count for the rim (>=3); [strands] number of strands (>=2)") = 0,
+    # strands — expressive multi-strand tier (SPEC-10 Phase 5)
+    sides: tag(int, "[strands] cross-section verts per strand (thin tube)") = 8,
+    jitter: tag(float, "[strands] 0..1 coherent midspan waywardness (0=clean parallel fan)") = 0.0,
+    strand_radius: tag(float, "[strands] tube radius per strand (m); -1=auto-pack to the rim+count") = -1.0,
     # directional amounts (extrude / move-style ops; meters, local frame)
     out: tag(float, "[extrude/proportional_move] push out along normal (m)") = 0.0,
     inward: tag(float, "[extrude/proportional_move] push inward (m)") = 0.0,
@@ -75,7 +80,7 @@ def edit(
     weight: tag(float, "[crease] crease weight 0..1") = 1.0,
     # inflate / jitter / noise_displace / proportional
     amount: tag(float, "[inflate/jitter/noise_displace] displacement amount (m); noise wants ~0.03–0.1") = 0.003,
-    seed: tag(int, "[jitter] random seed") = 0,
+    seed: tag(int, "[jitter/strands] random seed (same seed reproduces the bundle)") = 0,
     only_positive: tag(bool, "[jitter] jitter outward only") = False,
     # noise_displace (coherent organic surface break-up)
     feature_size: tag(float, "[noise_displace] noise feature size (bigger = broader lumps)") = 0.5,
@@ -116,7 +121,7 @@ def edit(
     at: tag(float, "[band] position along axis (0..1)") = None,
     thickness: tag(float, "[band] band thickness (m) / [inset] inset distance (m)") = 0.02,
     # trace_profile
-    sections: tag(int, "[trace] number of cross-sections") = 24,
+    sections: tag(int, "[trace/connect/strands] number of cross-sections / rings along the span") = 24,
     # boolean
     cutter: tag(str, "[boolean] cutter object") = "",
     bool_op: tag(str, "[boolean] DIFFERENCE|UNION|INTERSECT") = "DIFFERENCE",
@@ -201,6 +206,15 @@ def edit(
                     transition collar), re-homing the handle onto the new loop. Lifts
                     connect's 1:1 weld limit: equalise a 16-vs-32 mismatch in one call.
                     (a=<rim handle>, count, depth)
+      strands     — EXPRESSIVE multi-strand tier (SPEC-10 Phase 5): N thin tubes
+                    distributed around two rims, each leaving along its opening's
+                    normal (G1, like connect), with a seeded coherent jitter bowing
+                    each one its own way → "a sequence of crazy curves" from a count +
+                    a seed, not K hand-placed Béziers. One editable object (capped
+                    tubes); stores its recipe → edit op=reshape re-bakes the bundle
+                    against the live handles. a/b are two boundary handles.
+                    (a, b, count, style, tension, sections, sides, jitter, seed,
+                    strand_radius)
       relax       — RELAX the selection: even out vertex spacing over the form WITHOUT
                     changing its shape (smooth + reproject onto the pre-relax surface).
                     Moves verts ALONG the surface — fixes stretched/bunched quads.
@@ -229,6 +243,8 @@ def edit(
                     "edit op=reshape name=connector tension=0.8"),
         "resample": (bool(a and count >= 3), "a=<rim handle> and count=N (>=3)",
                     "edit op=resample a=pipe.top count=32"),
+        "strands": (bool(a and b and count >= 2), "a,b (two handles) and count=N (>=2)",
+                    "edit op=strands a=pipe.top b=spout.base count=7 jitter=0.2"),
         "boolean": (bool(cutter), "cutter=<object to cut with>",
                     "edit op=boolean target=block cutter=drill bool_op=DIFFERENCE"),
         "extrude_along_curve": (bool(curve), "curve=<curve to sweep along>",
@@ -299,6 +315,9 @@ def edit(
         return editmode.reshape(name, tension, label)
     if o == "resample":
         return editmode.resample(a, count, depth if depth > 0 else -1.0, label)
+    if o == "strands":
+        return editmode.strands(a, b, count, style, tension, sections, sides, jitter,
+                                seed, strand_radius, name or "strands", label)
     if o == "relax":
         return editmode.relax_selection(iterations, strength, reproject, label, target)
     if o == "slide":

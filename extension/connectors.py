@@ -32,6 +32,7 @@ The multi-strand expressive tier is SPEC-10 Phase 5, not built here.
 """
 
 import math
+import random
 
 import bmesh
 import bpy
@@ -113,16 +114,17 @@ def _bezier(p0, p1, p2, p3, t):
 _STYLE_TENSION = {"arc": 0.55, "s_curve": 0.55, "slack": 0.9, "direct": 0.0}
 
 
-# ── the swept-connector engine (shared by connect + reshape) ──────────────────
+# ── shared rim resolution (connect + strands both consume this) ───────────────
 
-def _compute_connector(a_name, b_name, style, tension, sections, profile):
-    """Resolve both handles LIVE and build the connector rings + G65 quality reads.
+def _resolve_rim_pair(a_name, b_name):
+    """Resolve two boundary handles LIVE into their ordered world rims + geometry.
 
-    Returns (data, None) on success or (None, error_str). `data` carries `rings`
-    (the ring-of-rings to materialise), `n` (sides), and every public read field
-    plus the private `min_bend`/`rim_r`. Both `connect_handles` (create) and
-    `reshape_connector` (re-evaluate) call this — the geometry lives in one place so
-    a reshape re-reads the handles' current positions and the tube follows."""
+    Returns (info, None) or (None, error_str). `info` carries loopA/loopB (the ordered
+    world loops), cA/cB (centroids), nA_out/nB_out (outward opening normals), rA/rB
+    (mean radii), gap, and owner_a/owner_b. Shared by `_compute_connector` (a 1:1
+    weld) and `_compute_strands` (N distributed tubes); the equal-vertex-count
+    requirement is connect's alone and is NOT enforced here. Owns the mode switch to
+    OBJECT (rim reads need it)."""
     ea, eb = H._find_handle(a_name), H._find_handle(b_name)
     if ea is None:
         return None, f"handle '{a_name}' not found (run feel op=assembly to mint rims)"
@@ -137,10 +139,9 @@ def _compute_connector(a_name, b_name, style, tension, sections, profile):
         return None, f"'{b_name}' owner is gone or not a mesh"
     for o in (owner_a, owner_b):
         if o.data.shape_keys is not None:
-            return None, (f"'{o.name}' has shape keys — connect changes topology and "
-                          f"would corrupt the keys. Keyed/rigged meshes are out of scope.")
+            return None, (f"'{o.name}' has shape keys — this changes topology and would "
+                          f"corrupt the keys. Keyed/rigged meshes are out of scope.")
 
-    # Own the mode: rim reads + object creation/join all need OBJECT mode.
     if bpy.context.active_object is not None and bpy.context.active_object.mode == 'EDIT':
         bpy.ops.object.mode_set(mode='OBJECT')
 
@@ -150,6 +151,38 @@ def _compute_connector(a_name, b_name, style, tension, sections, profile):
     loopB, _idxB, errB = _ordered_loop(owner_b, eb.get("bb_vgroup", ""))
     if errB:
         return None, f"handle '{b_name}': {errB}"
+
+    cA = H._centroid(loopA)
+    cB = H._centroid(loopB)
+    nA_out = H._newell_normal(loopA, cA, Vector(world_center(owner_a)))
+    nB_out = H._newell_normal(loopB, cB, Vector(world_center(owner_b)))
+    rA = sum((c - cA).length for c in loopA) / len(loopA)
+    rB = sum((c - cB).length for c in loopB) / len(loopB)
+    gap = (cB - cA).length
+    if gap < 1e-6:
+        return None, "the two rim centres coincide — nothing to span"
+
+    return {
+        "loopA": loopA, "loopB": loopB, "cA": cA, "cB": cB,
+        "nA_out": nA_out, "nB_out": nB_out, "rA": rA, "rB": rB, "gap": gap,
+        "owner_a": owner_a, "owner_b": owner_b,
+    }, None
+
+
+# ── the swept-connector engine (shared by connect + reshape) ──────────────────
+
+def _compute_connector(a_name, b_name, style, tension, sections, profile):
+    """Resolve both handles LIVE and build the connector rings + G65 quality reads.
+
+    Returns (data, None) on success or (None, error_str). `data` carries `rings`
+    (the ring-of-rings to materialise), `n` (sides), and every public read field
+    plus the private `min_bend`/`rim_r`. Both `connect_handles` (create) and
+    `reshape_connector` (re-evaluate) call this — the geometry lives in one place so
+    a reshape re-reads the handles' current positions and the tube follows."""
+    info, err = _resolve_rim_pair(a_name, b_name)
+    if err:
+        return None, err
+    loopA, loopB = info["loopA"], info["loopB"]
 
     nA, nB = len(loopA), len(loopB)
     if nA != nB:
@@ -167,16 +200,10 @@ def _compute_connector(a_name, b_name, style, tension, sections, profile):
     tension = max(0.0, min(float(tension), 2.0))
     sections = max(2, min(int(sections), 256))
 
-    cA = H._centroid(loopA)
-    cB = H._centroid(loopB)
-    nA_out = H._newell_normal(loopA, cA, Vector(world_center(owner_a)))
-    nB_out = H._newell_normal(loopB, cB, Vector(world_center(owner_b)))
-    rA = sum((c - cA).length for c in loopA) / n
-    rB = sum((c - cB).length for c in loopB) / n
-
-    gap = (cB - cA).length
-    if gap < 1e-6:
-        return None, "the two rim centres coincide — nothing to span"
+    cA, cB = info["cA"], info["cB"]
+    nA_out, nB_out = info["nA_out"], info["nB_out"]
+    rA, rB = info["rA"], info["rB"]
+    gap = info["gap"]
 
     # Bézier control points: leave A along nA_out, arrive at B along -nB_out (so it
     # leaves B along nB_out) — G1 continuity at both seams. tension sets handle length.
@@ -352,6 +379,272 @@ def _public_reads(data):
     return out
 
 
+# ── the strand engine (SPEC-10 Phase 5 — expressive multi-strand tier) ────────
+
+def _strand_rings(aPt, nA_out, bPt, nB_out, tension, sections, sides, radius, jvec):
+    """One strand: a thin `sides`-gon tube from aPt to bPt that LEAVES along nA_out and
+    ARRIVES along nB_out (G1, same construction as the single connector), optionally
+    bowed by a per-strand `jvec` displacement under a sin² envelope. Returns
+    (rings, length, min_bend_radius)."""
+    gap = (bPt - aPt).length
+    hlen = tension * gap
+    P0, P1, P2, P3 = aPt, aPt + nA_out * hlen, bPt + nB_out * hlen, bPt
+    path = []
+    for k in range(sections + 1):
+        t = k / sections
+        p = _bezier(P0, P1, P2, P3, t)
+        if jvec is not None:
+            # sin²(πt) is 0 with zero slope at t=0,1 → endpoints AND launch tangents
+            # (the normals) are preserved; the bow lives entirely in the midspan.
+            p = p + jvec * (math.sin(math.pi * t) ** 2)
+        path.append(p)
+
+    # Parallel-transport a frame down the centreline (min-twist; seed arbitrary — a
+    # thin circular tube has no preferred roll).
+    seg0 = path[1] - path[0]
+    t0 = seg0.normalized() if seg0.length > 1e-9 else nA_out
+    u0 = t0.orthogonal().normalized()
+    v0 = t0.cross(u0).normalized()
+    frames = [(u0, v0)]
+    u, v, prev_t = u0, v0, t0
+    for k in range(1, sections + 1):
+        seg = path[k] - path[k - 1]
+        t_k = seg.normalized() if seg.length > 1e-9 else prev_t
+        q = prev_t.rotation_difference(t_k)
+        u = (q @ u).normalized()
+        v = (q @ v).normalized()
+        prev_t = t_k
+        frames.append((u, v))
+
+    angs = [2.0 * math.pi * s / sides for s in range(sides)]
+    rings = []
+    for k in range(sections + 1):
+        uk, vk = frames[k]
+        rings.append([path[k] + (uk * math.cos(a) + vk * math.sin(a)) * radius
+                      for a in angs])
+
+    length = sum((path[k + 1] - path[k]).length for k in range(sections))
+    max_k = 0.0
+    for i in range(1, sections):
+        a3, b3, c3 = path[i - 1], path[i], path[i + 1]
+        ab, bc, ca = (b3 - a3).length, (c3 - b3).length, (a3 - c3).length
+        cross = (b3 - a3).cross(c3 - b3)
+        denom = ab * bc * ca
+        if denom > 1e-12 and cross.length > 1e-12:
+            kk = 4.0 * (cross.length / 2.0) / denom
+            if kk > max_k:
+                max_k = kk
+    min_bend = (1.0 / max_k) if max_k > 1e-9 else None
+    return rings, length, min_bend
+
+
+def _compute_strands(a_name, b_name, count, style, tension, sections,
+                     sides, radius, jitter, seed):
+    """Build N thin tubes distributed around the two rims — the expressive tier.
+
+    Resolves both handles LIVE (so strands follow a deformed pipe on reshape), samples
+    `count` anchor points around each rim by arc length, pairs them by the cyclic
+    shift+winding that minimises total strand length (so the bundle fans, never
+    crosses), and sweeps each as a `_strand_rings` tube with a seeded coherent jitter.
+    Returns (data, None) or (None, error_str)."""
+    info, err = _resolve_rim_pair(a_name, b_name)
+    if err:
+        return None, err
+    if style not in _STYLE_TENSION:
+        return None, f"style '{style}' invalid — use arc | s_curve | direct | slack"
+    count = max(2, min(int(count), 256))
+    sides = max(3, min(int(sides), 64))
+    sections = max(2, min(int(sections), 256))
+    tension = max(0.0, min(float(tension), 2.0))
+    jitter = max(0.0, min(float(jitter), 1.0))
+
+    loopA, loopB = info["loopA"], info["loopB"]
+    nA_out, nB_out = info["nA_out"], info["nB_out"]
+    rA, rB = info["rA"], info["rB"]
+    gap = info["gap"]
+
+    ptsA = _resample_polyline_closed(loopA, count)
+    ptsB = _resample_polyline_closed(loopB, count)
+
+    best = None
+    for d in (1, -1):
+        for s in range(count):
+            cost = 0.0
+            for i in range(count):
+                cost += (ptsA[i] - ptsB[(d * i + s) % count]).length_squared
+            if best is None or cost < best[0]:
+                best = (cost, d, s)
+    _c, bd, bs = best
+    perm = [(bd * i + bs) % count for i in range(count)]
+
+    # Auto strand radius: pack the tubes around the rim without heavy overlap. Adjacent
+    # strand centres sit ~2π·rim_r/count apart; keep each tube under ~0.35 of that.
+    rim_r = min(rA, rB)
+    if radius is None or radius < 0:
+        spacing = (2.0 * math.pi * rim_r) / count
+        radius = max(min(0.35 * spacing, 0.45 * rim_r), 0.001)
+    else:
+        radius = max(float(radius), 1e-4)
+
+    rng = random.Random(int(seed))
+    strands, lengths, min_bend = [], [], None
+    for i in range(count):
+        jvec = None
+        if jitter > 1e-9:
+            rv = Vector((rng.gauss(0, 1), rng.gauss(0, 1), rng.gauss(0, 1)))
+            if rv.length > 1e-9:
+                jvec = rv.normalized() * (jitter * gap * 0.5)
+        rings_i, len_i, bend_i = _strand_rings(
+            ptsA[i], nA_out, ptsB[perm[i]], nB_out,
+            tension, sections, sides, radius, jvec)
+        strands.append(rings_i)
+        lengths.append(len_i)
+        if bend_i is not None and (min_bend is None or bend_i < min_bend):
+            min_bend = bend_i
+
+    feasible = (min_bend is None) or (min_bend > radius)
+    data = {
+        "strands": strands, "n_strands": count, "sides": sides,
+        "style": style, "tension": round(tension, 3), "sections": sections,
+        "jitter": round(jitter, 3), "seed": int(seed),
+        "strand_radius_cm": round(radius * 100, 2),
+        "avg_length_cm": round((sum(lengths) / len(lengths)) * 100, 2),
+        "min_bend_radius_cm": round(min_bend * 100, 2) if min_bend else None,
+        "diam_a_cm": round(rA * 2 * 100, 2), "diam_b_cm": round(rB * 2 * 100, 2),
+        "winding": "same" if bd == 1 else "reversed",
+        "sweep_feasible": feasible, "radius": radius,
+    }
+    return data, None
+
+
+def _strands_to_bmesh(strands, sides, matrix=None):
+    """Materialise N strands (each a list of `sides`-vert rings) into ONE bmesh of
+    smooth, end-capped tubes. WORLD points; pass `matrix` (an inverse world transform)
+    to bake into a moved object's local space."""
+    bm = bmesh.new()
+    for rings in strands:
+        vmap = []
+        for ring in rings:
+            pts = [matrix @ p for p in ring] if matrix is not None else ring
+            vmap.append([bm.verts.new(p) for p in pts])
+        for k in range(len(rings) - 1):
+            for i in range(sides):
+                j = (i + 1) % sides
+                try:
+                    f = bm.faces.new((vmap[k][i], vmap[k][j],
+                                      vmap[k + 1][j], vmap[k + 1][i]))
+                    f.smooth = True
+                except ValueError:
+                    pass   # duplicate face guard
+        for cap in (vmap[0], vmap[-1]):   # close each strand into a solid tube
+            try:
+                bm.faces.new(cap)
+            except ValueError:
+                pass
+    bm.normal_update()
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return bm
+
+
+_STRAND_READ_KEYS = ("style", "tension", "sections", "n_strands", "sides", "jitter",
+                     "seed", "strand_radius_cm", "avg_length_cm", "min_bend_radius_cm",
+                     "diam_a_cm", "diam_b_cm", "winding", "sweep_feasible")
+
+
+def _public_strand_reads(data):
+    """The status fields strands/reshape both surface — selected from `data`."""
+    out = {k: data[k] for k in _STRAND_READ_KEYS}
+    if not data["sweep_feasible"]:
+        out["warning"] = (
+            f"tightest strand bend radius {data['min_bend_radius_cm']}cm < strand radius "
+            f"{data['strand_radius_cm']}cm — a strand may fold through itself. Lower "
+            f"tension/jitter or use style=slack.")
+    return out
+
+
+# ── op=strands (SPEC-10 Phase 5) ──────────────────────────────────────────────
+
+def make_strands(params):
+    """edit op=strands — generate N thin tubes between two rims (SPEC-10 Phase 5).
+
+    The expressive tier: "a sequence of crazy curves" as cheap relational generation,
+    not K hand-placed Béziers. Distributes `count` strands around the two openings,
+    each leaving along the opening's normal (G1, like the single connector), with a
+    seeded coherent `jitter` bowing each one differently → variety from a count + a
+    seed. Emitted as ONE editable mesh object (capped tubes); stores its recipe, so
+    edit op=reshape re-bakes the whole bundle against the LIVE handles.
+
+    a, b:     the two boundary handles to span (mint with feel op=assembly).
+    count:    number of strands (>=2).
+    style:    arc (default) | s_curve | direct | slack — same gesture vocabulary as
+              connect (arc/s_curve/slack leave each rim along its normal).
+    tension:  0..1 how much each strand bows; -1 (default) = the style's default.
+    sections: rings along each strand. Default 24.
+    sides:    cross-section verts per strand (thin tube). Default 8.
+    jitter:   0..1 coherent midspan waywardness — 0 = a clean parallel fan, higher =
+              each strand bows its own way (endpoints + launch normals stay fixed).
+    seed:     RNG seed — same seed reproduces the same bundle.
+    radius:   strand tube radius (m); -1 (default) = auto-pack to the rim + count.
+    name:     name for the strands object (default 'strands').
+    """
+    a_name = (params.get("a") or "").strip()
+    b_name = (params.get("b") or "").strip()
+    if not a_name or not b_name:
+        return {"error": "edit op=strands needs a=<handle> and b=<handle> "
+                         "(mint boundary handles with feel op=assembly)"}
+    if a_name == b_name:
+        return {"error": "a and b are the same handle — strands needs two distinct rims"}
+    count = int(params.get("count", 0) or 0)
+    if count < 2:
+        return {"error": "count must be >=2 (the number of strands to generate)"}
+
+    style = (params.get("style") or "arc").strip().lower()
+    tension = params.get("tension", -1.0)
+    tension = float(tension if tension is not None else -1.0)
+    if tension < 0:
+        tension = _STYLE_TENSION.get(style, 0.55)
+    sections = int(params.get("sections", 24) or 24)
+    sides = int(params.get("sides", 8) or 8)
+    jitter = float(params.get("jitter", 0.0) or 0.0)
+    seed = int(params.get("seed", 0) or 0)
+    radius = params.get("radius", -1.0)
+    radius = float(radius if radius is not None else -1.0)
+    cname = (params.get("name") or "strands").strip() or "strands"
+
+    data, err = _compute_strands(a_name, b_name, count, style, tension, sections,
+                                 sides, radius, jitter, seed)
+    if err:
+        return {"error": err}
+
+    bm = _strands_to_bmesh(data["strands"], data["sides"])
+    me = bpy.data.meshes.new(cname)
+    bm.to_mesh(me)
+    bm.free()
+    obj = bpy.data.objects.new(cname, me)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    oname = obj.name
+
+    # Recipe → edit op=reshape re-evaluates the bundle against the live handles.
+    obj["bb_strands"] = True
+    obj["bb_conn_a"] = a_name
+    obj["bb_conn_b"] = b_name
+    obj["bb_conn_style"] = data["style"]
+    obj["bb_conn_tension"] = data["tension"]
+    obj["bb_conn_sections"] = data["sections"]
+    obj["bb_strand_count"] = data["n_strands"]
+    obj["bb_strand_sides"] = data["sides"]
+    obj["bb_strand_jitter"] = data["jitter"]
+    obj["bb_strand_seed"] = data["seed"]
+    obj["bb_strand_radius"] = data["radius"]
+
+    push_undo(f"strands {a_name} ↔ {b_name} ×{count}")
+    out = {"success": True, "a": a_name, "b": b_name, "object": oname}
+    out.update(_public_strand_reads(data))
+    return out
+
+
 # ── op=connect ─────────────────────────────────────────────────────────────────
 
 def connect_handles(params):
@@ -488,6 +781,8 @@ def reshape_connector(params):
     obj = bpy.data.objects.get(name)
     if obj is None:
         return {"error": f"object '{name}' not found"}
+    if obj.get("bb_strands"):
+        return _reshape_strands(obj, params)
     if not obj.get("bb_connector"):
         return {"error": f"'{name}' is not an editable connector. Welded connectors are "
                          f"committed (the rims are fused) — re-run edit op=connect to "
@@ -523,6 +818,50 @@ def reshape_connector(params):
     push_undo(f"reshape {name}")
     out = {"success": True, "reshaped": True, "name": name, "a": a, "b": b}
     out.update(_public_reads(data))
+    return out
+
+
+def _reshape_strands(obj, params):
+    """edit op=reshape on a strands object — re-bake the whole bundle against its live
+    handles (same recipe-replay contract as the single connector). The stored seed keeps
+    the bundle identical apart from the handles' motion; `tension` overrides the bow."""
+    a = obj.get("bb_conn_a", "")
+    b = obj.get("bb_conn_b", "")
+    if not a or not b:
+        return {"error": f"'{obj.name}' has an incomplete strands recipe (missing handle "
+                         f"binding) — re-create it with edit op=strands"}
+    style = obj.get("bb_conn_style", "arc")
+    sections = int(obj.get("bb_conn_sections", 24) or 24)
+    count = int(obj.get("bb_strand_count", 6) or 6)
+    sides = int(obj.get("bb_strand_sides", 8) or 8)
+    jitter = float(obj.get("bb_strand_jitter", 0.0) or 0.0)
+    seed = int(obj.get("bb_strand_seed", 0) or 0)
+    radius = float(obj.get("bb_strand_radius", -1.0))   # concrete value stored at create
+
+    t = params.get("tension", -1.0)
+    t = float(t if t is not None else -1.0)
+    tension = t if t >= 0 else float(obj.get("bb_conn_tension",
+                                             _STYLE_TENSION.get(style, 0.55)))
+
+    if bpy.context.active_object is not None and bpy.context.active_object.mode == 'EDIT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    data, err = _compute_strands(a, b, count, style, tension, sections,
+                                 sides, radius, jitter, seed)
+    if err:
+        return {"error": f"reshape '{obj.name}': {err}"}
+
+    bm = _strands_to_bmesh(data["strands"], data["sides"],
+                           matrix=obj.matrix_world.inverted())
+    bm.to_mesh(obj.data)
+    bm.free()
+    obj.data.update()
+    obj["bb_conn_tension"] = data["tension"]
+
+    push_undo(f"reshape {obj.name}")
+    out = {"success": True, "reshaped": True, "kind": "strands",
+           "name": obj.name, "a": a, "b": b}
+    out.update(_public_strand_reads(data))
     return out
 
 
@@ -661,4 +1000,5 @@ TOOLS = {
     "connect_handles": connect_handles,
     "reshape_connector": reshape_connector,
     "resample_loop": resample_loop,
+    "make_strands": make_strands,
 }

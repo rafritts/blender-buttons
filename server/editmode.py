@@ -781,31 +781,91 @@ def connect(a: str = "", b: str = "", style: str = "arc", tension: float = -1.0,
     return main + _status(result)
 
 
-def reshape(name: str = "", tension: float = -1.0, label: str = "") -> str:
-    """Re-evaluate an UNWELDED connector against its live handles (SPEC-10 Phase 4).
+def strands(a: str = "", b: str = "", count: int = 0, style: str = "arc",
+            tension: float = -1.0, sections: int = 24, sides: int = 8,
+            jitter: float = 0.0, seed: int = 0, radius: float = -1.0,
+            name: str = "strands", label: str = "") -> str:
+    """Generate N thin tubes between two rims — the expressive multi-strand tier
+    (SPEC-10 Phase 5). "A sequence of crazy curves" as cheap relational generation:
+    variety from a `count` + a `seed`, not K hand-placed Béziers.
 
-    A weld=False connector stored its recipe (the two handles + style/tension/
-    sections/profile). reshape re-reads the handles' CURRENT positions and re-bakes
-    the tube in place — so if you deform or move a pipe, the connector follows. The
-    one editable knob is `tension` (more/less arc); -1 keeps the stored value.
+    Distributes `count` strands around the two openings, each leaving along the
+    opening's OWN outward normal (G1, like `edit op=connect`), with a seeded coherent
+    `jitter` bowing each strand its own way. Emitted as ONE editable mesh object
+    (capped tubes, not welded into the shells); it stores its recipe, so
+    `edit op=reshape name=<strands>` re-bakes the whole bundle against the live
+    handles. Re-run with a new `seed` for a different bundle from the same inputs.
+
+    a, b:     the two boundary handles to span (mint with feel op=assembly).
+    count:    number of strands (>=2).
+    style:    arc (default) | s_curve | direct | slack.
+    tension:  0..1 how much each strand bows; -1 (default) = the style default.
+    sections: rings along each strand (default 24). sides: cross-section verts (8).
+    jitter:   0..1 coherent midspan waywardness (0 = a clean parallel fan).
+    seed:     RNG seed — same seed reproduces the same bundle.
+    radius:   strand tube radius (m); -1 (default) = auto-pack to the rim + count."""
+    result = call_blender("make_strands", {
+        "a": a, "b": b, "count": count, "style": style, "tension": tension,
+        "sections": sections, "sides": sides, "jitter": jitter, "seed": seed,
+        "radius": radius, "name": name,
+    }, label=label)
+    if result.get("success"):
+        bend = result.get("min_bend_radius_cm")
+        bend_str = f", tightest bend {bend}cm" if bend is not None else ""
+        wind = ", reversed winding" if result.get("winding") == "reversed" else ""
+        main = (f"strands {result['a']} ↔ {result['b']} → {result['object']} — "
+                f"{result['n_strands']}×{result['sides']}-side {result['style']} "
+                f"t{result['tension']}, jitter {result['jitter']} (seed {result['seed']}), "
+                f"r={result['strand_radius_cm']}cm each, avg {result['avg_length_cm']}cm, "
+                f"taper ⌀{result['diam_a_cm']}→{result['diam_b_cm']}cm{bend_str}{wind} "
+                f"[{result.get('op_id','')}]")
+        if result.get("warning"):
+            main += f"\n  ⚠ {result['warning']}"
+        main += ("\n  → next: tune with `edit op=reshape name=" + result['object']
+                 + " tension=…` (re-evaluates against the live handles); re-run "
+                   "op=strands with a new seed for a different bundle")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def reshape(name: str = "", tension: float = -1.0, label: str = "") -> str:
+    """Re-evaluate an UNWELDED connector (or a strands bundle) against its live handles
+    (SPEC-10 Phase 4/5).
+
+    A weld=False connector — or any `edit op=strands` object — stored its recipe (the
+    two handles + style/tension/…). reshape re-reads the handles' CURRENT positions and
+    re-bakes the geometry in place — so if you deform or move a pipe, the connector or
+    the whole strand bundle follows. The one editable knob is `tension` (more/less arc);
+    -1 keeps the stored value.
 
     Welded connectors are committed (the rims are fused into the shell, nothing live
     to re-evaluate) — re-run edit op=connect to reshape those.
 
-    name:    the connector object to re-evaluate (the one connect left on weld=False).
+    name:    the connector/strands object to re-evaluate.
     tension: 0..1 — override the bow; -1 (default) keeps the stored tension."""
     result = call_blender("reshape_connector", {"name": name, "tension": tension},
                           label=label)
     if result.get("success"):
-        seams = (f"seams {result['seam_angle_a_deg']}°/{result['seam_angle_b_deg']}° "
-                 f"off-normal")
-        bend = result.get("min_bend_radius_cm")
-        bend_str = f", tightest bend {bend}cm" if bend is not None else ""
-        main = (f"reshaped {result['name']} — {result['style']} t{result['tension']}, "
-                f"{result['sides']}-side, {result['length_cm']}cm, "
-                f"taper ⌀{result['diam_a_cm']}→{result['diam_b_cm']}cm{bend_str}; {seams} "
-                f"(re-evaluated against live {result['a']}/{result['b']}) "
-                f"[{result.get('op_id','')}]")
+        if result.get("kind") == "strands":
+            bend = result.get("min_bend_radius_cm")
+            bend_str = f", tightest bend {bend}cm" if bend is not None else ""
+            main = (f"reshaped {result['name']} — {result['n_strands']}×"
+                    f"{result['sides']}-side {result['style']} t{result['tension']}, "
+                    f"jitter {result['jitter']}, r={result['strand_radius_cm']}cm, "
+                    f"avg {result['avg_length_cm']}cm{bend_str} "
+                    f"(re-evaluated against live {result['a']}/{result['b']}) "
+                    f"[{result.get('op_id','')}]")
+        else:
+            seams = (f"seams {result['seam_angle_a_deg']}°/{result['seam_angle_b_deg']}° "
+                     f"off-normal")
+            bend = result.get("min_bend_radius_cm")
+            bend_str = f", tightest bend {bend}cm" if bend is not None else ""
+            main = (f"reshaped {result['name']} — {result['style']} t{result['tension']}, "
+                    f"{result['sides']}-side, {result['length_cm']}cm, "
+                    f"taper ⌀{result['diam_a_cm']}→{result['diam_b_cm']}cm{bend_str}; {seams} "
+                    f"(re-evaluated against live {result['a']}/{result['b']}) "
+                    f"[{result.get('op_id','')}]")
         if result.get("warning"):
             main += f"\n  ⚠ {result['warning']}"
     else:

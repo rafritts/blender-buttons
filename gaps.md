@@ -121,15 +121,19 @@ describe` (deferred; `feel method=facing` covers the need).
 
 ## Carried over — bigger build-outs (not yet started)
 
-- **SPEC-10 connector — expressive strand tier (Phase 5).** Phases 2–4 shipped (`edit
-  op=connect`: geometry-bound, normal-continuous, taper-matched hollow sweep, weld-aware,
-  seam-angle/bend-radius reads — G59/G60/G61/G65; `edit op=reshape`: re-evaluate an unwelded
-  connector against its live handles; `edit op=resample`: equalise a rim's vertex count so
-  connect's 1:1 weld limit is lifted by composition). What's **still open**: (5) the
-  EXPRESSIVE strand tier — sub-address a rim into N addressable outlets, `count`/`jitter`/
-  `seed` strands between two openings, and bundle-weld a set of strand ends. Rides on the
-  single-connector engine that now exists; the new piece it needs is a boundary-loop
-  partition selection primitive (carve a rim into N addressable sub-arcs).
+- **SPEC-10 connector — bundle-weld + rim sub-addressing (the Phase-5 remainder).** Phases
+  2–5 shipped: `edit op=connect` (geometry-bound, normal-continuous, taper-matched hollow
+  sweep, weld-aware, seam-angle/bend-radius reads — G59/G60/G61/G65); `edit op=reshape`
+  (re-evaluate an unwelded connector/strand bundle against its live handles); `edit
+  op=resample` (equalise a rim's vertex count so connect's 1:1 weld limit lifts by
+  composition); and `edit op=strands count/jitter/seed` (N normal-continuous tubes
+  distributed around two rims with seeded coherent jitter — variety from a count + a seed,
+  emitted as one editable, reshape-able bundle of capped tubes). What's **still open** is the
+  one coupled sliver: **sub-address a rim into N addressable outlets** + **bundle-weld a set
+  of strand ends into a rim**. These two need each other (welding strand ends requires carved
+  outlets) and both gate on the same missing primitive — a **boundary-loop partition
+  selection** op that carves a rim into N addressable sub-arcs. Until then strands ship
+  floating-but-capped (an honest cables/vines/sinew result) rather than fused into the shells.
 
 - **Multires + dyntopo** as real multi-level sculpt targets — the proper organic-sculpt
   resolution story (distinct from the local-subdivide that shipped under G3).
