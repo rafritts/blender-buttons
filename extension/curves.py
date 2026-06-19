@@ -584,17 +584,15 @@ def feel_curve(params):
         for L in seglens:
             cum.append(cum[-1] + L)
 
+        # Pass 1 — per-sample curvature κ, bend-plane normal, and local turn angle.
         max_k = 0.0
         at_frac = 0.0
         turning = 0.0
-        inflections = 0
-        prev_bn = None
-        mean_k_num = 0.0
+        samples = []   # (arc_frac, k, unit bend-normal, turn_deg)
         for i in range(1, len(P) - 1):
             a, b, c = P[i - 1], P[i], P[i + 1]
             ab, bc, ca = (b - a).length, (c - b).length, (a - c).length
             cross = (b - a).cross(c - b)
-            # turning angle at b
             d0, d1 = (b - a), (c - b)
             turn_local = 0.0
             if d0.length > 1e-9 and d1.length > 1e-9:
@@ -602,22 +600,38 @@ def feel_curve(params):
                 turn_local = math.degrees(math.acos(cosang))
                 turning += turn_local
             denom = ab * bc * ca
-            if denom > 1e-12:
-                area = cross.length / 2.0
-                k = 4.0 * area / denom    # Menger curvature 1/R
-                mean_k_num += k * (ab + bc) / 2.0
+            if denom > 1e-12 and cross.length > 1e-12:
+                k = 4.0 * (cross.length / 2.0) / denom    # Menger curvature 1/R
                 if k > max_k:
                     max_k = k
                     at_frac = cum[i] / length
-            # inflection: the bend-plane normal flips to the other side. ONLY track
-            # where the bend is meaningful — in near-straight stretches the cross
-            # product is numerical noise whose sign flips at random (which used to
-            # mint phantom inflections on a clean planar arc). 2° gate filters it.
-            if turn_local > 2.0 and cross.length > 1e-12:
-                bn = cross.normalized()
-                if prev_bn is not None and bn.dot(prev_bn) < -0.2:
-                    inflections += 1
-                prev_bn = bn
+                samples.append((cum[i] / length, k, cross.normalized(), turn_local))
+
+        # Pass 2 — segment the curve into constant-bend-sense RUNS and count the real
+        # LOBES. A clean arch is one lobe (0 inflections); a real S is two big lobes
+        # (1). A 3-pt Bézier overshoots a sliver opposite the arc at each endpoint,
+        # and discretisation can jitter a stray sample at the reversal — both make
+        # tiny runs. Keeping only runs that carry a meaningful share of the total
+        # turning (≥12%) drops the slivers, so a plain arch no longer reads 'S-bend',
+        # and inflections = (real lobes − 1) regardless of where they fall.
+        inflections = 0
+        infl_at = []
+        if samples:
+            ref = max(samples, key=lambda s: s[1])[2]   # normal at the tightest bend
+            runs = []   # [sign, turning_sum, start_frac]
+            for frac, k, bn, turn in samples:
+                if k < 0.10 * max_k:
+                    continue                          # near-straight → ignore (noise)
+                sign = 1 if bn.dot(ref) >= 0 else -1
+                if runs and runs[-1][0] == sign:
+                    runs[-1][1] += turn
+                else:
+                    runs.append([sign, turn, frac])
+            total_turn = sum(r[1] for r in runs)
+            if total_turn > 1e-6:
+                lobes = [r for r in runs if r[1] >= 0.12 * total_turn]
+                inflections = max(0, len(lobes) - 1)
+                infl_at = [round(lobes[i][2], 2) for i in range(1, len(lobes))]
 
         min_radius = (1.0 / max_k) if max_k > 1e-9 else None
         t0 = (P[1] - P[0]).normalized()
@@ -629,6 +643,7 @@ def feel_curve(params):
             "tightest_at": round(at_frac, 2),
             "turning_deg": round(turning, 1),
             "inflections": inflections,
+            "inflection_at": infl_at,
             "shape": ("straight" if turning < 5 else
                       "single arc" if inflections == 0 else
                       f"S-bend ({inflections} inflection(s))"),
