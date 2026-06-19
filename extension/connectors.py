@@ -1,4 +1,4 @@
-"""connectors — geometry-bound parametric connectors (SPEC-10 Phases 2–3).
+"""connectors — geometry-bound parametric connectors (SPEC-10).
 
 `edit op=connect a=<handleA> b=<handleB>` welds two open rims with a swept,
 tapered, tangent-continuous tube — the primitive the two-cylinder "connect with
@@ -17,10 +17,18 @@ What it does that no existing verb could:
   • G65 — emits the centreline quality reads (length, min bend radius, per-seam
     tangent-vs-normal angle, sweep feasibility) in the status block.
 
-v1 scope: rims must have EQUAL vertex counts (1:1 weld); unequal counts are refused
-with a pointer to re-ring. Both owners must be meshes. The editable-parameter tier
-(re-evaluate against live handles) and the multi-strand tier are SPEC-10 Phases 4–5,
-not built here.
+SPEC-10 Phase 4 (editability): a weld=False connector stores its recipe (the two
+handles + style/tension/sections/profile) as custom props. `edit op=reshape
+name=<connector>` re-evaluates that recipe against the LIVE handles — deform a pipe
+and the connector follows — with an optional `tension` override for "more / less
+arc". A welded connector is a COMMIT (the rims are fused into the shell, so there is
+nothing live to re-evaluate); reshape it by re-running connect.
+
+Vertex-count match: the exact weld needs both rims at the same vertex count.
+`edit op=resample a=<handle> count=N` resamples a boundary rim to N verts (an
+arc-length transition collar), so a 16-vs-32 mismatch is equalised in one call and
+connect stays a clean 1:1 weld. Both owners must be meshes (keyed/rigged refused).
+The multi-strand expressive tier is SPEC-10 Phase 5, not built here.
 """
 
 import math
@@ -105,53 +113,32 @@ def _bezier(p0, p1, p2, p3, t):
 _STYLE_TENSION = {"arc": 0.55, "s_curve": 0.55, "slack": 0.9, "direct": 0.0}
 
 
-# ── the verb ──────────────────────────────────────────────────────────────────
+# ── the swept-connector engine (shared by connect + reshape) ──────────────────
 
-def connect_handles(params):
-    """edit op=connect — weld two open boundary rims with a swept tangent-continuous
-    tube (SPEC-10). See module docstring. Consumes two boundary handles (mint with
-    feel op=assembly), not coordinates.
+def _compute_connector(a_name, b_name, style, tension, sections, profile):
+    """Resolve both handles LIVE and build the connector rings + G65 quality reads.
 
-    a, b:     the two boundary handles to connect (order-independent for the weld;
-              the curve is symmetric).
-    style:    arc (default) | s_curve | direct | slack. arc/s_curve/slack leave each
-              opening along its OUTWARD NORMAL (G1 continuity); the shape that emerges
-              is a single arc when the openings face each other and an S when they face
-              the same way. direct relaxes continuity toward the straight chord.
-    tension:  0..1 — control-handle length as a fraction of the gap ("how much it
-              bows"). -1 (default) = the style's default.
-    sections: length resolution (rings along the span). Default 12.
-    profile:  match (default — sweep each rim's own cross-section, tapering between) |
-              round (force a clean circle of the matched radius mid-span).
-    weld:     fuse both ends into the owning shell(s) → one watertight manifold
-              (default True). False leaves the connector as a separate mesh object.
-    name:     name for the connector object (default 'connector'). When weld=True the
-              result keeps owner a's name; this only shows on weld=False.
-    """
-    a_name = (params.get("a") or "").strip()
-    b_name = (params.get("b") or "").strip()
-    if not a_name or not b_name:
-        return {"error": "edit op=connect needs a=<handle> and b=<handle> "
-                         "(mint boundary handles with feel op=assembly)"}
-    if a_name == b_name:
-        return {"error": "a and b are the same handle — connect needs two distinct rims"}
-
+    Returns (data, None) on success or (None, error_str). `data` carries `rings`
+    (the ring-of-rings to materialise), `n` (sides), and every public read field
+    plus the private `min_bend`/`rim_r`. Both `connect_handles` (create) and
+    `reshape_connector` (re-evaluate) call this — the geometry lives in one place so
+    a reshape re-reads the handles' current positions and the tube follows."""
     ea, eb = H._find_handle(a_name), H._find_handle(b_name)
     if ea is None:
-        return {"error": f"handle '{a_name}' not found (run feel op=assembly to mint rims)"}
+        return None, f"handle '{a_name}' not found (run feel op=assembly to mint rims)"
     if eb is None:
-        return {"error": f"handle '{b_name}' not found (run feel op=assembly to mint rims)"}
+        return None, f"handle '{b_name}' not found (run feel op=assembly to mint rims)"
 
     owner_a = bpy.data.objects.get(ea.get("bb_owner", ""))
     owner_b = bpy.data.objects.get(eb.get("bb_owner", ""))
     if owner_a is None or owner_a.type != 'MESH':
-        return {"error": f"'{a_name}' owner is gone or not a mesh"}
+        return None, f"'{a_name}' owner is gone or not a mesh"
     if owner_b is None or owner_b.type != 'MESH':
-        return {"error": f"'{b_name}' owner is gone or not a mesh"}
+        return None, f"'{b_name}' owner is gone or not a mesh"
     for o in (owner_a, owner_b):
         if o.data.shape_keys is not None:
-            return {"error": f"'{o.name}' has shape keys — connect changes topology and "
-                             f"would corrupt the keys. Keyed/rigged meshes are out of scope."}
+            return None, (f"'{o.name}' has shape keys — connect changes topology and "
+                          f"would corrupt the keys. Keyed/rigged meshes are out of scope.")
 
     # Own the mode: rim reads + object creation/join all need OBJECT mode.
     if bpy.context.active_object is not None and bpy.context.active_object.mode == 'EDIT':
@@ -159,18 +146,26 @@ def connect_handles(params):
 
     loopA, _idxA, errA = _ordered_loop(owner_a, ea.get("bb_vgroup", ""))
     if errA:
-        return {"error": f"handle '{a_name}': {errA}"}
+        return None, f"handle '{a_name}': {errA}"
     loopB, _idxB, errB = _ordered_loop(owner_b, eb.get("bb_vgroup", ""))
     if errB:
-        return {"error": f"handle '{b_name}': {errB}"}
+        return None, f"handle '{b_name}': {errB}"
 
     nA, nB = len(loopA), len(loopB)
     if nA != nB:
-        return {"error":
+        coarser = a_name if nA < nB else b_name
+        return None, (
             f"rims have different vertex counts ({nA} vs {nB}) — connect needs 1:1 "
-            f"weldable rims. Re-ring one opening to match (edit op=loop_cut / a remesh "
-            f"to equalise the loop), then retry."}
+            f"weldable rims. Equalise them first: edit op=resample a={coarser} "
+            f"count={max(nA, nB)} (resamples the coarser rim up to match), then retry.")
     n = nA
+
+    if style not in _STYLE_TENSION:
+        return None, f"style '{style}' invalid — use arc | s_curve | direct | slack"
+    if profile not in ("match", "round"):
+        return None, f"profile '{profile}' invalid — use match | round"
+    tension = max(0.0, min(float(tension), 2.0))
+    sections = max(2, min(int(sections), 256))
 
     cA = H._centroid(loopA)
     cB = H._centroid(loopB)
@@ -181,22 +176,7 @@ def connect_handles(params):
 
     gap = (cB - cA).length
     if gap < 1e-6:
-        return {"error": "the two rim centres coincide — nothing to span"}
-
-    style = (params.get("style") or "arc").strip().lower()
-    if style not in _STYLE_TENSION:
-        return {"error": f"style '{style}' invalid — use arc | s_curve | direct | slack"}
-    tension = params.get("tension", -1.0)
-    tension = float(tension if tension is not None else -1.0)
-    if tension < 0:
-        tension = _STYLE_TENSION[style]
-    tension = max(0.0, min(tension, 2.0))
-    sections = max(2, min(int(params.get("sections", 12) or 12), 256))
-    profile = (params.get("profile") or "match").strip().lower()
-    if profile not in ("match", "round"):
-        return {"error": f"profile '{profile}' invalid — use match | round"}
-    weld = bool(params.get("weld", True))
-    cname = (params.get("name") or "connector").strip() or "connector"
+        return None, "the two rim centres coincide — nothing to span"
 
     # Bézier control points: leave A along nA_out, arrive at B along -nB_out (so it
     # leaves B along nB_out) — G1 continuity at both seams. tension sets handle length.
@@ -315,35 +295,9 @@ def connect_handles(params):
     rim_r = min(rA, rB)
     feasible = (min_bend is None) or (min_bend > rim_r)
 
-    # Materialise the tube as a fresh mesh object (world coords == local; join folds it
-    # into the owner's local space, preserving the world-coincident seam verts).
-    bm = bmesh.new()
-    vmap = []
-    for ring in rings:
-        vmap.append([bm.verts.new(p) for p in ring])
-    for k in range(sections):
-        for i in range(n):
-            j = (i + 1) % n
-            try:
-                bm.faces.new((vmap[k][i], vmap[k][j], vmap[k + 1][j], vmap[k + 1][i]))
-            except ValueError:
-                pass   # duplicate face guard
-    bm.normal_update()
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-    me = bpy.data.meshes.new(cname)
-    bm.to_mesh(me)
-    bm.free()
-    conn = bpy.data.objects.new(cname, me)
-    bpy.context.scene.collection.objects.link(conn)
-    conn.select_set(True)
-    bpy.context.view_layer.objects.active = conn
-    bpy.ops.object.shade_smooth()
-    conn_name = conn.name
-
-    out = {
-        "success": True, "a": a_name, "b": b_name, "style": style,
-        "tension": round(tension, 3), "sections": sections, "profile": profile,
-        "sides": n,
+    data = {
+        "rings": rings, "n": n,
+        "style": style, "tension": tension, "sections": sections, "profile": profile,
         "length_cm": round(length * 100, 2),
         "min_bend_radius_cm": round(min_bend * 100, 2) if min_bend else None,
         "tightest_at": round(tight_at, 2),
@@ -352,19 +306,128 @@ def connect_handles(params):
         "seam_angle_a_deg": seam_a, "seam_angle_b_deg": seam_b,
         "twist_offset": bs, "winding": "same" if bd == 1 else "reversed",
         "sweep_feasible": feasible,
+        "min_bend": min_bend, "rim_r": rim_r,
     }
-    if not feasible:
-        out["warning"] = (f"tightest bend radius {round(min_bend * 100, 2)}cm < rim "
-                          f"radius {round(rim_r * 100, 2)}cm — the inner wall may fold "
-                          f"through itself. Lower tension or use style=slack.")
+    return data, None
+
+
+def _rings_to_bmesh(rings, n, matrix=None):
+    """Materialise the ring-of-rings into a smooth-shaded bmesh tube. `rings` are
+    WORLD points; pass `matrix` (an inverse world transform) to bake them into a
+    moved object's local space."""
+    bm = bmesh.new()
+    vmap = []
+    for ring in rings:
+        pts = [matrix @ p for p in ring] if matrix is not None else ring
+        vmap.append([bm.verts.new(p) for p in pts])
+    for k in range(len(rings) - 1):
+        for i in range(n):
+            j = (i + 1) % n
+            try:
+                f = bm.faces.new((vmap[k][i], vmap[k][j], vmap[k + 1][j], vmap[k + 1][i]))
+                f.smooth = True
+            except ValueError:
+                pass   # duplicate face guard
+    bm.normal_update()
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return bm
+
+
+_READ_KEYS = ("style", "tension", "sections", "profile",
+              "length_cm", "min_bend_radius_cm", "tightest_at",
+              "diam_a_cm", "diam_b_cm", "taper",
+              "seam_angle_a_deg", "seam_angle_b_deg",
+              "twist_offset", "winding", "sweep_feasible")
+
+
+def _public_reads(data):
+    """The status fields connect/reshape both surface — selected from `data`."""
+    out = {k: data[k] for k in _READ_KEYS}
+    out["tension"] = round(data["tension"], 3)
+    out["sides"] = data["n"]
+    if not data["sweep_feasible"]:
+        out["warning"] = (f"tightest bend radius {data['min_bend_radius_cm']}cm < rim "
+                          f"radius {round(data['rim_r'] * 100, 2)}cm — the inner wall may "
+                          f"fold through itself. Lower tension or use style=slack.")
+    return out
+
+
+# ── op=connect ─────────────────────────────────────────────────────────────────
+
+def connect_handles(params):
+    """edit op=connect — weld two open boundary rims with a swept tangent-continuous
+    tube (SPEC-10). See module docstring. Consumes two boundary handles (mint with
+    feel op=assembly), not coordinates.
+
+    a, b:     the two boundary handles to connect (order-independent for the weld).
+    style:    arc (default) | s_curve | direct | slack. arc/s_curve/slack leave each
+              opening along its OUTWARD NORMAL (G1 continuity); direct relaxes toward
+              the straight chord.
+    tension:  0..1 — control-handle length as a fraction of the gap ("how much it
+              bows"). -1 (default) = the style's default.
+    sections: length resolution (rings along the span). Default 12.
+    profile:  match (default — sweep each rim's own cross-section, tapering between) |
+              round (force a clean circle of the matched radius mid-span).
+    weld:     fuse both ends into the owning shell(s) → one watertight manifold
+              (default True). False leaves the connector as a separate, EDITABLE mesh
+              object (stores its recipe → edit op=reshape).
+    name:     name for the connector object (default 'connector'; shows on weld=False).
+    """
+    a_name = (params.get("a") or "").strip()
+    b_name = (params.get("b") or "").strip()
+    if not a_name or not b_name:
+        return {"error": "edit op=connect needs a=<handle> and b=<handle> "
+                         "(mint boundary handles with feel op=assembly)"}
+    if a_name == b_name:
+        return {"error": "a and b are the same handle — connect needs two distinct rims"}
+
+    style = (params.get("style") or "arc").strip().lower()
+    tension = params.get("tension", -1.0)
+    tension = float(tension if tension is not None else -1.0)
+    if tension < 0:
+        tension = _STYLE_TENSION.get(style, 0.55)
+    sections = int(params.get("sections", 12) or 12)
+    profile = (params.get("profile") or "match").strip().lower()
+    weld = bool(params.get("weld", True))
+    cname = (params.get("name") or "connector").strip() or "connector"
+
+    data, err = _compute_connector(a_name, b_name, style, tension, sections, profile)
+    if err:
+        return {"error": err}
+
+    n = data["n"]
+    bm = _rings_to_bmesh(data["rings"], n)
+    me = bpy.data.meshes.new(cname)
+    bm.to_mesh(me)
+    bm.free()
+    conn = bpy.data.objects.new(cname, me)
+    bpy.context.scene.collection.objects.link(conn)
+    conn.select_set(True)
+    bpy.context.view_layer.objects.active = conn
+    conn_name = conn.name
+
+    out = {"success": True, "a": a_name, "b": b_name}
+    out.update(_public_reads(data))
 
     if not weld:
+        # SPEC-10 Phase 4 — store the recipe so the connector is re-evaluable against
+        # the live handles (edit op=reshape).
+        conn["bb_connector"] = True
+        conn["bb_conn_a"] = a_name
+        conn["bb_conn_b"] = b_name
+        conn["bb_conn_style"] = data["style"]
+        conn["bb_conn_tension"] = data["tension"]
+        conn["bb_conn_sections"] = data["sections"]
+        conn["bb_conn_profile"] = data["profile"]
         push_undo(f"connect {a_name} ↔ {b_name} (unwelded)")
         out["connector"] = conn_name
         out["welded"] = False
         return out
 
     # Weld: join owner(s) + connector, fuse the world-coincident seam verts.
+    ea, eb = H._find_handle(a_name), H._find_handle(b_name)
+    owner_a = bpy.data.objects.get(ea.get("bb_owner", ""))
+    owner_b = bpy.data.objects.get(eb.get("bb_owner", ""))
     owners = [owner_a] if owner_a.name == owner_b.name else [owner_a, owner_b]
     bpy.ops.object.select_all(action='DESELECT')
     for o in owners:
@@ -403,6 +466,199 @@ def connect_handles(params):
     return out
 
 
+# ── op=reshape (SPEC-10 Phase 4) ──────────────────────────────────────────────
+
+def reshape_connector(params):
+    """edit op=reshape — re-evaluate an UNWELDED connector against its live handles.
+
+    The connector stored its recipe at create time (the two handles + style/tension/
+    sections/profile). reshape re-reads the handles' CURRENT positions and re-bakes
+    the tube in place, so deforming/moving a pipe drags the connector with it. The one
+    editable knob is `tension` (more / less arc); -1 keeps the stored value.
+
+    Welded connectors are committed (the rims are fused into the shell) and carry no
+    recipe — re-run edit op=connect to reshape them.
+
+    name:    the connector object to re-evaluate.
+    tension: 0..1 override ("more / less arc"); -1 (default) keeps the stored value.
+    """
+    name = (params.get("name") or "").strip()
+    if not name:
+        return {"error": "edit op=reshape needs name=<connector> (an unwelded connector)"}
+    obj = bpy.data.objects.get(name)
+    if obj is None:
+        return {"error": f"object '{name}' not found"}
+    if not obj.get("bb_connector"):
+        return {"error": f"'{name}' is not an editable connector. Welded connectors are "
+                         f"committed (the rims are fused) — re-run edit op=connect to "
+                         f"reshape. Only weld=False connectors store an editable recipe."}
+
+    a = obj.get("bb_conn_a", "")
+    b = obj.get("bb_conn_b", "")
+    if not a or not b:
+        return {"error": f"'{name}' has an incomplete recipe (missing handle binding) — "
+                         f"re-create it with edit op=connect"}
+    style = obj.get("bb_conn_style", "arc")
+    sections = int(obj.get("bb_conn_sections", 12) or 12)
+    profile = obj.get("bb_conn_profile", "match")
+
+    t = params.get("tension", -1.0)
+    t = float(t if t is not None else -1.0)
+    tension = t if t >= 0 else float(obj.get("bb_conn_tension",
+                                             _STYLE_TENSION.get(style, 0.55)))
+
+    if bpy.context.active_object is not None and bpy.context.active_object.mode == 'EDIT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    data, err = _compute_connector(a, b, style, tension, sections, profile)
+    if err:
+        return {"error": f"reshape '{name}': {err}"}
+
+    bm = _rings_to_bmesh(data["rings"], data["n"], matrix=obj.matrix_world.inverted())
+    bm.to_mesh(obj.data)
+    bm.free()
+    obj.data.update()
+    obj["bb_conn_tension"] = data["tension"]
+
+    push_undo(f"reshape {name}")
+    out = {"success": True, "reshaped": True, "name": name, "a": a, "b": b}
+    out.update(_public_reads(data))
+    return out
+
+
+# ── op=resample — equalise a rim's vertex count (lifts the connect 1:1 limit) ──
+
+def _resample_polyline_closed(pts, count):
+    """Arc-length-equidistant resample of a CLOSED polyline to `count` points. The
+    first sample lands on pts[0] (keeps the new rim's winding aligned to the old)."""
+    m = len(pts)
+    seg = [(pts[(i + 1) % m] - pts[i]).length for i in range(m)]
+    total = sum(seg)
+    if total < 1e-9:
+        return [pts[i % m].copy() for i in range(count)]
+    cum = [0.0]
+    for s in seg:
+        cum.append(cum[-1] + s)            # cum[m] == total
+    out = []
+    for k in range(count):
+        target = (k / count) * total
+        i = 0
+        while i < m and cum[i + 1] <= target:
+            i += 1
+        if i >= m:
+            i = m - 1
+        seglen = seg[i] if seg[i] > 1e-12 else 1.0
+        f = (target - cum[i]) / seglen
+        out.append(pts[i].lerp(pts[(i + 1) % m], f))
+    return out
+
+
+def resample_loop(params):
+    """edit op=resample — resample a boundary rim to a target vertex count.
+
+    Builds a short arc-length transition collar from the rim out to a fresh `count`-
+    vert loop and re-homes the handle onto it, so two rims that didn't match (e.g.
+    16 vs 32) can be equalised in one call and edit op=connect stays a clean 1:1 weld.
+    The handle is re-baselined (its vert count changes), so it reads clean afterward.
+
+    a:      the boundary handle whose rim to resample (mint with feel op=assembly).
+    count:  target vertex count (>=3).
+    depth:  collar length along the rim's outward normal (m); -1 = auto (~5% of the
+            rim radius). The collar extends the opening by this much; the new rim
+            keeps the opening's diameter.
+    """
+    hname = (params.get("a") or params.get("handle") or "").strip()
+    if not hname:
+        return {"error": "edit op=resample needs a=<boundary handle> and count=N"}
+    count = int(params.get("count", 0) or 0)
+    if count < 3:
+        return {"error": "count must be >=3 (the target vertex count for the rim)"}
+
+    e = H._find_handle(hname)
+    if e is None:
+        return {"error": f"handle '{hname}' not found (run feel op=assembly to mint rims)"}
+    owner = bpy.data.objects.get(e.get("bb_owner", ""))
+    if owner is None or owner.type != 'MESH':
+        return {"error": f"'{hname}' owner is gone or not a mesh"}
+    if owner.data.shape_keys is not None:
+        return {"error": f"'{owner.name}' has shape keys — resample changes topology and "
+                         f"would corrupt the keys. Keyed/rigged meshes are out of scope."}
+
+    if bpy.context.active_object is not None and bpy.context.active_object.mode == 'EDIT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    vgname = e.get("bb_vgroup", "")
+    loop, idx, err = _ordered_loop(owner, vgname)
+    if err:
+        return {"error": f"handle '{hname}': {err}"}
+    m = len(loop)
+    if count == m:
+        return {"success": True, "handle": hname, "owner": owner.name,
+                "from_count": m, "to_count": m, "noop": True}
+
+    cen = H._centroid(loop)
+    nrm = H._newell_normal(loop, cen, Vector(world_center(owner)))
+    rim_r = sum((c - cen).length for c in loop) / m
+
+    depth = params.get("depth", -1.0)
+    depth = float(depth if depth is not None else -1.0)
+    if depth < 0:
+        depth = max(0.05 * rim_r, 0.005)
+
+    new_world = [p + nrm * depth for p in _resample_polyline_closed(loop, count)]
+
+    mw = owner.matrix_world
+    mwi = mw.inverted()
+    bm = bmesh.new()
+    bm.from_mesh(owner.data)
+    bm.verts.ensure_lookup_table()
+    bm.edges.ensure_lookup_table()
+
+    # The old rim's open-boundary edges (one adjacent face) along the walked cycle.
+    needed = {frozenset((idx[a], idx[(a + 1) % m])) for a in range(m)}
+    old_edges = [ed for ed in bm.edges
+                 if len(ed.link_faces) == 1
+                 and frozenset((ed.verts[0].index, ed.verts[1].index)) in needed]
+
+    new_verts = [bm.verts.new(mwi @ p) for p in new_world]
+    new_edges = [bm.edges.new((new_verts[a], new_verts[(a + 1) % count]))
+                 for a in range(count)]
+
+    bridged = bmesh.ops.bridge_loops(bm, edges=old_edges + new_edges)
+    for f in bridged.get("faces", []):
+        f.smooth = True
+    bm.normal_update()
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.verts.index_update()
+    new_idx = [v.index for v in new_verts]
+    new_local = [v.co.copy() for v in new_verts]
+    bm.to_mesh(owner.data)
+    bm.free()
+    owner.data.update()
+
+    # Re-home the handle onto the new rim (the old verts are now interior).
+    g = owner.vertex_groups.get(vgname)
+    if g is not None:
+        g.remove(list(idx))
+        g.add(new_idx, 1.0, 'REPLACE')
+
+    # Re-baseline: the vert count changed, so a stale snapshot would read orphaned.
+    new_world_cos = [mw @ c for c in new_local]
+    new_cen = H._centroid(new_world_cos)
+    new_nrm = H._newell_normal(new_world_cos, new_cen, Vector(world_center(owner)))
+    H._snapshot_provenance(e, new_cen, new_nrm, new_world_cos, count, hname)
+    if not e.get("bb_vertex_parent"):
+        e.location = new_cen
+    e.rotation_euler = new_nrm.to_track_quat('Z', 'Y').to_euler()
+
+    push_undo(f"resample {hname} {m}→{count}")
+    return {"success": True, "handle": hname, "owner": owner.name,
+            "from_count": m, "to_count": count,
+            "depth_cm": round(depth * 100, 2), "rim_diam_cm": round(rim_r * 2 * 100, 2)}
+
+
 TOOLS = {
     "connect_handles": connect_handles,
+    "reshape_connector": reshape_connector,
+    "resample_loop": resample_loop,
 }

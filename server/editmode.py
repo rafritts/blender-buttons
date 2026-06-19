@@ -770,8 +770,72 @@ def connect(a: str = "", b: str = "", style: str = "arc", tension: float = -1.0,
             main += f"\n  ⚠ {result['warning']}"
         if result.get("welded"):
             main += ("\n  → next: `feel op=mesh target=" + result['result_object']
-                     + "` to lint the weld (watertight / normals) · `feel op=curve` peers "
-                     "won't help here — the connector is baked; re-run connect to reshape")
+                     + "` to lint the weld (watertight / normals) · welded = committed; "
+                     "re-run connect to reshape")
+        else:
+            main += ("\n  → next: tune it with `edit op=reshape name=" + result['connector']
+                     + " tension=…` (re-evaluates against the live handles); "
+                     "re-run with weld=true to commit")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def reshape(name: str = "", tension: float = -1.0, label: str = "") -> str:
+    """Re-evaluate an UNWELDED connector against its live handles (SPEC-10 Phase 4).
+
+    A weld=False connector stored its recipe (the two handles + style/tension/
+    sections/profile). reshape re-reads the handles' CURRENT positions and re-bakes
+    the tube in place — so if you deform or move a pipe, the connector follows. The
+    one editable knob is `tension` (more/less arc); -1 keeps the stored value.
+
+    Welded connectors are committed (the rims are fused into the shell, nothing live
+    to re-evaluate) — re-run edit op=connect to reshape those.
+
+    name:    the connector object to re-evaluate (the one connect left on weld=False).
+    tension: 0..1 — override the bow; -1 (default) keeps the stored tension."""
+    result = call_blender("reshape_connector", {"name": name, "tension": tension},
+                          label=label)
+    if result.get("success"):
+        seams = (f"seams {result['seam_angle_a_deg']}°/{result['seam_angle_b_deg']}° "
+                 f"off-normal")
+        bend = result.get("min_bend_radius_cm")
+        bend_str = f", tightest bend {bend}cm" if bend is not None else ""
+        main = (f"reshaped {result['name']} — {result['style']} t{result['tension']}, "
+                f"{result['sides']}-side, {result['length_cm']}cm, "
+                f"taper ⌀{result['diam_a_cm']}→{result['diam_b_cm']}cm{bend_str}; {seams} "
+                f"(re-evaluated against live {result['a']}/{result['b']}) "
+                f"[{result.get('op_id','')}]")
+        if result.get("warning"):
+            main += f"\n  ⚠ {result['warning']}"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def resample(a: str = "", count: int = 0, depth: float = -1.0, label: str = "") -> str:
+    """Resample a boundary rim to a target vertex count (SPEC-10 — lifts connect's 1:1
+    limit). Builds a short arc-length transition collar out to a fresh `count`-vert
+    loop and re-homes the handle onto it, so two rims that didn't match (e.g. 16 vs 32)
+    can be equalised in one call and `edit op=connect` stays a clean 1:1 weld.
+
+    a:     the boundary handle whose rim to resample (mint with feel op=assembly).
+    count: target vertex count (>=3).
+    depth: collar length along the rim's outward normal (m); -1 = auto (~5% of the rim
+           radius). Extends the opening by this much; the new rim keeps its diameter."""
+    result = call_blender("resample_loop", {"a": a, "count": count, "depth": depth},
+                          label=label)
+    if result.get("success"):
+        if result.get("noop"):
+            main = (f"'{result['handle']}' already {result['to_count']} verts — no change "
+                    f"[{result.get('op_id','')}]")
+        else:
+            main = (f"resampled {result['handle']} {result['from_count']}→"
+                    f"{result['to_count']} verts (collar {result['depth_cm']}cm, "
+                    f"⌀{result['rim_diam_cm']}cm) — handle re-baselined "
+                    f"[{result.get('op_id','')}]")
+            main += (f"\n  → next: `edit op=connect a=<other rim> b={result['handle']}` — "
+                     f"the rims now match for a clean 1:1 weld")
     else:
         main = result.get("error", "failed")
     return main + _status(result)

@@ -15,7 +15,7 @@ _OPS = ["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
         "mark_sharp", "crease", "inflate", "jitter", "noise_displace", "proportional_move",
         "extrude_along_curve", "round", "bend", "smooth_edges", "taper_end",
         "taper_section", "scale_rings", "band", "trace", "boolean", "subdivide", "bridge",
-        "connect", "relax", "slide", "poke", "inset", "grid_fill"]
+        "connect", "reshape", "resample", "relax", "slide", "poke", "inset", "grid_fill"]
 
 
 @mcp.tool(name="edit")
@@ -25,10 +25,11 @@ def edit(
                 "proportional_move",
                 "extrude_along_curve", "round", "bend", "smooth_edges", "taper_end",
                 "taper_section", "scale_rings", "band", "trace", "boolean", "subdivide",
-                "bridge", "connect", "relax", "slide", "poke", "inset", "grid_fill"],
+                "bridge", "connect", "reshape", "resample", "relax", "slide", "poke",
+                "inset", "grid_fill"],
     target: tag(str, "mesh object to edit (empty=active)") = "",
     # bridge — weld two boundary handles (SPEC-07 Phase 5 / G10)
-    a: tag(str, "[bridge] first boundary handle to weld (order-independent)") = "",
+    a: tag(str, "[bridge/connect] first boundary handle (order-independent); [resample] the rim handle to resample") = "",
     b: tag(str, "[bridge] second boundary handle to weld") = "",
     # bridge curvature dials (G58 — pass-through to Bridge Edge Loops; defaults = straight)
     bridge_cuts: tag(int, "[bridge] intermediate loops across the span (0=straight strut; raise to bow it)") = 0,
@@ -41,6 +42,8 @@ def edit(
     tension: tag(float, "[connect] 0..1 how much it bows (handle length as fraction of the gap); -1=style default") = -1.0,
     connect_profile: tag(str, "[connect] cross-section: match (sweep each rim's shape, tapering) | round") = "match",
     weld: tag(bool, "[connect] fuse both ends into one watertight mesh (False = leave a separate connector)") = True,
+    # reshape / resample — Phase 4 editability + rim equalising (SPEC-10)
+    count: tag(int, "[resample] target vertex count for the rim (>=3)") = 0,
     # directional amounts (extrude / move-style ops; meters, local frame)
     out: tag(float, "[extrude/proportional_move] push out along normal (m)") = 0.0,
     inward: tag(float, "[extrude/proportional_move] push inward (m)") = 0.0,
@@ -125,7 +128,7 @@ def edit(
     reproject: tag(bool, "[relax] snap back onto the surface each pass (shape preserved)") = True,
     # poke / inset / grid_fill (G50) — face authoring
     offset: tag(float, "[poke] push the new centre vert along the face normal (m)") = 0.0,
-    depth: tag(float, "[inset] push the inset in/out along the normal (m)") = 0.0,
+    depth: tag(float, "[inset] push the inset in/out along the normal (m); [resample] collar length (-1=auto)") = 0.0,
     individual: tag(bool, "[inset] inset each face separately vs. the region as a whole") = False,
     span: tag(int, "[grid_fill] grid span (0 = auto)") = 0,
     grid_offset: tag(int, "[grid_fill] grid offset") = 0,
@@ -189,6 +192,15 @@ def edit(
                     (joins the owners itself). a/b are two boundary handles.
                     (a, b, style=arc|s_curve|direct|slack, tension, sections,
                     connect_profile=match|round, weld)
+      reshape     — RE-EVALUATE an unwelded connector against its LIVE handles
+                    (SPEC-10 Phase 4): a weld=False connector stored its recipe, so
+                    if you deform/move a pipe, reshape re-bakes the tube to follow.
+                    tension overrides the bow (-1 keeps stored). Welded connectors are
+                    committed — re-run connect to reshape them.   (name, tension)
+      resample    — resample a boundary rim to a target vertex COUNT (an arc-length
+                    transition collar), re-homing the handle onto the new loop. Lifts
+                    connect's 1:1 weld limit: equalise a 16-vs-32 mismatch in one call.
+                    (a=<rim handle>, count, depth)
       relax       — RELAX the selection: even out vertex spacing over the form WITHOUT
                     changing its shape (smooth + reproject onto the pre-relax surface).
                     Moves verts ALONG the surface — fixes stretched/bunched quads.
@@ -213,6 +225,10 @@ def edit(
                     "edit op=bridge a=torso.neck b=head.base"),
         "connect": (bool(a and b), "a and b (two boundary handles)",
                     "edit op=connect a=pipe.top b=spout.base style=arc"),
+        "reshape": (bool(name), "name=<unwelded connector>",
+                    "edit op=reshape name=connector tension=0.8"),
+        "resample": (bool(a and count >= 3), "a=<rim handle> and count=N (>=3)",
+                    "edit op=resample a=pipe.top count=32"),
         "boolean": (bool(cutter), "cutter=<object to cut with>",
                     "edit op=boolean target=block cutter=drill bool_op=DIFFERENCE"),
         "extrude_along_curve": (bool(curve), "curve=<curve to sweep along>",
@@ -279,6 +295,10 @@ def edit(
     if o == "connect":
         return editmode.connect(a, b, style, tension, sections, connect_profile,
                                 weld, name or "connector", label)
+    if o == "reshape":
+        return editmode.reshape(name, tension, label)
+    if o == "resample":
+        return editmode.resample(a, count, depth if depth > 0 else -1.0, label)
     if o == "relax":
         return editmode.relax_selection(iterations, strength, reproject, label, target)
     if o == "slide":

@@ -121,15 +121,15 @@ describe` (deferred; `feel method=facing` covers the need).
 
 ## Carried over — bigger build-outs (not yet started)
 
-- **SPEC-10 connector — expressive + editable tiers (Phases 4–5).** The core connector
-  shipped (`edit op=connect`: geometry-bound, normal-continuous, taper-matched hollow
-  sweep, weld-aware, with the seam-angle/bend-radius quality reads — closing G59/G60/G61/
-  G65, verified live on the 2:1 55°-off-axis two-pipe case). What's **still open**: (4)
-  EDITABLE parameters — re-evaluate `tension`/`style`/`profile` against the live handles
-  instead of re-running the bake; and (5) the EXPRESSIVE strand tier — sub-address a rim
-  into N outlets, `count`/`jitter`/`seed` strands between two openings, bundle-weld a set
-  of strand ends. Also a v1 limit to lift: `connect` requires **equal rim vertex counts**
-  (refuses 32-vs-16 with a re-ring pointer) — auto-rering one end would close it.
+- **SPEC-10 connector — expressive strand tier (Phase 5).** Phases 2–4 shipped (`edit
+  op=connect`: geometry-bound, normal-continuous, taper-matched hollow sweep, weld-aware,
+  seam-angle/bend-radius reads — G59/G60/G61/G65; `edit op=reshape`: re-evaluate an unwelded
+  connector against its live handles; `edit op=resample`: equalise a rim's vertex count so
+  connect's 1:1 weld limit is lifted by composition). What's **still open**: (5) the
+  EXPRESSIVE strand tier — sub-address a rim into N addressable outlets, `count`/`jitter`/
+  `seed` strands between two openings, and bundle-weld a set of strand ends. Rides on the
+  single-connector engine that now exists; the new piece it needs is a boundary-loop
+  partition selection primitive (carve a rim into N addressable sub-arcs).
 
 - **Multires + dyntopo** as real multi-level sculpt targets — the proper organic-sculpt
   resolution story (distinct from the local-subdivide that shipped under G3).

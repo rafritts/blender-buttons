@@ -1,12 +1,18 @@
 # SPEC-10 — Geometry-bound parametric connectors: curves that know the openings
 
-_Status: Phases 2–3 SHIPPED 2026-06-18 as `edit op=connect` (`extension/connectors.py`):
-geometry-bound anchoring + normal-continuous launch, the hollow taper-matched stable-frame
-sweep, weld-into-shell(s), and the G65 quality reads (length, min bend radius, per-seam
-tangent-vs-normal angle, sweep feasibility) emitted in the status block. Closes gaps.md
-G59/G60/G61/G65; verified live on the 2:1, 55°-off-axis two-pipe case (watertight 1-shell
-weld, both seams 0.0° off-normal). Phases 4 (editable params) and 5 (expressive strand tier)
-remain open — see "Phasing" + gaps.md "Carried over". v1 limit: equal rim vertex counts only.
+_Status: Phases 2–4 SHIPPED as `edit op=connect` / `op=reshape` / `op=resample`
+(`extension/connectors.py`). **Phases 2–3** (2026-06-18): geometry-bound anchoring +
+normal-continuous launch, the hollow taper-matched stable-frame sweep, weld-into-shell(s),
+and the G65 quality reads (length, min bend radius, per-seam tangent-vs-normal angle, sweep
+feasibility) in the status block — closes gaps.md G59/G60/G61/G65, verified live on the 2:1,
+55°-off-axis two-pipe case. **Phase 4** (2026-06-18): editability — a weld=False connector
+stores its recipe (handles + style/tension/sections/profile) and `edit op=reshape` re-bakes
+it against the LIVE handles (deform a pipe, the connector follows) with a `tension` override;
+a welded connector is a COMMIT (rims fused → nothing live), reshape it by re-running connect.
+The equal-vertex-count limit is **lifted by composition**: `edit op=resample a=<handle>
+count=N` resamples a rim to N verts (arc-length transition collar, re-homes the handle), so a
+mismatch is equalised in one call and connect stays a clean 1:1 weld. **Phase 5** (expressive
+strand tier) remains open — see "Phasing" + gaps.md "Carried over".
 Proposed 2026-06-18 from the two-cylinder dogfood — three failed approaches (SPLINE_TUBE,
 curve+bevel, bridge-then-sculpt). G58 (curved `bridge`) shipped first as the cheap 80%._
 
@@ -143,8 +149,16 @@ afternoons. This tier rides entirely on the single-connector engine — build th
    taper, sweep feasibility — emitted in the connect status block. (The standalone `feel
    op=curve` centreline read shipped under G65 earlier; the connector adds the seam angles
    that need both ends bound.)
-4. **Editability.** Stored params, re-evaluation against live handles. (OPEN — v1 bakes; to
-   reshape, re-run `connect`.)
+4. ✅ **Editability.** A weld=False connector stores its recipe; `edit op=reshape
+   name=<connector>` re-evaluates it against the LIVE handles (re-bakes in place; the tube
+   follows a deformed/moved pipe), with a `tension` override. Stored as a custom-prop param
+   block the verb re-runs — NOT a node-group: the sweep is a custom bmesh algorithm (parallel
+   transport + the correspondence search + the exact-rim weld) that doesn't express in nodes.
+   Editability is scoped to UNWELDED connectors by design — the weld fuses the rims into the
+   shell and turns them interior, so there's nothing live to re-evaluate; a weld is the
+   commit. The equal-vert-count limit is lifted by `edit op=resample` (a standalone rim
+   resampler) rather than auto-rering inside connect — a more general primitive that keeps
+   connect's 1:1 invariant clean. (`reshape_connector` + `resample_loop`.)
 5. **Expressive tier.** Sub-address rims, `count`/`jitter`/`seed` strands, bundle-weld. (OPEN.)
 
 ## Open questions
@@ -152,8 +166,10 @@ afternoons. This tier rides entirely on the single-connector engine — build th
 - **Editable representation:** modifier/node-group authored by the verb, vs. a stored param
   block the verb re-runs on demand. The former is live but heavier; the latter is simpler but
   "edit" means "re-invoke." Lean node-group if the bevel/sweep can be expressed there.
-- **`profile=match` when rim counts differ** (e.g. 32 vs 24): auto-rering one end, or refuse
-  and point at a re-ring op? Probably auto-match with a reported warning.
+- ~~**`profile=match` when rim counts differ** (e.g. 32 vs 24): auto-rering one end, or refuse
+  and point at a re-ring op?~~ RESOLVED (Phase 4): refuse + point at the standalone `edit
+  op=resample` rim resampler (a more general primitive than burying a reduction band inside
+  connect; keeps the exact 1:1 weld invariant clean).
 - **Continuity order:** G1 (tangent) is the floor; is G2 (curvature) worth it for "elegant,"
   or does it over-bulge near the seam? Decide empirically in Phase 2.
 - **Where the verb lives:** `edit op=connect` (mesh-result framing) vs. a new top-level
