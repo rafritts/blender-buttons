@@ -20,6 +20,12 @@ panel operators — also the main thread.
 Unlike SPEC-11's chat, decisions flow back to the agent ON DEMAND: the agent calls
 `collab op=status` whenever it wants to know the phase or whether the human acted.
 There is no long-poll loop to hold open — SPEC-11's #1 risk is gone by design.
+
+The sign-off queue is AUTOMATIC and the agent cannot curate it: every mutating op
+auto-enqueues via `enqueue()`, called from the dispatch (extension/server.py) at the
+exact point each op gets its op_id + undo step. So the queue == the undo stack since
+the last review — the whole diff, not what the agent chose to surface (like a PR
+showing every changed line). Reject == undo. The agent only READS, via `op=status`.
 """
 
 import bpy
@@ -60,27 +66,15 @@ def collab_status(params):
             "decided": decided}
 
 
-def collab_submit(params):
-    """Surface an applied edit for sign-off. op_id defaults to the last logged op;
-    label is required (what the human is signing off on). Instant."""
-    label = (params.get("label") or "").strip()
-    if not label:
-        return {"error": "collab_submit: 'label' is required (what to sign off on)"}
-    op_id = (params.get("op_id") or "").strip()
-    if not op_id:
-        op_id = state._history[-1]["id"] if state._history else ""
-    if not op_id:
-        return {"error": "nothing to submit — no op has been applied yet, and no "
-                         "op_id was given"}
-    if not any(h["id"] == op_id for h in state._history):
-        return {"error": f"op_id '{op_id}' is not in the history log — pass the op_id "
-                         "the edit returned, or omit it to use the last logged op"}
-    if any(e["op_id"] == op_id for e in _pending):
-        return {"error": f"op '{op_id}' is already in the sign-off queue"}
-    _pending.append({"op_id": op_id, "label": label})
+def enqueue(op_id, label):
+    """Auto-enqueue a just-applied mutating op for sign-off. Called from the dispatch
+    (extension/server.py) at the point the op gets its op_id + undo step, so the queue
+    stays 1:1 with the undo stack — the whole diff, not an agent-curated subset. Not a
+    socket command: the agent has no way to add to or withhold from the queue."""
+    if not op_id or any(e["op_id"] == op_id for e in _pending):
+        return
+    _pending.append({"op_id": op_id, "label": label or op_id})
     tag_redraw()
-    return {"success": True, "op_id": op_id, "label": label,
-            "pending_count": len(_pending)}
 
 
 # ── human side (panel operators call these — main thread) ─────────────────────
@@ -194,5 +188,4 @@ def delete_handle(name):
 
 TOOLS = {
     "collab_status": collab_status,
-    "collab_submit": collab_submit,
 }

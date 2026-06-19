@@ -7,6 +7,11 @@ uses. See docs/SPEC-12-collab-panel.md.
 
 Decisions flow back ON DEMAND — call `op=status` whenever you want to check in.
 There is no long-poll loop (the SPEC-11 chat had one; this deliberately doesn't).
+
+You do NOT submit edits for sign-off: the queue is AUTOMATIC. Every mutating op you
+run auto-enqueues, so the queue is the whole diff since the human last reviewed (like
+a PR showing every changed line) — you can't curate what they sign off on. You only
+read verdicts here.
 """
 
 from typing import Literal
@@ -14,15 +19,12 @@ from typing import Literal
 from server._core import mcp, call_blender
 from ._common import tag, unknown
 
-_OPS = ["status", "submit"]
+_OPS = ["status"]
 
 
 @mcp.tool(name="collab")
 def collab(
-    op: Literal["status", "submit"] = "status",
-    label: tag(str, '[submit] what the human is signing off on, '
-                    'e.g. "extrude nub +0.04"') = "",
-    op_id: tag(str, "[submit] the op to sign off (default: your last logged op)") = "",
+    op: Literal["status"] = "status",
 ) -> str:
     """
     Shared-state collaboration with the human, through the in-Blender Collab panel
@@ -30,17 +32,16 @@ def collab(
 
       status — read the shared state: the current PHASE the human set (blockout →
                secondary → detail → retopo → uv → bake — a signal, not a lock), the
-               sign-off queue (edits awaiting Accept/Reject), and any DECISIONS the
-               human made since your last read (each reported once — this call
-               DRAINS them). A rejected edit was undone in the viewport; if it
-               wasn't the most recent op, later ops were rewound too (listed in
-               `rewound`) — rebuild the ones you still want. Call this to check in;
-               no loop, no waiting.
-      submit — surface an edit you just applied for the human's sign-off. label= is
-               what they're signing off on; op_id= defaults to your last logged op.
+               sign-off queue (every edit you've made awaiting Accept/Reject — it
+               fills AUTOMATICALLY; you don't submit), and any DECISIONS the human
+               made since your last read (each reported once — this call DRAINS
+               them). A rejected edit was undone in the viewport; if it wasn't the
+               most recent op, later ops were rewound too (listed in `rewound`) —
+               rebuild the ones you still want. Call this to check in; no loop, no
+               waiting.
 
-    The flow: apply an edit → `collab op=submit label="…"` → later `collab op=status`
-    to learn the verdict. It is all one conversation; you decide when to check in.
+    The flow: make edits (each auto-enqueues) → later `collab op=status` to learn
+    the human's verdicts. It is all one conversation; you decide when to check in.
     """
     o = op.lower().strip()
 
@@ -49,16 +50,6 @@ def collab(
         if result.get("error"):
             return result["error"]
         return _format_status(result)
-
-    if o == "submit":
-        if not label.strip():
-            return ('collab submit: needs label= — what the human is signing off on. '
-                    'e.g. collab op=submit label="extrude nub +0.04"')
-        result = call_blender("collab_submit", {"label": label, "op_id": op_id})
-        if result.get("error"):
-            return result["error"]
-        return (f'submitted for sign-off: "{result["label"]}" [{result["op_id"]}] — '
-                f'{result["pending_count"]} awaiting the human\'s call')
 
     return unknown("collab", "op", op, _OPS)
 

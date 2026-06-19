@@ -67,11 +67,11 @@ NO_LOG_TOOLS = {
     # G12 checkpoints: mark is pure metadata; restore delegates to undo_to (which is
     # itself unlogged), so neither should consume a log slot / undo step.
     "mark_checkpoint", "restore_checkpoint",
-    # SPEC-12 collab panel: shared-state I/O, not geometry — reads phase / the
-    # sign-off queue and surfaces an applied edit; touches no mesh and no undo step,
-    # so it must not consume a history slot or an undo step. (Reject DOES undo, but
-    # via the history path, not by logging collab_submit itself.)
-    "collab_status", "collab_submit",
+    # SPEC-12 collab panel: shared-state read — reads phase / the sign-off queue /
+    # the human's decisions; touches no mesh, so it must not consume a history slot
+    # or an undo step. (The queue fills automatically from the dispatch; Reject undoes
+    # via the history path.)
+    "collab_status",
 }
 
 # Tools that neither log to history NOR consume an undo step: pure queries,
@@ -124,9 +124,9 @@ NO_STATUS_TOOLS = {
     # handle GC (G15) — registry tidying; deleting an Empty doesn't move geometry, so
     # the status block would be noise (matches list/accept). Still mutating/undoable.
     "prune_handles", "forget_handle",
-    # SPEC-12 collab panel: shared-state I/O — the status block would be pure noise on
-    # a status/submit round-trip (the agent reads geometry from the geometry verbs).
-    "collab_status", "collab_submit",
+    # SPEC-12 collab panel: shared-state read — the status block would be pure noise
+    # on a status round-trip (the agent reads geometry from the geometry verbs).
+    "collab_status",
 }
 
 
