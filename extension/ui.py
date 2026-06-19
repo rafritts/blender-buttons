@@ -1,30 +1,11 @@
-"""Blender UI: start/stop operators and the Properties-panel UI."""
+"""Blender UI: start/stop operators, the Properties-panel UI, and the SPEC-12
+shared-state Collab panel (phase + sign-off queue + handles)."""
 
 import threading
 
 import bpy
 
-from . import chat, handles, server, state
-
-
-def _tag_chat_redraw():
-    """Tag every VIEW_3D N-panel region for redraw so freshly-drained agent
-    replies show up without the user nudging the UI."""
-    wm = bpy.context.window_manager
-    for window in (wm.windows if wm else []):
-        for area in window.screen.areas:
-            if area.type == 'VIEW_3D':
-                for region in area.regions:
-                    if region.type == 'UI':
-                        region.tag_redraw()
-
-
-def _chat_drain_timer():
-    """SPEC-11: move agent replies from the outbound queue into the displayed log
-    and redraw when any arrived. Runs on the main thread (bpy.app.timers)."""
-    if chat.drain_outbound():
-        _tag_chat_redraw()
-    return 0.2  # 5 Hz — responsive for chat, negligible cost
+from . import collab, handles, server, state
 
 
 def start_server():
@@ -36,8 +17,6 @@ def start_server():
     state._server_thread.start()
     if not bpy.app.timers.is_registered(server.process_queue):
         bpy.app.timers.register(server.process_queue, persistent=True)
-    if not bpy.app.timers.is_registered(_chat_drain_timer):
-        bpy.app.timers.register(_chat_drain_timer, persistent=True)
     return True
 
 
@@ -61,8 +40,6 @@ class BB_OT_StopServer(bpy.types.Operator):
         state._running = False
         if bpy.app.timers.is_registered(server.process_queue):
             bpy.app.timers.unregister(server.process_queue)
-        if bpy.app.timers.is_registered(_chat_drain_timer):
-            bpy.app.timers.unregister(_chat_drain_timer)
         self.report({'INFO'}, "Server stopped")
         return {'FINISHED'}
 
@@ -120,23 +97,72 @@ class BB_PT_Panel(bpy.types.Panel):
         layout.label(text=f"Port: {state.PORT}")
 
 
-class BB_OT_ChatSend(bpy.types.Operator):
-    """Send the typed message to the agent (SPEC-11). Enqueues onto the inbound
-    queue the agent long-polls via `chat op=poll`."""
-    bl_idname = "bb.chat_send"
-    bl_label = "Send"
+# ── SPEC-12: shared-state collaboration panel ─────────────────────────────────
+
+class BB_OT_CollabAccept(bpy.types.Operator):
+    """Keep the applied edit; report it accepted on the agent's next status read."""
+    bl_idname = "bb.collab_accept"
+    bl_label = "Accept"
+    op_id: bpy.props.StringProperty()
 
     def execute(self, context):
-        wm = context.window_manager
-        if not chat.push_inbound(wm.bb_chat_input):
+        res = collab.accept(self.op_id)
+        if res.get("error"):
+            self.report({'ERROR'}, res["error"])
             return {'CANCELLED'}
-        wm.bb_chat_input = ""
-        _tag_chat_redraw()
+        self.report({'INFO'}, "Accepted")
+        return {'FINISHED'}
+
+
+class BB_OT_CollabReject(bpy.types.Operator):
+    """Undo the applied edit (back to before it) and report it rejected. Rejecting a
+    non-tail op also rewinds every op after it — the agent is told what to rebuild."""
+    bl_idname = "bb.collab_reject"
+    bl_label = "Reject"
+    op_id: bpy.props.StringProperty()
+
+    def execute(self, context):
+        res = collab.reject(self.op_id)
+        if res.get("error"):
+            self.report({'ERROR'}, res["error"])
+            return {'CANCELLED'}
+        n = res.get("rewound", 0)
+        self.report({'INFO'}, "Rejected (undone)"
+                              + (f", +{n} later op(s) rewound" if n else ""))
+        return {'FINISHED'}
+
+
+class BB_OT_CollabHandleSelect(bpy.types.Operator):
+    """Select the handle's owner mesh and, in edit mode, just its verts."""
+    bl_idname = "bb.collab_handle_select"
+    bl_label = "Select"
+    name: bpy.props.StringProperty()
+
+    def execute(self, context):
+        res = collab.select_handle(self.name)
+        if res.get("error"):
+            self.report({'ERROR'}, res["error"])
+            return {'CANCELLED'}
+        return {'FINISHED'}
+
+
+class BB_OT_CollabHandleDelete(bpy.types.Operator):
+    """Delete the handle (Empty + its owner's HANDLE_ vgroup)."""
+    bl_idname = "bb.collab_handle_delete"
+    bl_label = "Delete"
+    name: bpy.props.StringProperty()
+
+    def execute(self, context):
+        res = collab.delete_handle(self.name)
+        if res.get("error"):
+            self.report({'ERROR'}, res["error"])
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Deleted handle '{self.name}'")
         return {'FINISHED'}
 
 
 def _wrap(text, width):
-    """Greedy word-wrap for the panel log (Blender labels don't wrap)."""
+    """Greedy word-wrap for panel labels (Blender labels don't wrap)."""
     out, line = [], ""
     for word in text.split():
         if line and len(line) + 1 + len(word) > width:
@@ -149,11 +175,11 @@ def _wrap(text, width):
     return out or [""]
 
 
-class BB_PT_ChatPanel(bpy.types.Panel):
-    """SPEC-11 V1: chat with the agent from inside Blender, routed entirely
-    through the MCP server. Sidebar (N-panel) → 'Blender Buttons' tab."""
-    bl_label = "Chat"
-    bl_idname = "BB_PT_chat"
+class BB_PT_CollabPanel(bpy.types.Panel):
+    """SPEC-12 V1: the shared-state surface — phase, sign-off queue, handles.
+    Sidebar (N-panel) → 'Blender Buttons' tab."""
+    bl_label = "Collab"
+    bl_idname = "BB_PT_collab"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = "Blender Buttons"
@@ -162,26 +188,50 @@ class BB_PT_ChatPanel(bpy.types.Panel):
         layout = self.layout
         wm = context.window_manager
 
-        # Chat needs the socket server up — expose start/stop here too.
+        # The panel is useless with the socket down — expose start/stop here too.
         row = layout.row(align=True)
         row.operator("bb.start_server", icon='PLAY', text="Start")
         row.operator("bb.stop_server", icon='PAUSE', text="Stop")
 
+        # ── Phase (human-owned signal) ──
         box = layout.box()
-        msgs = chat.log()
-        if not msgs:
-            box.label(text="(no messages yet)")
-        else:
-            for m in msgs[-30:]:
-                who = "You" if m["role"] == "human" else "Claude"
-                col = box.column(align=True)
-                for i, line in enumerate(_wrap(m["text"], 34)):
-                    col.label(text=(f"{who}: " if i == 0 else "    ") + line)
+        box.label(text="Phase", icon='SEQUENCE')
+        box.prop(wm, "bb_phase", text="")
 
-        layout.prop(wm, "bb_chat_input", text="")
-        layout.operator("bb.chat_send", icon='EXPORT')
-        layout.label(text=f"Status: {chat.status_text()}")
+        # ── Sign-off queue (apply, then review) ──
+        box = layout.box()
+        box.label(text="Sign-off queue", icon='CHECKMARK')
+        pending = collab._pending
+        if not pending:
+            box.label(text="(nothing awaiting review)")
+        else:
+            for e in pending:
+                col = box.column(align=True)
+                for i, line in enumerate(_wrap(e["label"], 30)):
+                    col.label(text=line if i else f"• {line}")
+                row = col.row(align=True)
+                row.operator("bb.collab_accept", text="Accept",
+                             icon='CHECKMARK').op_id = e["op_id"]
+                row.operator("bb.collab_reject", text="Reject",
+                             icon='X').op_id = e["op_id"]
+
+        # ── Handles (live scaffold) ──
+        box = layout.box()
+        box.label(text="Handles", icon='EMPTY_ARROWS')
+        hs = collab.list_for_panel()
+        if not hs:
+            box.label(text="(no handles yet)")
+        else:
+            for h in hs:
+                row = box.row(align=True)
+                row.label(text=h["name"])
+                row.operator("bb.collab_handle_select", text="",
+                             icon='RESTRICT_SELECT_OFF').name = h["name"]
+                row.operator("bb.collab_handle_delete", text="",
+                             icon='TRASH').name = h["name"]
 
 
 CLASSES = (BB_OT_StartServer, BB_OT_StopServer, BB_OT_SaveAsHandle,
-           BB_OT_ChatSend, BB_PT_Panel, BB_PT_ChatPanel)
+           BB_OT_CollabAccept, BB_OT_CollabReject,
+           BB_OT_CollabHandleSelect, BB_OT_CollabHandleDelete,
+           BB_PT_Panel, BB_PT_CollabPanel)

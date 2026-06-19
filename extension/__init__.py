@@ -71,9 +71,21 @@ def register():
 
     for cls in ui.CLASSES:
         bpy.utils.register_class(cls)
-    # SPEC-11: the chat panel's single-line input box.
-    bpy.types.WindowManager.bb_chat_input = bpy.props.StringProperty(
-        name="Message", description="Type a message to the agent, then Send")
+    # SPEC-12: the Collab panel's phase selector — a human-owned shared signal the
+    # agent reads via `collab op=status`. No op-gating; just a marker of where we are.
+    bpy.types.WindowManager.bb_phase = bpy.props.EnumProperty(
+        name="Phase",
+        description="The art-pipeline phase — a shared signal the agent reads",
+        items=[
+            ('blockout',  "Blockout",  "Rough forms and proportions"),
+            ('secondary', "Secondary", "Secondary forms"),
+            ('detail',    "Detail",    "Surface detail"),
+            ('retopo',    "Retopo",    "Clean topology"),
+            ('uv',        "UV",        "UV unwrap"),
+            ('bake',      "Bake",      "Bake maps"),
+        ],
+        default='blockout',
+    )
     # SPEC-07: right-click → Save as Handle in the edit-mode component context menu.
     bpy.types.VIEW3D_MT_edit_mesh_context_menu.append(ui._draw_save_as_handle)
     if _on_load_post not in bpy.app.handlers.load_post:
@@ -100,9 +112,7 @@ def unregister():
         bpy.app.handlers.load_post.remove(_on_load_post)
     if bpy.app.timers.is_registered(server.process_queue):
         bpy.app.timers.unregister(server.process_queue)
-    if bpy.app.timers.is_registered(ui._chat_drain_timer):
-        bpy.app.timers.unregister(ui._chat_drain_timer)
-    if hasattr(bpy.types.WindowManager, "bb_chat_input"):
-        del bpy.types.WindowManager.bb_chat_input
+    if hasattr(bpy.types.WindowManager, "bb_phase"):
+        del bpy.types.WindowManager.bb_phase
     for cls in reversed(ui.CLASSES):
         bpy.utils.unregister_class(cls)

@@ -15,7 +15,7 @@ from . import (
     armature,
     assembly,
     bands,
-    chat,
+    collab,
     connectors,
     curves,
     designs,
@@ -50,7 +50,7 @@ from . import (
 _TOOL_MODULES = (
     status,      # get_scene_tree, get_blender_status
     viewport,
-    chat,        # SPEC-11 in-Blender chat pipe
+    collab,      # SPEC-12 shared-state collaboration panel
     history,
     primitives,
     curves,
