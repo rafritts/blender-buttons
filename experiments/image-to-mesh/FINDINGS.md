@@ -29,6 +29,7 @@ incoherence metric.
 | 1 | Is a Grok wireframe *structural* (real grid) or *decorative*? | ✅ structural — real face loops (eyes, mouth), valence-4 dominant |
 | 1b | On a clean spec'd image (flat surface, black wires, red vertex dots) does detection go clean? | ✅ near-complete line capture; ~478 vertices grabbed directly by color |
 | 2 | Are front + side the SAME head? (height-axis coherence) | ✅ reliable across 3 sheets: band corr 0.94–0.98, beats flipped-self null by +0.27 to +0.36, ≤0.5% span mismatch |
+| 3 | Can we extract the grid GRAPH (nodes+edges) from one clean view? | 🟡 partial — regular grid extracts cleanly (dot-to-dot rebuild reads as the head, ~531 edges); dense feature regions (eyes/nose/mouth) degrade; some false-positive vertex dots. Graph saved to `graph_front.json`. |
 
 ### Key enabling tricks discovered
 - **Control the input, not the detector.** A faint wireframe on a *shaded*
@@ -49,6 +50,17 @@ incoherence metric.
    quad-grid *graph* in each view (red dots = nodes, black lines = edges), then
    align graphs by walking from shared anchors (centerline, silhouette). Grid
    topology turns blind point-matching into graph-alignment.
+   - **Rung 3 progress:** per-view graph extraction is *demonstrated* (skeleton
+     punch + endpoint-snap; see `rung3_extract_graph.py`) but NOT yet robust.
+     Two scoped tasks remain before correspondence:
+       a) **vertex-detection precision** — prune false red-dot blobs (some dots
+          come back isolated because they aren't real vertices).
+       b) **dense-region edges** — eyes/nose/mouth interiors drop edges because
+          skeleton lines merge into multi-end blobs that the endpoint heuristic
+          under-connects. A candidate-edge test (line-runs-between-dots) is the
+          right idea but needs care to avoid false diagonals.
+     Lesson logged: tuning the extractor against a SINGLE image is a trap —
+     validate any change across multiple sheets.
 2. **Top axis** — all sheets produced a *tilted* (~80°) top, not orthographic.
    Width/depth coherence is untested; a clean top must be generated separately.
 3. **Orthographic-ness** — slight perspective in the views would add error.
