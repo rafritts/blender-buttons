@@ -30,6 +30,7 @@ incoherence metric.
 | 1b | On a clean spec'd image (flat surface, black wires, red vertex dots) does detection go clean? | ✅ near-complete line capture; ~478 vertices grabbed directly by color |
 | 2 | Are front + side the SAME head? (height-axis coherence) | ✅ reliable across 3 sheets: band corr 0.94–0.98, beats flipped-self null by +0.27 to +0.36, ≤0.5% span mismatch |
 | 3 | Can we extract the grid GRAPH (nodes+edges) from one clean view? | 🟡 partial — regular grid extracts cleanly (dot-to-dot rebuild reads as the head, ~531 edges); dense feature regions (eyes/nose/mouth) degrade; some false-positive vertex dots. Graph saved to `graph_front.json`. |
+| 4 | Can we produce an importable 3D mesh? | ✅ first mesh — `rung4_loft.py` lofts the front grid into 3D (`head.obj`, 464 verts / 184 faces / 653 edges); renders as a recognizable head with depth. Caveats: depth is GENERIC (no matching full-res side yet, so no nose/brow projection); surface holey in dense regions. 4-up quadrants are too low-res (only ~101 verts) — real reconstruction needs a full-res front+side **pair**. |
 
 ### Key enabling tricks discovered
 - **Control the input, not the detector.** A faint wireframe on a *shaded*
