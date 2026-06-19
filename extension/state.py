@@ -67,6 +67,9 @@ NO_LOG_TOOLS = {
     # G12 checkpoints: mark is pure metadata; restore delegates to undo_to (which is
     # itself unlogged), so neither should consume a log slot / undo step.
     "mark_checkpoint", "restore_checkpoint",
+    # SPEC-11 chat pipe: conversation I/O, not geometry — never touches the mesh or
+    # the undo stack, so it must not consume a history slot or an undo step.
+    "chat_poll", "chat_say", "chat_history",
 }
 
 # Tools that neither log to history NOR consume an undo step: pure queries,
@@ -119,6 +122,9 @@ NO_STATUS_TOOLS = {
     # handle GC (G15) — registry tidying; deleting an Empty doesn't move geometry, so
     # the status block would be noise (matches list/accept). Still mutating/undoable.
     "prune_handles", "forget_handle",
+    # SPEC-11 chat pipe: conversation I/O — the status block would be pure noise on a
+    # poll/say/history round-trip (the agent reads it from the geometry verbs instead).
+    "chat_poll", "chat_say", "chat_history",
 }
 
 

@@ -4,7 +4,27 @@ import threading
 
 import bpy
 
-from . import handles, server, state
+from . import chat, handles, server, state
+
+
+def _tag_chat_redraw():
+    """Tag every VIEW_3D N-panel region for redraw so freshly-drained agent
+    replies show up without the user nudging the UI."""
+    wm = bpy.context.window_manager
+    for window in (wm.windows if wm else []):
+        for area in window.screen.areas:
+            if area.type == 'VIEW_3D':
+                for region in area.regions:
+                    if region.type == 'UI':
+                        region.tag_redraw()
+
+
+def _chat_drain_timer():
+    """SPEC-11: move agent replies from the outbound queue into the displayed log
+    and redraw when any arrived. Runs on the main thread (bpy.app.timers)."""
+    if chat.drain_outbound():
+        _tag_chat_redraw()
+    return 0.2  # 5 Hz — responsive for chat, negligible cost
 
 
 def start_server():
@@ -16,6 +36,8 @@ def start_server():
     state._server_thread.start()
     if not bpy.app.timers.is_registered(server.process_queue):
         bpy.app.timers.register(server.process_queue, persistent=True)
+    if not bpy.app.timers.is_registered(_chat_drain_timer):
+        bpy.app.timers.register(_chat_drain_timer, persistent=True)
     return True
 
 
@@ -39,6 +61,8 @@ class BB_OT_StopServer(bpy.types.Operator):
         state._running = False
         if bpy.app.timers.is_registered(server.process_queue):
             bpy.app.timers.unregister(server.process_queue)
+        if bpy.app.timers.is_registered(_chat_drain_timer):
+            bpy.app.timers.unregister(_chat_drain_timer)
         self.report({'INFO'}, "Server stopped")
         return {'FINISHED'}
 
@@ -96,4 +120,68 @@ class BB_PT_Panel(bpy.types.Panel):
         layout.label(text=f"Port: {state.PORT}")
 
 
-CLASSES = (BB_OT_StartServer, BB_OT_StopServer, BB_OT_SaveAsHandle, BB_PT_Panel)
+class BB_OT_ChatSend(bpy.types.Operator):
+    """Send the typed message to the agent (SPEC-11). Enqueues onto the inbound
+    queue the agent long-polls via `chat op=poll`."""
+    bl_idname = "bb.chat_send"
+    bl_label = "Send"
+
+    def execute(self, context):
+        wm = context.window_manager
+        if not chat.push_inbound(wm.bb_chat_input):
+            return {'CANCELLED'}
+        wm.bb_chat_input = ""
+        _tag_chat_redraw()
+        return {'FINISHED'}
+
+
+def _wrap(text, width):
+    """Greedy word-wrap for the panel log (Blender labels don't wrap)."""
+    out, line = [], ""
+    for word in text.split():
+        if line and len(line) + 1 + len(word) > width:
+            out.append(line)
+            line = word
+        else:
+            line = f"{line} {word}".strip()
+    if line:
+        out.append(line)
+    return out or [""]
+
+
+class BB_PT_ChatPanel(bpy.types.Panel):
+    """SPEC-11 V1: chat with the agent from inside Blender, routed entirely
+    through the MCP server. Sidebar (N-panel) → 'Blender Buttons' tab."""
+    bl_label = "Chat"
+    bl_idname = "BB_PT_chat"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Blender Buttons"
+
+    def draw(self, context):
+        layout = self.layout
+        wm = context.window_manager
+
+        # Chat needs the socket server up — expose start/stop here too.
+        row = layout.row(align=True)
+        row.operator("bb.start_server", icon='PLAY', text="Start")
+        row.operator("bb.stop_server", icon='PAUSE', text="Stop")
+
+        box = layout.box()
+        msgs = chat.log()
+        if not msgs:
+            box.label(text="(no messages yet)")
+        else:
+            for m in msgs[-30:]:
+                who = "You" if m["role"] == "human" else "Claude"
+                col = box.column(align=True)
+                for i, line in enumerate(_wrap(m["text"], 34)):
+                    col.label(text=(f"{who}: " if i == 0 else "    ") + line)
+
+        layout.prop(wm, "bb_chat_input", text="")
+        layout.operator("bb.chat_send", icon='EXPORT')
+        layout.label(text=f"Status: {chat.status_text()}")
+
+
+CLASSES = (BB_OT_StartServer, BB_OT_StopServer, BB_OT_SaveAsHandle,
+           BB_OT_ChatSend, BB_PT_Panel, BB_PT_ChatPanel)

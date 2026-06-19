@@ -1,6 +1,18 @@
 # SPEC-11 — In-Blender chat: talking to the agent through the MCP server (V1 collaboration surface)
 
-_Status: PROPOSED (2026-06-19). V1 of the collaboration surface discussed in the anime-head
+_Status: V1 IMPLEMENTED (2026-06-19), pending live validation. Addon side:
+`extension/chat.py` (the `inbound`/`outbound` queues + displayed log + `chat_poll`/
+`chat_say`/`chat_history` handlers), registered in `extension/server.py`'s
+`_TOOL_MODULES` and exempted from history/undo/status in `extension/state.py`; the
+N-panel + Send operator + `_chat_drain_timer` + `bb_chat_input` prop in
+`extension/ui.py` / `extension/__init__.py`. Server side: the `chat` verb
+(`op=poll` long-poll in-process, `op=say`, `op=history`) in `server/verbs/chat.py`,
+wired into `server/verbs/__init__.py`. Verb registers and survives the prune (16
+verbs). Remaining: the user reinstalls the addon + reconnects MCP, then we run the
+four success criteria live (the proof demo can't pass until then). Original spec
+text below._
+
+_PROPOSED (2026-06-19). V1 of the collaboration surface discussed in the anime-head
 dogfory session. Deliberately minimal: this spec proves **one** thing — that you can hold a
 continuous conversation with the agent from a panel inside Blender, routed entirely through the
 existing MCP server, while the agent can still drive the geometry verbs in the same loop. The
