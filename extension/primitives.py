@@ -152,6 +152,81 @@ def _build_primitive(name, ptype, target_dims, on, rotation_deg, extra=None):
     }
 
 
+def add_text(params):
+    """G83 — a TEXT / numeral primitive. Builds a FONT object (body string, size,
+    extrude depth, optional bevel), converts it to a real editable MESH, recenters the
+    origin on its bounds, and seats it with the relational placement DSL — dial numerals,
+    maker's marks, gauge labels, keycaps, signage, dice pips. A general Blender object
+    type with no surface here before; emits a mesh so it takes box-projection materials
+    and edit-mode ops like any primitive."""
+    name = params.get("name")
+    if not name:
+        return {"error": "'name' is required — give the text object a meaningful name"}
+    if bpy.data.objects.get(name) is not None:
+        return {"error": f"Object '{name}' already exists — choose a different name"}
+    body = params.get("body")
+    if not body:
+        return {"error": "text needs body=<string> — the characters to render (e.g. 'XII')"}
+    size = float(params.get("size", 0.1) or 0.1)
+    depth = float(params.get("depth", 0.0) or 0.0)     # total extrude thickness (m)
+    bevel = float(params.get("bevel", 0.0) or 0.0)
+    rotation_deg = params.get("rotation_deg", [0, 0, 0])
+    on = params.get("on")
+    rotation_rad = tuple(math.radians(a) for a in (rotation_deg or [0, 0, 0]))
+
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.select_all(action='DESELECT')
+
+    curve = bpy.data.curves.new(name=name, type='FONT')
+    curve.body = str(body)
+    curve.size = size
+    curve.align_x = 'CENTER'        # centre the glyphs on the origin so placement is exact
+    curve.align_y = 'CENTER'
+    # Blender extrudes a curve by `extrude` in BOTH local-Z directions → total ≈ 2×extrude.
+    curve.extrude = (depth / 2.0) if depth else 0.0
+    if bevel:
+        curve.bevel_depth = bevel
+
+    text_obj = bpy.data.objects.new(name, curve)
+    bpy.context.scene.collection.objects.link(text_obj)
+    activate(text_obj)
+    bpy.ops.object.convert(target='MESH')           # → a real, editable mesh
+    obj = bpy.context.active_object
+    obj.name = name
+    if obj.data:
+        obj.data.name = name
+    if not obj.data or not obj.data.vertices:
+        bpy.data.objects.remove(obj, do_unlink=True)
+        return {"error": f"text body '{body}' produced no geometry (unprintable glyphs?)"}
+
+    # Origin → geometry bounds centre, so obj.location IS the bbox centre (placement exact).
+    bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
+    bpy.context.view_layer.update()
+    xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
+    dims = (xmax - xmin, ymax - ymin, zmax - zmin)
+    try:
+        cx, cy, cz = resolve_placement(on, _rotated_dims(dims, rotation_rad))
+    except ValueError as e:
+        bpy.data.objects.remove(obj, do_unlink=True)
+        return {"error": str(e)}
+    obj.location = (cx, cy, cz)
+    obj.rotation_euler = rotation_rad
+    bpy.context.view_layer.update()
+
+    xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
+    return {
+        "success": True,
+        "object_name": obj.name,
+        "dimensions": [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)],
+        "world_bounds": {
+            "x": [round(xmin, 4), round(xmax, 4)],
+            "y": [round(ymin, 4), round(ymax, 4)],
+            "z": [round(zmin, 4), round(zmax, 4)],
+        },
+    }
+
+
 def add_box(params):
     return _build_primitive(
         name=params.get("name"),
@@ -326,6 +401,7 @@ def add_floor(params):
 
 TOOLS = {
     "add_box":        add_box,
+    "add_text":       add_text,
     "add_primitives": add_primitives,
     "add_floor":      add_floor,
     "add_plane":     add_plane,

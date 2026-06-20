@@ -73,6 +73,25 @@ def add_box(name: str, width: float, depth: float, height: float,
     return _add_result("BOX", result) + _status(result)
 
 
+def add_text(name: str, body: str, size: float = 0.1, depth: float = 0.0,
+             bevel: float = 0.0, on: dict = None,
+             rot_x: float = 0, rot_y: float = 0, rot_z: float = 0, label: str = "") -> str:
+    """G83 — add a TEXT / numeral object, emitted as a real editable MESH (dial numerals,
+    maker's marks, gauge labels, keycaps, signage, dice pips).
+
+    name: REQUIRED unique object name.   body: REQUIRED — the characters to render.
+    size:  cap height in meters (roughly the text height).
+    depth: extrude thickness in meters (0 = flat single-sided text).
+    bevel: round-bevel radius on the extruded edges (m; 0 = sharp).
+    on:    placement DSL (same as the dimensional primitives) — the text is centred on
+           its own bounds, so on= seats it exactly. rot_x/y/z optional (degrees)."""
+    result = call_blender("add_text", {
+        "name": name, "body": body, "size": size, "depth": depth, "bevel": bevel,
+        "on": on, "rotation_deg": [rot_x, rot_y, rot_z],
+    }, label=label)
+    return _add_result("TEXT", result) + _status(result)
+
+
 @mcp.tool()
 def add_plane(name: str, width: float, depth: float,
               on: dict = None,

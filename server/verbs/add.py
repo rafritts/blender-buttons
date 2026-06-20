@@ -13,13 +13,13 @@ from server import primitives, scene
 from ._common import tag, unknown, teach
 
 _TYPES = ["box", "plane", "cylinder", "sphere", "cone", "torus", "icosphere",
-          "circle", "tube", "helix", "curve", "floor", "light", "camera"]
+          "circle", "tube", "helix", "curve", "text", "floor", "light", "camera"]
 
 
 @mcp.tool(name="add")
 def add(
     type: Literal["box", "plane", "cylinder", "sphere", "cone", "torus",
-                  "icosphere", "circle", "tube", "helix", "curve", "floor",
+                  "icosphere", "circle", "tube", "helix", "curve", "text", "floor",
                   "light", "camera"],
     name: tag(str, "object name (required except floor)") = "",
     # ── placement & orientation (the dimensional primitives) ──
@@ -29,14 +29,17 @@ def add(
     rot_z: tag(float, "[mesh primitives] rotation Z (deg)") = 0,
     # ── dimensions (use the ones your `type` needs — see table) ──
     width: tag(float, "[box/plane] X extent (m)") = 0,
-    depth: tag(float, "[box/plane] Y extent (m)") = 0,
+    depth: tag(float, "[box/plane] Y extent (m); [text] extrude thickness (m)") = 0,
+    # ── text (type=text) ──
+    body: tag(str, "[text] the characters to render (e.g. 'XII', '12', a maker's name)") = "",
+    bevel: tag(float, "[text] round-bevel radius on the extruded edges (m; 0=sharp)") = 0,
     height: tag(float, "[box/plane/cylinder/cone] Z extent (m)") = 0,
     radius: tag(float, "[sphere/cylinder/icosphere/circle] radius (m)") = 0,
     radius_top: tag(float, "[cone] top radius (0 = sharp)") = 0,
     radius_bottom: tag(float, "[cone] base radius (m)") = 0,
     major_radius: tag(float, "[torus] center-to-tube radius (m)") = 0,
     minor_radius: tag(float, "[torus] tube radius (m)") = 0,
-    size: tag(float, "[floor/light] floor side length / light size (m)") = 0,
+    size: tag(float, "[floor/light] floor side length / light size (m); [text] cap height (m)") = 0,
     # ── resolution / topology ──
     segments: tag(int, "[cylinder/cone/sphere/circle] segments around") = 0,
     rings: tag(int, "[sphere] latitudinal rings") = 0,
@@ -95,6 +98,9 @@ def add(
                      origin — re-seat it relationally with transform op=place.
         curve      — points + subtype (BEZIER|NURBS|POLY), cyclic, resolution,
                      bevel_depth          (LIVE curve datablock — dolly path, rope)
+        text       — body=<string>, size (cap height), depth (extrude), bevel
+                     (converted to a real editable MESH — dial numerals, maker's
+                     marks, gauge labels, keycaps, signage). Placeable with on=.
       OBJECTS (spawn at a default viewpoint — re-seat relationally with
       transform op=place / op=nudge, or aim with target=<object>):
         light      — subtype (POINT|SUN|SPOT|AREA), energy, color|hex,
@@ -118,6 +124,8 @@ def add(
                   "add type=tube name=cable points=[[0,0,0],[0,0,1]] tube_radius=0.02"),
         "curve": (bool(points), "points=[...] control points",
                   "add type=curve name=path points=[[0,0,0],[1,0,0]] subtype=BEZIER"),
+        "text":  (bool(body), "body=<string> the characters to render",
+                  "add type=text name=numeral body=\"XII\" size=0.02 depth=0.004"),
     })
     if bad:
         return bad
@@ -164,6 +172,8 @@ def add(
         return primitives.add_curve(
             name, points or [], subtype or "BEZIER", cyclic, resolution or 12,
             bevel_depth, label)
+    if t == "text":
+        return primitives.add_text(name, body, size or 0.1, depth, bevel, on, *r, label)
     if t == "light":
         # Spawns above the origin; re-seat relationally (transform op=place/nudge).
         return scene.add_light(

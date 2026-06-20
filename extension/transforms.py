@@ -585,6 +585,74 @@ def rest_on(params):
             "offset": offset, "rested": rested}
 
 
+def seat_into(params):
+    """G82 — seat a source DOWN INTO a cavity: lower it along −axis until it rests on the
+    highest INTERIOR floor beneath its footprint (a bezel well, counterbore, setting,
+    rebate), instead of catching on the cavity's outer rim the way rest_on does.
+
+    rest_on stops at the FIRST contact (min clearance) — for a part lowered toward a
+    recess that's the rim/wall top, so it never enters. seat keeps only target hits whose
+    surface faces UP along +axis (a floor, not a vertical wall or an overhang) and seats on
+    the highest such floor under the footprint — so the part sinks into the pocket and
+    lands on its floor.
+
+    targets: object(s) to seat. target: the cavity object. axis: drop axis (default Z).
+    offset: clearance above the floor after seating (m)."""
+    from .introspect import _prepare
+    objs, err = resolve_targets(params.get("targets"))
+    if err:
+        return {"error": err}
+    target_name = params.get("target")
+    if not target_name:
+        return {"error": "seat needs 'target' — the cavity object to seat into"}
+    target = bpy.data.objects.get(target_name)
+    if target is None:
+        return {"error": f"Target '{target_name}' not found"}
+    axis_key = (params.get("axis") or "Z").upper().strip().lstrip("+-")
+    if axis_key not in _AXIS_VEC:
+        return {"error": f"axis must be X|Y|Z, got '{params.get('axis')}'"}
+    axis_idx = "XYZ".index(axis_key)
+    offset = float(params.get("offset", 0.0) or 0.0)
+
+    tgt = _prepare(target)
+    if tgt is None:
+        return {"error": f"target '{target_name}' has no usable geometry"}
+    up_vec = _AXIS_VEC[axis_key]
+    down = -up_vec
+
+    rested = []
+    for o in objs:
+        if o.name == target_name:
+            continue
+        src = _prepare(o, cap=500)
+        if src is None:
+            continue
+        # Among the target surfaces directly below the source's verts, keep only FLOORS
+        # (normal facing up along +axis). Vertical cavity walls and the outer rim's
+        # vertical faces are excluded, so the part can sink past them onto the floor.
+        min_clear = None
+        for v in src["verts"]:
+            loc, normal, idx, dist = tgt["bvh"].ray_cast(v, down)
+            if loc is None or normal is None:
+                continue
+            if normal.dot(up_vec) <= 0.3:      # not an up-facing floor → skip (wall/overhang)
+                continue
+            clear = v[axis_idx] - loc[axis_idx]
+            if min_clear is None or clear < min_clear:
+                min_clear = clear
+        if min_clear is None:
+            return {"error": (f"'{o.name}' found no up-facing floor of '{target_name}' "
+                              f"beneath it along {axis_key} — is its footprint over the "
+                              f"cavity opening? (rest_on seats on an outer top surface.)")}
+        drop = min_clear - offset
+        o.location[axis_idx] -= drop
+        rested.append({"name": o.name, "dropped_mm": round(drop * 1000, 2)})
+    bpy.context.view_layer.update()
+    return {"success": True, "target": target_name, "axis": axis_key,
+            "offset": offset, "seated": rested,
+            "rested": rested}   # alias so _status_focus / callers find the names
+
+
 def place(params):
     """Re-place EXISTING objects with the same relational DSL as add's `on=` (G30).
     resolve_placement gives the desired world-bbox CENTRE for the object's own dims;
@@ -627,6 +695,7 @@ TOOLS = {
     "place":           place,
     "aim_axis":        aim_axis,
     "rest_on":         rest_on,
+    "seat_into":       seat_into,
     "move_to":         move_to,
     "rotate_to":       rotate_to,
     "resize":          resize,

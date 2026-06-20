@@ -96,6 +96,26 @@ def rest_on(targets: str = "", target: str = "", axis: str = "Z",
     return main + _status(result)
 
 
+def seat_into(targets: str = "", target: str = "", axis: str = "Z",
+              offset: float = 0.0, label: str = "") -> str:
+    """Seat objects DOWN INTO a cavity (G82): lower along −axis until they rest on the
+    highest INTERIOR floor of `target` beneath their footprint — a dial in its bezel well,
+    a gem in a setting, a lens in a barrel, a panel in a rebate. Unlike rest_on (which
+    stops at the first/outer contact and so catches on a recess's rim), seat keeps only
+    up-facing floor hits, so the part sinks past the cavity walls onto the floor. offset
+    leaves a clearance above the floor."""
+    if not target:
+        return "seat needs 'target' — the cavity object to seat into"
+    result = call_blender("seat_into", {"targets": _targets(targets), "target": target,
+                                        "axis": axis, "offset": offset}, label=label)
+    if result.get("success"):
+        drops = ", ".join(f"{r['name']}↓{r['dropped_mm']}mm" for r in result["seated"]) or "nothing"
+        main = f"seated into {target} ({result['axis']}): {drops} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 def place(targets: str = "", on: dict = None, label: str = "") -> str:
     """Re-place EXISTING objects with the relational placement DSL — the same `on=`
     vocabulary as add (G30). Closes the 'placement DSL is add-only' gap: seat an

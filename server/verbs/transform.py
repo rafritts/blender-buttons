@@ -11,18 +11,18 @@ from server._core import mcp
 from server import transforms, relational, editmode, handles
 from ._common import tag, unknown, teach
 
-_OPS = ["nudge", "place", "move_to", "rotate_to", "aim_axis", "rest_on", "resize", "scale",
-        "rotate", "apply", "snap", "snap_grid", "match_dim", "mirror", "distribute",
+_OPS = ["nudge", "place", "move_to", "rotate_to", "aim_axis", "rest_on", "seat", "resize",
+        "scale", "rotate", "apply", "snap", "snap_grid", "match_dim", "mirror", "distribute",
         "array_corners", "array_along", "array_radial", "scatter", "move_verts",
         "scale_verts", "snap_loop"]
 
 
 @mcp.tool(name="transform")
 def transform(
-    op: Literal["nudge", "place", "move_to", "rotate_to", "aim_axis", "rest_on", "resize",
-                "scale", "rotate", "apply", "snap", "snap_grid", "match_dim", "mirror",
-                "distribute", "array_corners", "array_along", "array_radial", "scatter",
-                "move_verts", "scale_verts", "snap_loop"],
+    op: Literal["nudge", "place", "move_to", "rotate_to", "aim_axis", "rest_on", "seat",
+                "resize", "scale", "rotate", "apply", "snap", "snap_grid", "match_dim",
+                "mirror", "distribute", "array_corners", "array_along", "array_radial",
+                "scatter", "move_verts", "scale_verts", "snap_loop"],
     targets: tag(str, "object(s): '' active, 'name', or 'a,b,c'") = "",
     # place (relational re-placement — same DSL as add's on=)
     on: tag(dict, "[place] placement spec — {\"left_of\":\"base\",\"gap\":0}, {\"on\":\"seat\"}, …") = None,
@@ -54,16 +54,16 @@ def transform(
     pivot: tag(str, "[scale/rotate] pivot point. rotate: self=own origin (default) | world=world 0,0,0 | bbox_center | cursor. (legacy aliases: center→self, origin→world — named backwards vs Blender, prefer self/world.) scale: center=bbox centre (default) | bottom_center | world | object name") = "center",
     pivot_object: tag(str, "[scale/rotate] object to pivot around") = "",
     angle: tag(float, "[rotate] degrees") = 0.0,
-    axis: tag(str, "[rotate/match_dim/array_*] axis X|Y|Z; [aim_axis] local axis (signed ok, e.g. -Z); [rest_on] drop axis") = "Z",
+    axis: tag(str, "[rotate/match_dim/array_*] axis X|Y|Z; [aim_axis] local axis (signed ok, e.g. -Z); [rest_on/seat] drop axis") = "Z",
     # apply
     scale: tag(bool, "[apply] bake scale into mesh data") = True,
     rotation: tag(bool, "[apply] bake rotation") = False,
     location: tag(bool, "[apply] bake location") = False,
     # snap
-    target: tag(str, "[snap/match_dim] object to snap/measure against; [rest_on] surface to rest on; [scatter] the SURFACE to scatter onto") = "",
+    target: tag(str, "[snap/match_dim] object to snap/measure against; [rest_on] surface to rest on; [seat] cavity to seat into; [scatter] the SURFACE to scatter onto") = "",
     side: tag(str, "[snap] target side, e.g. Z_MAX") = "Z_MAX",
     source_side: tag(str, "[snap] moved-object side (AUTO infers)") = "AUTO",
-    offset: tag(float, "[snap] gap along the snap axis (m); [rest_on] clearance after contact (m)") = 0.0,
+    offset: tag(float, "[snap] gap along the snap axis (m); [rest_on/seat] clearance after contact (m)") = 0.0,
     # snap_grid
     size: tag(float, "[snap_grid] grid size (m)") = 0.1,
     axes: tag(str, "[snap_grid] axes to snap, e.g. XYZ") = "XYZ",
@@ -138,6 +138,11 @@ def transform(
                  (axis=Z default, offset=clearance). BVH from the source's own verts,
                  so tilted/irregular parts seat by their true lowest point — the action
                  half of feel op=contacts 'floating Xmm'.
+      seat     — seat the object DOWN INTO a cavity: lower along −axis onto the highest
+                 INTERIOR floor of `target` under its footprint (dial in a bezel well,
+                 gem in a setting, lens in a barrel). Unlike rest_on it ignores the
+                 cavity's rim/walls (keeps only up-facing floors), so the part sinks in
+                 instead of catching on the lip.  (targets, target, axis, offset)
       resize   — set absolute dims         (width, depth, height)
       scale    — multiply size             (factor, pivot=center|.., pivot_object)
       rotate   — rotate degrees            (angle, axis, pivot, pivot_object)
@@ -181,6 +186,9 @@ def transform(
         "rest_on":       (bool(target),
                           "target=<surface to rest on>",
                           "transform op=rest_on targets=crate target=floor axis=Z"),
+        "seat":          (bool(target),
+                          "target=<cavity to seat into>",
+                          "transform op=seat targets=dial target=case axis=Z"),
         "resize":        (any(v is not None for v in (width, depth, height)),
                           "width/depth/height (any)",
                           "transform op=resize targets=box width=0.5"),
@@ -233,6 +241,8 @@ def transform(
         return transforms.aim_axis(targets, frm, to, axis, label)
     if o == "rest_on":
         return transforms.rest_on(targets, target, axis, offset, label)
+    if o == "seat":
+        return transforms.seat_into(targets, target, axis, offset, label)
     if o == "resize":
         return transforms.resize(targets, width, depth, height, label)
     if o == "scale":
