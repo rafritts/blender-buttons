@@ -128,3 +128,39 @@ info` round-trips.
 target), not `context.view_layer.objects.active`. For multi-target ops, summarize the set or report
 the primary target's bounds. Lives in `_status()` / per-verb result assembly in `_core.py`.
 
+## G77 — spatial verification isn't effortless; the agent dead-reckons clearance/facing instead of reaching for it 🧭 NORTH-STAR
+
+**Symptom.** Building the pocketwatch I (a) worked out the open lid's facing direction with a
+rotation matrix in my head instead of reading it, and (b) verified the dial-stack (markers / hands /
+crystal) didn't intersect by arithmetic on z-bounds instead of `feel op=overlaps`. Both are spatial
+questions the server can answer exactly — both got hand-computed because reaching for the read
+wasn't the reflex.
+
+**This is the most important finding of the build.** The perceive-and-stack loop (status bounds,
+`feel topology`, `check_framing`) is strong, yet it still *let* me dead-reckon. Two root causes:
+
+1. **The verify-half of `feel` (`overlaps`, `contacts`, `facing`, `resting`) isn't surfaced at the
+   moment of need.** Nothing in an `add`/`transform` status block says "the part you just placed now
+   intersects X" or "this rests on nothing." So the agent runs them only if it remembers to — and
+   under load it falls back to math. Effortless means the agent shouldn't have to remember.
+
+2. **THE ONE RULE grants a blanket "geometry you authored is trustworthy" exception**, which invites
+   dead-reckoning coordinates authored 100k+ tokens / dozens of calls ago. The exception should be
+   *temporal*: coordinate math is never trustworthy — only pragmatically safe within ~1–2 calls of
+   the authoring action; staleness rises monotonically with token-distance. Re-read beyond that.
+
+**North star = effortless.** The agent should never hand-compute a spatial relationship. Either the
+value falls out of a read it is already doing, or the status block surfaces the drift unasked.
+
+**Fix directions.**
+- Auto-surface collision / loss-of-contact: after a `transform`/`add` that places a part, the status
+  block (or a G9-style follow-up) flags *new* intersections / lost rests against neighbours. The
+  agent learns it without asking.
+- Reword THE ONE RULE in `guidance://llms`, the MCP server instructions, and `GUIDANCE_FOR_LLMS.md`:
+  drop the authorship exception; replace with "coordinate math is never trustworthy — pragmatically
+  safe only within ~1–2 calls of authorship; re-read ground truth beyond that." (See also
+  [[feel_operates_on_meshes_i_didnt_author]]: the rule is about *un-perceived* geometry, not
+  authorship — staleness is just un-perception over time.)
+- Consider a lightweight staleness signal: a read echoes how many calls ago an object was last
+  mutated, so the agent knows when its remembered bounds have gone stale.
+
