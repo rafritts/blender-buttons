@@ -220,3 +220,63 @@ the relational replacements may reuse some of this plumbing.
 > `raise_to` keys from the placement DSL). That change only takes effect after the addon is **rebuilt
 > and reinstalled** in Blender — until then the running addon still accepts `on={"at":[...]}`.
 
+---
+
+> G81–G83 surfaced building a second pocketwatch hero asset (open-face gold case + enamel dial +
+> sub-seconds + blued hands + Albert chain, for UE5). The pivot bugs (G70/G71) and the ARRAY-offset
+> hole (G73) re-surfaced verbatim — confirming they bite on every repeat-and-pivot build. These three
+> are the *new* misses: a round-face layout couldn't stay in intent-space, a part couldn't be seated
+> into a cavity, and dial lettering had no primitive.
+
+## G81 — no way to mint a landmark by ANGLE on a round face (forces hand-trig) 🧩 MISSING CONTROL
+
+**Symptom.** Laying out a round dial — sub-seconds register at "6 o'clock, 0.11 m out", a hand pivot
+there, hour-index anchors at each clock hour — has no angular primitive. `feel op=place` takes only
+*cartesian* offsets (left/right/up/down/front/back), so a cardinal direction (−Y = 6 o'clock) works,
+but any off-axis hour (2 o'clock = 60°) forces me to decompose `radius·(sin θ, cos θ)` into x/y by
+hand. `array_radial` *places copies* on a ring but yields no named, addressable point to then act at.
+I fell back to typed x/y for every register.
+
+**Impact.** Any radial layout on a round face — sub-dials, bolt circles, clock numerals, lug/lug-hole
+positions, gauge ticks, dice pips — leaves intent-space; each off-cardinal position is hand-trig. The
+angle/radius are legitimate *derived* magnitudes (per THE ONE RULE) — there's just no verb that
+accepts them.
+
+**Fix.** Add an angular term to `feel op=place` (or a dedicated radial-landmark op): `anchor=<disc or
+handle>`, `angle=<deg>`, `radius=<m>`, surface-snap → **mint a handle by name** at that point (pairs
+with G78, which lets the minted point be consumed by `sculpt handle=` / `move_to handle=` / etc.).
+Test: on a disc, `place anchor=Dial angle=60 radius=0.11` mints a handle at the 2-o'clock surface
+point; its mirror is addressable by name.
+
+## G82 — `rest_on` seats only on TOP; nothing seats a part DOWN INTO a cavity 🧩 MISSING CONTROL
+
+**Symptom.** Dropping the enamel dial into the case's recessed bezel well had no relational op.
+`transform op=rest_on` drops a part until it lands on the *outer top* surface of a target (BVH cast
+from below) — it cannot lower a part into an interior pocket until it rests on the *pocket floor*.
+Seating the dial was a derived typed height — which the coordinate amputation (G78–G80) now removes
+entirely, leaving **no path at all**.
+
+**Impact.** Post-amputation this is a hard hole. Seating anything into a cavity — a dial in its bezel
+well, a gem in a setting, a lens in a barrel, a battery in a compartment, a panel into a rebate — has
+no relational primitive; `rest_on` only does on-top.
+
+**Fix.** Extend `rest_on` (or add `op=seat`) with a "drop into" mode: lower along −axis until the
+part contacts the highest *interior* surface beneath its footprint (the cavity floor it is entering
+from above), with an `offset=` clearance — optionally targeting a named recess/face. Test: a disc
+lowered into a cylindrical counterbore seats on the bore floor at the given clearance, not on the
+part's own rim.
+
+## G83 — no text / numeral primitive 🧩 MISSING CONTROL
+
+**Symptom.** Putting "XII" / "12" or a maker's name on the dial is impossible — `add` has no `text`
+type. I modeled applied baton indices instead; the watch reads as *a* watch, not a *named* one.
+
+**Impact.** Engraved / embossed / applied lettering — dial numerals, brand marks, gauge labels,
+keycaps, signage, dice pips — is a native Blender object type (FONT/Text, extrudable + bevelable) with
+no surface here. It is a general primitive, not a watch-specific shortcut, so it belongs.
+
+**Fix.** `add type=text` — `body` string, `font` (default ok), `size`, extrude `depth`, optional
+`bevel`; emit a real mesh (or a FONT object convertible via `object op=convert`, like curves),
+placeable with the relational DSL and the existing box-projection materials. Test: `add type=text
+body="XII" depth=0.004` yields a readable extruded mesh seatable on the dial.
+
