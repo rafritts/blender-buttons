@@ -194,28 +194,6 @@ def orbit_viewport(params):
     return out
 
 
-def set_camera_position(params):
-    x  = params.get("x", 5.0)
-    y  = params.get("y", -5.0)
-    z  = params.get("z", 5.0)
-    tx = params.get("target_x", 0.0)
-    ty = params.get("target_y", 0.0)
-    tz = params.get("target_z", 0.0)
-
-    # G35: address a named camera (symmetric with check_framing/camera_dof). Without
-    # this it grabbed the FIRST camera in the file, so with two cameras present it
-    # silently moved the wrong one while the agent checked framing on the other.
-    from .common import resolve_camera
-    cam, err = resolve_camera(params.get("camera"))
-    if err:
-        return {"error": err}
-
-    cam.location = (x, y, z)
-    direction = mathutils.Vector((tx, ty, tz)) - mathutils.Vector((x, y, z))
-    cam.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()
-    return {"success": True, "camera": cam.name}
-
-
 def set_active_camera(params):
     """G35: make an existing camera the active scene camera, so a freshly-added hero
     camera can become the render camera (and the target of the camera-write ops) without
@@ -365,7 +343,6 @@ TOOLS = {
     "frame_scene":             frame_scene,
     "zoom_to_selected":        zoom_to_selected,
     "orbit_viewport":          orbit_viewport,
-    "set_camera_position":     set_camera_position,
     "set_active_camera":       set_active_camera,
     "add_camera":              add_camera,
 }

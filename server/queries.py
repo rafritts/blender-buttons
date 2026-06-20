@@ -505,7 +505,6 @@ def resolve_selection_anchor(target: str = ""):
 
 
 def place_on_surface(target: str, handle: str = "",
-                     anchor_x: float = None, anchor_y: float = None, anchor_z: float = None,
                      up: float = 0.0, down: float = 0.0, front: float = 0.0, back: float = 0.0,
                      left: float = 0.0, right: float = 0.0, snap: bool = True,
                      as_handle: str = "") -> str:

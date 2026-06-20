@@ -381,25 +381,6 @@ def render_settings() -> str:
 
 
 @mcp.tool()
-def set_camera_position(x: float, y: float, z: float,
-                        target_x: float = 0.0, target_y: float = 0.0, target_z: float = 0.0,
-                        camera: str = "") -> str:
-    """Move a camera to a position aimed at a target point.
-
-    camera: camera object name. Empty = scene camera (then the sole camera). Symmetric
-            with check_framing/camera_dof — without it, the first camera in the file was
-            moved regardless of which one you were checking (G35)."""
-    params = {"x": x, "y": y, "z": z,
-              "target_x": target_x, "target_y": target_y, "target_z": target_z}
-    if camera:
-        params["camera"] = camera
-    result = call_blender("set_camera_position", params)
-    main = (f"camera '{result['camera']}' moved" if result.get("success")
-            else result.get("error", "failed"))
-    return main + _status(result)
-
-
-@mcp.tool()
 def set_active_camera(camera: str, label: str = "") -> str:
     """Make an existing camera the active scene camera — the camera render uses and
     the camera-write ops default to. Lets a freshly-added hero camera become the render

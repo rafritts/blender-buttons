@@ -255,7 +255,7 @@ def feel(
     if o == "diff":
         return topology.region_diff(name)
     if o == "place":
-        return queries.place_on_surface(target, handle, None, None, None,
+        return queries.place_on_surface(target, handle,
                                         up, down, front, back, left, right, snap, as_handle)
     if o == "radial":
         return queries.radial_landmark(anchor or target, angle, radius, axis, snap, as_handle)
