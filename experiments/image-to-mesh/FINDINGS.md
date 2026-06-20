@@ -43,6 +43,17 @@ incoherence metric.
 | 10 | Can we build a mesh from the AUTHORED edges (no Delaunay)? | ✅ `rung10_mesh_from_graph.py` recovers faces from the rung9 edge graph by a planar half-edge traversal (clockwise-most turn at each node; keep 3–5-gons, drop the outer face + big feature holes so eyes/mouth stay open). On `v3_front` (446-edge graph): 282 nodes → **122 faces (87 quads, 18 tris, 17 pentagons)**, `head_v5.obj`. All real authored-edge quads, **zero Delaunay** — a legible quad head with the eye/mouth/nostril openings as true holes. (Was 31 faces on the pre-fix 383-edge graph; the endpoint-void fix below tripled face closure.) Visualized in `rung10_faces.png`. |
 | 9 | Can we extract the REAL quad edge graph (not Delaunay soup) from one view? | ✅ `rung9_trace.py` inverts rung3: nodes are the red dots, connectivity is LOCAL link-prediction. Per dot, ring-sample the directions ink leaves it, walk each direction's cone nearest-first, accept the first dot whose **chord validates against the ink**. Curve-tolerant: the validation tube WIDENS toward mid-span (`base + curve·L`) so Grok's bowed edges pass; and endpoints are TRIMMED because the red vertex dot blanks the wire under it (~4px ink void at every dot) — judging the interior, not the dot-void, was the key fix (recall 2.72→3.16, faces 31→122). On `v3_front`: 282 nodes, **446 edges, avg degree 3.16**, **precision ~perfect** (median chord 0px). **Succeeds in the eye/nose/mouth feature regions where rung3 skeletonize failed.** Remaining sub-degree-4 is mostly legit boundary/silhouette verts + a few dense-region ring merges. No turnkey library; built from numpy+scipy (distance transform + kdtree). |
 
+### Anti-trick: don't paint the midline
+A bright-green centerline seam (used early for coherence/profile) turned out to
+ERASE the whole facial centre column — the seam covers its own vertex dots, so
+red-dot detection finds **0 of ~43** midline vertices. Coherence is already
+proven (rung6) and depth comes from the silhouette (rung7), so green buys
+nothing now. Fix: midline vertices are ordinary RED dots (prompts updated);
+for the existing green images, `rung9.detect` recovers the column by sampling
+the seam, but the recovered dots aren't row-aligned (a faint centre seam
+remains) — the clean fix is at the source (no green). Symmetry, not a painted
+line, gives the midline axis.
+
 ### Key enabling tricks discovered
 - **Control the input, not the detector.** A faint wireframe on a *shaded*
   surface is hard to detect; asking Grok for a *flat* surface with *solid

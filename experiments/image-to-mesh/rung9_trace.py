@@ -30,6 +30,8 @@ from scipy import ndimage as ndi
 from scipy.spatial import cKDTree
 from skimage.morphology import remove_small_objects
 
+from rung7_reconstruct import centerline_verts, dedup
+
 
 def detect(path):
     """Red dots = nodes. Ink = black wires + green centerline (NOT blue guides,
@@ -42,6 +44,13 @@ def detect(path):
     red = remove_small_objects(red, 2)
     lbl, n = ndi.label(red)
     V = np.array(ndi.center_of_mass(red, lbl, range(1, n + 1)))      # (y, x)
+
+    # The bright-green midline is painted OVER its vertex dots, so the whole
+    # facial centre column is missing from the red detection. Recover it by
+    # sampling the green seam as an explicit centre column (until the prompts
+    # drop green entirely and these become ordinary red dots).
+    sp0 = float(np.median(cKDTree(V).query(V, k=2)[0][:, 1]))
+    V = dedup(np.vstack([V, centerline_verts(im, sp0)]), 0.5 * sp0)
 
     green = (G - (R + B) // 2 > 40) & (G > 90)
     blue = (B - (R + G) // 2 > 10) & (B > 170) & (R > 140)

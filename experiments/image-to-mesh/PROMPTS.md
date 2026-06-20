@@ -69,128 +69,65 @@ High contrast, clean line art, like a retopology reference diagram.
 
 ---
 
-## 3. Coherent 3-view recipe — CURRENT (front generate + two edits)
+## 3. Coherent 3-view, all-red dots
 
-Rung 5 verdict: reconstruction wants **front + 3/4 + side**, all the SAME head at
-the SAME scale with the SAME height registration. Instead of cramming them into a
-low-res 4-up, generate ONE full-res front, then use Image Edit to re-render that
-exact mesh from new camera angles. Coherence by construction (every view anchored
-to one source) at full resolution per view.
+All vertex dots are pure red — no rainbow, and crucially NO colored centerline.
+A painted green midline seam erases the entire centre column from red-dot
+detection (measured: 0 of ~43 centre vertices survive; the seam covers its own
+dots). Surface flat grey, wires black. Generate PROMPT A, then run B and C as
+Image Edits off A's output. Cross-view correspondence comes from geometry /
+row-order (rung5) and bilateral symmetry, not from dot color.
 
-All three prompts share one verbatim **STYLE LOCK** so the model can't drift.
+### PROMPT A — FRONT (generate)
 
-### Carry-over anchors (must survive the edits — these are what the solver reads)
-- **Four light-blue horizontal guide lines** at top-of-skull / eye-line /
-  nose-base / chin, at the SAME image heights in every view. This is the height
-  registration — rows align by these.
-- **Bright-green centerline seam** (the facial midline). In front it is straight
-  vertical; in 3/4 it curves around the form; in side it becomes the facial
-  profile outline. The angle-recovery step keys off this.
-- **Red vertex dots + quad topology** — same count, same edge loops; the edit
-  must rotate the mesh, not redraw it.
-- **Flat-grey surface / pure-black wires / white background / scale / vertical
-  centering** — identical across all three.
+Generate a clean orthographic FRONT view of a stylized human female head and
+neck, dead-on and bilaterally symmetric, as a flat technical wireframe diagram —
+NOT a shaded render.
+- Surface: one flat uniform light-grey. No shading, shadows, highlights, or
+  gradients on the surface.
+- Wireframe: crisp solid even-weight pure-black lines; clean all-quad topology
+  with concentric loops around each eye and the mouth, even quad grid elsewhere.
+- Vertex dots: a small solid PURE-RED dot at every vertex, INCLUDING the vertices
+  running down the facial midline. Do NOT draw a colored centerline seam — the
+  midline is an ordinary black edge loop with red dots like everywhere else.
+- Guides: four faint thin LIGHT-BLUE horizontal lines at top of skull, eye line,
+  base of nose, and chin.
+- Background: flat pure white. Strict orthographic, no perspective. No text.
+The blue guides are perfectly horizontal, the head is bilaterally symmetric and
+centered.
 
-### STYLE LOCK (identical in every prompt)
-```
-STYLE LOCK — keep all of this identical in every view:
-- Subject: a single stylized human female head and neck, drawn as a clean
-  quad-mesh retopology wireframe.
-- Surface: one flat, uniform, light-grey fill. No shading, no shadows, no
-  highlights, no gradients, no ambient occlusion, no specular — completely flat.
-- Wireframe: crisp, solid, even-weight, uniform-thickness PURE-BLACK lines.
-  Clean all-quad topology: concentric edge loops around each eye, concentric
-  edge loops around the mouth, an even quad grid across forehead, cheeks, jaw,
-  and skull.
-- Vertices: one small, solid, PURE-RED dot at every vertex (every point where
-  black wires cross). All dots the same size.
-- Centerline: the vertical facial midline seam — top of skull, straight down the
-  middle of forehead, nose, lips, chin — drawn as ONE continuous solid
-  BRIGHT-GREEN line.
-- Guide lines: exactly four faint, thin, LIGHT-BLUE horizontal lines spanning the
-  full image width, at: (1) top of the skull, (2) the eye line (pupil height),
-  (3) the base of the nose (nostrils), (4) the bottom of the chin.
-- Background: flat PURE-WHITE. Nothing else in the frame.
-- Projection: strict ORTHOGRAPHIC — no perspective, no lens distortion, no
-  foreshortening, no depth of field.
-- The ONLY colors in the image are: light-grey surface, black wires, red dots,
-  green centerline, light-blue guides. No text, no labels, no axes, no extra
-  objects.
-```
 
-### PROMPT A — FRONT (generate from scratch)
-```
-FRONT VIEW — generate from scratch.
-A clean orthographic wireframe topology diagram of a stylized human female head,
-dead-on FRONT view, looking straight at the face, perfectly centered and
-bilaterally symmetric, head and neck only.
+### PROMPT B — EDIT to 3/4 (feed it A's output)
 
-The bright-green centerline seam runs perfectly STRAIGHT and VERTICAL down the
-exact middle of the image. The four light-blue guide lines are perfectly
-HORIZONTAL. The head fills the frame vertically and is centered.
+Treat the attached image as a single rigid 3D object — this exact head, wireframe
+mesh, and colored vertex dots. Do NOT redraw, re-topologize, or re-imagine it.
+Re-render the SAME object from a camera rotated 35 degrees to a three-quarter view
+showing the LEFT side of the face, nose pointing toward the RIGHT edge of the
+image. Only the camera angle changes.
+Preserve exactly:
+- Every vertex keeps its PURE-RED dot; same count of dots. Rotate the mesh, do
+  not redraw or re-topologize it.
+- Same quad topology and edge loops.
+- The four light-blue horizontal guides stay horizontal at the SAME heights as
+  the source.
+- Same flat light-grey surface, pure-black wires, pure-white background, same
+  scale and vertical centering.
+No shading, no perspective distortion, no new colors, strict orthographic.
 
-<STYLE LOCK — paste the block above verbatim>
+### PROMPT C — EDIT to SIDE (feed it A's output)
 
-Reminder: flat grey only, strict orthographic only, all-quad wireframe, a red dot
-on every vertex, one straight vertical green centerline, four horizontal blue
-guides, pure-white background. No shading. No perspective. No extra colors.
-```
-
-### PROMPT B — EDIT to 3/4 (feed it PROMPT A's output)
-```
-EDIT — same head, new camera angle ONLY.
-Treat the attached image as a single rigid 3D object: this EXACT head, this EXACT
-wireframe mesh, these EXACT red vertex dots. Do NOT redraw, re-topologize,
-restyle, or re-imagine it. Re-render the SAME object from a camera rotated 35° to
-a THREE-QUARTER view that reveals the LEFT side of the face — the head turns so
-the nose points toward the RIGHT edge of the image and the left cheek faces the
-camera. Everything else stays identical.
-
-Carry-over anchors — preserve EXACTLY:
-- Same number of red vertex dots and the same quad topology and edge loops (same
-  mesh, only rotated).
-- The four light-blue horizontal guide lines stay perfectly horizontal and at the
-  SAME vertical heights as the source image — they are registration marks, do NOT
-  move them up or down.
-- The bright-green centerline seam stays ONE continuous line from skull-top over
-  the nose to the chin; it curves naturally around the form but never breaks.
-- Same flat light-grey surface, same pure-black even-weight wires, same pure-white
-  background, same overall scale, same vertical centering.
-
-Do NOT add or remove vertices, loops, or features. Do NOT change proportions or
-identity. No shading, no shadows, no perspective distortion, no new colors. Strict
-orthographic. ONLY the viewing angle changes.
-```
-
-### PROMPT C — EDIT to SIDE (feed it PROMPT A's output)
-```
-EDIT — same head, new camera angle ONLY.
-Treat the attached image as a single rigid 3D object: this EXACT head, this EXACT
-wireframe mesh, these EXACT red vertex dots. Do NOT redraw, re-topologize,
-restyle, or re-imagine it. Re-render the SAME object from a camera rotated to an
-exact 90° SIDE PROFILE that reveals the LEFT side of the face — full profile, the
-nose pointing toward the RIGHT edge of the image. Everything else stays identical.
-
-Carry-over anchors — preserve EXACTLY:
-- Same red vertex dots and the same quad topology and edge loops (same mesh, only
-  rotated).
-- The four light-blue horizontal guide lines stay perfectly horizontal and at the
-  SAME vertical heights as the source image — registration marks, do NOT move them.
-- In this profile, the bright-green centerline seam becomes the facial PROFILE
-  outline — forehead, nose bridge, nose tip, lips, chin — keep it as ONE clean,
-  continuous green line along the front edge of the face.
-- Same flat light-grey surface, same pure-black even-weight wires, same pure-white
-  background, same overall scale, same vertical centering.
-
-Do NOT add or remove vertices, loops, or features. Do NOT change proportions or
-identity. No shading, no shadows, no perspective distortion, no new colors. Strict
-orthographic. ONLY the viewing angle changes.
-```
-
-## Notes for next time
-- Optional red-dot step occasionally risks the model *reimagining* topology
-  instead of dotting the existing grid — eyeball the result to confirm it kept
-  the same loops.
-- For a real orthographic TOP, generate it separately and insist hard on
-  "looking straight down, no tilt, no perspective" — the 4-up sheet won't give
-  it cleanly.
+Treat the attached image as a single rigid 3D object — this exact head, wireframe
+mesh, and colored vertex dots. Do NOT redraw, re-topologize, or re-imagine it.
+Re-render the SAME object from an exact 90-degree LEFT-side profile, nose pointing
+toward the RIGHT edge of the image. Only the camera angle changes.
+Preserve exactly:
+- Every vertex keeps its PURE-RED dot. (Left-side dots are in front; far-side
+  dots are hidden — expected.) Rotate the mesh, do not redraw it.
+- Same quad topology and edge loops.
+- The four light-blue horizontal guides stay horizontal at the SAME heights as
+  the source.
+- The facial PROFILE (forehead, nose, lips, chin) reads as the front silhouette
+  edge — that profile curve is our depth source.
+- Same flat light-grey surface, pure-black wires, pure-white background, same
+  scale and vertical centering.
+No shading, no perspective distortion, no new colors, strict orthographic.
