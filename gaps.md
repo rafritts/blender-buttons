@@ -68,3 +68,38 @@ follows a `move_verts`.
 **Want:** edit-mode selection state to persist deterministically across consecutive
 edit-mode mutations regardless of which verb (`transform` vs `edit`) issues them.
 
+## G88 — `transform op=array_along between=[a,b]` ignores the endpoint objects
+
+The one verb whose whole job is "lay N copies along the line between two things" doesn't.
+`array_along prototype=link between=["ep_a","ep_b"] count=6` (two real mesh objects at
+distinct points) returned *"placed 6 copies on Z (spacing 0.0 m)"* and stacked all six at
+the origin — it never read `between`, fell back to a Z axis, and computed zero spacing. So
+there is no working "distribute a chain of links from here to there" primitive; I had to
+abandon it for an Array modifier. This is squarely an intent-space tool ("run links from
+the bow to the T-bar") that silently no-spaces.
+**Want:** `array_along` must space `count` copies evenly along the segment between the two
+named endpoint objects (or accept two points), honoring their world positions.
+
+## G89 — `modifier op=add target=X` adds to the ACTIVE object, not `target`
+
+`modifier op=add type=ARRAY target=chain_link` while `ep_b` was the active/selected object
+put the Array on **ep_b**, not chain_link (`modifier remove target=chain_link` then reported
+`Available: []`). The `target=` arg is ignored on add; it silently uses whatever is active.
+Every other verb (`material`, `edit`, `transform`) takes an explicit target/selection to
+defend against exactly this — `modifier` should too, especially since you often add a
+modifier to a part you just *named* but isn't active after the last op.
+**Want:** `modifier op=add` must resolve `target=` and add to that object (matching how
+`modifier modify/remove/apply` already accept `target`).
+
+## G90 — Array modifier `count`/`offset` not settable through the verb
+
+`modifier op=add type=ARRAY count=16 offset=0.783` ignored both (built the default 2 copies
+at relative-offset 1.0). `modifier op=modify count=12 offset=0.783` applied `count` but
+reported `(skipped: ['offset'])` — so the **relative/constant offset of an array is
+unreachable**. You can set how many links, but not how far apart, which is the parameter
+that decides whether a chain's links overlap-and-interlink or sit in a dotted line. I had
+to engineer the link spacing into the prototype's own bbox so that the stuck offset=1.0
+happened to land in the interlink range.
+**Want:** `count` honored on `add`, and `offset` (relative factor, plus ideally a
+`constant`/per-axis distance) honored on both `add` and `modify` for ARRAY.
+
