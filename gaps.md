@@ -160,3 +160,63 @@ value falls out of a read it is already doing, or the status block surfaces the 
 - Consider a lightweight staleness signal: a read echoes how many calls ago an object was last
   mutated, so the agent knows when its remembered bounds have gone stale.
 
+---
+
+> G78–G80 are the holes opened by the **coordinate amputation** (all typed absolute world
+> coordinates removed from the verb surface — at_x/y/z, to_x/y/z, anchor/center/target coords,
+> on={"at":[x,y,z]}, raise_to, select in_sphere center, light/camera/helix placement). The cut
+> forces every position to be relational/handle-addressed; these are the relational primitives that
+> now MUST exist for the freed-up workflows to stay possible. (Kept by deliberate decision: relative
+> *nudges* everywhere, curve/tube `points` as geometry-definition, pose `loc` as bone-space relative.)
+
+## G78 — a measured read (`feel op=aim` / `op=place` / `op=map`) produces a point nothing can consume 🧭 NORTH-STAR
+
+**Symptom.** `feel op=aim` / `op=place` / `op=map` hand back a world point + normal. The old
+workflow fed that point to `sculpt at_x/y/z`, `select in_sphere center=`, or `add on={"at":...}` —
+all removed. There is now no way to ACT on a point a read discovered: handles only mint from the
+live edit-mode *selection* (`feel op=handle source=selection`), not from an arbitrary point.
+
+**Impact.** The "judge where, server measures, then act there" loop is broken at the last step for
+any feature located by a cast rather than a vertex selection. The reads still measure; their output
+is now a dead end.
+
+**Fix.** Let a read MINT a handle at its hit so it's addressable by name: e.g. `feel op=handle
+source=point` (mint at a supplied/last-read point), or an `as_handle=<name>` flag on `aim`/`place`/
+`map` that mints the cast point directly. Then the existing handle-based verbs (`sculpt handle=`,
+`select op=in_sphere handle=`, `transform op=move_to handle=`) consume it. This is the keystone that
+keeps the coordinate ban from removing capability instead of just removing dead-reckoning.
+
+## G79 — no relational placement/aim for lights & cameras 🧩 MISSING CONTROL
+
+**Symptom.** `add light/camera` lost x/y/z + target_x/y/z; `object op=light` lost x/y/z; `view
+op=camera_position` is gone. Lights/cameras now spawn at a fixed default and can only be moved with
+`transform op=place`/`nudge` (they are objects, so this works) — but there is no relational way to
+**aim** them (`view op=orbit` aims at a fixed point, not a named object) nor to **rig** them
+(key/fill/rim at an angle + distance around a subject), which is the actual intent.
+
+**Impact.** Lighting and camera framing — the last mile of every hero render — got harder, not just
+coordinate-free. Aiming a camera/light at a named object, or placing one "3/4 front, 30° up, 2 m out
+from the subject," has no primitive.
+
+**Fix.** (a) `view op=orbit target=<object>` and an `aim=<object>` on camera/light ops (aim by name,
+not by point). (b) A relational light-rig primitive: position by angle (azimuth/elevation) + distance
+around a named subject — the spherical-relative analogue of `array_radial`, reusing the orbit math.
+
+## G80 — dead coordinate plumbing left in the internal adapters 🧹 CLEANUP
+
+**Symptom.** The cut was made at the agent-facing verb layer; the pruned internal adapters still
+carry coordinate params now fed defaults/None: `transforms.move_to`, `scene.add_light/add_camera`
+(baked spawn defaults), `scene.set_camera_position` (now orphaned — no verb calls it),
+`viewport.orbit_viewport`, `queries.place_on_surface` (dead `anchor_x/y/z` branch), every `sculpt._s.*`
+(`at_x/y/z`, grab `to_x/y/z`). The Blender-side executors (extension/) still accept the same params.
+
+**Impact.** None functional (unreachable from the agent), but it's dead code and a re-exposure risk.
+
+**Fix.** Strip the coordinate params from the adapter signatures + their extension counterparts; delete
+`set_camera_position` (server + extension handler). Low priority — do it once G78/G79 settle, since
+the relational replacements may reuse some of this plumbing.
+
+> ⚙️ **Deploy note:** the coordinate cut touched `extension/placement.py` (removed the `at`/`x`/`y`/`z`/
+> `raise_to` keys from the placement DSL). That change only takes effect after the addon is **rebuilt
+> and reinstalled** in Blender — until then the running addon still accepts `on={"at":[...]}`.
+

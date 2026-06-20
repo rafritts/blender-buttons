@@ -56,9 +56,6 @@ def object_verb(
     hex: tag(str, "[light] #RRGGBB color") = "",
     size: tag(float, "[light] soft-shadow size") = None,
     spot_angle: tag(float, "[light] SPOT cone angle (deg)") = None,
-    x: tag(float, "[light] move to X") = None,
-    y: tag(float, "[light] move to Y") = None,
-    z: tag(float, "[light] move to Z") = None,
     target: tag(str, "[light] re-aim at object") = "",
     label: str = "",
 ) -> str:
@@ -84,7 +81,8 @@ def object_verb(
       particle_visibility — toggle particle systems  (name, show=bool)
       props       — read custom properties           (name, bone)
       set_prop    — write a custom property   (name, key, value, bone)
-      light       — tweak an existing light  (name, energy/color/hex/size/spot_angle/x/y/z/target)
+      light       — tweak an existing light  (name, energy/color/hex/size/spot_angle/target);
+                    to MOVE it, use transform op=place/nudge (relational)
       mode        — explicit mode switch; pass name to guarantee it lands on that
                     object despite a stray click   (name, mode=OBJECT|EDIT|SCULPT|POSE)
       remesh      — auto-retopology of the whole mesh (mode=voxel → uniform sculpt-ready
@@ -132,7 +130,7 @@ def object_verb(
         return objects.set_custom_property(name, key, value, bone, label)
     if o == "light":
         return _scene.modify_light(name, energy, color, hex, size, spot_angle,
-                                   x, y, z, target, label)
+                                   None, None, None, target, label)
     if o == "mode":
         return objects.set_mode(mode, name)
     if o == "remesh":

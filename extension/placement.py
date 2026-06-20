@@ -20,8 +20,6 @@ Whole-object placements (set all three axes):
                  "top": False}}
                             -- {corner} of new aligns with {corner} of target; Z embeds at
                                the target's bottom, or rests on its TOP when "top": True
-  {"at": [x, y, z]}         -- center at the literal world coordinate (full ripcord;
-                               prefer relational keys when an anchor object exists)
 
 Adjacency placements (set 1 axis + center the other 2 on target):
   {"left_of": "name"}       -- flush to target's -X side, Y/Z centered on target
@@ -33,15 +31,8 @@ Mirror placement (sets cx from another object's center, flipping the chosen axis
   {"mirror_of": "name", "axis": "X"}   -- center = (-cx_of_name, cy, cz) when axis=X
                                           (axis Y or Z analogous)
 
-Absolute axis overrides (applied AFTER relational resolution; always win):
-  {"x": value}              -- center X = value
-  {"y": value}              -- center Y = value
-  (use "raise_to"/"on_floor" for Z — they set Z_MIN, not Z_CENTER)
-
-Z overrides (always applied last, win conflicts):
-  {"on_floor": True}        -- Z_MIN of new = 0
-  {"raise_to": value}       -- Z_MIN of new = value
-  {"z": value}              -- center Z = value (alternative to raise_to)
+Z override (relational datum, applied last):
+  {"on_floor": True}        -- Z_MIN of new = 0 (rest on the floor plane)
 
 Modifiers:
   {"gap": 0.02}             -- spacing for on/under/left_of/right_of/in_front_of/behind
@@ -55,10 +46,10 @@ from .common import world_bbox
 # Every key resolve_placement understands. Anything else in a spec is a typo or
 # an unsupported idea — reject loudly instead of silently ignoring it.
 VALID_SPEC_KEYS = {
-    "on", "under", "between", "centered_on", "at_corner", "at",
+    "on", "under", "between", "centered_on", "at_corner",
     "left_of", "right_of", "in_front_of", "behind",
     "mirror_of", "axis",
-    "on_floor", "raise_to", "x", "y", "z", "gap",
+    "on_floor", "gap",
 }
 
 
@@ -105,12 +96,7 @@ def resolve_placement(spec, dims):
         return ((xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2)
 
     # Whole-object placements
-    if "at" in spec:
-        at = spec["at"]
-        if not (isinstance(at, (list, tuple)) and len(at) == 3):
-            raise ValueError("'at' requires [x, y, z] — three world coordinates for the center")
-        cx, cy, cz = float(at[0]), float(at[1]), float(at[2])
-    elif "on" in spec:
+    if "on" in spec:
         xmin, ymin, zmin, xmax, ymax, zmax = bbox(spec["on"])
         cx = (xmin + xmax) / 2
         cy = (ymin + ymax) / 2
@@ -189,19 +175,9 @@ def resolve_placement(spec, dims):
         else:
             raise ValueError(f"mirror_of axis must be X, Y, or Z (got {axis!r})")
 
-    # Z overrides (last word)
+    # Z override (last word) — the floor plane is a relational datum, not a coordinate.
     if spec.get("on_floor"):
         cz = h / 2
-    if "raise_to" in spec:
-        cz = spec["raise_to"] + h / 2
-
-    # Absolute X/Y/Z overrides — always last word for that axis.
-    if "x" in spec:
-        cx = float(spec["x"])
-    if "y" in spec:
-        cy = float(spec["y"])
-    if "z" in spec:
-        cz = float(spec["z"])
 
     return (cx, cy, cz)
 

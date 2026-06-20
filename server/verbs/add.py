@@ -59,7 +59,6 @@ def add(
     taper: tag(float, "[helix] end/start wire-thickness ratio (1=uniform)") = 0,
     handedness: tag(str, "[helix] right (default) | left") = "",
     axis: tag(str, "[helix] coil axis X|Y|Z (default Z)") = "",
-    center: tag(list, "[helix] [x,y,z] base centre (default origin)") = None,
     segments_per_turn: tag(int, "[helix] samples per revolution (default 24)") = 0,
     # ── light / camera (type=light|camera) ──
     energy: tag(float, "[light] strength (watts; SUN ~5)") = 0,
@@ -68,12 +67,6 @@ def add(
     target: tag(str, "[light/camera] object to aim at") = "",
     spot_angle: tag(float, "[light] SPOT cone angle (deg)") = 0,
     lens: tag(float, "[camera] focal length (mm; 35 wide, 85 portrait)") = 0,
-    x: tag(float, "[light/camera] world X (default: light 0, camera 7)") = None,
-    y: tag(float, "[light/camera] world Y (default: light 0, camera -7)") = None,
-    z: tag(float, "[light/camera] world Z (default: light 5, camera 5)") = None,
-    target_x: tag(float, "[camera] aim point X") = 0,
-    target_y: tag(float, "[camera] aim point Y") = 0,
-    target_z: tag(float, "[camera] aim point Z") = 0,
     label: str = "",
 ) -> str:
     """
@@ -97,14 +90,16 @@ def add(
                      OR between=[A,B] to strut/connect two objects (nearest-surface
                      endpoints — no coordinates)
         helix      — turns, height, radius, tube_radius, taper, handedness, axis,
-                     center, segments_per_turn, sides  (continuous coil MESH — wire
-                     wrap, spring, screw thread, coiled rope; no point cap)
+                     segments_per_turn, sides  (continuous coil MESH — wire wrap,
+                     spring, screw thread, coiled rope; no point cap). Spawns at the
+                     origin — re-seat it relationally with transform op=place.
         curve      — points + subtype (BEZIER|NURBS|POLY), cyclic, resolution,
                      bevel_depth          (LIVE curve datablock — dolly path, rope)
-      OBJECTS:
-        light      — subtype (POINT|SUN|SPOT|AREA), x/y/z, energy, color|hex,
+      OBJECTS (spawn at a default viewpoint — re-seat relationally with
+      transform op=place / op=nudge, or aim with target=<object>):
+        light      — subtype (POINT|SUN|SPOT|AREA), energy, color|hex,
                      size, target, spot_angle
-        camera     — x/y/z, target|target_x/y/z, lens   (focal mm; 35 wide, 85 portrait)
+        camera     — target=<object>, lens   (focal mm; 35 wide, 85 portrait)
 
     name: REQUIRED for everything except floor (defaults to 'floor').
     on:   placement DSL for mesh primitives — {"on":"seat"}, {"between":[...]},
@@ -163,26 +158,20 @@ def add(
         return primitives.helix_coil(
             name, turns or 3, height or 0.2, radius or 0.05,
             (tube_radius if isinstance(tube_radius, (int, float)) else None) or 0.02,
-            taper or 1.0, handedness or "right", axis or "Z", center,
+            taper or 1.0, handedness or "right", axis or "Z", None,
             segments_per_turn or 24, sides or 4, label)
     if t == "curve":
         return primitives.add_curve(
             name, points or [], subtype or "BEZIER", cyclic, resolution or 12,
             bevel_depth, label)
     if t == "light":
-        # `is None` sentinel, not `x or 0.0`: a light placed at 0 must stay at 0.
+        # Spawns above the origin; re-seat relationally (transform op=place/nudge).
         return scene.add_light(
-            name, subtype or "POINT",
-            0.0 if x is None else x,
-            0.0 if y is None else y,
-            5.0 if z is None else z,
+            name, subtype or "POINT", 0.0, 0.0, 5.0,
             energy or None, color, hex, size or 0.25, target, spot_angle or 45.0, label)
     if t == "camera":
-        # `is None` sentinel, not `x or 7.0`: a camera at x=0 (dead-front) must stay at 0.
+        # Spawns at a default 3/4 viewpoint; re-seat relationally (view op=orbit,
+        # transform op=place) and aim with target=<object>.
         return scene.add_camera(
-            name,
-            7.0 if x is None else x,
-            -7.0 if y is None else y,
-            5.0 if z is None else z,
-            target, target_x, target_y, target_z, lens or 50.0, label)
+            name, 7.0, -7.0, 5.0, target, 0.0, 0.0, 0.0, lens or 50.0, label)
     return unknown("add", "type", type, _TYPES)

@@ -418,10 +418,10 @@ def aim_surface(target: str = "", face: str = "-Y", u: float = 0.5, v: float = 0
           two diverge (face=-Y can cast world +Z), which silently missed the head (G39).
           The response echoes the world direction the cast resolved to.
 
-    Then feed the returned point to a constructive verb:
-      sculpt … at_x/y/z=point, radius=…   (push along the returned normal to pull out)
-      select op=in_sphere center=point     |   add … on={"at": point}
-    Casts onto the EVALUATED surface (subsurf included)."""
+    The returned point is a READ. To ACT on it without typing coordinates, address it
+    by name: with the live selection set, mint a handle (feel op=handle) and feed it to
+    handle-based verbs (sculpt handle=, select op=in_sphere handle=, transform op=move_to
+    handle=). Casts onto the EVALUATED surface (subsurf included)."""
     result = call_blender("aim_surface",
                           {"target": target, "face": face, "u": u, "v": v,
                            "margin": margin, "frame": frame})
@@ -433,8 +433,8 @@ def aim_surface(target: str = "", face: str = "-Y", u: float = 0.5, v: float = 0
     return (f"surface @ {result['region']} (cast {result['cast_axis']} [{result.get('frame','world')}] "
             f"→ world {result.get('world_dir','?')}): "
             f"point=[{p[0]}, {p[1]}, {p[2]}]  normal=[{n[0]}, {n[1]}, {n[2]}]\n"
-            f"  → sculpt at_x={p[0]} at_y={p[1]} at_z={p[2]} (push along the normal "
-            f"to pull out); or select in_sphere center=that point")
+            f"  → a read, not an action: mint a handle here (feel op=handle) and brush/"
+            f"select by name (sculpt handle=, select op=in_sphere handle=).")
 
 
 def selection_anchor(target: str = "") -> str:
@@ -472,11 +472,11 @@ def place_on_surface(target: str, handle: str = "",
                      anchor_x: float = None, anchor_y: float = None, anchor_z: float = None,
                      up: float = 0.0, down: float = 0.0, front: float = 0.0, back: float = 0.0,
                      left: float = 0.0, right: float = 0.0, snap: bool = True) -> str:
-    """G47 — surface-relative placement. Anchor on a measured landmark (a handle's live
-    point, or an explicit anchor_x/y/z) + a METRIC world offset (up/down/front/back/
-    left/right, in m; front=-Y), ray-snap to the target surface, and hand back the
-    world point + normal to seed a sculpt/select. 'On the front midline, a hand below
-    the bust apex, snapped to the surface' — no typed Z."""
+    """G47 — surface-relative placement. Anchor on a measured landmark (a named handle's
+    live point) + a METRIC world offset (up/down/front/back/left/right, in m; front=-Y),
+    ray-snap to the target surface, and hand back the world point + normal to seed a
+    sculpt/select. 'On the front midline, a hand below the bust apex, snapped to the
+    surface' — no typed Z."""
     from server import handles as _h
     if handle:
         pt, err, drift = _h.resolve_point(handle)
@@ -484,11 +484,8 @@ def place_on_surface(target: str, handle: str = "",
             return err
         anchor = list(pt)
         note = drift or ""
-    elif None not in (anchor_x, anchor_y, anchor_z):
-        anchor = [anchor_x, anchor_y, anchor_z]
-        note = ""
     else:
-        return "place: need an anchor — pass handle=<name> or anchor_x/y/z"
+        return "place: need an anchor — pass handle=<name>"
     result = call_blender("place_on_surface", {
         "target": target, "anchor": anchor, "snap": snap,
         "up": up, "down": down, "front": front, "back": back, "left": left, "right": right})
@@ -498,4 +495,5 @@ def place_on_surface(target: str, handle: str = "",
     return note + (
         f"placed @ {result['region']}: point=[{p[0]}, {p[1]}, {p[2]}]  "
         f"normal=[{n[0]}, {n[1]}, {n[2]}]\n"
-        f"  → sculpt at_x={p[0]} at_y={p[1]} at_z={p[2]}; or select in_sphere center=that point")
+        f"  → a read: mint a handle here (feel op=handle) and act by name "
+        f"(sculpt handle=, select op=in_sphere handle=).")

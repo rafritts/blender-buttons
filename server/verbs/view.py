@@ -11,13 +11,13 @@ from server import viewport, introspect, scene
 from ._common import tag, unknown
 
 _OPS = ["shading", "angle", "overlays", "orbit", "zoom", "frame", "check_framing",
-        "camera_position", "camera_dof", "active_camera"]
+        "camera_dof", "active_camera"]
 
 
 @mcp.tool(name="view")
 def view(
     op: Literal["shading", "angle", "overlays", "orbit", "zoom", "frame",
-                "check_framing", "camera_position", "camera_dof", "active_camera"],
+                "check_framing", "camera_dof", "active_camera"],
     # shading / angle
     mode: tag(str, "[shading] WIREFRAME|SOLID|MATERIAL|RENDERED") = "MATERIAL",
     angle: tag(str, "[angle] FRONT|BACK|TOP|… or persp/ortho") = "",
@@ -33,20 +33,13 @@ def view(
     azimuth: tag(float, "[orbit] horizontal angle (deg)") = 45.0,
     elevation: tag(float, "[orbit] vertical angle (deg)") = 25.0,
     distance: tag(float, "[orbit] camera distance (m)") = 8.0,
-    target_x: tag(float, "[orbit/camera_position] look-at X") = 0.0,
-    target_y: tag(float, "[orbit/camera_position] look-at Y") = 0.0,
-    target_z: tag(float, "[orbit/camera_position] look-at Z") = 1.0,
     auto_frame: tag(bool, "[orbit] auto-fit the scene") = False,
     # frame / check_framing
     targets: tag(str, "[frame/check_framing] objects to frame/check") = "",
     include_lights: tag(bool, "[frame] include lights in the frame") = False,
     camera: tag(str, "[check_framing/camera_dof] camera name (empty=scene cam)") = "",
     aspect: tag(str, "[check_framing] target frame 'WxH'|'W:H' to validate against (empty=scene resolution)") = "",
-    # camera_position
-    x: tag(float, "[camera_position] camera X") = 0.0,
-    y: tag(float, "[camera_position] camera Y") = 0.0,
-    z: tag(float, "[camera_position] camera Z") = 0.0,
-    # camera_position / active_camera — camera= names which camera to act on (empty=scene cam)
+    # active_camera — camera= names which camera to act on (empty=scene cam)
     # camera_dof
     focus_distance: tag(float, "[camera_dof] focus distance (m)") = None,
     aperture: tag(float, "[camera_dof] f-stop (lower = shallower)") = None,
@@ -60,15 +53,13 @@ def view(
       overlays  — toggle overlays (relationship_lines/floor/cursor/wireframes/
                   text_info/axes, or overlays=False to hide all)
       orbit     — orbit the viewport camera (azimuth, elevation, distance,
-                  target_x/y/z, auto_frame)
+                  auto_frame) — relational viewpoint, no typed coordinates
       zoom      — zoom to the current selection (—)
       frame     — frame objects in view  (targets, include_lights)
       check_framing — is everything in the camera frame? Coverage % is relative to
                   the frame aspect, so each reading states the reference resolution;
                   aspect='WxH'|'W:H' validates against an intended output. (targets,
                   camera, aspect)
-      camera_position — move a camera to a point aimed at a target
-                  (x/y/z, target_x/y/z, camera — empty=scene cam)
       camera_dof — depth of field on the camera (focus_distance OR focus_object,
                   aperture f-stop, camera)
       active_camera — make an existing camera the active scene/render camera (camera)
@@ -82,16 +73,14 @@ def view(
         return viewport.set_viewport_overlays(relationship_lines, floor, cursor,
                                               wireframes, text_info, axes, overlays)
     if o == "orbit":
-        return viewport.orbit_viewport(azimuth, elevation, distance, target_x,
-                                       target_y, target_z, auto_frame)
+        return viewport.orbit_viewport(azimuth, elevation, distance, 0.0, 0.0, 1.0,
+                                       auto_frame)
     if o == "zoom":
         return viewport.zoom_to_selected()
     if o == "frame":
         return viewport.frame_scene(targets, include_lights)
     if o == "check_framing":
         return introspect.check_framing(targets, camera, aspect)
-    if o == "camera_position":
-        return scene.set_camera_position(x, y, z, target_x, target_y, target_z, camera)
     if o == "camera_dof":
         return scene.set_camera_dof(focus_distance, aperture, focus_object, camera)
     if o == "active_camera":

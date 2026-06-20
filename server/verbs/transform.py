@@ -35,22 +35,16 @@ def transform(
     forward: tag(float, "[nudge/move_verts] -Y (m)") = 0.0,
     inward: tag(float, "[move_verts] inward along normal (m)") = 0.0,
     out: tag(float, "[move_verts] outward along normal (m)") = 0.0,
-    # move_to (absolute world position; omitted axis preserved)
-    to_x: tag(float, "[move_to] absolute world X (m)") = None,
-    to_y: tag(float, "[move_to] absolute world Y (m)") = None,
-    to_z: tag(float, "[move_to] absolute world Z (m)") = None,
-    # rotate_to (absolute euler degrees; omitted axis preserved). Separate from to_*
-    # so no field means two things (G23): a param's meaning is clear from its name.
+    # rotate_to (absolute euler degrees; omitted axis preserved). An ANGLE, not a
+    # position — intrinsic orientation, no world coordinate involved.
     deg_x: tag(float, "[rotate_to] absolute X euler (deg)") = None,
     deg_y: tag(float, "[rotate_to] absolute Y euler (deg)") = None,
     deg_z: tag(float, "[rotate_to] absolute Z euler (deg)") = None,
     handle: tag(str, "[move_to/snap_loop] a named handle: move_to moves a whole object "
                      "TO its point; snap_loop seats the selected loop ONTO it") = "",
-    # aim_axis (orient a local axis down a from→to segment)
-    aim_from: tag(list, "[aim_axis] start point [x,y,z]") = None,
-    aim_to: tag(list, "[aim_axis] end point [x,y,z]") = None,
-    from_handle: tag(str, "[aim_axis] start handle (instead of aim_from)") = "",
-    to_handle: tag(str, "[aim_axis] end handle (instead of aim_to)") = "",
+    # aim_axis (orient a local axis down a from→to segment, by named handles)
+    from_handle: tag(str, "[aim_axis] start handle") = "",
+    to_handle: tag(str, "[aim_axis] end handle") = "",
     # resize (absolute meters)
     width: tag(float, "[resize] absolute X extent (m)") = None,
     depth: tag(float, "[resize] absolute Y extent (m)") = None,
@@ -89,7 +83,6 @@ def transform(
     linked: tag(bool, "[array_*] make INSTANCES sharing the prototype's mesh — one mesh "
                       "for the whole array (pickets, balusters, spokes); edit one, all change") = False,
     name_prefix: tag(str, "[array_*/scatter] name prefix for copies") = "",
-    center: tag(list, "[array_radial] ring center [x,y,z]") = None,
     center_object: tag(str, "[array_radial] object at the ring center") = "",
     start_angle: tag(float, "[array_radial] start angle (deg)") = 0.0,
     end_angle: tag(float, "[array_radial] end angle (deg)") = 360.0,
@@ -131,17 +124,16 @@ def transform(
                  vocabulary as add's on=, but for objects already in the scene. Seat
                  left_of/on/under/at_corner another without raw coordinates. Resolves
                  against the object's own dims; place one object at a time.
-      move_to  — set ABSOLUTE world position (to_x/to_y/to_z; omitted axis preserved) —
-                 drop at a computed point, e.g. a feel op=aim hit, or handle=<name>
-                 to move TO a handle's live point
+      move_to  — move a whole object TO a named handle's live point (handle=<name>) —
+                 the relational re-locate: address the destination by name, never by
+                 typed coordinate.
       rotate_to— set ABSOLUTE euler rotation in degrees (deg_x/deg_y/deg_z; omitted
-                 kept). Distinct param names from move_to's to_*, so no field is
-                 polymorphic — meaning is unambiguous from the name alone.
-      aim_axis — orient a LOCAL axis down a from→to segment (aim_from/aim_to points or
-                 from_handle/to_handle; axis=Z default, signed ok). The orient-along-
-                 an-edge primitive for solids that don't self-orient like type=tube —
-                 lay a coil/bolt/strut along a direction without hand-trig. Rotation
-                 only; pair with move_to to position.
+                 kept). An angle, not a position — intrinsic orientation only.
+      aim_axis — orient a LOCAL axis down a from→to segment (from_handle/to_handle;
+                 axis=Z default, signed ok). The orient-along-an-edge primitive for
+                 solids that don't self-orient like type=tube — lay a coil/bolt/strut
+                 along a direction without hand-trig. Rotation only; pair with move_to
+                 to position.
       rest_on  — drop along −axis until the object's REAL geometry rests on `target`
                  (axis=Z default, offset=clearance). BVH from the source's own verts,
                  so tilted/irregular parts seat by their true lowest point — the action
@@ -157,7 +149,7 @@ def transform(
       distribute — space evenly between two (targets, between=[a,b], axis)
       array_corners — copy to a target's 4 corners (prototype, of, standing_on_floor)
       array_along  — N copies between two   (prototype, count, between=[a,b], axis)
-      array_radial — N copies in a ring (prototype, count, center|center_object, axis,
+      array_radial — N copies in a ring (prototype, count, center_object, axis,
                    start_angle, end_angle, radius, align_to_tangent)
       scatter  — scatter copies on a surface (target, source/sources, count OR density,
                  within=region mask, avoid, scale_min/max, …)
@@ -176,15 +168,15 @@ def transform(
         "place":         (bool(on),
                           "on=<placement spec> (same DSL as add's on=)",
                           "transform op=place targets=cup on={\"left_of\":\"base\",\"gap\":0}"),
-        "move_to":       (bool(handle) or any(v is not None for v in (to_x, to_y, to_z)),
-                          "to_x/to_y/to_z (any) or handle=<name>",
-                          "transform op=move_to targets=cap to_z=1.2"),
-        "rotate_to":     (any(v is not None for v in (deg_x, deg_y, deg_z, to_x, to_y, to_z)),
+        "move_to":       (bool(handle),
+                          "handle=<name> (a named landmark to move TO)",
+                          "transform op=move_to targets=cap handle=jar.rim"),
+        "rotate_to":     (any(v is not None for v in (deg_x, deg_y, deg_z)),
                           "deg_x/deg_y/deg_z (any)",
                           "transform op=rotate_to targets=guide deg_z=25"),
-        "aim_axis":      ((aim_from and aim_to) or (from_handle and to_handle),
-                          "aim_from+aim_to (points) or from_handle+to_handle",
-                          "transform op=aim_axis targets=bolt aim_from=[0,0,0] aim_to=[1,0,0] axis=Z"),
+        "aim_axis":      (bool(from_handle and to_handle),
+                          "from_handle+to_handle (two named handles)",
+                          "transform op=aim_axis targets=bolt from_handle=base to_handle=tip axis=Z"),
         "rest_on":       (bool(target),
                           "target=<surface to rest on>",
                           "transform op=rest_on targets=crate target=floor axis=Z"),
@@ -206,8 +198,8 @@ def transform(
         "array_along":   (bool(prototype and count) and len(between or []) == 2,
                           "prototype, count, between=[a,b]",
                           "transform op=array_along prototype=picket count=5 between=[postL,postR]"),
-        "array_radial":  (bool(prototype and count and (center or center_object)),
-                          "prototype, count, center=[x,y,z] or center_object",
+        "array_radial":  (bool(prototype and count and center_object),
+                          "prototype, count, center_object",
                           "transform op=array_radial prototype=spoke count=8 center_object=hub axis=Z"),
         "scatter":       (bool(target and (source or sources)),
                           "target=<surface to scatter onto> and source=<object to instance> (or sources=)",
@@ -223,35 +215,20 @@ def transform(
     if o == "place":
         return transforms.place(targets, on, label)
     if o == "move_to":
-        note = ""
-        if handle:
-            pt, err, drift = handles.resolve_point(handle)
-            if err:
-                return err
-            note = drift or ""
-            to_x = pt[0] if to_x is None else to_x
-            to_y = pt[1] if to_y is None else to_y
-            to_z = pt[2] if to_z is None else to_z
-        return note + transforms.move_to(targets, to_x, to_y, to_z, label)
+        pt, err, drift = handles.resolve_point(handle)
+        if err:
+            return err
+        note = drift or ""
+        return note + transforms.move_to(targets, pt[0], pt[1], pt[2], label)
     if o == "rotate_to":
-        # deg_* is the correct field; fall back to the old to_* only if deg_* unset,
-        # so pre-G23 callers still work while the schema steers to the clear name.
-        rx = deg_x if deg_x is not None else to_x
-        ry = deg_y if deg_y is not None else to_y
-        rz = deg_z if deg_z is not None else to_z
-        return transforms.rotate_to(targets, rx, ry, rz, label)
+        return transforms.rotate_to(targets, deg_x, deg_y, deg_z, label)
     if o == "aim_axis":
-        frm, to = aim_from, aim_to
-        if from_handle:
-            pt, err, drift = handles.resolve_point(from_handle)
-            if err:
-                return err
-            frm = pt
-        if to_handle:
-            pt, err, drift = handles.resolve_point(to_handle)
-            if err:
-                return err
-            to = pt
+        frm, err, _ = handles.resolve_point(from_handle)
+        if err:
+            return err
+        to, err, _ = handles.resolve_point(to_handle)
+        if err:
+            return err
         return transforms.aim_axis(targets, frm, to, axis, label)
     if o == "rest_on":
         return transforms.rest_on(targets, target, axis, offset, label)
@@ -280,7 +257,7 @@ def transform(
         return relational.array_along(prototype, count, between or [], axis,
                                       keep_original, name_prefix, linked, label)
     if o == "array_radial":
-        return relational.array_radial(prototype, count, center, center_object, axis,
+        return relational.array_radial(prototype, count, None, center_object, axis,
                                        start_angle, end_angle, radius, align_to_tangent,
                                        keep_original, name_prefix, linked, label)
     if o == "scatter":

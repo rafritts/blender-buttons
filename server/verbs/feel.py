@@ -76,10 +76,7 @@ def feel(
     source: tag(str, "[handle] addressing mode: selection (the live edit-mode selection)") = "selection",
     vertex_parent: tag(bool, "[handle] vertex-parent the Empty to a tracking vert so it rides pose/deform (default off; the vgroup recompute stays the source of truth)") = False,
     prune: tag(bool, "[handles] also garbage-collect orphaned handles (delete the ✗ unresolvable Empties), then list what remains") = False,
-    # place — surface-relative placement (G47); anchor — live-selection anchor (SPEC-09)
-    anchor_x: tag(float, "[place] explicit anchor world X (or use handle=)") = None,
-    anchor_y: tag(float, "[place] explicit anchor world Y") = None,
-    anchor_z: tag(float, "[place] explicit anchor world Z") = None,
+    # place — surface-relative placement off a named handle (G47); anchor — live-selection anchor (SPEC-09)
     up: tag(float, "[place] offset +Z (m)") = 0.0,
     down: tag(float, "[place] offset -Z (m)") = 0.0,
     front: tag(float, "[place] offset -Y (m)") = 0.0,
@@ -165,10 +162,10 @@ def feel(
       diff     — signed change per metric over a baseline's SAME verts after an edit —
                  a local, temporal check a global bbox/symmetry read can't give. 'It
                  grew 2cm and stayed symmetric' in one read (G45).    (name)
-      place    — surface-relative placement: anchor on a handle/landmark + a metric
-                 world offset (up/down/front/back/left/right), ray-snap to the surface,
-                 get the world point + normal. 'A hand below the bust apex, on the
-                 surface' with no typed Z (G47).  (target, handle OR anchor_x/y/z,
+      place    — surface-relative placement: anchor on a named handle/landmark + a
+                 metric world offset (up/down/front/back/left/right), ray-snap to the
+                 surface, get the world point + normal. 'A hand below the bust apex, on
+                 the surface' with no typed Z (G47).  (target, handle,
                  up/down/front/back/left/right, snap)
       handle   — mint a named spatial anchor from the live edit-mode selection: an
                  Empty in a `Handles` collection + a `HANDLE_<name>` vertex group on
@@ -247,7 +244,7 @@ def feel(
     if o == "diff":
         return topology.region_diff(name)
     if o == "place":
-        return queries.place_on_surface(target, handle, anchor_x, anchor_y, anchor_z,
+        return queries.place_on_surface(target, handle, None, None, None,
                                         up, down, front, back, left, right, snap)
     if o == "handle":
         return handles.mint_handle(name, source, vertex_parent)

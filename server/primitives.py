@@ -29,23 +29,19 @@ from server._core import mcp, call_blender, _status, _add_result
 #   Mirror (center copied from another object, one axis flipped):
 #     {"mirror_of": "thigh_R", "axis": "X"}  → center = thigh_R's center with X negated
 #
-#   Absolute coordinates (the ripcord — prefer relational keys when an anchor exists):
-#     {"at": [x, y, z]}                → center at the literal world coordinate
-#     {"x": 0.085} / {"y": ...} / {"z": ...}  → override just that center axis,
-#                                       applied AFTER relational keys (combine freely)
-#
-#   Z overrides (applied last; win conflicts with the above):
-#     {"on_floor":  true}              → bottom of new = Z 0
-#     {"raise_to":  0.45}              → bottom of new = Z 0.45  (literal Z — ripcord)
+#   Z override (relational datum, applied last):
+#     {"on_floor":  true}              → bottom of new = Z 0 (rest on the floor plane)
 #
 #   Modifier:
 #     {"gap": 0.01}                    → spacing for on/under/left_of/etc.
 #
-#   Unknown keys are rejected with an error (no silent ignores).
+#   Unknown keys are rejected with an error (no silent ignores). There is NO literal-
+#   coordinate ripcord: placement is relational only. To seat at a point you can't
+#   reach relationally, mint a handle there and address it by name.
 #
 # Examples:
 #   on={"at_corner": {"of": "seat", "corner": "front_left"}, "on_floor": True}
-#   on={"between": ["leg_back_left", "leg_back_right"], "raise_to": 0.50}
+#   on={"between": ["leg_back_left", "leg_back_right"]}
 #   on={"right_of": "leg_front_left", "gap": 0.36, "on_floor": True}
 #
 # Axis convention: +X = right, +Y = back, +Z = up. Front of an object is its −Y side.

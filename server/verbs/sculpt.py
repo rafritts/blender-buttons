@@ -1,7 +1,8 @@
 """sculpt — Sculpt Mode brushes (SPEC-05).
 
-Stroke a brush at a world point on a mesh. `brush` selects which brush; every
-brush shares the at_x/at_y/at_z + radius targeting. Auto-enters Sculpt Mode.
+Stroke a brush at a measured point on a mesh. `brush` selects which brush; every
+brush shares the at=selection / handle= + radius targeting (no typed coordinates).
+Auto-enters Sculpt Mode.
 """
 
 from typing import Literal
@@ -20,17 +21,11 @@ def sculpt(
     radius: tag(float, "brush radius (m); optional for gravity (omit = whole mesh)") = None,
     at: tag(str, "WHERE to brush — 'selection' uses the LIVE edit-mode selection's "
                  "surface-snapped centroid (the measured, no-coordinate default; "
-                 "SPEC-09). Prefer this or handle= over typing at_x/y/z.") = "",
+                 "SPEC-09).") = "",
     handle: tag(str, "brush at a named handle's live point (recomputed)") = "",
-    at_x: tag(float, "[ripcord] brush world X — prefer at=selection / handle=") = None,
-    at_y: tag(float, "[ripcord] brush world Y — prefer at=selection / handle=") = None,
-    at_z: tag(float, "[ripcord] brush world Z — prefer at=selection / handle=") = None,
     # amount (draw/inflate/crease/pinch/flatten)
     amount: tag(float, "[draw/inflate/crease/pinch/flatten] strength") = 1.0,
-    # grab displacement — absolute to_* OR relative directions
-    to_x: tag(float, "[grab] drag to world X") = None,
-    to_y: tag(float, "[grab] drag to world Y") = None,
-    to_z: tag(float, "[grab] drag to world Z") = None,
+    # grab displacement — relative directions (m)
     out: tag(float, "[grab] drag outward (m)") = 0.0,
     inward: tag(float, "[grab] drag inward (m)") = 0.0,
     up: tag(float, "[grab] drag +Z (m)") = 0.0,
@@ -56,13 +51,12 @@ def sculpt(
     label: str = "",
 ) -> str:
     """
-    Sculpt a mesh — **Sculpt Mode** brushes. WHERE to stroke, cheapest-correct first:
-    at='selection' (the live selection's surface-snapped centroid — measured, no
-    coordinate), handle=<name> (a named anchor's live point), or the at_x/y/z ripcord
-    (a typed world point — a divined seed an LLM can't see; avoid). Strokes within
-    `radius`. `brush` selects:
+    Sculpt a mesh — **Sculpt Mode** brushes. WHERE to stroke: at='selection' (the
+    live selection's surface-snapped centroid — measured, no coordinate) or
+    handle=<name> (a named anchor's live point). Strokes within `radius`. `brush`
+    selects:
 
-      grab    — drag verts   (to_x/y/z absolute, OR out/up/left/.. relative)
+      grab    — drag verts   (out/up/left/.. relative)
       draw    — raise/lower along a normal  (amount, normal_x/y/z)
       inflate — push along per-vert normals (amount)
       smooth  — relax surface               (iterations)
@@ -71,12 +65,14 @@ def sculpt(
       flatten — flatten toward a plane      (amount, plane_normal_x/y/z)
       gravity — DRAPE a soft form: pin the top, let the lower mass fall →
                 a hanging/teardrop shape by construction (strength, pin). Scope
-                with at_x/y/z + radius, or omit the point to drape the whole mesh.
+                with at=selection/handle + radius, or omit the point to drape the
+                whole mesh.
 
     falloff: SMOOTH|SHARP|… subdivide=True adds resolution under the brush first.
     """
     b = brush.lower().strip()
     note = ""
+    at_x = at_y = at_z = None
     if at.strip().lower() == "selection":
         pt, nrm, sugg_r, err = queries.resolve_selection_anchor(target)
         if err:
@@ -100,11 +96,11 @@ def sculpt(
         return note + _s.sculpt_gravity(target, at_x, at_y, at_z, radius,
                                         strength, pin, falloff, subdivide, label)
     if at_x is None or at_y is None or at_z is None:
-        return "sculpt: need a brush point — pass at_x/at_y/at_z or handle=<name>"
+        return "sculpt: need a brush point — pass at=selection or handle=<name>"
     if radius is None:
         return "sculpt: 'radius' is required for this brush"
     if b == "grab":
-        result = _s.sculpt_grab(target, at_x, at_y, at_z, radius, to_x, to_y, to_z,
+        result = _s.sculpt_grab(target, at_x, at_y, at_z, radius, None, None, None,
                                 out, inward, up, down, left, right, forward, back,
                                 falloff, subdivide, label)
     elif b == "draw":

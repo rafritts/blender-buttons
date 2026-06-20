@@ -26,8 +26,12 @@ clothes. Therefore:
     op (overlaps / contacts / facing / resting / aim / verify), not arithmetic in your
     head or a script. Hand-deriving clearance or handedness is the smell — the answer was
     one read away. Strongly favour a `feel` check over "trust-me" math, every time.
-  • Stay in intent-space. Place things relationally (on / between / left_of / snap_to /
-    gap, or a handle BY NAME). Typed at_x/y/z is the ripcord, not the default.
+  • Stay in intent-space — it is now the ONLY space. Place things relationally (on /
+    between / left_of / snap_to / gap, or a handle BY NAME). The typed-coordinate escape
+    hatches are GONE: no at_x/y/z, to_x/y/z, anchor/center/target coordinates, no
+    on={"at":[x,y,z]} — every verb takes relational anchors only. If you can't reach a
+    spot relationally, mint a handle there and address it by name. There is no coordinate
+    to type, by design.
   • The status block from every mutating call is ground truth for THAT call — trust its
     world bounds over anything you remember or expected, and re-read (a fresh `feel` or a
     new mutating call) before acting on geometry you haven't touched in a while.
