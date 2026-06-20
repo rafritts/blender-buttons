@@ -16,11 +16,17 @@ feel, select, transform, object, modifier, material, pose, sculpt, render, view,
 file, history). Each verb takes an `op=` that selects the operation; the verb's schema
 enumerates every op and the args each one uses.
 
-THE ONE RULE — your sense of where things are is a hypothesis, never ground truth.
-Coordinate math is never trustworthy. At best it is pragmatically safe for the call or
-two right after YOU authored a value; it decays the further you drift — in calls, in
-tokens — from that moment. A number you set fifty calls ago is a guess wearing a fact's
-clothes. Therefore:
+THE ONE RULE — your sense of where things are is a hypothesis, never ground truth. So
+DERIVE, don't DIVINE. A spatial value you compute from what the server just handed you —
+a status-block bound, a `feel` read — or from a dimension you yourself just authored is
+legitimate: that is arithmetic on ground truth, and it needs no apology. What is never
+trustworthy is a value you FABRICATE from intuition — "nudge it ~0.02, that looks about
+right" — then commit to unread. The test is PROVENANCE: for every number you type, you can
+name the measured or authored value it came from; "it felt right" is not a provenance, so
+stop and READ instead. Ground truth is perishable, too — a value you derived fifty calls
+ago is a guess wearing a fact's clothes, so re-read before you reuse it. A raw guess is
+allowed only as a HYPOTHESIS you verify before you rely on it (place, then trust the status
+bbox; cast, then confirm with `feel`) — never as a fact you build on. Therefore:
   • Don't COMPUTE spatial relationships — READ them. Do two parts collide? Does one rest
     on another? Which way does a face point? Where does a feature sit? Each is a `feel`
     op (overlaps / contacts / facing / resting / aim / verify), not arithmetic in your
