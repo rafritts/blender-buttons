@@ -1,35 +1,24 @@
 # Guidance for LLMs driving blender-buttons
 
-Field notes from real builds (chair, treasure chest, sword-in-the-stone, pocket watch).
+Field notes from real builds (chair, treasure chest, sword-in-the-stone).
 Read this before modeling. It is the distilled version of every mistake already made.
 
-## The one rule that explains everything else
+## The one rule
 
-**You cannot reason reliably about coordinates in a scene you didn't just author.**
-Your coordinate math works only in the narrow regime where the pocket watch lived:
-single object, centered at origin, axis-aligned, every number self-authored moments
-ago, trig outsourced to a script. Outside that regime — compound rotations, curved
-surfaces, scenes edited over hours — dead-reckoning fails silently (a fob bar
-computed from a tangent heading landed 14cm adrift; a bow's resting tilt was
-guessed and eyeballed). Therefore:
-
-- Use the placement DSL (`on`, `between`, `left_of`, `snap_to`, `gap`) wherever its
-  vocabulary covers the relationship. Absolute `at` is the ripcord, not the default.
-- When you must compute positions (radial layouts have no relational vocabulary yet —
-  see gaps P1/P2), do the trig in a script (`python3 -c ...`), never in your head,
-  and generate all positions in one pass.
-- Prefer tools that treat **the mesh itself as the coordinate system**
-  (`select_ring`, `get_rings`, `band_around`, `scatter_on_surface`, `snap_to`)
-  over remembered numbers.
+**THE ONE RULE lives in the server `instructions`** — always in your context, so it is not
+restated here. In one breath: your sense of where things are is a hypothesis, coordinate
+math goes stale the further you drift from authoring it, and you *read* spatial
+relationships with `feel` rather than computing them. Everything below is how to **live**
+that rule — the loops, the reads, and the failure modes distilled from real builds.
 
 ## The status block is your instrument panel
 
 Every mutating call returns exact world bounds. **Trust and use them.** A whole
-case stack can be built as arithmetic on previous bounds without a single
-screenshot — and on the pocket watch, zero placement corrections were needed in
-~45 parts. Maintain a Z stack-up table as you go (caseback 0→0.035, band
-0.035→0.135, ...). `get_object_info` is almost never needed; the answer was in the
-last status block.
+stacked assembly can be built as arithmetic on previous bounds without a single
+screenshot — a multi-part stack with zero placement corrections is achievable when
+every part seats on the last one's reported bounds. Maintain a Z stack-up table as
+you go (part A 0→0.035, part B 0.035→0.135, ...). `get_object_info` is almost never
+needed; the answer was in the last status block.
 
 **But watch for exact equality.** Two numbers that *match* in your stack-up table
 are a bug, not a coincidence: coplanar faces from different objects z-fight.

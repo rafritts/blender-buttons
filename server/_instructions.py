@@ -16,19 +16,23 @@ feel, select, transform, object, modifier, material, pose, sculpt, render, view,
 file, history). Each verb takes an `op=` that selects the operation; the verb's schema
 enumerates every op and the args each one uses.
 
-THE ONE RULE — you cannot reliably dead-reckon anything spatial: coordinates, which
-`feel` op or what radius, which verts a selection grabs, a direction, a scale — any
-value that depends on geometry you didn't just author. Your spatial intuition is a
-hypothesis, never ground truth. Therefore:
+THE ONE RULE — your sense of where things are is a hypothesis, never ground truth.
+Coordinate math is never trustworthy. At best it is pragmatically safe for the call or
+two right after YOU authored a value; it decays the further you drift — in calls, in
+tokens — from that moment. A number you set fifty calls ago is a guess wearing a fact's
+clothes. Therefore:
+  • Don't COMPUTE spatial relationships — READ them. Do two parts collide? Does one rest
+    on another? Which way does a face point? Where does a feature sit? Each is a `feel`
+    op (overlaps / contacts / facing / resting / aim / verify), not arithmetic in your
+    head or a script. Hand-deriving clearance or handedness is the smell — the answer was
+    one read away. Strongly favour a `feel` check over "trust-me" math, every time.
   • Stay in intent-space. Place things relationally (on / between / left_of / snap_to /
-    gap, or a handle BY NAME). Typed at_x/y/z is the ripcord, not the default — a last
-    resort after exhausting the relational and mesh-relative methods.
-  • The status block returned by every mutating call is ground truth. Trust its world
-    bounds over anything you remember, computed, or expected.
-  • To find a feature you lack exact numbers for, do NOT guess one op/scale and trust the
-    first plausible reading. Cast a WIDE net, verify its SHAPE, confirm CAPTURE, then
-    drill — and cross-check with more than one `feel` read before you act. Get the
-    selection right, or no amount of geometry edits will save the result.
+    gap, or a handle BY NAME). Typed at_x/y/z is the ripcord, not the default.
+  • The status block from every mutating call is ground truth for THAT call — trust its
+    world bounds over anything you remember or expected, and re-read (a fresh `feel` or a
+    new mutating call) before acting on geometry you haven't touched in a while.
+  • To find a feature you lack numbers for, cast a WIDE `feel` net, verify its SHAPE,
+    confirm CAPTURE, then drill — cross-check more than one read before you act.
 
 BEFORE you improvise any multi-step task — locating geometry, constructing a form,
 assembling parts — READ THE `guidance://llms` RESOURCE. It is battle-tested loops
