@@ -151,6 +151,18 @@ NOOP_CHECK_TOOLS = {
 _NOOP_TARGET_KEY = {"boolean", "match_dimension", "noise_displace", "round_corners"}
 
 
+# G77: ops that PLACE a single part — after these, the status block auto-surfaces a NEW
+# penetration of the placed object against its neighbours, so the agent verifies clearance
+# by reading rather than hand-computing. Bulk placers (array_*/scatter) and curve builders
+# are excluded (one focus object, and they're usually deliberately interleaved).
+PLACEMENT_TOOLS = {
+    "nudge", "place", "move_to", "rest_on", "seat_into", "snap_to",
+    "rotate_object", "scale_group",
+    "add_box", "add_plane", "add_cylinder", "add_sphere", "add_cone",
+    "add_torus", "add_icosphere", "add_circle", "add_text",
+}
+
+
 def _noop_obj(tool, params, edit_target):
     """The object a no-op-checked op should change. EDIT_MODE_TOOLS already resolved it
     into `edit_target` (popped from params). Object-level ops name the moved object in
@@ -398,6 +410,17 @@ def execute_command(command):
         # SPEC-12: every mutating op auto-enqueues for sign-off — the queue stays 1:1
         # with the undo stack (the whole diff), never an agent-curated subset.
         collab.enqueue(result["op_id"], label or tool)
+
+    # G77: after a placement op, auto-surface a NEW penetration against neighbours so the
+    # agent verifies clearance by READING (effortless, unasked), never hand-computing it.
+    if tool in PLACEMENT_TOOLS and isinstance(result, dict) and result.get("success"):
+        try:
+            focus = _status_focus(result)
+            note = introspect.auto_proximity_note(focus) if focus else None
+            if note:
+                result.setdefault("notes", []).append(note)
+        except Exception:
+            pass
 
     if tool not in state.NO_STATUS_TOOLS and isinstance(result, dict):
         try:

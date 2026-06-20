@@ -23,6 +23,13 @@ needed; the answer was in the last status block.
 **But watch for exact equality.** Two numbers that *match* in your stack-up table
 are a bug, not a coincidence: coplanar faces from different objects z-fight.
 
+**Placement self-reports collisions — don't hand-check clearance.** After a placing op
+(add a primitive, nudge / place / move_to / rest_on / seat / snap / rotate), the status
+block auto-flags any NEW penetration of the placed part into a neighbour ("spatial: 'X'
+now penetrates Y 6mm…"). So never compute whether two parts collide by differencing their
+bounds — the read is done for you, unasked. No note = it sits clear. For an explicit or
+deeper check (contacts, resting, facing, overlaps) reach for `feel`, never arithmetic.
+
 **One dependent edit op per message.** Tool calls you batch in a single message reach
 Blender over separate connections and run in ARRIVAL order, not the order you wrote
 them. For object placement that's harmless (each reads the bounds it needs). But for

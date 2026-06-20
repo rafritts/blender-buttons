@@ -88,6 +88,44 @@ def _bbox_overlaps(a, b):
             min(a[5], b[5]) - max(a[2], b[2]))
 
 
+def auto_proximity_note(obj_name):
+    """G77 — after a placement op, the single highest-signal spatial fact the agent would
+    otherwise hand-compute: does the just-placed object now PENETRATE a neighbour? Surfaced
+    UNASKED in the status block so verification is effortless — the agent never has to
+    remember to run `feel op=contacts`. Cheap: AABB pre-filter, then a BVH only on the few
+    candidates whose bbox actually overlaps. Factual, not alarmist — interpenetration is
+    correct for a seated / sunk / linked part; the note lets the agent JUDGE. Returns a note
+    string, or None when the part sits clear (no note → no noise)."""
+    obj = bpy.data.objects.get(obj_name)
+    if obj is None or obj.type != 'MESH':
+        return None
+    me = _prepare(obj)
+    if me is None:
+        return None
+    cands = [o for o in scene_mesh_objects()
+             if o.name != obj_name
+             and _bbox_separation(me["bbox"], world_bbox(o)) <= _TOUCH]
+    pens = []
+    for o in cands[:8]:                     # bound the BVH builds on dense scenes
+        p = _prepare(o)
+        if p is None:
+            continue
+        gap = min(_surface_gap(me, p), _surface_gap(p, me))
+        ox, oy, oz = _bbox_overlaps(me["bbox"], p["bbox"])
+        # Penetration = surfaces cross (gap≈0) AND bboxes overlap on every axis — the
+        # same robust signal check_contacts uses at hobby scale.
+        if gap <= _TOUCH and ox > 0 and oy > 0 and oz > 0:
+            depth_mm = round(min(ox, oy, oz) * 1000, 1)
+            if depth_mm >= 0.3:             # ignore sub-0.3mm grazes / coplanar touches
+                pens.append((o.name, depth_mm))
+    if not pens:
+        return None
+    pens.sort(key=lambda t: -t[1])
+    parts = ", ".join(f"{n} {d}mm" for n, d in pens[:3])
+    return (f"spatial: '{obj_name}' now penetrates {parts} — intended for a seated/sunk/"
+            f"linked part, a bug (overlap / z-fight) if not. `feel op=contacts` for the full read.")
+
+
 def check_contacts(params):
     """Per target part, how it relates to its neighbours: connected (touching),
     floating (gap in mm), or penetrating (depth in mm). Reports facts, makes no

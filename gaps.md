@@ -18,40 +18,19 @@ task-specific shortcut.
 
 ---
 
-> The gaps below were surfaced building a full pocketwatch vignette (105 objects: cased watch +
-> open hunter lid + Albert chain + display base). The "perceive-and-stack" half of the toolkit
-> (status-block bounds, `feel`, `array_radial`, `check_framing`, materials) performed well; these
-> are the "repeat-and-pivot" failures that forced workarounds. Each entry is self-contained.
+## G77 — effortless spatial verification: the remaining auto-surfaces 🧭 NORTH-STAR
 
-## G77 — spatial verification isn't effortless; the agent dead-reckons clearance/facing instead of reaching for it 🧭 NORTH-STAR
+**Shipped.** After a placement op (add primitive / nudge / place / move_to / rest_on / seat / snap /
+rotate / scale), the status block now auto-flags any NEW penetration of the placed part into a
+neighbour, unasked (`introspect.auto_proximity_note`) — so the agent verifies clearance by reading,
+never by differencing bounds. Guidance + THE ONE RULE reinforce "read, don't compute."
 
-**Symptom.** Building the pocketwatch I (a) worked out the open lid's facing direction with a
-rotation matrix in my head instead of reading it, and (b) verified the dial-stack (markers / hands /
-crystal) didn't intersect by arithmetic on z-bounds instead of `feel op=overlaps`. Both are spatial
-questions the server can answer exactly — both got hand-computed because reaching for the read
-wasn't the reflex.
-
-**This is the most important finding of the build.** The perceive-and-stack loop (status bounds,
-`feel topology`, `check_framing`) is strong, yet it still *let* me dead-reckon. Two root causes:
-
-1. **The verify-half of `feel` (`overlaps`, `contacts`, `facing`, `resting`) isn't surfaced at the
-   moment of need.** Nothing in an `add`/`transform` status block says "the part you just placed now
-   intersects X" or "this rests on nothing." So the agent runs them only if it remembers to — and
-   under load it falls back to math. Effortless means the agent shouldn't have to remember.
-
-2. **Nothing *enforces* "read, don't compute."** THE ONE RULE (single-sourced in the server
-   `instructions`) now tells the agent to read spatial relationships with `feel` and treats
-   coordinates as decaying with token-distance from authorship — but a rule the agent can silently
-   ignore isn't enough. Without #1 (effortless, surfaced verification) it still falls back to math on
-   stale coordinates under load.
-
-**North star = effortless.** The agent should never hand-compute a spatial relationship. Either the
-value falls out of a read it is already doing, or the status block surfaces the drift unasked.
-
-**Fix directions.**
-- Auto-surface collision / loss-of-contact: after a `transform`/`add` that places a part, the status
-  block (or a G9-style follow-up) flags *new* intersections / lost rests against neighbours. The
-  agent learns it without asking.
-- Consider a lightweight staleness signal: a read echoes how many calls ago an object was last
-  mutated, so the agent knows when its remembered bounds have gone stale.
+**Still open — the other half of "effortless."**
+- **Loss-of-contact.** The auto-surface flags new *penetrations* but not a part that was meant to
+  rest on something and now *floats* (or a rest that was lost when a neighbour moved). A "floats Xmm
+  above its nearest support" note would close the symmetric case — but it's noisier (many parts float
+  by design), so it needs a "was-resting / should-rest" signal to fire only when it matters.
+- **Staleness signal.** A read could echo how many calls ago an object was last mutated, so the agent
+  knows when its *remembered* bounds have gone stale (a value derived 50 calls ago is a guess wearing
+  a fact's clothes). Cheap via the op-log; deferred — lower signal than the collision surface.
 
