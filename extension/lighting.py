@@ -98,6 +98,61 @@ def add_light(params):
     }
 
 
+def aim_at(params):
+    """G79 — re-aim an existing object's -Z axis at a named subject's centre. General:
+    cameras (no aim path before), spotlights, area lights, or any object you want to
+    'look at' something — by name, never a typed point."""
+    name = params.get("name")
+    obj = bpy.data.objects.get(name) if name else bpy.context.active_object
+    if obj is None:
+        return {"error": f"object '{name or '(active)'}' not found"}
+    subject = params.get("subject") or params.get("target")
+    tgt = bpy.data.objects.get(subject) if subject else None
+    if tgt is None:
+        return {"error": f"subject '{subject}' not found — aim needs a named object to look at"}
+    from .common import world_center
+    c = mathutils.Vector(world_center(tgt))
+    direction = c - obj.matrix_world.translation
+    if direction.length < 1e-9:
+        return {"error": f"'{obj.name}' sits at the subject's centre — move it out first"}
+    obj.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()
+    bpy.context.view_layer.update()
+    return {"success": True, "aimed": [obj.name], "subject": tgt.name}
+
+
+def rig_around(params):
+    """G79 — position an object on a sphere around a subject (azimuth / elevation /
+    distance) and aim it inward. The relational light/camera rig: a key/fill/rim light or
+    a hero camera at an angle + radius around the subject, no typed coordinates — the
+    spherical analogue of array_radial. azimuth 0 = front (−Y), 90 = +X (right side);
+    elevation = degrees above the horizon; distance = subject-centre → object."""
+    import math
+    name = params.get("name")
+    obj = bpy.data.objects.get(name) if name else bpy.context.active_object
+    if obj is None:
+        return {"error": f"object '{name or '(active)'}' not found"}
+    subject = params.get("subject") or params.get("target")
+    tgt = bpy.data.objects.get(subject) if subject else None
+    if tgt is None:
+        return {"error": f"subject '{subject}' not found — rig needs a named subject to orbit"}
+    az = math.radians(float(params.get("azimuth", 45.0)))
+    el = math.radians(float(params.get("elevation", 25.0)))
+    dist = float(params.get("distance", 8.0))
+    from .common import world_center
+    c = mathutils.Vector(world_center(tgt))
+    dir_to_obj = mathutils.Vector((math.cos(el) * math.sin(az),
+                                   -math.cos(el) * math.cos(az),
+                                   math.sin(el)))
+    pos = c + dist * dir_to_obj
+    obj.location = pos
+    direction = c - pos
+    obj.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()
+    bpy.context.view_layer.update()
+    return {"success": True, "rigged": [obj.name], "subject": tgt.name,
+            "azimuth": round(math.degrees(az), 1), "elevation": round(math.degrees(el), 1),
+            "distance": round(dist, 4), "location": [round(v, 4) for v in pos]}
+
+
 def set_world_background(params):
     """Set the scene's world environment.
 
@@ -564,6 +619,8 @@ def set_cycles_quality(params):
 TOOLS = {
     "add_light":            add_light,
     "modify_light":         modify_light,
+    "aim_at":               aim_at,
+    "rig_around":           rig_around,
     "set_world_background": set_world_background,
     "set_camera_dof":       set_camera_dof,
     "set_color_management": set_color_management,

@@ -10,13 +10,13 @@ from server._core import mcp
 from server import viewport, introspect, scene
 from ._common import tag, unknown
 
-_OPS = ["shading", "angle", "overlays", "orbit", "zoom", "frame", "check_framing",
+_OPS = ["shading", "angle", "overlays", "orbit", "rig", "zoom", "frame", "check_framing",
         "camera_dof", "active_camera"]
 
 
 @mcp.tool(name="view")
 def view(
-    op: Literal["shading", "angle", "overlays", "orbit", "zoom", "frame",
+    op: Literal["shading", "angle", "overlays", "orbit", "rig", "zoom", "frame",
                 "check_framing", "camera_dof", "active_camera"],
     # shading / angle
     mode: tag(str, "[shading] WIREFRAME|SOLID|MATERIAL|RENDERED") = "MATERIAL",
@@ -29,11 +29,14 @@ def view(
     text_info: tag(bool, "[overlays] show text info") = None,
     axes: tag(bool, "[overlays] show axes") = None,
     overlays: tag(bool, "[overlays] master toggle (False hides all)") = None,
-    # orbit
-    azimuth: tag(float, "[orbit] horizontal angle (deg)") = 45.0,
-    elevation: tag(float, "[orbit] vertical angle (deg)") = 25.0,
-    distance: tag(float, "[orbit] camera distance (m)") = 8.0,
+    # orbit / rig
+    azimuth: tag(float, "[orbit/rig] horizontal angle (deg; 0=front −Y, 90=+X right)") = 45.0,
+    elevation: tag(float, "[orbit/rig] vertical angle above horizon (deg)") = 25.0,
+    distance: tag(float, "[orbit/rig] distance from the subject/target (m)") = 8.0,
     auto_frame: tag(bool, "[orbit] auto-fit the scene") = False,
+    target: tag(str, "[orbit] named object to orbit the viewport around (empty=fixed datum)") = "",
+    rig: tag(str, "[rig] the object (light/camera) to position+aim around the subject") = "",
+    subject: tag(str, "[rig] the named object the rigged light/camera orbits and aims at") = "",
     # frame / check_framing
     targets: tag(str, "[frame/check_framing] objects to frame/check") = "",
     include_lights: tag(bool, "[frame] include lights in the frame") = False,
@@ -52,8 +55,12 @@ def view(
       angle     — snap to a standard view (angle=FRONT|BACK|TOP|… or persp/ortho)
       overlays  — toggle overlays (relationship_lines/floor/cursor/wireframes/
                   text_info/axes, or overlays=False to hide all)
-      orbit     — orbit the viewport camera (azimuth, elevation, distance,
-                  auto_frame) — relational viewpoint, no typed coordinates
+      orbit     — orbit the viewport camera (azimuth, elevation, distance, auto_frame,
+                  target=<object to orbit around>) — relational viewpoint, no coordinates
+      rig       — position+aim a light or camera around a subject: rig=<light/camera>,
+                  subject=<object>, azimuth/elevation/distance. The relational key/fill/
+                  rim or hero-camera rig (spherical analogue of array_radial); aims the
+                  object's -Z at the subject. (re-aim only → object op=aim)
       zoom      — zoom to the current selection (—)
       frame     — frame objects in view  (targets, include_lights)
       check_framing — is everything in the camera frame? Coverage % is relative to
@@ -74,7 +81,9 @@ def view(
                                               wireframes, text_info, axes, overlays)
     if o == "orbit":
         return viewport.orbit_viewport(azimuth, elevation, distance, 0.0, 0.0, 1.0,
-                                       auto_frame)
+                                       auto_frame, target)
+    if o == "rig":
+        return scene.rig_object(rig, subject, azimuth, elevation, distance)
     if o == "zoom":
         return viewport.zoom_to_selected()
     if o == "frame":

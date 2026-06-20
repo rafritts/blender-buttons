@@ -13,7 +13,8 @@ from ._common import tag, unknown
 
 _OPS = ["info", "describe", "rename", "delete", "duplicate", "duplicate_mirrored",
         "join", "split", "group", "ungroup", "add_to_group", "parts", "convert",
-        "visibility", "particle_visibility", "props", "set_prop", "light", "mode", "remesh"]
+        "visibility", "particle_visibility", "props", "set_prop", "light", "aim", "mode",
+        "remesh"]
 
 
 @mcp.tool(name="object")
@@ -21,7 +22,8 @@ def object_verb(
     op: Literal["info", "describe", "rename", "delete", "duplicate",
                 "duplicate_mirrored", "join", "split", "group", "ungroup",
                 "add_to_group", "parts", "convert", "visibility",
-                "particle_visibility", "props", "set_prop", "light", "mode", "remesh"],
+                "particle_visibility", "props", "set_prop", "light", "aim", "mode",
+                "remesh"],
     name: tag(str, "object name (empty=active for info/describe)") = "",
     # rename / duplicate
     new_name: tag(str, "[rename/duplicate/duplicate_mirrored] new object name") = "",
@@ -56,7 +58,7 @@ def object_verb(
     hex: tag(str, "[light] #RRGGBB color") = "",
     size: tag(float, "[light] soft-shadow size") = None,
     spot_angle: tag(float, "[light] SPOT cone angle (deg)") = None,
-    target: tag(str, "[light] re-aim at object") = "",
+    target: tag(str, "[light/aim] object to re-aim at (its -Z points at the target's centre)") = "",
     label: str = "",
 ) -> str:
     """
@@ -83,6 +85,9 @@ def object_verb(
       set_prop    — write a custom property   (name, key, value, bone)
       light       — tweak an existing light  (name, energy/color/hex/size/spot_angle/target);
                     to MOVE it, use transform op=place/nudge (relational)
+      aim         — re-aim an object's -Z at a named target (camera, spotlight, any
+                    object). To position AND aim by angle+distance, use view op=rig.
+                    (name, target=<object to look at>)
       mode        — explicit mode switch; pass name to guarantee it lands on that
                     object despite a stray click   (name, mode=OBJECT|EDIT|SCULPT|POSE)
       remesh      — auto-retopology of the whole mesh (mode=voxel → uniform sculpt-ready
@@ -131,6 +136,8 @@ def object_verb(
     if o == "light":
         return _scene.modify_light(name, energy, color, hex, size, spot_angle,
                                    None, None, None, target, label)
+    if o == "aim":
+        return _scene.aim_object(name, target, label)
     if o == "mode":
         return objects.set_mode(mode, name)
     if o == "remesh":

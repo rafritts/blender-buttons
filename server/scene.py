@@ -4,6 +4,39 @@ from server._core import mcp, call_blender, _status
 from server import polyhaven
 
 
+def aim_object(name: str = "", subject: str = "", label: str = "") -> str:
+    """G79 — re-aim an existing object's -Z axis at a named subject's centre (cameras,
+    spotlights, area lights, or any object you want to 'look at' something). By name, no
+    typed point. To also POSITION it by angle+distance, use rig_object."""
+    if not subject:
+        return "aim needs subject=<object to look at>"
+    result = call_blender("aim_at", {"name": name, "subject": subject}, label=label)
+    if result.get("success"):
+        main = f"aimed {result['aimed']} at {result['subject']} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def rig_object(name: str = "", subject: str = "", azimuth: float = 45.0,
+               elevation: float = 25.0, distance: float = 8.0, label: str = "") -> str:
+    """G79 — position an object on a sphere around a subject and aim it inward: the
+    relational light/camera rig (key/fill/rim light, hero camera) by azimuth/elevation/
+    distance, no typed coordinates — the spherical analogue of array_radial. azimuth
+    0=front (−Y), 90=+X (right); elevation above the horizon; distance = subject→object."""
+    if not subject:
+        return "rig needs subject=<object to orbit around>"
+    result = call_blender("rig_around", {"name": name, "subject": subject,
+        "azimuth": azimuth, "elevation": elevation, "distance": distance}, label=label)
+    if result.get("success"):
+        main = (f"rigged {result['rigged']} around {result['subject']} "
+                f"(az {result['azimuth']}° el {result['elevation']}° d {result['distance']}m) "
+                f"[{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 @mcp.tool()
 def add_light(name: str, type: str = "POINT",
               x: float = 0.0, y: float = 0.0, z: float = 5.0,

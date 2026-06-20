@@ -146,6 +146,15 @@ def orbit_viewport(params):
     ty = params.get("target_y", 0.0)
     tz = params.get("target_z", 1.0)
 
+    # G79: orbit around a NAMED object's centre, not just a fixed point.
+    target_obj = params.get("target")
+    if target_obj:
+        o = bpy.data.objects.get(target_obj)
+        if o is None:
+            return {"error": f"orbit target '{target_obj}' not found"}
+        from .common import world_center
+        tx, ty, tz = world_center(o)
+
     # auto_frame: derive target + distance from the scene/selection bounds so the
     # subject fills the frame at the current orbit angle — no eyeballing distance.
     auto_framed = None

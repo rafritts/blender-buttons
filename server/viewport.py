@@ -91,12 +91,13 @@ def zoom_to_selected() -> str:
 @mcp.tool()
 def orbit_viewport(azimuth: float = 45.0, elevation: float = 25.0, distance: float = 8.0,
                    target_x: float = 0.0, target_y: float = 0.0, target_z: float = 1.0,
-                   auto_frame: bool = False) -> str:
+                   auto_frame: bool = False, target: str = "") -> str:
     """
     Position the viewport perspective camera using orbit controls.
     azimuth: horizontal angle in degrees (0=front, +right, -left)
     elevation: vertical angle in degrees (positive=from above)
     distance: distance from target
+    target: orbit around this NAMED object's centre (G79); empty = the fixed datum point.
     auto_frame: if True, ignore target_*/distance and auto-frame the scene — aims
                 at the bounding-box center of the selection (or all visible meshes
                 if nothing is selected) and pulls back to fit. The default
@@ -108,7 +109,7 @@ def orbit_viewport(azimuth: float = 45.0, elevation: float = 25.0, distance: flo
     result = call_blender("orbit_viewport", {
         "azimuth": azimuth, "elevation": elevation, "distance": distance,
         "target_x": target_x, "target_y": target_y, "target_z": target_z,
-        "auto_frame": auto_frame,
+        "auto_frame": auto_frame, "target": target,
     })
     if result.get("success"):
         af = result.get("auto_framed")

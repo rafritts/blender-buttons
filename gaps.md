@@ -64,22 +64,6 @@ value falls out of a read it is already doing, or the status block surfaces the 
 > now MUST exist for the freed-up workflows to stay possible. (Kept by deliberate decision: relative
 > *nudges* everywhere, curve/tube `points` as geometry-definition, pose `loc` as bone-space relative.)
 
-## G79 — no relational placement/aim for lights & cameras 🧩 MISSING CONTROL
-
-**Symptom.** `add light/camera` lost x/y/z + target_x/y/z; `object op=light` lost x/y/z; `view
-op=camera_position` is gone. Lights/cameras now spawn at a fixed default and can only be moved with
-`transform op=place`/`nudge` (they are objects, so this works) — but there is no relational way to
-**aim** them (`view op=orbit` aims at a fixed point, not a named object) nor to **rig** them
-(key/fill/rim at an angle + distance around a subject), which is the actual intent.
-
-**Impact.** Lighting and camera framing — the last mile of every hero render — got harder, not just
-coordinate-free. Aiming a camera/light at a named object, or placing one "3/4 front, 30° up, 2 m out
-from the subject," has no primitive.
-
-**Fix.** (a) `view op=orbit target=<object>` and an `aim=<object>` on camera/light ops (aim by name,
-not by point). (b) A relational light-rig primitive: position by angle (azimuth/elevation) + distance
-around a named subject — the spherical-relative analogue of `array_radial`, reusing the orbit math.
-
 ## G80 — dead coordinate plumbing left in the internal adapters 🧹 CLEANUP
 
 **Symptom.** The cut was made at the agent-facing verb layer; the pruned internal adapters still
