@@ -18,142 +18,113 @@ task-specific shortcut.
 
 ---
 
-## G9 — responses are dead-end documents (the "dark cave") 🕯️ SPEC'D, NOT IMPLEMENTED
+> The gaps below (G70–G76) were surfaced building a full pocketwatch vignette (105 objects:
+> cased watch + open hunter lid + Albert chain + display base). The "perceive-and-stack" half
+> of the toolkit (status-block bounds, `feel`, `array_radial`, `check_framing`, materials)
+> performed well; these are the "repeat-and-pivot" failures that forced workarounds. Each entry
+> is self-contained with a live repro.
 
-Every tool answers the question asked, then goes silent — it never points at the **adjacent
-read or action that refines it**. The cross-references that exist live only in docstrings
-(at tool-*selection* time), which under deferred/`ToolSearch` loading aren't even reliably
-in context. The *response payload* says nothing. A knowing operator who doesn't already know
-the whole surface is spelunking blind (e.g. `object info` reports `vertex_count: 3288` and
-stops — that those verts are two open shells only surfaces if you already know to reach for
-`feel op=topology`).
+## G70 — `transform op=rotate pivot_object=<name>` crashes (`world_center` undefined) 🐞 BUG
 
-This is the perception→action bridge applied to **responses**: a read tool should hand back
-the **next read**, the way `feel structure` hands back a named limb handle. Call it a
-**follow-up** (hypermedia control, named-tool not URL). Principle: the server should never
-feel like a dark cave.
+**Symptom.** `transform op=rotate axis=Y angle=-125 pivot_object=Hinge` returned the error
+string `name 'world_center' is not defined` and changed nothing. Any `rotate` with
+`pivot_object=` set hits it.
 
-**Further witnesses (yard build).** The agent deleted-and-re-added a camera to reframe the
-scene instead of reaching for `view op=camera_position` (it existed; nothing pointed at it),
-and reasoned about picket/rail z-fighting by hand instead of running `feel op=overlaps`. Both
-capabilities were present and went unused — the response payloads never surfaced them, and
-under deferred tool-loading their docstrings weren't in context either. Discoverability, not a
-missing primitive.
+**Impact.** The canonical "rotate about another object's origin" — a lid/door swing on a named
+hinge, a part pivoting on an axle — is unavailable. Forced workaround: translate the pivot
+point to the world origin → `rotate pivot=origin` → translate back (3 calls, hand-managed).
 
-**Mechanism (cheap — machinery exists).** `_status()` in `_core.py` already drains ride-along
-channels (`notes`, `bind_warning`, …). Add a fourth: one new **`server/followups.py`** with a
-single *pure* function — given the result dict + verb/op, return 0–2 follow-up lines —
-rendered as a uniform `next:` line. **One central helper + a gating table, not an edit to all
-15 verbs.**
+**Fix.** Find the `pivot_object` branch in the `transform`/`rotate` handler. `world_center` is
+almost certainly a typo / renamed variable for the pivot object's world-space origin — set the
+pivot to `pivot_object.matrix_world.translation`. Test: rotate a box about a second object's
+origin, assert it orbits that point.
 
-**Discipline (where it goes wrong if rushed).** A follow-up must be *earned, conditional,
-factual*: fire only when the data warrants it, ≤2 lines, name the concrete tool+op+arg, state
-a fact about the object — never a static "you might also like," never divine intent. When in
-doubt, stay silent.
+## G71 — `pivot` enum naming is inverted from intuition (`origin`=WORLD, `center`=object's OWN) ⚠️ TRAP
 
-**The reviewable artifact is the table (sign off before coding):**
+**Symptom.** `pivot=origin` rotates about the WORLD origin (0,0,0); `pivot=center` rotates about
+the object's OWN origin — the opposite of what the names imply. I read "origin" as "the object's
+origin" and flung the sub-dial seconds hand across the dial. The hour/minute hands only worked by
+luck (their origins sat at world zero).
 
-| After this… | …when | Follow-up |
-|---|---|---|
-| `object info`/`describe` (MESH w/ modifiers) | rigged geo | counts are the **cage**; `feel op=topology` for shells/holes, `base=evaluated` for the final surface |
-| `object info` (coord dump) | normal flow | `object describe` for the relational read |
-| `feel op=topology` (cheap bundle) | holes/poles/multiple shells found | the deeper method — `structure`, `region_form`, `thickness` |
-| `feel op=topology` | a protrusion/limb named | `select op=limb` to anchor + act |
-| `select` (edit-mode selection) | a patch selected | `feel op=region_form` to read its form |
-| `feel op=aim` | returns point+normal | `sculpt … at_x/y/z`, `transform op=move_to`, `select op=in_sphere` |
-| `feel op=assembly` | two openings found | `feel op=relate` → `transform op=snap_loop` → `edit op=bridge` |
-| `add` (primitive) | always | `edit` to shape, `transform` to place |
-| `modifier` add (subsurf/deform) | always | `feel … base=evaluated` to read the final surface |
+**Impact.** Silent wrong-pivot rotations — no error, geometry just lands wrong. Pure naming/docs
+trap, easy to flip.
 
-Start with the `info`/`describe → feel` row (the proven one) and grow. When promoted, this is
-its own SPEC: pattern + `followups.py` + table, table signed off first.
+**Fix (pick one).** (a) Rename enum values to `world` / `self` (clearest); (b) keep aliases for
+compat but state explicitly which is which in every `pivot` field's schema description; (c) at
+minimum, echo the world-space pivot point used in the status block for ALL pivots (it already
+prints "about [x,y,z]" for `pivot=origin` — do it for `center`/`cursor`/`bbox_center` too so a
+wrong pivot is catchable). Lives in the `transform` schema + rotate handler.
 
-## G14 — live X-symmetry edit mode 🪞 TABLED (real gap, deferred by decision)
+## G72 — `transform op=move_verts` x/y/z are NOT meters (scaled by bbox dimension) 🐞 BUG
 
-Shaping one side and having it mirror live is the natural primitive for torsos, soft-form
-work, almost all character modelling — mirroring as post-hoc cleanup means shaping twice or
-mirror-and-pray. Acknowledged real, deliberately tabled. Handles ease the manual path (mint
-`…_L`, mirror to `…_R`); the symmetry *mode* itself is separate work.
+**Symptom.** `move_verts y=0.15` on a 0.46-long blade moved verts by 0.069 m (= 0.15 × 0.46);
+`y=0.176` → 0.081 m. The multiplier equals the object's bbox extent along that axis — so explicit
+x/y/z behave as a *fraction of bbox*, while the schema says "(m)". I had to drive every vert move
+by reading bounds and back-solving the fraction.
 
-**Narrower sibling worth building first — "match a twin's edit."** When the human hand-edits
-*one* side of a symmetric pair, the agent can read the transform delta (`object info`) but
-must re-apply it to the twin by hand. A one-call `object op=mirror_edit name=<src> twin=<dst>`
-(read src's delta-from-twin, apply the mirrored transform) makes "you yawed the left form
-+25° — mirror it right" a single move. Post-hoc twin-matching, not a live mode — cheaper than
-G14 proper and independently useful.
+**Impact.** Can't move verts a known metric distance — breaks the "self-authored coordinates are
+trustworthy" regime for edit-mode moves.
 
-## G53 — a mesh's facing/orientation isn't handed back; the agent re-derives it every read 🧭 ✅ SHIPPED
+**Fix.** In the `move_verts` handler, the *named* offsets (right/left/up/down/back/forward/in/out)
+read correctly in meters — only the explicit x/y/z are scaled. The x/y/z path is multiplying by a
+dimension it shouldn't (or routing through a normalized op). Make x/y/z translate by raw meters.
+Test: add box depth 0.46, `move_verts y=0.1`, assert bbox shifted exactly 0.1 m.
 
-Every read this session, the agent burned reasoning re-deriving the same fact — "front = −Y,
-up = +Z, right = −X" — from the world bbox plus a handedness cross-product done in its head.
-That's repeated, error-prone (the cross-product is easy to flip), and exactly the
-dead-reckoning the server exists to kill: a *signed local frame* is ground truth the geometry
-already determines, but no read states it. So the agent guesses orientation, and a flipped
-guess silently poisons every downstream left/right/front call (e.g. grabbing the wrong half
-of a mirrored pair, or casting `feel op=aim` from the wrong face).
+## G73 — ARRAY modifier offset is uncontrollable and defaults to unusably tight 🧩 MISSING CONTROL
 
-**The ingredients are already computed.** `feel`'s cheap bundle includes `symmetry` (best
-mirror plane) and `frame` (intrinsic principal axes). A facing read is a thin synthesis on
-top: lateral axis = the symmetry plane's normal; up axis = the principal axis nearest world Z;
-front = the remaining axis, *signed* toward the feature-dense / mass-forward side. Near-free —
-it rides data the bundle already pays for.
+**Symptom.** `modifier op=add type=ARRAY count=18` gave ~0.01 m per-copy spacing (18 copies packed
+into ~2× the unit length, basically overlapping). `modifier op=modify modifier_name=Array
+factor=0.667` returned `(skipped: ['factor'])` — the wrapper exposes no way to set array spacing.
 
-**Discipline (legible, not divining — per [[feel_legibility_not_divination]]).** Report the
-frame only when the geometry *supports* an inference (a clear symmetry plane + separated
-principal axes), and **state the evidence** ("front −Y: shallowest axis, opposite the
-symmetry-broken feature mass"). When ambiguous — a mug, a sphere, a radially-symmetric part —
-say "no clear facing," don't invent one. The point is to hand back a defensible frame, not to
-pretend every mesh has a front.
+**Impact.** The natural primitive for any linear repeat (chain links, pickets, watch-band, stair
+treads, baluster runs) is dead on arrival. Fell back to duplicate→nudge→join doubling.
 
-**General primitive, not "character facing."** An *orientation-frame* read: given any mesh,
-name its signed local axes (which world axis is its long/up axis, which is its
-symmetry/lateral axis, the sign of its front) with the evidence, or abstain. Natural home: a
-line in `object describe` and/or `feel method=frame`.
+**Fix.** In the `modifier` verb, expose ARRAY offset controls — at minimum a constant-offset
+distance (`use_constant_offset` + `constant_offset_displace`) and/or the relative-offset factor —
+and make `modify` accept them. Pick a sane default (relative offset 1.0 = one bbox length, not the
+current ~0.06). Test: array a 0.165 m box, count 8, constant offset 0.11; assert length ≈ 0.825 m.
 
-**Shipped** as `feel method=facing` (`_m_facing` in `extension/topology.py`): up = the
-principal axis most aligned to world +Z; lateral = the centroid-relative mirror plane when one
-axis is a clear bilateral winner; front = the remaining axis signed toward the vertex-dense
-(feature) side; left/right = `front × up`. Each axis prints its evidence; it abstains on a
-rotated/near-isotropic mesh, on no clear mirror plane (→ left/right undefined), and on near-
-centred front-to-back mass (→ front sign withheld). Kept OUT of the cheap bundle — orientation
-is a distinct question the agent asks once, not per structure-read. Not yet wired into `object
-describe` (deferred; `feel method=facing` covers the need).
+## G74 — `transform op=array_along between=[A,B]` ignores the endpoints (stacks at origin) 🐞 BUG
 
-## Carried over — bigger build-outs (not yet started)
+**Symptom.** `array_along prototype=Chain between=["ChainStart","ChainEnd"] count=15` (markers at
+x=0 and x=1.55) reported `placed 15 copies on Z (spacing 0.0 m)` and dropped all 15 at the origin,
+overlapping. The A/B endpoints were never read; it fell through to a default Z axis with zero
+spacing.
 
-- **SPEC-10 connector — bundle-weld + rim sub-addressing (the Phase-5 remainder).** Phases
-  2–5 shipped: `edit op=connect` (geometry-bound, normal-continuous, taper-matched hollow
-  sweep, weld-aware, seam-angle/bend-radius reads — G59/G60/G61/G65); `edit op=reshape`
-  (re-evaluate an unwelded connector/strand bundle against its live handles); `edit
-  op=resample` (equalise a rim's vertex count so connect's 1:1 weld limit lifts by
-  composition); and `edit op=strands count/jitter/seed` (N normal-continuous tubes
-  distributed around two rims with seeded coherent jitter — variety from a count + a seed,
-  emitted as one editable, reshape-able bundle of capped tubes). What's **still open** is the
-  one coupled sliver: **sub-address a rim into N addressable outlets** + **bundle-weld a set
-  of strand ends into a rim**. These two need each other (welding strand ends requires carved
-  outlets) and both gate on the same missing primitive — a **boundary-loop partition
-  selection** op that carves a rim into N addressable sub-arcs. Until then strands ship
-  floating-but-capped (an honest cables/vines/sinew result) rather than fused into the shells.
+**Impact.** The relational "distribute N copies between these two things" primitive — the
+intent-space tool for a draped chain, or balusters between two posts — silently no-ops.
 
-- **Multires + dyntopo** as real multi-level sculpt targets — the proper organic-sculpt
-  resolution story (distinct from the local-subdivide that shipped under G3).
-- **Guided/interactive retopology** — deformation-grade edge flow drawn by hand once a form is
-  sculpted. (Auto-retopo + the face-authoring primitives shipped: `object op=remesh`
-  voxel/QuadriFlow, `edit op=poke/inset/grid_fill`, surface-tangential `edit op=relax/slide`.)
-- **UV unwrap, material node graph, hair cards, face-loop topology** — further out, the road to
-  a finished character.
+**Fix.** In the `array_along` handler, when `between=[A,B]` is given, resolve both objects' world
+origins, derive axis + length from A→B, and space copies = |B−A|/(count−1). The "spacing 0.0 m / on
+Z" message says it took a default branch without parsing `between`. Test: two markers 1.5 m apart on
+X, `array_along count=4`, assert copies at 0, 0.5, 1.0, 1.5.
 
-## Open (older, unverified against current build)
+## G75 — sequential edit-ops on one mesh can't be batched in a single message (silent no-op) ⚠️ FOOTGUN
 
-- `check_contacts` / contact queries timing out on dense evaluated meshes (Spring's production
-  geometry) vs the socket window.
-- bbox-vs-`sel_z` self-contradiction flag (a stale-eval-cache symptom — may already be cured by
-  the G19 depsgraph-refresh fix; needs re-checking on dense geo).
-- status-block `dims`/`bounds` **inflate after joining a rotated multi-shell mesh** (reported
-  7.73 m for geometry that was actually unchanged; `feel` shell sizes were correct). Looks like
-  an OBB-in-rotated-local-frame projection, not real distortion — but the convenience bbox lied
-  while ground-truth reads held. (Witnessed 2026-06-18, same family as the bbox item above.)
-- **selection/mode silently resets to OBJECT between calls** — `select op=current` errored
-  ("must be in edit mode") right after `select` ops that appeared to act; the edit selection
-  survives on the mesh but mode does not, so multi-step edit sequences need an explicit
-  `object op=mode mode=EDIT` re-entry. Workflow friction, re-confirmed 2026-06-18.
+**Symptom.** Issuing `loop_cut` + `taper_end MAX` + `taper_end MIN` on the same mesh in one
+tool-batch left the MAX taper byte-identical — the no-op detector caught it ("reported success but
+geometry is byte-identical"). Re-run standalone, it worked. Batched edit ops run against stale
+mesh/bmesh state, and only SOME ops in the batch fail.
+
+**Impact.** Edit-mode work can't be parallelized; the partial-failure mode is the dangerous part.
+(The no-op detector is the hero here — keep it.)
+
+**Fix.** Edit ops likely each snapshot a bmesh at dispatch time rather than re-reading sequentially.
+Either serialize edit-op execution within a batch (per target), or document loudly that edit ops on
+the same target must be one-per-message. At minimum, a doc line. Lower priority than the bugs above.
+
+## G76 — status block `active`/`selected` lags the last mutation 🔍 LEGIBILITY
+
+**Symptom.** The `── blender status ──` block repeatedly reported a stale `active:` object — it kept
+showing `WoodBase` through six material assignments to other objects, and `Hinge` after `LidCover`
+nudges. The bounds printed then describe the WRONG object, so I had to call `object info <name>` to
+get real post-op bounds.
+
+**Impact.** Undercuts "the status block is ground truth" for any op where the acted-on object isn't
+the viewport-active one (multi-target material/transform, name-addressed ops). Cost extra `object
+info` round-trips.
+
+**Fix.** Have the status block report the object(s) the OP acted on (the verb already knows its
+target), not `context.view_layer.objects.active`. For multi-target ops, summarize the set or report
+the primary target's bounds. Lives in `_status()` / per-verb result assembly in `_core.py`.
+
