@@ -23,6 +23,14 @@ needed; the answer was in the last status block.
 **But watch for exact equality.** Two numbers that *match* in your stack-up table
 are a bug, not a coincidence: coplanar faces from different objects z-fight.
 
+**One dependent edit op per message.** Tool calls you batch in a single message reach
+Blender over separate connections and run in ARRIVAL order, not the order you wrote
+them. For object placement that's harmless (each reads the bounds it needs). But for
+`edit` ops that build on each other — `loop_cut` then `taper_end`, `extrude` then
+`bevel` on the new face — the second can run before the first and silently no-op
+against geometry that isn't there yet. Issue chained edit ops one per message, each
+seeing the prior result in its status block. Edits on *different* meshes batch fine.
+
 
 ## How to find specific geometry (you judge *where*, the server measures it)
 

@@ -150,7 +150,15 @@ def get_blender_status(params):
     # or scale changes from the just-finished tool. Without this, status reads return
     # the pre-mutation state and the appended status block lies.
     bpy.context.view_layer.update()
-    obj = bpy.context.active_object
+    active = bpy.context.active_object
+    # G76: a name-addressed op (multi-target material/transform) often leaves the
+    # viewport-active object UNCHANGED, so reporting active's bounds describes the wrong
+    # object. When the caller passes the op's real target as `focus`, report THAT
+    # object's bounds — and surface the still-active object as viewport_active so the
+    # lag is visible, not hidden.
+    focus_name = (params or {}).get("focus")
+    focus_obj = bpy.data.objects.get(focus_name) if focus_name else None
+    obj = focus_obj or active
 
     status = {
         "mode": obj.mode if obj else "OBJECT",
@@ -164,6 +172,11 @@ def get_blender_status(params):
         ),
         "history_depth": len(state._history),
     }
+    # G76: when the reported object is the op's target rather than the viewport-active
+    # one, name the lagging active object so the agent sees the discrepancy.
+    if focus_obj is not None and active is not focus_obj:
+        status["acted_on"] = focus_obj.name
+        status["viewport_active"] = active.name if active else None
 
     # Render/display settings — an agent can't diagnose washed-out (AgX) or
     # plastic-metal (no raytracing) renders without seeing these.

@@ -23,35 +23,6 @@ task-specific shortcut.
 > (status-block bounds, `feel`, `array_radial`, `check_framing`, materials) performed well; these
 > are the "repeat-and-pivot" failures that forced workarounds. Each entry is self-contained.
 
-## G75 — sequential edit-ops on one mesh can't be batched in a single message (silent no-op) ⚠️ FOOTGUN
-
-**Symptom.** Issuing `loop_cut` + `taper_end MAX` + `taper_end MIN` on the same mesh in one
-tool-batch left the MAX taper byte-identical — the no-op detector caught it ("reported success but
-geometry is byte-identical"). Re-run standalone, it worked. Batched edit ops run against stale
-mesh/bmesh state, and only SOME ops in the batch fail.
-
-**Impact.** Edit-mode work can't be parallelized; the partial-failure mode is the dangerous part.
-(The no-op detector is the hero here — keep it.)
-
-**Fix.** Edit ops likely each snapshot a bmesh at dispatch time rather than re-reading sequentially.
-Either serialize edit-op execution within a batch (per target), or document loudly that edit ops on
-the same target must be one-per-message. At minimum, a doc line. Lower priority than the bugs above.
-
-## G76 — status block `active`/`selected` lags the last mutation 🔍 LEGIBILITY
-
-**Symptom.** The `── blender status ──` block repeatedly reported a stale `active:` object — it kept
-showing `WoodBase` through six material assignments to other objects, and `Hinge` after `LidCover`
-nudges. The bounds printed then describe the WRONG object, so I had to call `object info <name>` to
-get real post-op bounds.
-
-**Impact.** Undercuts "the status block is ground truth" for any op where the acted-on object isn't
-the viewport-active one (multi-target material/transform, name-addressed ops). Cost extra `object
-info` round-trips.
-
-**Fix.** Have the status block report the object(s) the OP acted on (the verb already knows its
-target), not `context.view_layer.objects.active`. For multi-target ops, summarize the set or report
-the primary target's bounds. Lives in `_status()` / per-verb result assembly in `_core.py`.
-
 ## G77 — spatial verification isn't effortless; the agent dead-reckons clearance/facing instead of reaching for it 🧭 NORTH-STAR
 
 **Symptom.** Building the pocketwatch I (a) worked out the open lid's facing direction with a

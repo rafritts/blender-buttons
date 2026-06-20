@@ -68,7 +68,17 @@ def _status(result: dict) -> str:
         "",
         "── blender status ──────────────────────────────",
         f"  mode:        {s['mode']}",
-        f"  active:      {s['active_object']} ({s['active_type']})",
+    ]
+    # G76: when the op acted on a name-addressed object that isn't the viewport-active
+    # one, the bounds below describe acted_on — label it, and show the lagging active.
+    if s.get("acted_on"):
+        lines.append(f"  acted_on:    {s['active_object']} ({s['active_type']})  "
+                     f"⟵ bounds below are THIS object")
+        lines.append(f"  vp_active:   {s.get('viewport_active')}  "
+                     f"(viewport-active lags; not the acted-on object)")
+    else:
+        lines.append(f"  active:      {s['active_object']} ({s['active_type']})")
+    lines += [
         f"  selected:    {s['selected_objects']}",
         f"  dims:        {s.get('dimensions')}     (world bbox, rotation-aware)",
         f"  bounds:      x={wb.get('x')}  y={wb.get('y')}  z={wb.get('z')}",

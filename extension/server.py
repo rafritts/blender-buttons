@@ -244,6 +244,30 @@ def _enter_edit_for_target(target_name):
     return True, None
 
 
+def _status_focus(result):
+    """G76: the name of the object an op ACTED ON, read from the handler's own result
+    keys (the handler knows what it touched — unambiguous, unlike the overloaded request
+    `target`, which for snap/rest_on names the REFERENCE, not the moved object). The
+    status block focuses its bounds on this so a name-addressed op (multi-target material
+    or transform) reports the right object instead of the stale viewport-active one.
+    Returns the first acted-on name, or None to fall back to the active object."""
+    explicit = result.get("status_focus")
+    if isinstance(explicit, str) and explicit:
+        return explicit
+    for key in ("moved", "rotated", "resized", "scaled", "aimed", "applied_to",
+                "assigned_to", "placed", "rested", "object_name", "objects", "renamed"):
+        v = result.get(key)
+        if isinstance(v, str) and v:
+            return v
+        if isinstance(v, list) and v:
+            first = v[0]
+            if isinstance(first, str) and first:
+                return first
+            if isinstance(first, dict) and isinstance(first.get("name"), str):
+                return first["name"]
+    return None
+
+
 def execute_command(command):
     tool   = command.get("tool")
     params = command.get("params", {})
@@ -377,7 +401,9 @@ def execute_command(command):
 
     if tool not in state.NO_STATUS_TOOLS and isinstance(result, dict):
         try:
-            result["blender_status"] = status.get_blender_status({}).get("status")
+            focus = _status_focus(result) if result.get("success") else None
+            sp = {"focus": focus} if focus else {}
+            result["blender_status"] = status.get_blender_status(sp).get("status")
         except Exception:
             pass
     return result

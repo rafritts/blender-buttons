@@ -143,6 +143,14 @@ def edit(
     Mesh editing — **Edit Mode / Mesh** menu. Operates on the active object's
     current selection. `op` selects:
 
+    ⚠ ONE edit op PER MESSAGE when they build on each other. Tool calls batched in a
+    single message reach Blender over separate connections and execute in ARRIVAL order,
+    not the order you wrote them — so `loop_cut` then `taper_end` in one batch can run
+    taper-first against geometry the cut hasn't made yet, and the taper silently no-ops
+    (the no-op detector will flag the byte-identical result). Issue dependent edit ops
+    sequentially, one per message, each seeing the previous one's result. Independent
+    edits on DIFFERENT meshes are fine to batch.
+
       extrude     — push the selection out (out/inward/up/down/left/right/forward/back
                     meters, or until_contact=obj / until_length)
       bevel       — round edges/verts   (width OR factor, segments, affect=EDGES|VERTICES)
