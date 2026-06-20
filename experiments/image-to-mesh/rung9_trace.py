@@ -78,22 +78,28 @@ def ring_dirs(dt, y, x, r, tol=1.5, n=144):
     return dirs
 
 
-def chord_eval(dt, ya, xa, yb, xb, base=2.5, curve=0.18, k=24, frac=0.9):
+def chord_eval(dt, ya, xa, yb, xb, base=2.0, curve=0.18, k=24, frac=0.85, r_end=6.0):
     """Accept an edge whose ink stays inside a tube that WIDENS toward mid-span.
 
     Grok bows some edges; a straight chord cuts across the inside of the bow and
-    leaves the ink. So the allowed deviation grows with edge length and peaks at
-    the midpoint (~base + curve*L), zero at the dots. Short edges (dense regions)
-    get a tight tube for free, so this doesn't invite false bridges where it
-    matters. Returns (ok, median_dist)."""
+    leaves the ink, so the allowed deviation grows with edge length and peaks at
+    the midpoint, tight in the dense (short-edge) regions where the diagonal trap
+    lives. Endpoints are TRIMMED (r_end px): the red vertex dot blanks the wire
+    under it, so the ink voids near each dot are not the edge's fault — judge the
+    interior, which is where a false diagonal gives itself away. Returns
+    (ok, median_dist)."""
     t = np.linspace(0, 1, k)
     yy = np.clip((ya * (1 - t) + yb * t).astype(int), 0, dt.shape[0] - 1)
     xx = np.clip((xa * (1 - t) + xb * t).astype(int), 0, dt.shape[1] - 1)
     d = dt[yy, xx]
     L = float(np.hypot(yb - ya, xb - xa))
+    s = t * L                                                   # arc dist from a
+    inner = (s >= r_end) & (s <= L - r_end)
+    if inner.sum() < 3:
+        inner = np.ones_like(t, bool)                          # tiny edge: use all
     allow = base + curve * L * (2.0 * np.minimum(t, 1 - t))     # tube, fat at mid
-    ok = (d <= allow).mean() >= frac                            # continuous ink path
-    return ok, float(np.median(d))
+    ok = (d[inner] <= allow[inner]).mean() >= frac              # interior on ink
+    return ok, float(np.median(d[inner]))
 
 
 def extract(im, V, dt, cone_deg=40.0):
