@@ -24,52 +24,6 @@ task-specific shortcut.
 > performed well; these are the "repeat-and-pivot" failures that forced workarounds. Each entry
 > is self-contained with a live repro.
 
-## G70 — `transform op=rotate pivot_object=<name>` crashes (`world_center` undefined) 🐞 BUG
-
-**Symptom.** `transform op=rotate axis=Y angle=-125 pivot_object=Hinge` returned the error
-string `name 'world_center' is not defined` and changed nothing. Any `rotate` with
-`pivot_object=` set hits it.
-
-**Impact.** The canonical "rotate about another object's origin" — a lid/door swing on a named
-hinge, a part pivoting on an axle — is unavailable. Forced workaround: translate the pivot
-point to the world origin → `rotate pivot=origin` → translate back (3 calls, hand-managed).
-
-**Fix.** Find the `pivot_object` branch in the `transform`/`rotate` handler. `world_center` is
-almost certainly a typo / renamed variable for the pivot object's world-space origin — set the
-pivot to `pivot_object.matrix_world.translation`. Test: rotate a box about a second object's
-origin, assert it orbits that point.
-
-## G71 — `pivot` enum naming is inverted from intuition (`origin`=WORLD, `center`=object's OWN) ⚠️ TRAP
-
-**Symptom.** `pivot=origin` rotates about the WORLD origin (0,0,0); `pivot=center` rotates about
-the object's OWN origin — the opposite of what the names imply. I read "origin" as "the object's
-origin" and flung the sub-dial seconds hand across the dial. The hour/minute hands only worked by
-luck (their origins sat at world zero).
-
-**Impact.** Silent wrong-pivot rotations — no error, geometry just lands wrong. Pure naming/docs
-trap, easy to flip.
-
-**Fix (pick one).** (a) Rename enum values to `world` / `self` (clearest); (b) keep aliases for
-compat but state explicitly which is which in every `pivot` field's schema description; (c) at
-minimum, echo the world-space pivot point used in the status block for ALL pivots (it already
-prints "about [x,y,z]" for `pivot=origin` — do it for `center`/`cursor`/`bbox_center` too so a
-wrong pivot is catchable). Lives in the `transform` schema + rotate handler.
-
-## G72 — `transform op=move_verts` x/y/z are NOT meters (scaled by bbox dimension) 🐞 BUG
-
-**Symptom.** `move_verts y=0.15` on a 0.46-long blade moved verts by 0.069 m (= 0.15 × 0.46);
-`y=0.176` → 0.081 m. The multiplier equals the object's bbox extent along that axis — so explicit
-x/y/z behave as a *fraction of bbox*, while the schema says "(m)". I had to drive every vert move
-by reading bounds and back-solving the fraction.
-
-**Impact.** Can't move verts a known metric distance — breaks the "self-authored coordinates are
-trustworthy" regime for edit-mode moves.
-
-**Fix.** In the `move_verts` handler, the *named* offsets (right/left/up/down/back/forward/in/out)
-read correctly in meters — only the explicit x/y/z are scaled. The x/y/z path is multiplying by a
-dimension it shouldn't (or routing through a normalized op). Make x/y/z translate by raw meters.
-Test: add box depth 0.46, `move_verts y=0.1`, assert bbox shifted exactly 0.1 m.
-
 ## G73 — ARRAY modifier offset is uncontrollable and defaults to unusably tight 🧩 MISSING CONTROL
 
 **Symptom.** `modifier op=add type=ARRAY count=18` gave ~0.01 m per-copy spacing (18 copies packed
@@ -83,21 +37,6 @@ treads, baluster runs) is dead on arrival. Fell back to duplicate→nudge→join
 distance (`use_constant_offset` + `constant_offset_displace`) and/or the relative-offset factor —
 and make `modify` accept them. Pick a sane default (relative offset 1.0 = one bbox length, not the
 current ~0.06). Test: array a 0.165 m box, count 8, constant offset 0.11; assert length ≈ 0.825 m.
-
-## G74 — `transform op=array_along between=[A,B]` ignores the endpoints (stacks at origin) 🐞 BUG
-
-**Symptom.** `array_along prototype=Chain between=["ChainStart","ChainEnd"] count=15` (markers at
-x=0 and x=1.55) reported `placed 15 copies on Z (spacing 0.0 m)` and dropped all 15 at the origin,
-overlapping. The A/B endpoints were never read; it fell through to a default Z axis with zero
-spacing.
-
-**Impact.** The relational "distribute N copies between these two things" primitive — the
-intent-space tool for a draped chain, or balusters between two posts — silently no-ops.
-
-**Fix.** In the `array_along` handler, when `between=[A,B]` is given, resolve both objects' world
-origins, derive axis + length from A→B, and space copies = |B−A|/(count−1). The "spacing 0.0 m / on
-Z" message says it took a default branch without parsing `between`. Test: two markers 1.5 m apart on
-X, `array_along count=4`, assert copies at 0, 0.5, 1.0, 1.5.
 
 ## G75 — sequential edit-ops on one mesh can't be batched in a single message (silent no-op) ⚠️ FOOTGUN
 

@@ -206,10 +206,15 @@ def rotate_object(angle: float, axis: str = "Z", targets: str = "",
     pivot / pivot_object: rotate about a SHARED point instead of each object's own
     origin — a rigid swing where both position and orientation turn. Pass
     pivot=[x,y,z] for a world point; pivot_object="dial" to pivot about an object's
-    bbox center; or a pivot MODE string: "bbox_center" (the targets' combined
-    geometric centre — rotate in place even when the origin is off the mesh),
-    "cursor" (the 3D cursor), or "origin" (world 0,0,0). pivot="center" (the default)
-    spins each object about its own origin (unchanged behavior).
+    bbox center; or a pivot MODE string. The two that bite if confused:
+      "self"  — each object spins about its OWN origin (the DEFAULT). Alias: "center".
+      "world" — pivot about the WORLD origin (0,0,0). Alias: "origin".
+    ("self" and "world" are named after Blender's own vocabulary — "origin" there
+    means the object's origin, so the legacy aliases read backwards; prefer the
+    explicit names.) Also: "bbox_center" (the targets' combined geometric centre —
+    rotate in place even when the origin is off the mesh) and "cursor" (the 3D
+    cursor). For "self" the status echoes each object's world origin (pivot_points),
+    so a hand whose origin sits off the dial is catchable, not silently flung.
     """
     params = {"angle": angle, "axis": axis, "targets": _targets(targets)}
     if pivot_object:
@@ -218,10 +223,14 @@ def rotate_object(angle: float, axis: str = "Z", targets: str = "",
         params["pivot"] = list(pivot)
     elif isinstance(pivot, str) and pivot.strip().lower() not in ("", "center", "self"):
         params["pivot"] = pivot.strip().lower()
-    # else (pivot="center"/""): no shared pivot — each object spins about its own origin
+    # else (pivot="self"/"center"/""): no shared pivot — each object spins about its
+    # own origin; the handler echoes those origins back as pivot_points.
     result = call_blender("rotate_object", params, label=label)
     if result.get("success"):
         about = f" about {result['pivot']}" if result.get("pivot") else ""
+        pts = result.get("pivot_points")
+        if pts:
+            about += f" {pts if len(pts) > 1 else pts[0]}"
         main = f"rotated {result['rotated']} by {angle}° on {axis}{about} [{result.get('op_id','')}]"
     else:
         main = result.get("error", "failed")

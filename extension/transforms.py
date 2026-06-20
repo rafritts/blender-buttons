@@ -5,7 +5,7 @@ import math
 import bpy
 import mathutils
 
-from .common import activate, resolve_targets, world_bbox
+from .common import activate, resolve_targets, world_bbox, world_center
 
 _AXIS_VEC = {"X": mathutils.Vector((1, 0, 0)),
              "Y": mathutils.Vector((0, 1, 0)),
@@ -180,13 +180,13 @@ def scale_group(params):
         pivot = ((xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2)
     elif pivot_spec == "bottom_center":
         pivot = ((xmin + xmax) / 2, (ymin + ymax) / 2, zmin)
-    elif pivot_spec == "origin":
+    elif pivot_spec in ("world", "origin"):
         pivot = (0.0, 0.0, 0.0)
     else:
         anchor = bpy.data.objects.get(str(pivot_spec))
         if anchor is None:
             return {"error": (f"pivot '{pivot_spec}' not understood — use 'center', "
-                              "'bottom_center', 'origin', an object name, or [x, y, z]")}
+                              "'bottom_center', 'world', an object name, or [x, y, z]")}
         a_xmin, a_ymin, a_zmin, a_xmax, a_ymax, a_zmax = world_bbox(anchor)
         pivot = ((a_xmin + a_xmax) / 2, (a_ymin + a_ymax) / 2, (a_zmin + a_zmax) / 2)
 
@@ -260,16 +260,23 @@ def rotate_object(params):
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
     rad = math.radians(angle)
 
-    if pivot_spec is None:
+    # G71: "self" (each object's OWN origin) is the no-shared-pivot case. The legacy
+    # alias "center" maps here too. Echo each object's world-space origin so a
+    # wrong-origin spin (a hand whose origin sits at world zero, off the dial) is
+    # catchable in the status block instead of silently landing wrong.
+    if pivot_spec is None or (isinstance(pivot_spec, str)
+                              and pivot_spec.strip().lower() in ("", "self", "center")):
+        origins = [[round(v, 5) for v in o.matrix_world.translation] for o in objs]
         for o in objs:
             o.rotation_euler[axis_idx] += rad
         bpy.context.view_layer.update()
         return {"success": True, "rotated": [o.name for o in objs],
-                "angle_deg": angle, "axis": axis, "pivot": None}
+                "angle_deg": angle, "axis": axis,
+                "pivot": "self (own origin)", "pivot_points": origins}
 
     if isinstance(pivot_spec, str):
         mode = pivot_spec.strip().lower()
-        if mode in ("bbox", "bbox_center", "center"):
+        if mode in ("bbox", "bbox_center"):
             # combined geometric centre of all targets (world space)
             pts = [o.matrix_world @ Vector(c) for o in objs for c in o.bound_box]
             pivot = Vector((sum(p.x for p in pts) / len(pts),
@@ -277,13 +284,15 @@ def rotate_object(params):
                             sum(p.z for p in pts) / len(pts)))
         elif mode == "cursor":
             pivot = Vector(bpy.context.scene.cursor.location)
-        elif mode == "origin":
+        elif mode in ("world", "origin"):
+            # G71: "world" is the clear name; "origin" kept as a legacy alias. Both
+            # mean the WORLD origin (0,0,0), NOT the object's own origin (= "self").
             pivot = Vector((0.0, 0.0, 0.0))
         else:
             p_obj = bpy.data.objects.get(pivot_spec)
             if p_obj is None:
                 return {"error": f"pivot '{pivot_spec}' not understood — use "
-                                 f"bbox_center | cursor | origin | an object name | [x,y,z]"}
+                                 f"self | world | bbox_center | cursor | an object name | [x,y,z]"}
             pivot = Vector(world_center(p_obj))
     elif isinstance(pivot_spec, (list, tuple)) and len(pivot_spec) == 3:
         pivot = Vector([float(v) for v in pivot_spec])

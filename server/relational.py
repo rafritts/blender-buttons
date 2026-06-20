@@ -106,8 +106,10 @@ def array_along(prototype: str, count: int, between: list, axis: str = "X",
                 keep_original: bool = False, name_prefix: str = "",
                 linked: bool = False, label: str = "") -> str:
     """
-    Duplicate a prototype N times, spacing copies evenly between two anchor centers.
-    Like distribute_evenly but also creates the copies. Copies are named "<prefix>_1"..."_N".
+    Duplicate a prototype N times, evenly spaced along the SEGMENT between two anchors.
+    Copies INCLUDE both endpoints (copy i at A + (B−A)·i/(N−1)). The direction is the
+    true A→B vector in 3D — `axis` is ignored (kept for back-compat), so anchors that
+    differ on several axes still distribute correctly. Copies named "<prefix>_1".."_N".
 
     linked: True = the N copies share the prototype's mesh datablock (instances) — one
             mesh for the whole run instead of N, an edit to one shows on all. The right
@@ -115,8 +117,8 @@ def array_along(prototype: str, count: int, between: list, axis: str = "X",
             Default False (independent copies).
 
     Example: array_along("slat", count=5,
-                         between=["back_rail_bottom", "back_rail_top"], axis="Z")
-             → 5 evenly spaced copies of "slat" between the two rails.
+                         between=["back_rail_bottom", "back_rail_top"])
+             → 5 evenly spaced copies of "slat" from the bottom rail to the top.
     """
     result = call_blender("array_along", {
         "prototype": prototype, "count": count, "between": between, "axis": axis,
@@ -126,7 +128,9 @@ def array_along(prototype: str, count: int, between: list, axis: str = "X",
     if result.get("success"):
         inst = (f" (instances — shared mesh '{result.get('shared_mesh')}')"
                 if result.get("linked") else "")
-        return (f"placed {count} copies on {axis} (spacing {result['spacing']} m): "
+        span = result.get("span")
+        span_str = f", span {span} m" if span is not None else ""
+        return (f"placed {count} copies along A→B (spacing {result['spacing']} m{span_str}): "
                 f"{result['placed']}{inst} [{result.get('op_id','')}]" + _status(result))
     return result.get("error", "failed")
 

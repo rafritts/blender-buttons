@@ -51,7 +51,7 @@ def transform(
     height: tag(float, "[resize] absolute Z extent (m)") = None,
     # scale / rotate
     factor: tag(float, "[scale] multiply size by") = 1.0,
-    pivot: tag(str, "[scale/rotate] pivot: center (default; scale=bbox centre, rotate=own origin) | bbox_center | cursor | origin") = "center",
+    pivot: tag(str, "[scale/rotate] pivot point. rotate: self=own origin (default) | world=world 0,0,0 | bbox_center | cursor. (legacy aliases: center→self, origin→world — named backwards vs Blender, prefer self/world.) scale: center=bbox centre (default) | bottom_center | world | object name") = "center",
     pivot_object: tag(str, "[scale/rotate] object to pivot around") = "",
     angle: tag(float, "[rotate] degrees") = 0.0,
     axis: tag(str, "[rotate/match_dim/array_*] axis X|Y|Z; [aim_axis] local axis (signed ok, e.g. -Z); [rest_on] drop axis") = "Z",
@@ -148,7 +148,8 @@ def transform(
       mirror   — mirrored copy across a plane (targets, plane=X|Y|Z, suffix, replace)
       distribute — space evenly between two (targets, between=[a,b], axis)
       array_corners — copy to a target's 4 corners (prototype, of, standing_on_floor)
-      array_along  — N copies between two   (prototype, count, between=[a,b], axis)
+      array_along  — N copies evenly along the A→B segment, endpoints included
+                   (prototype, count, between=[a,b]); direction is the true A→B vector
       array_radial — N copies in a ring (prototype, count, center_object, axis,
                    start_angle, end_angle, radius, align_to_tangent)
       scatter  — scatter copies on a surface (target, source/sources, count OR density,

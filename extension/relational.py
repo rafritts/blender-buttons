@@ -176,11 +176,18 @@ def array_at_corners(params):
 
 
 def array_along(params):
-    """Duplicate a prototype N times, spacing copies evenly between two anchor objects' centers."""
+    """Duplicate a prototype N times, evenly spaced along the SEGMENT between two anchor
+    objects' centers.
+
+    G74: the direction is the true A→B vector in 3D (resolved from the anchors' world
+    centres), NOT a single named axis — so anchors that differ on more than one axis, or
+    that are coplanar on the axis you'd have guessed, both distribute correctly instead of
+    collapsing to spacing 0. Copies INCLUDE both endpoints: copy i sits at A + (B−A)·i/(N−1),
+    so step = |B−A|/(N−1) (a single copy lands at the midpoint)."""
+    from mathutils import Vector
     prototype = params.get("prototype")
     count = params.get("count", 3)
     between = params.get("between")
-    axis = params.get("axis", "X").upper()
     keep_original = params.get("keep_original", False)
     name_prefix = params.get("name_prefix", prototype)
     linked = bool(params.get("linked", False))  # G54: share the prototype's mesh
@@ -197,11 +204,10 @@ def array_along(params):
     if count < 1:
         return {"error": "count must be >= 1"}
 
-    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 0)
-    ca = world_center(a)[axis_idx]
-    cb = world_center(b)[axis_idx]
-    lo, hi = min(ca, cb), max(ca, cb)
-    step = (hi - lo) / (count + 1)
+    pa = Vector(world_center(a))
+    pb = Vector(world_center(b))
+    seg = pb - pa
+    length = seg.length
 
     if bpy.context.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
@@ -209,7 +215,8 @@ def array_along(params):
     shared_mesh = proto.data.name if (linked and proto.data) else None
     placed = []
     for i in range(count):
-        target_pos = lo + step * (i + 1)
+        t = 0.5 if count == 1 else i / (count - 1)
+        target_pt = pa + seg * t
         activate(proto)
         bpy.ops.object.duplicate(linked=linked)
         dup = bpy.context.active_object
@@ -218,18 +225,18 @@ def array_along(params):
             dup.name = new_name
             if dup.data and not linked:
                 dup.data.name = new_name
-        loc = list(dup.location)
-        cur = world_center(dup)[axis_idx]
-        loc[axis_idx] += target_pos - cur
-        dup.location = loc
+        # Move the dup's CENTER onto the target point (full 3D, not one axis).
+        dup.location = Vector(dup.location) + (target_pt - Vector(world_center(dup)))
         placed.append(dup.name)
 
     bpy.context.view_layer.update()
     if not keep_original:
         bpy.data.objects.remove(proto, do_unlink=True)
 
-    return {"success": True, "axis": axis, "count": count, "spacing": round(step, 5),
-            "placed": placed, "removed_prototype": not keep_original,
+    step = round(length / (count - 1), 5) if count > 1 else 0.0
+    return {"success": True, "axis": "A→B segment", "count": count, "spacing": step,
+            "span": round(length, 5), "placed": placed,
+            "removed_prototype": not keep_original,
             "linked": linked, "shared_mesh": shared_mesh}
 
 

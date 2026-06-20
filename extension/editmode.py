@@ -895,16 +895,13 @@ def move_vertices(params):
         local = obj.matrix_world.inverted().to_3x3() @ wv
         world_delta = [round(c, 5) for c in wv]
     else:
-        # Legacy fraction-of-bbox path.
-        fx = params.get("x", 0.0)
-        fy = params.get("y", 0.0)
-        fz = params.get("z", 0.0)
-        dims = obj.dimensions
-        scale = obj.scale
-        local = Vector((fx * dims.x / (abs(scale.x) or 1.0),
-                        fy * dims.y / (abs(scale.y) or 1.0),
-                        fz * dims.z / (abs(scale.z) or 1.0)))
-        world_delta = [round(fx * dims.x, 5), round(fy * dims.y, 5), round(fz * dims.z, 5)]
+        # G72: explicit x/y/z are RAW WORLD METERS — matching the schema's "(m)" and the
+        # named directions above. (The pre-F1 fraction-of-bbox behaviour was the bug: it
+        # silently scaled the move by the object's bbox extent.) Convert the world delta
+        # to local space so a rotated object still travels the right WORLD distance.
+        wv = Vector((params.get("x", 0.0), params.get("y", 0.0), params.get("z", 0.0)))
+        local = obj.matrix_world.inverted().to_3x3() @ wv
+        world_delta = [round(c, 5) for c in wv]
 
     for v in selected:
         v.co += local

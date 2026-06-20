@@ -172,7 +172,7 @@ def move_vertices(out: float = 0.0, inward: float = 0.0,
     The result names the resolved 'out' direction in world-semantic words. If the
     selection's normals cancel (closed ring/band), 'out' is refused.
 
-    Legacy: x/y/z are a fraction of the object's bbox dimensions (pre-F1 API).
+    x/y/z: explicit world-axis offsets in METERS (same units as the named directions).
     target: optional object name — auto-selects it, enters edit mode, exits after.
     Must be in edit mode with vertices selected (or provide target).
     """
