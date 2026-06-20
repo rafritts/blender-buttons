@@ -203,6 +203,25 @@ def set_material(params):
         if alpha < 1.0:
             mat.blend_method = 'BLEND'
 
+    # G84: transmission makes a refractive SOLID (glass, gem, lens, water) — light bends
+    # through it and pairs with `ior` — rather than alpha's flat, non-refracting see-
+    # through surface. Modern Principled folds transmission roughness into the main
+    # Roughness input, so there's no separate transmission-roughness dial.
+    transmission = params.get("transmission")
+    if transmission is not None:
+        # Blender renamed "Transmission" → "Transmission Weight" around 4.0
+        if (_set_input(bsdf, "Transmission Weight", float(transmission))
+                or _set_input(bsdf, "Transmission", float(transmission))):
+            applied.append(f"transmission={transmission}")
+        # Enable refraction on the material so it actually bends light in EEVEE — the
+        # analog of alpha's blend_method='BLEND'. (Screen-space/raytraced refraction
+        # still needs raytracing enabled on the engine to be visible in the render.)
+        if transmission > 0.0:
+            if hasattr(mat, "use_screen_refraction"):
+                mat.use_screen_refraction = True
+            if hasattr(mat, "use_raytrace_refraction"):
+                mat.use_raytrace_refraction = True
+
     ec = params.get("emission_color")
     if ec is not None:
         if len(ec) == 3:

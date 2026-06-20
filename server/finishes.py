@@ -175,6 +175,7 @@ def set_material(target: str = "",
                  roughness: float = None,
                  ior: float = None,
                  alpha: float = None,
+                 transmission: float = None,
                  emission_color: list = None,
                  emission_strength: float = None,
                  material_name: str = "",
@@ -202,7 +203,11 @@ def set_material(target: str = "",
     metallic:      0..1 (0 = dielectric, 1 = metal).
     roughness:     0..1 (0 = mirror, 1 = chalk).
     ior:           index of refraction. Glass ≈ 1.5, water ≈ 1.33. Default 1.45.
-    alpha:         0..1. Values < 1 enable BLEND transparency.
+    alpha:         0..1. Values < 1 enable BLEND transparency (flat, non-refracting).
+    transmission:  0..1. The refractive-SOLID dial — glass, gems, lenses, water that
+                   BEND light (unlike alpha). Pair with `ior`; `roughness` blurs it
+                   (frosted glass). >0 auto-enables the material's refraction flags;
+                   the engine still needs raytracing on to show it in the render.
     emission_color / emission_strength: glow color and intensity.
     material_name: name for the material; defaults to "<target>_mat". Reused if exists.
 
@@ -225,6 +230,7 @@ def set_material(target: str = "",
     if roughness is not None:         params["roughness"] = roughness
     if ior is not None:               params["ior"] = ior
     if alpha is not None:             params["alpha"] = alpha
+    if transmission is not None:      params["transmission"] = transmission
     if emission_color is not None:    params["emission_color"] = emission_color
     if emission_strength is not None: params["emission_strength"] = emission_strength
     result = call_blender("set_material", params, label=label)

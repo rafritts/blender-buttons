@@ -18,42 +18,6 @@ task-specific shortcut.
 
 ---
 
-## G84 — `material op=set` has no transmission; glass/gem/liquid is unreachable
-
-`set` exposes `base_color, metallic, roughness, ior, alpha, emission`. There is no
-**transmission** (nor transmission-roughness) control. `alpha` only drives blend-mode
-see-through — a flat transparent *surface*, not a refractive *solid*. So any clear solid
-(a watch crystal, a gemstone, a bottle, a lens, water) cannot be expressed: it will read
-as a ghosted decal, never as glass that bends and catches light. `ior` is already there
-and is meaningless without transmission to pair it with. This is the one material the
-intent "make it glass" maps to, and the verb can't say it.
-**Want:** `transmission` (0..1) + optional `transmission_roughness` on `material op=set`,
-wired to the Principled BSDF transmission inputs (and auto-set the blend/refraction flags
-the active engine needs so it actually refracts).
-
-## G85 — edit-mode `sel_bounds` is wrong right after `extrude` (ground truth lies)
-
-Inset a cap face (status correctly reports the inner face: `faces:1`, `sel_bounds` at the
-inset radius). Then `edit op=extrude down=` that same face. The post-op edit status now
-reports `faces:1` but `verts:192` (a single N-gon has N verts, not 2N) and `sel_bounds`
-spanning the **full outer radius of the object**, not the extruded face's radius. The
-whole method rests on "trust the status block over what you remember" — but here the very
-next call's selection ground-truth is untrustworthy, and I only caught it by spending a
-`feel op=section` to confirm the real form. A misreport in the instrument panel is worse
-than no report.
-**Want:** after `extrude`, `sel_bounds`/`sel_center`/vert count must describe exactly the
-resulting selection (the moved face ring), the same way `inset` already does.
-
-## G86 — no focal-length control on an existing camera
-
-`view` can move (`camera_position`), focus (`camera_dof`), frame, and activate a camera,
-but nothing sets its **lens/focal length** after creation. `add type=camera` takes `lens=`,
-so the only way to get an 85 mm hero lens onto the scene's camera is to throw it away and
-add a new one (then re-activate, re-DOF, re-frame). Focal length is the primary
-storytelling dial of a shot (wide vs. compressed) and it's write-once-at-birth.
-**Want:** a `view op=camera_lens` (or a `lens=` on `camera_position`) to retune focal
-length on an existing camera.
-
 ## G87 — selection not reliably preserved across `transform op=move_verts` → `edit` (intermittent)
 
 `select op=all` → `transform op=move_verts` → `edit op=taper_end`, issued one-per-message
@@ -67,39 +31,10 @@ non-determinism is the gap — it forces a defensive re-select before every edit
 follows a `move_verts`.
 **Want:** edit-mode selection state to persist deterministically across consecutive
 edit-mode mutations regardless of which verb (`transform` vs `edit`) issues them.
-
-## G88 — `transform op=array_along between=[a,b]` ignores the endpoint objects
-
-The one verb whose whole job is "lay N copies along the line between two things" doesn't.
-`array_along prototype=link between=["ep_a","ep_b"] count=6` (two real mesh objects at
-distinct points) returned *"placed 6 copies on Z (spacing 0.0 m)"* and stacked all six at
-the origin — it never read `between`, fell back to a Z axis, and computed zero spacing. So
-there is no working "distribute a chain of links from here to there" primitive; I had to
-abandon it for an Array modifier. This is squarely an intent-space tool ("run links from
-the bow to the T-bar") that silently no-spaces.
-**Want:** `array_along` must space `count` copies evenly along the segment between the two
-named endpoint objects (or accept two points), honoring their world positions.
-
-## G89 — `modifier op=add target=X` adds to the ACTIVE object, not `target`
-
-`modifier op=add type=ARRAY target=chain_link` while `ep_b` was the active/selected object
-put the Array on **ep_b**, not chain_link (`modifier remove target=chain_link` then reported
-`Available: []`). The `target=` arg is ignored on add; it silently uses whatever is active.
-Every other verb (`material`, `edit`, `transform`) takes an explicit target/selection to
-defend against exactly this — `modifier` should too, especially since you often add a
-modifier to a part you just *named* but isn't active after the last op.
-**Want:** `modifier op=add` must resolve `target=` and add to that object (matching how
-`modifier modify/remove/apply` already accept `target`).
-
-## G90 — Array modifier `count`/`offset` not settable through the verb
-
-`modifier op=add type=ARRAY count=16 offset=0.783` ignored both (built the default 2 copies
-at relative-offset 1.0). `modifier op=modify count=12 offset=0.783` applied `count` but
-reported `(skipped: ['offset'])` — so the **relative/constant offset of an array is
-unreachable**. You can set how many links, but not how far apart, which is the parameter
-that decides whether a chain's links overlap-and-interlink or sit in a dotted line. I had
-to engineer the link spacing into the prototype's own bbox so that the stuck offset=1.0
-happened to land in the interlink range.
-**Want:** `count` honored on `add`, and `offset` (relative factor, plus ideally a
-`constant`/per-axis distance) honored on both `add` and `modify` for ARRAY.
-
+**Lead (unconfirmed):** not reproducible in the headless harness across repeated
+`select_all → move_verts → taper_end` runs — it only bites the live one-op-per-message
+path. Suspect the OBJECT↔EDIT mode-cycle in `execute_command` (`_enter_edit_for_target`):
+whether a call enters via the "already in EDIT, skip the toggle" branch or force-cycles
+modes depends on what mode the previous op left behind, and the toggle round-trips the
+component selection through Blender's editmesh↔mesh sync. A deterministic fix likely lives
+in making that entry/exit consistent rather than in `taper_end` (which reads no selection).

@@ -392,6 +392,24 @@ def set_active_camera(camera: str, label: str = "") -> str:
 
 
 @mcp.tool()
+def set_camera_lens(lens: float, camera: str = "", label: str = "") -> str:
+    """
+    Retune the focal length (lens) of an EXISTING camera — the primary storytelling
+    dial of a shot (wide vs. compressed). Previously settable only at add_camera (G86).
+
+    lens:   focal length in mm. 24 = wide/environmental | 50 = neutral | 85 = portrait |
+            135 = compressed hero. Higher = tighter, flatter, more background blur.
+    camera: camera object name. Empty = active scene camera.
+
+    Example: set_camera_lens(85, camera="hero_cam")
+    """
+    result = call_blender("set_camera_lens", {"lens": lens, "camera": camera}, label=label)
+    main = (f"lens on '{result['camera']}' → {result['lens']}mm [{result.get('op_id','')}]"
+            if result.get("success") else result.get("error", "failed"))
+    return main + _status(result)
+
+
+@mcp.tool()
 def add_camera(name: str,
                x: float = 7.0, y: float = -7.0, z: float = 5.0,
                target: str = "",

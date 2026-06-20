@@ -332,10 +332,28 @@ def _configure_array(mod, params):
     return applied
 
 
+# G89: modifier types that consume `target` as a PARTNER object (the surface/cage/
+# armature/lattice that drives the modifier), NOT as the host whose stack gets it.
+# For these the host is the active object and `target` is resolved below as the partner.
+_PARTNER_TYPES = {"SHRINKWRAP", "MESH_DEFORM", "ARMATURE", "LATTICE"}
+
+
 def add_modifier(params):
     mod_type = params.get("type", "SUBSURF").upper()
     name     = params.get("name", mod_type.capitalize())
-    obj      = bpy.context.active_object
+    target   = params.get("target")
+    # G89: for every type that DOESN'T use `target` as a partner, `target` names the
+    # HOST object whose stack receives the modifier — matching modify/remove/list/apply,
+    # so an ARRAY/SUBSURF/BEVEL/… lands on the named part even when it isn't active.
+    # The partner family keeps host=active (their tested, documented semantics).
+    if mod_type in _PARTNER_TYPES:
+        obj = bpy.context.active_object
+    elif target:
+        obj = bpy.data.objects.get(target)
+        if obj is None:
+            return {"error": f"target '{target}' not found"}
+    else:
+        obj = bpy.context.active_object
     if obj is None:
         return {"error": "No active object"}
     mod = obj.modifiers.new(name=name, type=mod_type)
@@ -473,7 +491,9 @@ def add_modifier(params):
                 if rest_source == "BIND" else
                 f"CORRECTIVE_SMOOTH added (rest_source=ORCO — smooths toward the base mesh).")
         return {"success": True, "modifier": mod.name, "note": note}
-    return {"success": True, "modifier": mod.name}
+    # status_focus so the status block reports the HOST object's bounds (G89) even when
+    # the modifier was added to a named, non-active object.
+    return {"success": True, "modifier": mod.name, "status_focus": obj.name}
 
 
 def bind_mesh_deform(params):

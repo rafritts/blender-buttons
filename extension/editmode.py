@@ -132,6 +132,28 @@ def _flush_vert_selection(bm):
     bm.select_flush(True)
 
 
+def _restrict_to_selected_faces(bm):
+    """G85: after `extrude_region_move`, Blender leaves the source ring's verts/edges
+    selected ALONGSIDE the new cap face — so the status block's sel_bounds / vert count
+    over-report the selection (a 32-vert cap reads as 64 verts spanning the outer radius).
+    `inset` doesn't suffer this because its bmesh-op leaves only the inner face selected.
+    Re-derive the selection from the selected FACES alone, so the next read describes
+    exactly the extruded face. No-op when nothing is fully face-selected (vert/edge
+    extrude), so it never disturbs those selections."""
+    faces = [f for f in bm.faces if f.select]
+    if not faces:
+        return
+    for v in bm.verts:
+        v.select = False
+    for e in bm.edges:
+        e.select = False
+    for f in bm.faces:
+        f.select = False
+    for f in faces:
+        f.select_set(True)  # selects the face plus its own verts + edges
+    bm.select_flush_mode()
+
+
 def bevel(params):
     width    = params.get("width")
     factor   = params.get("factor", 0.05)
@@ -192,6 +214,8 @@ def extrude(params):
 
         bpy.ops.mesh.extrude_region_move(
             TRANSFORM_OT_translate={"value": tuple(translate), "orient_type": "GLOBAL"})
+        _restrict_to_selected_faces(bmesh.from_edit_mesh(obj.data))  # G85
+        bmesh.update_edit_mesh(obj.data)
         result = {"success": True,
                   "translation_world": [round(c, 4) for c in translate]}
         if frame:
@@ -210,6 +234,8 @@ def extrude(params):
     y = fy * dims.y
     z = fz * dims.z
     bpy.ops.mesh.extrude_region_move(TRANSFORM_OT_translate={"value": (x, y, z)})
+    _restrict_to_selected_faces(bmesh.from_edit_mesh(obj.data))  # G85
+    bmesh.update_edit_mesh(obj.data)
     return {"success": True, "translation_world": [round(x, 4), round(y, 4), round(z, 4)]}
 
 

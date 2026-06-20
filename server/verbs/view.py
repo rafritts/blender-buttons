@@ -11,13 +11,13 @@ from server import viewport, introspect, scene
 from ._common import tag, unknown
 
 _OPS = ["shading", "angle", "overlays", "orbit", "rig", "zoom", "frame", "check_framing",
-        "camera_dof", "active_camera"]
+        "camera_dof", "camera_lens", "active_camera"]
 
 
 @mcp.tool(name="view")
 def view(
     op: Literal["shading", "angle", "overlays", "orbit", "rig", "zoom", "frame",
-                "check_framing", "camera_dof", "active_camera"],
+                "check_framing", "camera_dof", "camera_lens", "active_camera"],
     # shading / angle
     mode: tag(str, "[shading] WIREFRAME|SOLID|MATERIAL|RENDERED") = "MATERIAL",
     angle: tag(str, "[angle] FRONT|BACK|TOP|… or persp/ortho") = "",
@@ -47,6 +47,8 @@ def view(
     focus_distance: tag(float, "[camera_dof] focus distance (m)") = None,
     aperture: tag(float, "[camera_dof] f-stop (lower = shallower)") = None,
     focus_object: tag(str, "[camera_dof] object to focus on") = "",
+    # camera_lens
+    lens: tag(float, "[camera_lens] focal length mm (24 wide · 50 neutral · 85 portrait · 135 hero)") = None,
 ) -> str:
     """
     Look at the scene — the **View** menu + camera viewpoint. `op` selects:
@@ -69,6 +71,8 @@ def view(
                   camera, aspect)
       camera_dof — depth of field on the camera (focus_distance OR focus_object,
                   aperture f-stop, camera)
+      camera_lens — retune the focal length of an existing camera (lens mm, camera) —
+                  the wide-vs-compressed dial, no longer write-once at add
       active_camera — make an existing camera the active scene/render camera (camera)
     """
     o = op.lower().strip()
@@ -92,6 +96,8 @@ def view(
         return introspect.check_framing(targets, camera, aspect)
     if o == "camera_dof":
         return scene.set_camera_dof(focus_distance, aperture, focus_object, camera)
+    if o == "camera_lens":
+        return scene.set_camera_lens(lens, camera)
     if o == "active_camera":
         return scene.set_active_camera(camera)
     return unknown("view", "op", op, _OPS)

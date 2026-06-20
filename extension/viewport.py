@@ -209,6 +209,27 @@ def set_active_camera(params):
     return {"success": True, "camera": cam.name, "active": True}
 
 
+def set_camera_lens(params):
+    """G86: retune the focal length of an EXISTING camera. Focal length is the primary
+    storytelling dial of a shot (wide vs. compressed) and was previously write-once at
+    add_camera; this makes it adjustable without throwing the camera away."""
+    name = params.get("camera") or params.get("name")
+    if name:
+        cam = bpy.data.objects.get(name)
+        if cam is None or cam.type != 'CAMERA':
+            return {"error": f"Camera '{name}' not found"}
+    else:
+        cam = bpy.context.scene.camera
+        if cam is None:
+            return {"error": "No scene camera; pass camera= or add one first"}
+    lens = params.get("lens")
+    if lens is None:
+        return {"error": "'lens' (focal length in mm) is required"}
+    cam.data.lens = float(lens)
+    return {"success": True, "camera": cam.name, "lens": cam.data.lens,
+            "status_focus": cam.name}
+
+
 def add_camera(params):
     """Create a new camera and set it as the active scene camera.
 
@@ -344,5 +365,6 @@ TOOLS = {
     "zoom_to_selected":        zoom_to_selected,
     "orbit_viewport":          orbit_viewport,
     "set_active_camera":       set_active_camera,
+    "set_camera_lens":         set_camera_lens,
     "add_camera":              add_camera,
 }

@@ -24,8 +24,9 @@ def material(
     hex: tag(str, "[set/toon] #RRGGBB color") = "",
     metallic: tag(float, "[set/textured] metallic 0..1") = None,
     roughness: tag(float, "[set/textured] roughness 0..1") = None,
-    ior: tag(float, "[set] index of refraction") = None,
-    alpha: tag(float, "[set] opacity 0..1") = None,
+    ior: tag(float, "[set] index of refraction (glass≈1.5, water≈1.33)") = None,
+    alpha: tag(float, "[set] opacity 0..1 (flat see-through)") = None,
+    transmission: tag(float, "[set] 0..1 refractive solid — glass/gem/lens/water; pair with ior, roughness frosts it") = None,
     emission_color: tag(list, "[set] emission [r,g,b]") = None,
     emission_strength: tag(float, "[set] emission strength") = None,
     material_name: tag(str, "[set/toon/textured] name for the material") = "",
@@ -58,7 +59,7 @@ def material(
     Materials & shading — **Material Properties**. `op` selects:
 
       set       — PBR material   (target, base_color|hex, metallic, roughness, ior,
-                  alpha, emission_color/strength, material_name|material, slot)
+                  alpha, transmission, emission_color/strength, material_name|material, slot)
       toon      — flat cel material (target, base_color|hex, shadow_color, bands,
                   shadow_softness, rim_color/width, gradient_top/bottom)
       textured  — Poly Haven PBR texture set (target, asset_id, scale, resolution,
@@ -75,8 +76,8 @@ def material(
     o = op.lower().strip()
     if o == "set":
         return finishes.set_material(target, base_color, hex, metallic, roughness,
-                                     ior, alpha, emission_color, emission_strength,
-                                     material_name, material, slot, label)
+                                     ior, alpha, transmission, emission_color,
+                                     emission_strength, material_name, material, slot, label)
     if o == "toon":
         return shaders.set_toon_material(target, base_color, hex, shadow_color, bands,
                                          shadow_softness, rim_color, rim_width,
