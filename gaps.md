@@ -18,25 +18,10 @@ task-specific shortcut.
 
 ---
 
-> The gaps below (G70–G76) were surfaced building a full pocketwatch vignette (105 objects:
-> cased watch + open hunter lid + Albert chain + display base). The "perceive-and-stack" half
-> of the toolkit (status-block bounds, `feel`, `array_radial`, `check_framing`, materials)
-> performed well; these are the "repeat-and-pivot" failures that forced workarounds. Each entry
-> is self-contained with a live repro.
-
-## G73 — ARRAY modifier offset is uncontrollable and defaults to unusably tight 🧩 MISSING CONTROL
-
-**Symptom.** `modifier op=add type=ARRAY count=18` gave ~0.01 m per-copy spacing (18 copies packed
-into ~2× the unit length, basically overlapping). `modifier op=modify modifier_name=Array
-factor=0.667` returned `(skipped: ['factor'])` — the wrapper exposes no way to set array spacing.
-
-**Impact.** The natural primitive for any linear repeat (chain links, pickets, watch-band, stair
-treads, baluster runs) is dead on arrival. Fell back to duplicate→nudge→join doubling.
-
-**Fix.** In the `modifier` verb, expose ARRAY offset controls — at minimum a constant-offset
-distance (`use_constant_offset` + `constant_offset_displace`) and/or the relative-offset factor —
-and make `modify` accept them. Pick a sane default (relative offset 1.0 = one bbox length, not the
-current ~0.06). Test: array a 0.165 m box, count 8, constant offset 0.11; assert length ≈ 0.825 m.
+> The gaps below were surfaced building a full pocketwatch vignette (105 objects: cased watch +
+> open hunter lid + Albert chain + display base). The "perceive-and-stack" half of the toolkit
+> (status-block bounds, `feel`, `array_radial`, `check_framing`, materials) performed well; these
+> are the "repeat-and-pivot" failures that forced workarounds. Each entry is self-contained.
 
 ## G75 — sequential edit-ops on one mesh can't be batched in a single message (silent no-op) ⚠️ FOOTGUN
 
@@ -162,10 +147,9 @@ the relational replacements may reuse some of this plumbing.
 ---
 
 > G81–G83 surfaced building a second pocketwatch hero asset (open-face gold case + enamel dial +
-> sub-seconds + blued hands + Albert chain, for UE5). The pivot bugs (G70/G71) and the ARRAY-offset
-> hole (G73) re-surfaced verbatim — confirming they bite on every repeat-and-pivot build. These three
-> are the *new* misses: a round-face layout couldn't stay in intent-space, a part couldn't be seated
-> into a cavity, and dial lettering had no primitive.
+> sub-seconds + blued hands + Albert chain, for UE5). These three are the misses left after the
+> pivot/array bugs were closed: a round-face layout couldn't stay in intent-space, a part couldn't
+> be seated into a cavity, and dial lettering had no primitive.
 
 ## G81 — no way to mint a landmark by ANGLE on a round face (forces hand-trig) 🧩 MISSING CONTROL
 

@@ -131,3 +131,21 @@ Preserve exactly:
 - Same flat light-grey surface, pure-black wires, pure-white background, same
   scale and vertical centering.
 No shading, no perspective distortion, no new colors, strict orthographic.
+
+
+
+
+
+Generate a clean orthographic FRONT view of a stylized human female head and
+neck, dead-on and bilaterally symmetric, as a flat technical wireframe diagram —
+NOT a shaded render.
+- Surface: one flat uniform light-grey. No shading, shadows, highlights, or
+ gradients on the surface.
+- Wireframe: crisp solid even-weight pure-black lines; clean all-quad topology. Edge lines must be straight. 
+- Vertex dots: a small solid dot at every vertex, color coded as red.
+- Guides: four faint thin LIGHT-BLUE horizontal lines at top of skull, eye line,
+ base of nose, and chin.
+- Do not use a green center line. 
+- Background: flat pure white. Strict orthographic, no perspective. No text.
+The green centerline is perfectly straight and vertical, the blue guides are
+perfectly horizontal, and the head is centered.

@@ -9,12 +9,17 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
                  axis: str = "X", merge_threshold: float = None,
                  mirror_object: str = "", precision: int = None,
                  rest_source: str = "", factor: float = None, iterations: int = None,
-                 vertex_group: str = "", label: str = "") -> str:
+                 vertex_group: str = "", count: int = None, label: str = "") -> str:
     """
     Add a modifier to the active object.
     type: SUBSURF | BEVEL | SOLIDIFY | MIRROR | ARRAY | SCREW | SHRINKWRAP
           | MESH_DEFORM | ARMATURE | LATTICE | CORRECTIVE_SMOOTH
     levels: subdivision levels (SUBSURF)  |  width/segments: bevel params
+    ARRAY — repeat the mesh in a line: count = number of copies; the spacing is set by
+      offset (meters — a CONSTANT gap along `axis`, the intent-space "links 0.11 m
+      apart") OR factor (a RELATIVE offset = multiple of the bbox along `axis`); axis
+      picks the run direction (default X). Default with neither: copies touch end-to-end
+      (relative 1.0 along X). Constant wins if both are given.
     target: the partner object. Required for —
       SHRINKWRAP  : the surface to wrap onto.
       MESH_DEFORM : the cage mesh that drives the deform (added UNBOUND — then
@@ -71,6 +76,8 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
         params["iterations"] = iterations
     if vertex_group:
         params["vertex_group"] = vertex_group
+    if count is not None:
+        params["count"] = count
     result = call_blender("add_modifier", params, label=label)
     if result.get("success"):
         main = f"{result['modifier']} [{result.get('op_id','')}]"
@@ -216,7 +223,7 @@ def modify_modifier(target: str, modifier_name: str,
                     iterations: int = None,
                     show_viewport: bool = None, show_render: bool = None,
                     wrap_method: str = "", target_object: str = "",
-                    vertex_group: str = "", label: str = "") -> str:
+                    vertex_group: str = "", axis: str = "", label: str = "") -> str:
     """
     Tweak properties on an existing modifier without rebuilding it.
     Use this to dial in shrinkwrap offset, bevel width, subsurf levels, etc.
@@ -224,6 +231,8 @@ def modify_modifier(target: str, modifier_name: str,
     target: object name. modifier_name: name of the modifier on that object.
     Each numeric param is optional — pass only the ones you want to change.
     angle_limit is in degrees (BEVEL). target_object re-points SHRINKWRAP/ARRAY to a different object.
+    ARRAY — count = copies; offset (meters, constant gap) OR factor (relative ×bbox)
+      set the spacing along axis (X|Y|Z, default X). Constant wins if both given.
     wrap_method (SHRINKWRAP): NEAREST_SURFACEPOINT | PROJECT | NEAREST_VERTEX | TARGET_PROJECT.
     factor: CORRECTIVE_SMOOTH / SMOOTH strength. strength: DISPLACE. iterations: smoothing passes.
     show_viewport / show_render: enable-disable the modifier WITHOUT removing it — the
@@ -248,6 +257,8 @@ def modify_modifier(target: str, modifier_name: str,
         params["target_object"] = target_object
     if vertex_group:
         params["vertex_group"] = vertex_group
+    if axis:
+        params["axis"] = axis
     result = call_blender("modify_modifier", params, label=label)
     if result.get("success"):
         applied = result.get("applied", [])

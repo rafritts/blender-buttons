@@ -302,6 +302,36 @@ def noise_displace(params):
             "dims_before": dims_before, "dims_after": dims_after}
 
 
+def _configure_array(mod, params):
+    """G73: set ARRAY count + offset. `offset` (meters) → constant offset along `axis`
+    (the intent-space spacing: "links 0.11 m apart"); `factor` → relative offset as a
+    multiple of the object's bbox along `axis`; `axis` picks the run direction (default
+    X). Constant wins if both are given. Returns applied-prop descriptions."""
+    applied = []
+    axis = (params.get("axis") or "X").upper()
+    axis_idx = {"X": 0, "Y": 1, "Z": 2}.get(axis, 0)
+    if params.get("count") is not None:
+        mod.count = int(params["count"])
+        applied.append(f"count={mod.count}")
+    const = params.get("offset")
+    rel = params.get("factor")
+    if const is not None:
+        mod.use_constant_offset = True
+        mod.use_relative_offset = False
+        disp = [0.0, 0.0, 0.0]
+        disp[axis_idx] = float(const)
+        mod.constant_offset_displace = disp
+        applied.append(f"constant_offset[{axis}]={const}m")
+    elif rel is not None:
+        mod.use_relative_offset = True
+        mod.use_constant_offset = False
+        disp = [0.0, 0.0, 0.0]
+        disp[axis_idx] = float(rel)
+        mod.relative_offset_displace = disp
+        applied.append(f"relative_offset[{axis}]={rel}×bbox")
+    return applied
+
+
 def add_modifier(params):
     mod_type = params.get("type", "SUBSURF").upper()
     name     = params.get("name", mod_type.capitalize())
@@ -309,6 +339,15 @@ def add_modifier(params):
     if obj is None:
         return {"error": "No active object"}
     mod = obj.modifiers.new(name=name, type=mod_type)
+    if mod_type == "ARRAY":
+        # G73: configure ARRAY offset explicitly. Default (no offset/factor given) is a
+        # relative offset of 1.0 along X — copies touch end-to-end, one bbox length apart
+        # — instead of Blender's raw default which packed copies unusably tight here.
+        if params.get("offset") is None and params.get("factor") is None:
+            mod.use_relative_offset = True
+            mod.use_constant_offset = False
+            mod.relative_offset_displace = (1.0, 0.0, 0.0)
+        _configure_array(mod, params)
     if hasattr(mod, 'levels'):
         mod.levels = params.get("levels", 2)
     if hasattr(mod, 'render_levels'):
@@ -721,6 +760,14 @@ def modify_modifier(params):
             applied.append(f"target={target_object}")
         else:
             skipped.append("target_object")
+
+    # G73: ARRAY offset is a vector + boolean toggles, not a scalar the generic table
+    # below can set — intercept it here and consume the keys so they don't get
+    # mis-skipped (this is why `factor` on an ARRAY used to report "skipped").
+    if mod.type == 'ARRAY':
+        applied.extend(_configure_array(mod, params))
+        for k in ("offset", "factor", "count"):
+            params.pop(k, None)
 
     for key, (attr, coerce) in _MODIFIER_PROPS.items():
         if key not in params:

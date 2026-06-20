@@ -25,21 +25,21 @@ def modifier(
     render_levels: tag(int, "[add/modify] subsurf render levels") = None,
     width: tag(float, "[add/modify] bevel/solidify width") = None,
     segments: tag(int, "[add/modify] bevel segments") = None,
-    offset: tag(float, "[add/modify] solidify/mirror offset") = None,
+    offset: tag(float, "[add/modify] solidify/mirror offset; ARRAY constant spacing (m) along axis") = None,
     wrap_method: tag(str, "[add/modify] shrinkwrap method: NEAREST_SURFACEPOINT (flattens bumps) | PROJECT (casts along axis, keeps bump height)") = "",
     vertex_group: tag(str, "[add/modify] SHRINKWRAP region to wrap — pins weight-0 verts so a partial transfer leaves the rest (and the seam) in place; mint via edit/assign_weight") = "",
-    axis: tag(str, "[add] mirror axis X|Y|Z; SHRINKWRAP PROJECT cast axis (default Y)") = "X",
+    axis: tag(str, "[add/modify] mirror axis X|Y|Z; SHRINKWRAP PROJECT cast axis (default Y); ARRAY offset run direction (default X)") = "X",
     merge_threshold: tag(float, "[add] mirror merge threshold") = None,
     mirror_object: tag(str, "[add] mirror across this object") = "",
     precision: tag(int, "[add] mesh-deform bind precision") = None,
     rest_source: tag(str, "[add] corrective-smooth rest source") = "",
-    factor: tag(float, "[add/modify] generic strength/factor") = None,
+    factor: tag(float, "[add/modify] generic strength/factor; ARRAY relative offset (×bbox) along axis") = None,
     iterations: tag(int, "[add/modify] smooth iterations") = None,
     # modify (extra dials)
     modifier_name: tag(str, "[modify/remove] modifier to act on") = "",
     thickness: tag(float, "[modify] solidify thickness") = None,
     angle_limit: tag(float, "[modify] bevel angle limit (deg)") = None,
-    count: tag(int, "[modify] array count") = None,
+    count: tag(int, "[add/modify] ARRAY copy count") = None,
     strength: tag(float, "[modify] displace/other strength") = None,
     show_viewport: tag(bool, "[modify] show in viewport") = None,
     show_render: tag(bool, "[modify] show in render") = None,
@@ -77,12 +77,12 @@ def modifier(
             segments if segments is not None else 1,
             target, offset, wrap_method or "NEAREST_SURFACEPOINT", axis,
             merge_threshold, mirror_object, precision, rest_source, factor,
-            iterations, vertex_group, label)
+            iterations, vertex_group, count, label)
     if o == "modify":
         return modifiers.modify_modifier(
             target, modifier_name or modifier, levels, render_levels, width, segments,
             thickness, offset, angle_limit, count, factor, strength, iterations,
-            show_viewport, show_render, wrap_method, target_object, vertex_group, label)
+            show_viewport, show_render, wrap_method, target_object, vertex_group, axis, label)
     if o == "move":
         return modifiers.move_modifier(target, modifier, index, before, after, label)
     if o == "remove":

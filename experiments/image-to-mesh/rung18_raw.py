@@ -29,23 +29,21 @@ from rung17_depth import reconstruct, repair_depth
 
 def raw_force(V, edges, boundary, kmax=4):
     edges = set(edges)
-    tree = cKDTree(V)
+    N = len(V)
+    _, idx = cKDTree(V).query(V, k=N)          # full sorted neighbour list, NO cap
     added = []
     changed = True
     while changed:
         changed = False
-        adj = build_adj(edges, len(V))
-        for i in range(len(V)):
+        adj = build_adj(edges, N)
+        # lowest-degree first: needy verts grab partners before they fill up
+        for i in sorted(range(N), key=lambda v: len(adj[v])):
             if boundary[i] or len(adj[i]) >= kmax:
                 continue
-            _, idx = tree.query(V[i], k=12)
-            for j in idx:
-                if j == i or j in adj[i]:
+            for j in idx[i, 1:]:               # nearest-first, all of them
+                if j in adj[i] or len(adj[j]) >= kmax:   # don't bump a full vertex past 4
                     continue
-                # ---- NO GATES ----
-                # ok, med = chord_eval(...)          # beam: commented out
-                # if adj[i] & adj[j]: continue        # no-shared-neighbour: off
-                # if crosses(i, j): continue          # no-crossing: off
+                # ---- NO GATES (cross/shared-neighbour/beam all off) ----
                 edges.add((min(i, j), max(i, j)))
                 added.append((min(i, j), max(i, j)))
                 adj[i].add(j)
@@ -76,9 +74,17 @@ def main(front="v3_front.jpg", out="head_v13_raw.obj"):
     adj = build_adj(g2, len(V))
     interior = [i for i in range(len(V)) if not boundary[i]]
     v4 = sum(len(adj[i]) == 4 for i in interior)
-    print(f"  raw-forced edges added: {len(added)}  (no beam, no gates)")
+    print(f"  raw-forced edges added: {len(added)}  (no beam, no gates, NO cap)")
     print(f"  edges {len(g2)}  tris {c[3]}  quads {c[4]}  pent {c[5]}")
     print(f"  interior@val4: {v4}/{len(interior)}")
+
+    # how LONG are the forced edges? (in units of median dot spacing)
+    L = np.array([np.hypot(*(V[a] - V[b])) / sp for a, b in added])
+    longe = int((L > 2.5).sum())
+    print(f"  forced-edge length (x spacing): median {np.median(L):.1f}  "
+          f"max {L.max():.1f}  | >2.5x: {longe} (cross-hole / far reaches)")
+    print(f"  -> the {longe} long ones are the hole-rim/true-boundary verts the "
+          f"cardinal scan misses (it only finds the OUTER outline, not eye/mouth rims)")
 
     P = repair_depth(reconstruct(im, V, "ellipse", 0.5))
     with open(out, "w") as fh:
