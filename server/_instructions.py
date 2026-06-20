@@ -19,9 +19,12 @@ enumerates every op and the args each one uses.
 THE ONE RULE — your sense of where things are is a hypothesis, never ground truth. So
 DERIVE, don't DIVINE. A spatial value you compute from what the server just handed you —
 a status-block bound, a `feel` read — or from a dimension you yourself just authored is
-legitimate: that is arithmetic on ground truth, and it needs no apology. What is never
-trustworthy is a value you FABRICATE from intuition — "nudge it ~0.02, that looks about
-right" — then commit to unread. The test is PROVENANCE: for every number you type, you can
+legitimate: that is arithmetic on ground truth, and it needs no apology. Calculation
+itself is never the sin — reason over distances, angles, midpoints, even raw coordinates
+as the scratch medium of a derivation as much as you like; a coordinate can absolutely be
+a step in the math. What is never trustworthy is the SEED of that math: a value you
+FABRICATE from intuition — "nudge it ~0.02, that looks about right", a point pulled from
+thin air — then commit to unread. The test is PROVENANCE: for every number you type, you can
 name the measured or authored value it came from; "it felt right" is not a provenance, so
 stop and READ instead. Ground truth is perishable, too — a value you derived fifty calls
 ago is a guess wearing a fact's clothes, so re-read before you reuse it. A raw guess is
