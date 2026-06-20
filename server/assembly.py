@@ -86,9 +86,12 @@ def feel_relate(a: str = "", b: str = "") -> str:
     return "\n".join(lines)
 
 
-def feel_map(handle: str = "", target: str = "", margin: float = 0.0) -> str:
-    """Cast a ray from boundary handle(s) and report what each opening looks out onto."""
-    result = call_blender("feel_map", {"handle": handle, "target": target, "margin": margin})
+def feel_map(handle: str = "", target: str = "", margin: float = 0.0,
+             as_handle: str = "") -> str:
+    """Cast a ray from boundary handle(s) and report what each opening looks out onto.
+    as_handle=<name> (single handle= cast only) mints a point handle at the hit."""
+    result = call_blender("feel_map", {"handle": handle, "target": target,
+                                       "margin": margin, "as_handle": as_handle})
     if not result.get("success"):
         return result.get("error", "failed")
 
@@ -104,6 +107,11 @@ def feel_map(handle: str = "", target: str = "", margin: float = 0.0) -> str:
             )
         else:
             lines.append(f"  {c['handle']:<22} ✗ miss (opening looks out onto nothing)")
+    if result.get("handle"):
+        lines.append(f"  ✓ minted point handle '{result['handle']}' — act by name "
+                     f"(transform op=move_to handle={result['handle']}, …)")
+    elif result.get("handle_error"):
+        lines.append(f"  ⚠ as_handle: {result['handle_error']}")
     # G9 follow-up: a hit means two openings face each other — the bridge candidate.
     if any(c.get("hit") for c in casts):
         lines.append(

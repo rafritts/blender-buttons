@@ -14,17 +14,17 @@ from ._common import tag, unknown
 
 _OPS = ["topology", "profile", "silhouette", "section", "rings", "distance", "gap",
         "aligned", "symmetry", "mesh", "overlaps", "validate", "audit", "contacts",
-        "resting", "aim", "place", "anchor", "verify", "baseline", "diff", "handle",
-        "handles", "accept", "forget", "assembly", "map", "relate", "curve"]
+        "resting", "aim", "place", "radial", "anchor", "verify", "baseline", "diff",
+        "handle", "handles", "accept", "forget", "assembly", "map", "relate", "curve"]
 
 
 @mcp.tool(name="feel")
 def feel(
     op: Literal["topology", "profile", "silhouette", "section", "rings", "distance",
                 "gap", "aligned", "symmetry", "mesh", "overlaps", "validate", "audit",
-                "contacts", "resting", "aim", "place", "anchor", "verify", "baseline",
-                "diff", "handle", "handles", "accept", "forget", "assembly", "map",
-                "relate", "curve"] = "topology",
+                "contacts", "resting", "aim", "place", "radial", "anchor", "verify",
+                "baseline", "diff", "handle", "handles", "accept", "forget", "assembly",
+                "map", "relate", "curve"] = "topology",
     target: tag(str, "[topology/profile/silhouette/section/rings/symmetry/mesh] mesh "
                      "object (empty=active); "
                      "[map] cast from every boundary handle on this mesh") = "",
@@ -83,7 +83,12 @@ def feel(
     back: tag(float, "[place] offset +Y (m)") = 0.0,
     left: tag(float, "[place] offset -X (m)") = 0.0,
     right: tag(float, "[place] offset +X (m)") = 0.0,
-    snap: tag(bool, "[place] ray-snap the offset point onto the surface (default True)") = True,
+    snap: tag(bool, "[place/radial] ray-snap the offset point onto the surface (default True)") = True,
+    anchor: tag(str, "[radial] round object (bbox centre = ring centre) or handle (its point+plane)") = "",
+    angle: tag(float, "[radial] clock angle in degrees CLOCKWISE from 12 o'clock (0=top, 90=3 o'clock)") = 0.0,
+    as_handle: tag(str, "[aim/place/anchor/radial/map] mint a named POINT handle at the read's hit "
+                        "so the measured point is addressable by name (transform op=move_to "
+                        "handle=, aim_axis, sculpt handle=) — no coordinate ever typed (G78)") = "",
     steps: tag(int, "[verify] rings to grow/shrink the selection when perturbing (default 1)") = 1,
 ) -> str:
     """
@@ -145,9 +150,10 @@ def feel(
       contacts — which objects touch which                   (targets)
       resting  — are objects resting on / floating above surfaces? (targets)
       aim      — cast a normalized bbox-face aim onto the surface → world point +
-                 normal, to feed sculpt/select/add. The constructive-side
-                 `feel structure`: aim in fractions of the form, get the coordinate
-                 back instead of dead-reckoning it.   (target, face, u, v, aim_frame, margin)
+                 normal. The constructive-side `feel structure`: aim in fractions of the
+                 form, get the coordinate back instead of dead-reckoning it. Pass
+                 as_handle=NAME to MINT the hit as a named point handle you can then act
+                 on by name (no coordinate typed).   (target, face, u, v, aim_frame, margin, as_handle)
       anchor   — read the LIVE edit-mode selection as a surface anchor: its centroid
                  snapped onto the surface + normal — the measured seed a point-op uses
                  INSTEAD of a typed coordinate (SPEC-09).            (target)
@@ -166,7 +172,12 @@ def feel(
                  metric world offset (up/down/front/back/left/right), ray-snap to the
                  surface, get the world point + normal. 'A hand below the bust apex, on
                  the surface' with no typed Z (G47).  (target, handle,
-                 up/down/front/back/left/right, snap)
+                 up/down/front/back/left/right, snap, as_handle)
+      radial   — landmark by ANGLE on a round face: a point on a ring of `radius` around
+                 `anchor`'s centre at clock `angle` (deg CLOCKWISE from 12 o'clock). Sub-
+                 dials, bolt circles, clock indices, gauge ticks without hand-trig. Pair
+                 with as_handle to mint it by name (G81+G78). (anchor, angle, radius, axis,
+                 snap, as_handle)
       handle   — mint a named spatial anchor from the live edit-mode selection: an
                  Empty in a `Handles` collection + a `HANDLE_<name>` vertex group on
                  the owning mesh, visible/renamable/deletable in the Outliner. The
@@ -234,9 +245,9 @@ def feel(
     if o == "resting":
         return introspect.check_resting(targets)
     if o == "aim":
-        return queries.aim_surface(target, face, u, v, margin, aim_frame)
+        return queries.aim_surface(target, face, u, v, margin, aim_frame, as_handle)
     if o == "anchor":
-        return queries.selection_anchor(target)
+        return queries.selection_anchor(target, as_handle)
     if o == "verify":
         return editmode.verify_selection(steps)
     if o == "baseline":
@@ -245,7 +256,9 @@ def feel(
         return topology.region_diff(name)
     if o == "place":
         return queries.place_on_surface(target, handle, None, None, None,
-                                        up, down, front, back, left, right, snap)
+                                        up, down, front, back, left, right, snap, as_handle)
+    if o == "radial":
+        return queries.radial_landmark(anchor or target, angle, radius, axis, snap, as_handle)
     if o == "handle":
         return handles.mint_handle(name, source, vertex_parent)
     if o == "handles":
@@ -260,7 +273,7 @@ def feel(
     if o == "assembly":
         return assembly.feel_assembly(targets, group)
     if o == "map":
-        return assembly.feel_map(handle, target, margin)
+        return assembly.feel_map(handle, target, margin, as_handle)
     if o == "relate":
         return assembly.feel_relate(a, b)
     if o == "curve":

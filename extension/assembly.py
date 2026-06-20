@@ -228,7 +228,22 @@ def feel_map(params):
     else:
         return {"error": "feel op=map needs handle=<name> or target=<mesh>"}
 
-    return {"success": True, "casts": [_cast_from_handle(n, margin) for n in names]}
+    casts = [_cast_from_handle(n, margin) for n in names]
+    result = {"success": True, "casts": casts}
+    # G78: as_handle mints a point handle at the hit — only meaningful for a single cast
+    # that landed (target=<mesh> fans out to many, so there's no one point to name).
+    as_handle = (params.get("as_handle") or "").strip()
+    if as_handle and len(casts) == 1 and casts[0].get("hit") and casts[0].get("point"):
+        minted = handles.mint_from_point(casts[0]["point"], None, as_handle)
+        if minted.get("success"):
+            result["handle"] = minted["name"]
+            result["handle_kind"] = "point"
+        else:
+            result["handle_error"] = minted.get("error")
+    elif as_handle:
+        result["handle_error"] = ("as_handle needs a single hit — use handle=<one> that "
+                                  "lands on a surface (target=<mesh> casts many)")
+    return result
 
 
 # ── op=relate ────────────────────────────────────────────────────────────────

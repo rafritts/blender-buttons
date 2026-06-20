@@ -380,17 +380,75 @@ def mint_boundary_handle(obj, indices, base_name):
     return res
 
 
+def mint_from_point(point, normal=None, name="", kind="point"):
+    """G78 — mint a FREE-STANDING point handle at a world point. The Class-B anchor a
+    surface cast (aim/place/map) discovers, where there is NO vert-set to back it: just
+    an Empty at the point, no owner, no vgroup. It resolves to its own location (which a
+    human can still nudge — that reads as drift), so a measured point becomes addressable
+    by name and feeds the handle-consuming verbs without the coordinate ever passing
+    through the agent. Returns the same result shape as the vgroup mints."""
+    p = Vector((float(point[0]), float(point[1]), float(point[2])))
+    nrm = Vector(tuple(float(c) for c in normal)) if normal else Vector((0.0, 0.0, 1.0))
+    nrm = nrm.normalized() if nrm.length > 1e-9 else Vector((0.0, 0.0, 1.0))
+
+    empty = bpy.data.objects.new(name.strip() or "handle", None)
+    empty.empty_display_type = 'ARROWS'
+    empty.empty_display_size = 0.05
+    empty.location = p
+    empty.rotation_euler = nrm.to_track_quat('Z', 'Y').to_euler()
+    _handles_collection().objects.link(empty)
+
+    empty["bb_handle"] = True
+    empty["bb_kind"] = kind
+    empty["bb_owner"] = ""        # free-standing: no owning mesh
+    empty["bb_vgroup"] = ""       # and no vertex group to recompute from
+    empty["bb_normal"] = [round(c, 4) for c in nrm]
+    empty["bb_mint_point"] = [round(c, 5) for c in p]
+    empty["bb_vert_count"] = 0
+    return {
+        "success": True, "name": empty.name, "kind": kind, "owner": "",
+        "vgroup": "", "vert_count": 0,
+        "point": [round(c, 5) for c in p], "normal": [round(c, 4) for c in nrm],
+    }
+
+
+def mint_point_from_result(params, result):
+    """G78 — if a read carried `as_handle=<name>`, mint a point handle at the read's own
+    hit (`result['point']`). The keystone that makes a measured point actionable: a cast
+    can now feed `transform op=move_to handle=` / `aim_axis` / a `select` op by NAME. No-op
+    when as_handle is unset, the read failed, or there is no single point to mint."""
+    name = (params.get("as_handle") or "").strip()
+    if not name or not isinstance(result, dict) or not result.get("success"):
+        return result
+    pt = result.get("point")
+    if not (isinstance(pt, (list, tuple)) and len(pt) == 3):
+        return result
+    minted = mint_from_point(pt, result.get("normal"), name)
+    if minted.get("success"):
+        result["handle"] = minted["name"]
+        result["handle_kind"] = "point"
+    else:
+        result["handle_error"] = minted.get("error")
+    return result
+
+
 def mint_handle(params):
     """Mint a handle from the active mesh's current edit-mode selection (SPEC-07).
 
     name:   handle name (optional — auto-named if empty).
-    source: addressing mode. Only `selection` (the live edit-mode vertex selection)
-            so far; `aim` / `boundary` / `point` land in later phases.
+    source: addressing mode. `selection` (the live edit-mode vertex selection) is the
+            agent-facing mode; `point` (mint at a supplied world point — G78) exists for
+            the read handlers that mint from their own cast hit, not for typed input.
     vertex_parent: opt-in deform tracking (see mint_from_active_selection).
     """
     source = str(params.get("source") or "selection").lower().strip()
+    if source == "point":
+        pt = params.get("point")
+        if not (isinstance(pt, (list, tuple)) and len(pt) == 3):
+            return {"error": "source=point needs point=[x,y,z] (minted internally by a read)"}
+        return mint_from_point(pt, params.get("normal"), params.get("name", ""))
     if source != "selection":
-        return {"error": f"only source=selection is supported so far (got '{source}')"}
+        return {"error": f"source must be 'selection' or 'point' (got '{source}')"}
     return mint_from_active_selection(params.get("name", ""),
                                       bool(params.get("vertex_parent")))
 
@@ -444,6 +502,19 @@ def _validate(empty):
     Returns a dict: state (clean|dirty|orphaned), point (live centroid or None),
     vert_count, deform + place drift (metres), fiducial (whether place used
     neighbours), and — only when dirty — attribution (self|external)."""
+    # G78: a free-standing point handle (Class-B, from a cast hit) has no owner/vgroup
+    # to recompute from — its live point IS the Empty's location. It only "drifts" if
+    # something moved the Empty (a human nudge), measured against the mint point.
+    if not empty.get("bb_vgroup") and not empty.get("bb_owner"):
+        loc = empty.location
+        mp = empty.get("bb_mint_point")
+        place = (Vector(loc) - Vector(tuple(mp))).length if mp is not None else 0.0
+        nrm = Vector(tuple(empty.get("bb_normal", (0.0, 0.0, 1.0))))
+        return {"state": "dirty" if place > DRIFT_EPS else "clean",
+                "point": [round(c, 5) for c in loc], "vert_count": 0,
+                "normal": nrm, "deform": 0.0, "place": round(place, 5),
+                "fiducial": False}
+
     owner = bpy.data.objects.get(empty.get("bb_owner", ""))
     vgname = empty.get("bb_vgroup", "")
     cos, nrms = _vgroup_geo(owner, vgname)
@@ -535,6 +606,13 @@ def accept_handle(params):
     empty = _find_handle(name)
     if empty is None:
         return {"error": f"handle '{name}' not found in the Handles collection"}
+    # G78: a free-standing point handle has no geometry to re-snapshot — accepting it
+    # just re-baselines the mint point to its current (human-moved) location.
+    if not empty.get("bb_vgroup") and not empty.get("bb_owner"):
+        empty["bb_mint_point"] = [round(c, 5) for c in empty.location]
+        return {"success": True, "name": name,
+                "point": [round(c, 5) for c in empty.location],
+                "vert_count": 0, "state": "clean"}
     owner = bpy.data.objects.get(empty.get("bb_owner", ""))
     vgname = empty.get("bb_vgroup", "")
     cos, nrms = _vgroup_geo(owner, vgname)

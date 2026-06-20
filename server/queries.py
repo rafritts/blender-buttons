@@ -2,6 +2,20 @@ import json
 from server._core import mcp, call_blender, _status, _targets
 
 
+def _minted_line(result, how_hint):
+    """G78 — the tail a point-returning read appends about its as_handle outcome:
+    confirm the minted handle (now addressable by name), or nudge toward as_handle when
+    the agent read a point it will want to act on."""
+    if result.get("handle"):
+        return (f"\n  ✓ minted point handle '{result['handle']}' — act by name: "
+                f"transform op=move_to handle={result['handle']}, aim_axis, sculpt handle=, "
+                f"select op=in_sphere handle=.")
+    if result.get("handle_error"):
+        return f"\n  ⚠ as_handle: {result['handle_error']}"
+    return (f"\n  → a read, not an action. To ACT on this point without typing a "
+            f"coordinate, re-run with as_handle=NAME ({how_hint}) and address it by name.")
+
+
 @mcp.tool()
 def get_scene_tree(filter: str = "", type: str = "", max_depth: int = None,
                    summarize: int = 20, parts_only: bool = False) -> str:
@@ -402,7 +416,7 @@ def is_aligned(a: str, b: str, side: str = "TOP", tolerance: float = 0.001) -> s
 
 
 def aim_surface(target: str = "", face: str = "-Y", u: float = 0.5, v: float = 0.5,
-                margin: float = 0.0, frame: str = "world") -> str:
+                margin: float = 0.0, frame: str = "world", as_handle: str = "") -> str:
     """Cast a normalized bbox-face aim onto the surface — the constructive-side analog
     of `feel structure` → handles (gaps.md G1 / SPEC-06). Turns a framing you CAN
     reason about (a face of the bbox + two 0..1 coords) into the world point +
@@ -418,13 +432,14 @@ def aim_surface(target: str = "", face: str = "-Y", u: float = 0.5, v: float = 0
           two diverge (face=-Y can cast world +Z), which silently missed the head (G39).
           The response echoes the world direction the cast resolved to.
 
-    The returned point is a READ. To ACT on it without typing coordinates, address it
-    by name: with the live selection set, mint a handle (feel op=handle) and feed it to
-    handle-based verbs (sculpt handle=, select op=in_sphere handle=, transform op=move_to
-    handle=). Casts onto the EVALUATED surface (subsurf included)."""
+    The returned point is a READ. To ACT on it without typing coordinates, pass
+    as_handle=<name>: the cast point is minted as a named point handle on the spot, so it
+    feeds the handle-based verbs (transform op=move_to handle=, aim_axis from/to_handle=,
+    sculpt handle=, select op=in_sphere handle=) — no selection needed, no coordinate
+    typed. Casts onto the EVALUATED surface (subsurf included)."""
     result = call_blender("aim_surface",
                           {"target": target, "face": face, "u": u, "v": v,
-                           "margin": margin, "frame": frame})
+                           "margin": margin, "frame": frame, "as_handle": as_handle})
     if not result.get("success"):
         if "note" in result:
             return result["note"]
@@ -432,17 +447,17 @@ def aim_surface(target: str = "", face: str = "-Y", u: float = 0.5, v: float = 0
     p = result["point"]; n = result["normal"]
     return (f"surface @ {result['region']} (cast {result['cast_axis']} [{result.get('frame','world')}] "
             f"→ world {result.get('world_dir','?')}): "
-            f"point=[{p[0]}, {p[1]}, {p[2]}]  normal=[{n[0]}, {n[1]}, {n[2]}]\n"
-            f"  → a read, not an action: mint a handle here (feel op=handle) and brush/"
-            f"select by name (sculpt handle=, select op=in_sphere handle=).")
+            f"point=[{p[0]}, {p[1]}, {p[2]}]  normal=[{n[0]}, {n[1]}, {n[2]}]"
+            + _minted_line(result, "feel op=aim … as_handle=NAME"))
 
 
-def selection_anchor(target: str = "") -> str:
+def selection_anchor(target: str = "", as_handle: str = "") -> str:
     """SPEC-09 Phase 2 — read the LIVE edit-mode selection as a surface anchor: its
     centroid snapped onto the surface + that point's normal. The measured seed a
     point-op should use INSTEAD of a typed coordinate (`sculpt at=selection`,
-    `select in_sphere from_selection=true` do this for you)."""
-    result = call_blender("selection_anchor", {"target": target})
+    `select in_sphere from_selection=true` do this for you). as_handle=<name> also mints
+    a reusable point handle at the anchor."""
+    result = call_blender("selection_anchor", {"target": target, "as_handle": as_handle})
     if not result.get("success"):
         return result.get("error", "failed")
     p = result["point"]; n = result["normal"]
@@ -451,10 +466,31 @@ def selection_anchor(target: str = "") -> str:
     # knows it isn't the live edit selection (and could be stale if edited since).
     src = result.get("selection_source", "live")
     src_note = "" if src == "live" else f", from STORED selection (mesh in Object mode)"
+    tail = (f"\n  ✓ minted point handle '{result['handle']}'" if result.get("handle")
+            else "\n  → sculpt at=selection uses this point (radius defaults to the footprint)")
     return (f"selection anchor @ {result['region']} ({result['vert_count']} verts{src_note}): "
             f"point=[{p[0]}, {p[1]}, {p[2]}]  normal=[{n[0]}, {n[1]}, {n[2]}]  "
-            f"radius~{result.get('radius')}m (from extent {result.get('extent')})\n"
-            f"  → sculpt at=selection uses this point (radius defaults to the footprint)")
+            f"radius~{result.get('radius')}m (from extent {result.get('extent')})" + tail)
+
+
+def radial_landmark(anchor: str = "", angle: float = 0.0, radius: float = 0.0,
+                    axis: str = "Z", snap: bool = True, as_handle: str = "") -> str:
+    """G81 — mint a landmark by ANGLE on a round face. Clock-position a point on a ring
+    of `radius` around `anchor`'s centre, plane ⟂ `axis`. `angle` = degrees CLOCKWISE
+    from 12 o'clock (0=top, 90=3 o'clock, 180=6, 270=9), so a sub-dial register or an
+    off-cardinal hour stays in intent-space instead of hand-trig. anchor = a round object
+    (bbox centre) or a handle (its point + plane). Pair with as_handle to make the point
+    addressable by name (G78). Example: feel op=radial anchor=Dial angle=60 radius=0.11
+    as_handle=hour2 → the 2-o'clock surface point, minted."""
+    result = call_blender("radial_landmark", {"anchor": anchor, "angle": angle,
+        "radius": radius, "axis": axis, "snap": snap, "as_handle": as_handle})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    p = result["point"]; n = result["normal"]
+    return (f"radial landmark @ {result.get('region', '?')} "
+            f"(angle {result['angle']}° r={result['radius']}m on {result['axis']}): "
+            f"point=[{p[0]}, {p[1]}, {p[2]}]  normal=[{n[0]}, {n[1]}, {n[2]}]"
+            + _minted_line(result, "feel op=radial … as_handle=NAME"))
 
 
 def resolve_selection_anchor(target: str = ""):
@@ -471,7 +507,8 @@ def resolve_selection_anchor(target: str = ""):
 def place_on_surface(target: str, handle: str = "",
                      anchor_x: float = None, anchor_y: float = None, anchor_z: float = None,
                      up: float = 0.0, down: float = 0.0, front: float = 0.0, back: float = 0.0,
-                     left: float = 0.0, right: float = 0.0, snap: bool = True) -> str:
+                     left: float = 0.0, right: float = 0.0, snap: bool = True,
+                     as_handle: str = "") -> str:
     """G47 — surface-relative placement. Anchor on a measured landmark (a named handle's
     live point) + a METRIC world offset (up/down/front/back/left/right, in m; front=-Y),
     ray-snap to the target surface, and hand back the world point + normal to seed a
@@ -487,13 +524,12 @@ def place_on_surface(target: str, handle: str = "",
     else:
         return "place: need an anchor — pass handle=<name>"
     result = call_blender("place_on_surface", {
-        "target": target, "anchor": anchor, "snap": snap,
+        "target": target, "anchor": anchor, "snap": snap, "as_handle": as_handle,
         "up": up, "down": down, "front": front, "back": back, "left": left, "right": right})
     if not result.get("success"):
         return note + (result.get("note") or result.get("error", "failed"))
     p = result["point"]; n = result["normal"]
     return note + (
         f"placed @ {result['region']}: point=[{p[0]}, {p[1]}, {p[2]}]  "
-        f"normal=[{n[0]}, {n[1]}, {n[2]}]\n"
-        f"  → a read: mint a handle here (feel op=handle) and act by name "
-        f"(sculpt handle=, select op=in_sphere handle=).")
+        f"normal=[{n[0]}, {n[1]}, {n[2]}]"
+        + _minted_line(result, "feel op=place … as_handle=NAME"))

@@ -552,7 +552,8 @@ def aim_surface(params):
     loc_w = mw @ loc_local
     nrm_w = (mw.to_3x3() @ nrm_local).normalized()
     bbox = world_bbox(obj)
-    return {
+    from . import handles
+    return handles.mint_point_from_result(params, {
         "success": True, "hit": True,
         "point": [round(c, 5) for c in loc_w],
         "normal": [round(c, 4) for c in nrm_w],
@@ -561,7 +562,63 @@ def aim_surface(params):
         "frame": frame,
         "world_dir": world_dir,
         "push_out": f"move +normal to pull OUT, -normal to push IN",
-    }
+    })
+
+
+def radial_landmark(params):
+    """G81 — mint a landmark by ANGLE on a round face. Clock-position a point on a ring
+    of `radius` around `anchor`'s centre, in the plane perpendicular to `axis`. `angle`
+    is degrees CLOCKWISE from 12 o'clock (0=top, 90=3 o'clock, 180=6 o'clock, 270=9) — the
+    way a dial reads — so an off-cardinal hour (2 o'clock = 60°) stays in intent-space
+    instead of being decomposed into x/y by hand. Optionally surface-snaps onto the
+    anchor mesh; pairs with as_handle (G78) to mint the point so it's addressable by name.
+
+    anchor: a round object (its bbox centre is the ring centre) OR a handle (its live
+            point is the centre, its normal the ring axis). axis (X|Y|Z) is the ring's
+            normal when the anchor is an object; default Z (ring lies flat in XY)."""
+    from mathutils import Vector
+    from . import handles
+    anchor = (params.get("anchor") or "").strip()
+    angle = float(params.get("angle", 0.0))
+    radius = float(params.get("radius", 0.0))
+    axis = str(params.get("axis", "Z")).strip().upper()
+    if axis not in ("X", "Y", "Z"):
+        return {"error": f"axis '{axis}' invalid — X|Y|Z (the ring's normal)"}
+
+    obj = bpy.data.objects.get(anchor) if anchor else bpy.context.active_object
+    if obj is not None:
+        center = Vector(world_center(obj))
+    else:
+        h = handles._find_handle(anchor)
+        if h is None:
+            return {"error": f"anchor '{anchor}' is neither an object nor a handle"}
+        v = handles._validate(h)
+        if v.get("point") is None:
+            return {"error": f"anchor handle '{anchor}' is unresolvable"}
+        center = Vector(tuple(v["point"]))
+        # a handle's own plane normal overrides axis (the ring lies in its plane)
+        n = v.get("normal")
+        if n is not None and Vector(tuple(n)).length > 1e-6:
+            axis = "XYZ"[max((0, 1, 2), key=lambda i: abs(Vector(tuple(n))[i]))]
+
+    # in-plane basis: up = 12 o'clock, right = 3 o'clock (clockwise viewed down +axis)
+    up, right = {"Z": (Vector((0, 1, 0)), Vector((1, 0, 0))),
+                 "Y": (Vector((0, 0, 1)), Vector((1, 0, 0))),
+                 "X": (Vector((0, 0, 1)), Vector((0, 1, 0)))}[axis]
+    th = math.radians(angle)
+    p = center + radius * (math.sin(th) * right + math.cos(th) * up)
+
+    normal = None
+    if params.get("snap", True) and obj is not None and obj.type == 'MESH':
+        snap_w, nrm_w = _snap_to_surface(obj, p)
+        if snap_w is not None:
+            p, normal = snap_w, nrm_w
+    res = {"success": True, "point": [round(c, 5) for c in p],
+           "normal": [round(c, 4) for c in (normal or Vector((0.0, 0.0, 1.0)))],
+           "angle": angle, "radius": radius, "axis": axis}
+    if obj is not None:
+        res["region"] = region_words(world_bbox(obj), p)
+    return handles.mint_point_from_result(params, res)
 
 
 def _snap_to_surface(obj, point_world):
@@ -638,7 +695,8 @@ def selection_anchor(params):
     # suggested radius = half the largest horizontal-ish extent (the footprint radius)
     sugg_r = max(extent) / 2.0
     bbox = world_bbox(obj)
-    return {
+    from . import handles
+    return handles.mint_point_from_result(params, {
         "success": True,
         "point": [round(c, 5) for c in snap_w],
         "normal": [round(c, 4) for c in nrm_w],
@@ -648,7 +706,7 @@ def selection_anchor(params):
         "region": region_words(bbox, snap_w),
         "vert_count": len(sel),
         "selection_source": source,
-    }
+    })
 
 
 def place_on_surface(params):
@@ -680,13 +738,14 @@ def place_on_surface(params):
     else:
         snap_w, nrm_w = p, Vector((0.0, 0.0, 1.0))
     bbox = world_bbox(obj)
-    return {
+    from . import handles
+    return handles.mint_point_from_result(params, {
         "success": True, "hit": True,
         "point": [round(c, 5) for c in snap_w],
         "normal": [round(c, 4) for c in nrm_w],
         "offset_point": [round(c, 5) for c in p],
         "region": region_words(bbox, snap_w),
-    }
+    })
 
 
 TOOLS = {
@@ -698,4 +757,5 @@ TOOLS = {
     "aim_surface":      aim_surface,
     "selection_anchor": selection_anchor,
     "place_on_surface": place_on_surface,
+    "radial_landmark":  radial_landmark,
 }

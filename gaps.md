@@ -64,23 +64,6 @@ value falls out of a read it is already doing, or the status block surfaces the 
 > now MUST exist for the freed-up workflows to stay possible. (Kept by deliberate decision: relative
 > *nudges* everywhere, curve/tube `points` as geometry-definition, pose `loc` as bone-space relative.)
 
-## G78 — a measured read (`feel op=aim` / `op=place` / `op=map`) produces a point nothing can consume 🧭 NORTH-STAR
-
-**Symptom.** `feel op=aim` / `op=place` / `op=map` hand back a world point + normal. The old
-workflow fed that point to `sculpt at_x/y/z`, `select in_sphere center=`, or `add on={"at":...}` —
-all removed. There is now no way to ACT on a point a read discovered: handles only mint from the
-live edit-mode *selection* (`feel op=handle source=selection`), not from an arbitrary point.
-
-**Impact.** The "judge where, server measures, then act there" loop is broken at the last step for
-any feature located by a cast rather than a vertex selection. The reads still measure; their output
-is now a dead end.
-
-**Fix.** Let a read MINT a handle at its hit so it's addressable by name: e.g. `feel op=handle
-source=point` (mint at a supplied/last-read point), or an `as_handle=<name>` flag on `aim`/`place`/
-`map` that mints the cast point directly. Then the existing handle-based verbs (`sculpt handle=`,
-`select op=in_sphere handle=`, `transform op=move_to handle=`) consume it. This is the keystone that
-keeps the coordinate ban from removing capability instead of just removing dead-reckoning.
-
 ## G79 — no relational placement/aim for lights & cameras 🧩 MISSING CONTROL
 
 **Symptom.** `add light/camera` lost x/y/z + target_x/y/z; `object op=light` lost x/y/z; `view
@@ -121,26 +104,6 @@ the relational replacements may reuse some of this plumbing.
 > sub-seconds + blued hands + Albert chain, for UE5). These three are the misses left after the
 > pivot/array bugs were closed: a round-face layout couldn't stay in intent-space, a part couldn't
 > be seated into a cavity, and dial lettering had no primitive.
-
-## G81 — no way to mint a landmark by ANGLE on a round face (forces hand-trig) 🧩 MISSING CONTROL
-
-**Symptom.** Laying out a round dial — sub-seconds register at "6 o'clock, 0.11 m out", a hand pivot
-there, hour-index anchors at each clock hour — has no angular primitive. `feel op=place` takes only
-*cartesian* offsets (left/right/up/down/front/back), so a cardinal direction (−Y = 6 o'clock) works,
-but any off-axis hour (2 o'clock = 60°) forces me to decompose `radius·(sin θ, cos θ)` into x/y by
-hand. `array_radial` *places copies* on a ring but yields no named, addressable point to then act at.
-I fell back to typed x/y for every register.
-
-**Impact.** Any radial layout on a round face — sub-dials, bolt circles, clock numerals, lug/lug-hole
-positions, gauge ticks, dice pips — leaves intent-space; each off-cardinal position is hand-trig. The
-angle/radius are legitimate *derived* magnitudes (per THE ONE RULE) — there's just no verb that
-accepts them.
-
-**Fix.** Add an angular term to `feel op=place` (or a dedicated radial-landmark op): `anchor=<disc or
-handle>`, `angle=<deg>`, `radius=<m>`, surface-snap → **mint a handle by name** at that point (pairs
-with G78, which lets the minted point be consumed by `sculpt handle=` / `move_to handle=` / etc.).
-Test: on a disc, `place anchor=Dial angle=60 radius=0.11` mints a handle at the 2-o'clock surface
-point; its mirror is addressable by name.
 
 ## G82 — `rest_on` seats only on TOP; nothing seats a part DOWN INTO a cavity 🧩 MISSING CONTROL
 
