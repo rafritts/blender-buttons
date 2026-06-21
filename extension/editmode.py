@@ -606,6 +606,64 @@ def select_between(params):
     }
 
 
+def select_by_vgroup(params):
+    """Select the verts belonging to a named vertex group (or every group whose name
+    matches a substring) — the named-handle selector for IMPORTED assets. VRoid/Mixamo/
+    rigged characters ship semantic vertex groups (skirt sway panels, garment parts,
+    bone weights); this addresses them by NAME instead of box-selecting a shell out of a
+    fused mesh by hand.
+
+    name:       substring, case-insensitive. Empty = DISCOVERY: return every vgroup name
+                on the mesh (the 'grep' — list, don't select).
+    min_weight: a vert counts as in the group only if its weight there exceeds this
+                (default 0.0 = any non-zero weight). Raise it to shed faint seam bleed.
+    action:     SELECT (default) | DESELECT.
+    extend:     SELECT only — union onto the current selection instead of replacing.
+
+    Multiple matching groups are UNIONED (so name='skirt' grabs all three skirt layers
+    in one call). Reports which group names matched."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.type != 'MESH':
+        return {"error": "active object is not a mesh"}
+    name       = (params.get("name") or "").strip()
+    action     = params.get("action", "SELECT").upper()
+    extend     = bool(params.get("extend", False))
+    min_weight = float(params.get("min_weight", 0.0))
+    groups = list(obj.vertex_groups)
+
+    if not name:
+        return {"success": True, "groups": [vg.name for vg in groups],
+                "group_count": len(groups)}
+
+    needle = name.lower()
+    matched = [vg for vg in groups if needle in vg.name.lower()]
+    if not matched:
+        return {"error": f"no vertex group matching '{name}'. "
+                         f"Available ({len(groups)}): {[vg.name for vg in groups]}"}
+    if obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    deform = bm.verts.layers.deform.verify()
+    gidx = {vg.index for vg in matched}
+    count = 0
+    for v in bm.verts:
+        dv = v[deform]
+        hit = any(gi in dv and dv[gi] > min_weight for gi in gidx)
+        if hit:
+            v.select = (action != "DESELECT")
+        elif action == "SELECT" and not extend:
+            v.select = False
+        if v.select:
+            count += 1
+    _flush_vert_selection(bm)
+    bmesh.update_edit_mesh(obj.data)
+    return {"success": True,
+            "matched_groups": [vg.name for vg in matched],
+            "selected": count, "min_weight": min_weight}
+
+
 def loop_cut(params):
     import bmesh
     import mathutils
@@ -2184,6 +2242,7 @@ TOOLS = {
     "select_all":         select_all,
     "select_by_axis":     select_by_axis,
     "select_between":     select_between,
+    "select_by_vgroup":   select_by_vgroup,
     "grow_selection":     grow_selection,
     "verify_selection":   verify_selection,
     "flood_to_crease":    flood_to_crease,

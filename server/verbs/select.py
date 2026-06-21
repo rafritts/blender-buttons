@@ -10,18 +10,18 @@ from server._core import mcp
 from server import editmode, objects, rings, queries, handles
 from ._common import tag, unknown
 
-_OPS = ["all", "none", "object", "by_axis", "between", "boundary", "limb", "grow",
+_OPS = ["all", "none", "object", "by_axis", "between", "group", "boundary", "limb", "grow",
         "shrink", "flood", "random", "in_sphere", "ring", "rings", "component_mode",
         "current"]
 
 
 @mcp.tool(name="select")
 def select(
-    op: Literal["all", "none", "object", "by_axis", "between", "boundary", "limb",
+    op: Literal["all", "none", "object", "by_axis", "between", "group", "boundary", "limb",
                 "grow", "shrink", "flood", "random", "in_sphere", "ring", "rings",
                 "component_mode", "current"],
     # object selection
-    name: tag(str, "[object] object name to select") = "",
+    name: tag(str, "[object] object name to select; [group] vertex-group name substring (case-insensitive, unions all matches; empty = LIST every vgroup)") = "",
     # generic
     action: tag(str, "[all/by_axis/between/boundary/in_sphere/ring/rings] SELECT|DESELECT|INVERT|TOGGLE; on by_axis/between/in_sphere also INTERSECT (keep only verts BOTH already selected AND matching — 'frontmost ∩ chest-band' in one call instead of a deselect dance)") = "SELECT",
     extend: tag(bool, "[by_axis/between/in_sphere] True = ADD to current selection (union regions across calls) instead of replacing") = False,
@@ -54,6 +54,8 @@ def select(
     indices: tag(list, "[rings] list of ring indices") = None,
     # component mode
     mode: tag(str, "[component_mode] VERT | EDGE | FACE") = "",
+    # group
+    min_weight: tag(float, "[group] a vert counts as in the group only if its weight there exceeds this (0 = any non-zero; raise to shed faint seam bleed)") = 0.0,
 ) -> str:
     """
     Make a selection — the **Select** menu. `op` selects:
@@ -66,6 +68,11 @@ def select(
                     already selected AND past the threshold.
       between     — verts in an axis band         (axis, lo, hi, action, extend).
                     action=INTERSECT keeps only already-selected verts inside the band.
+      group       — verts in a named VERTEX GROUP   (name substring, min_weight, action,
+                    extend). name='' LISTS every vgroup (the grep). Unions all matches,
+                    so name='skirt' grabs every skirt layer at once. The named-handle
+                    selector for IMPORTED rigs — address a garment/part by its own name
+                    instead of box-selecting a shell out of a fused mesh.
       boundary    — open-edge boundary loop        (from_selection, action)
       limb        — a whole protrusion (sleeve/limb/finger), anchored to the mesh's
                     OWN topology — selects out to its base ring (the armhole), no
@@ -95,6 +102,8 @@ def select(
         return editmode.select_by_axis(axis, factor, comparison, action, extend, target)
     if o == "between":
         return editmode.select_between(axis, lo, hi, action, extend, target)
+    if o == "group":
+        return editmode.select_by_vgroup(name, action, extend, min_weight, target)
     if o == "boundary":
         return editmode.select_boundary(action, from_selection, target)
     if o == "limb":

@@ -596,6 +596,28 @@ def flood_to_crease(angle: float = 25.0, max_verts: int = 20000) -> str:
     return main + _status(result)
 
 
+def select_by_vgroup(name: str = "", action: str = "SELECT", extend: bool = False,
+                     min_weight: float = 0.0, target: str = "", label: str = "") -> str:
+    """Select verts by VERTEX-GROUP name — the named-handle selector for imported rigs.
+    name='' lists every group (the grep); a substring unions all matching groups."""
+    result = call_blender("select_by_vgroup",
+                          {"name": name, "action": action, "extend": extend,
+                           "min_weight": min_weight, "target": target}, label=label)
+    if not result.get("success"):
+        return result.get("error", "failed") + _status(result)
+    if "groups" in result:
+        gs = result["groups"]
+        if not gs:
+            main = "no vertex groups on this mesh"
+        else:
+            main = f"{result['group_count']} vertex groups:\n  " + "\n  ".join(gs)
+    else:
+        main = (f"selected {result['selected']} verts in "
+                f"{len(result['matched_groups'])} group(s): "
+                f"{', '.join(result['matched_groups'])}")
+    return main + _status(result)
+
+
 @mcp.tool()
 def select_between(axis: str = "Z", lo: float = 0.0, hi: float = 1.0,
                    action: str = "SELECT", extend: bool = False, target: str = "") -> str:

@@ -97,6 +97,7 @@ EDIT_MODE_TOOLS = {
     "get_rings", "select_ring", "select_rings", "scale_rings", "taper_end", "taper_section",
     "shape_profile", "flute", "field",
     "assign_weight", "select_boundary", "select_limb", "flood_to_crease",
+    "select_by_vgroup",
     "relax_selection", "slide_selection", "poke_faces", "inset_faces", "grid_fill",
 }
 
