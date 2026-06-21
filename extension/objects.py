@@ -1059,8 +1059,134 @@ def remesh(params):
     return result
 
 
+def clad_surface(params):
+    """G97: create a watertight offset SHELL that follows a surface region — the
+    create-half of shrinkwrap. Clothing, armor, plating, a phone case, bark over a trunk,
+    an apple's skin, candle wax over a wick, shrink-wrap film: all are 'a new shell that
+    follows a surface, held a clearance off it, with a wall thickness'. Today that's an
+    8-call hand retopo (duplicate → restrict to region → delete the rest → inflate off the
+    skin → solidify → material); this is the one call.
+
+    The SHRINKWRAP modifier only fits a shell you've ALREADY modelled and placed onto a
+    target, and has no standoff dial. This CREATES the region-following shell with the
+    clearance baked in — clothing's whole point is to float just above the skin.
+
+    target:    the surface to clad (empty = active object).
+    region:    'whole' = the entire surface | 'selection' = the live vertex selection on
+               the target (select the band/patch first, then clad) | 'trunk' = the whole
+               mesh minus its limbs/protrusions (so a garment dodges T-posed arms — the
+               'mesh minus limbs' selection the agent otherwise can't express).
+    clearance: outward standoff in m — how far the shell's inner wall floats off the
+               surface (default 0.005 = 5mm). The skin is lifted along its normals by this.
+    thickness: wall thickness in m (default 0.004 = 4mm), carried as a live SOLIDIFY
+               modifier grown OUTWARD so the inner wall stays exactly `clearance` proud.
+    new_name:  name for the shell object (default '<target>_shell').
+    """
+    import bmesh
+    target_name = params.get("target") or params.get("name")
+    clearance = float(params.get("clearance", 0.005))
+    thickness = float(params.get("thickness", 0.004))
+    region = (params.get("region") or "whole").lower()
+    target = bpy.data.objects.get(target_name) if target_name else bpy.context.active_object
+    if target is None or target.type != 'MESH':
+        return {"error": f"clad needs a mesh target (got {target_name!r})"}
+    if region not in ("whole", "selection", "trunk"):
+        return {"error": "region must be 'whole', 'selection', or 'trunk'"}
+    new_name = params.get("new_name") or f"{target.name}_shell"
+
+    # 'trunk' resolves to a vertex set NOW (off the cage topology) so it survives the
+    # duplicate as plain selection flags, same path as region='selection'.
+    trunk_ids = None
+    if region == "trunk":
+        from . import topology
+        abm = topology._topology_bmesh(target, "cage")
+        try:
+            bbox = topology._bbox(abm)
+            prots, _ap = topology.find_protrusions(abm, bbox)
+        finally:
+            abm.free()
+        limb_ids = set()
+        for p in prots:
+            limb_ids.update(p["member_ids"])
+        n = len(target.data.vertices)
+        trunk_ids = [i for i in range(n) if i not in limb_ids]
+        if not trunk_ids or len(trunk_ids) == n:
+            return {"error": "region='trunk' found no limbs to exclude — the mesh has no "
+                             "protrusions (run feel op=topology method=structure to see "
+                             "the regime). Use region='whole' or 'selection'."}
+
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    # For region='trunk' write the computed selection onto the source mesh so the
+    # duplicate inherits it; region='selection' relies on the selection already set.
+    if region == "trunk":
+        for v in target.data.vertices:
+            v.select = False
+        for i in trunk_ids:
+            target.data.vertices[i].select = True
+
+    bpy.ops.object.select_all(action='DESELECT')
+    target.select_set(True)
+    bpy.context.view_layer.objects.active = target
+    bpy.ops.object.duplicate(linked=False)
+    dup = bpy.context.active_object
+    dup.name = new_name
+    if dup.data:
+        dup.data.name = new_name
+
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_mode(type='VERT')
+    if region in ("selection", "trunk"):
+        bm = bmesh.from_edit_mesh(dup.data)
+        if not any(v.select for v in bm.verts):
+            bpy.ops.object.mode_set(mode='OBJECT')
+            bpy.data.objects.remove(dup, do_unlink=True)
+            return {"error": f"region='{region}' but no vertices are selected on "
+                             f"'{target.name}' — make the selection first."}
+        # Keep the region: drop everything else.
+        bpy.ops.mesh.select_all(action='INVERT')
+        bpy.ops.mesh.delete(type='VERT')
+        bpy.ops.mesh.select_all(action='SELECT')
+    else:
+        bpy.ops.mesh.select_all(action='SELECT')
+
+    # Lift the skin off the body along its own normals by `clearance` (local-space,
+    # scale-corrected — same convention as edit op=inflate).
+    sx = abs(dup.scale.x) or 1.0
+    sy = abs(dup.scale.y) or 1.0
+    sz = abs(dup.scale.z) or 1.0
+    bm = bmesh.from_edit_mesh(dup.data)
+    bm.normal_update()
+    lifted = 0
+    for v in bm.verts:
+        nrm = v.normal
+        if nrm.length == 0:
+            continue
+        v.co.x += nrm.x * clearance / sx
+        v.co.y += nrm.y * clearance / sy
+        v.co.z += nrm.z * clearance / sz
+        lifted += 1
+    bmesh.update_edit_mesh(dup.data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    # Wall thickness as a live SOLIDIFY, grown OUTWARD (offset=1) so the inner wall —
+    # the lifted skin — keeps its `clearance` standoff and the wall thickens away from
+    # the body.
+    mod = dup.modifiers.new(name="Shell", type='SOLIDIFY')
+    mod.thickness = thickness
+    mod.offset = 1.0
+
+    bb = world_bbox(dup)
+    dims = [round(bb[3] - bb[0], 4), round(bb[4] - bb[1], 4), round(bb[5] - bb[2], 4)]
+    return {"success": True, "shell": dup.name, "target": target.name,
+            "region": region, "clearance": round(clearance, 5),
+            "thickness": round(thickness, 5), "verts": lifted, "dimensions": dims}
+
+
 TOOLS = {
     "remesh":                 remesh,
+    "clad_surface":           clad_surface,
     "rename_object":          rename_object,
     "select_object":          select_object,
     "delete_object":          delete_object,

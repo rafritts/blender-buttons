@@ -14,7 +14,7 @@ from ._common import tag, unknown
 
 _OPS = ["topology", "profile", "silhouette", "section", "rings", "distance", "gap",
         "aligned", "linked", "symmetry", "mesh", "overlaps", "validate", "audit", "contacts",
-        "resting", "aim", "place", "radial", "anchor", "verify", "baseline", "diff",
+        "clearance", "resting", "aim", "place", "radial", "anchor", "verify", "baseline", "diff",
         "handle", "handles", "accept", "forget", "assembly", "map", "relate", "curve"]
 
 
@@ -22,9 +22,9 @@ _OPS = ["topology", "profile", "silhouette", "section", "rings", "distance", "ga
 def feel(
     op: Literal["topology", "profile", "silhouette", "section", "rings", "distance",
                 "gap", "aligned", "linked", "symmetry", "mesh", "overlaps", "validate",
-                "audit", "contacts", "resting", "aim", "place", "radial", "anchor", "verify",
-                "baseline", "diff", "handle", "handles", "accept", "forget", "assembly",
-                "map", "relate", "curve"] = "topology",
+                "audit", "contacts", "clearance", "resting", "aim", "place", "radial",
+                "anchor", "verify", "baseline", "diff", "handle", "handles", "accept",
+                "forget", "assembly", "map", "relate", "curve"] = "topology",
     target: tag(str, "[topology/profile/silhouette/section/rings/symmetry/mesh] mesh "
                      "object (empty=active); "
                      "[map] cast from every boundary handle on this mesh") = "",
@@ -62,6 +62,10 @@ def feel(
     # lint / check
     targets: tag(str, "[overlaps/validate/contacts/resting/assembly] object(s) to check; "
                       "assembly: '' = all scene meshes, 'a,b,c' = just those") = "",
+    shell: tag(str, "[clearance] the cladding object (garment/case/armor) that must clear the surface") = "",
+    surface: tag(str, "[clearance] the surface being wrapped (body/phone/jar)") = "",
+    threshold: tag(float, "[clearance] minimum clearance in mm; when set, adds a pass/fail verdict") = None,
+    samples: tag(int, "[clearance] cap on shell verts sampled (default 2000)") = 2000,
     group: tag(str, "[audit/assembly] group/collection (assembly: read this collection's meshes)") = "",
     tri_budget: tag(int, "[audit] triangle budget") = 5000,
     # aim — surface-relative addressing (G1 / SPEC-06)
@@ -152,6 +156,12 @@ def feel(
       validate — scene-wide hygiene pass                     (targets)
       audit    — asset budget/quality audit of a group       (group, tri_budget)
       contacts — which objects touch which                   (targets)
+      clearance— SIGNED nearest-surface read: 'is my shell everywhere OUTSIDE the surface
+                 it wraps?'. The cladding check `contacts` can't give — a garment that
+                 envelops a torso and one that stabs through it report the SAME bbox
+                 overlap. Per shell vert: + = outside (clears), − = stabbing inside.
+                 Reports min/mean clearance, % of shell outside, worst penetrations.
+                 (shell, surface, threshold, samples)
       resting  — are objects resting on / floating above surfaces? (targets)
       aim      — cast a normalized bbox-face aim onto the surface → world point +
                  normal. The constructive-side `feel structure`: aim in fractions of the
@@ -248,6 +258,8 @@ def feel(
         return lint.audit_asset(group, tri_budget)
     if o == "contacts":
         return introspect.check_contacts(targets)
+    if o == "clearance":
+        return introspect.check_clearance(shell, surface, threshold, samples)
     if o == "resting":
         return introspect.check_resting(targets)
     if o == "aim":

@@ -277,6 +277,103 @@ def check_resting(params):
     return {"success": True, "resting": results}
 
 
+# ─────────────────────────── clearance (G98) ───────────────────────────
+
+def check_clearance(params):
+    """G98: SIGNED nearest-surface clearance — 'is my shell everywhere OUTSIDE the
+    surface it wraps?'. The one read a bbox-overlap `contacts` number can't give: a
+    garment that correctly envelops a torso and one that stabs through the ribs produce
+    the SAME alarming bbox figure, because the wrapped body is supposed to live inside
+    the shell's bounding box. This signs the distance instead.
+
+    For each sampled SHELL vert, find the nearest point on the SURFACE and sign the
+    distance by the surface's outward normal: positive ⇒ the shell vert sits OUTSIDE the
+    surface (correct clearance), negative ⇒ the shell dips INSIDE the surface (it's
+    stabbing through). Reports min/mean clearance over the clearing verts, the fraction of
+    the shell outside the surface, and the worst penetration patches with locations.
+
+    General past clothing: armor over a body, a phone case over a phone, a lid over a jar,
+    a press-fit sleeve — anything that must clear the surface it claddes.
+
+    shell:     the cladding object (garment / case / armor / plating).
+    surface:   the surface being wrapped (body / phone / jar).
+    threshold: optional minimum clearance in mm; when given, adds a pass/fail `clears`.
+    samples:   cap on shell verts sampled (default 2000).
+    """
+    shell_name = params.get("shell")
+    surface_name = params.get("surface")
+    threshold = params.get("threshold")
+    shell = bpy.data.objects.get(shell_name) if shell_name else None
+    surface = bpy.data.objects.get(surface_name) if surface_name else None
+    if shell is None or surface is None:
+        return {"error": f"need existing 'shell' and 'surface' meshes "
+                         f"(shell={shell_name}, surface={surface_name})"}
+    if shell.type != 'MESH' or surface.type != 'MESH':
+        return {"error": "both 'shell' and 'surface' must be mesh objects"}
+    if shell_name == surface_name:
+        return {"error": "'shell' and 'surface' must be different objects"}
+
+    # Full-resolution surface BVH (accuracy: the signed field is only as good as the
+    # surface it samples against); the nearest-face normal gives the inside/outside sign.
+    surf_bm = eval_world_bmesh(surface)
+    if surf_bm is None or not surf_bm.verts:
+        if surf_bm:
+            surf_bm.free()
+        return {"error": f"surface '{surface_name}' has no mesh geometry"}
+    surf_bvh = BVHTree.FromBMesh(surf_bm)
+    surf_bm.free()
+
+    shell_bm = eval_world_bmesh(shell)
+    if shell_bm is None or not shell_bm.verts:
+        if shell_bm:
+            shell_bm.free()
+        return {"error": f"shell '{shell_name}' has no mesh geometry"}
+    n = len(shell_bm.verts)
+    cap = max(1, int(params.get("samples", 2000)))
+    step = max(1, n // cap)
+    samples = [shell_bm.verts[i].co.copy() for i in range(0, n, step)]
+    shell_bm.free()
+
+    outside = []          # signed distances (m) for shell verts OUTSIDE the surface
+    inside = []           # (depth_mm, [x,y,z]) for shell verts INSIDE the surface
+    for p in samples:
+        loc, normal, idx, dist = surf_bvh.find_nearest(p)
+        if loc is None:
+            continue
+        signed = dist if (p - loc).dot(normal) >= 0 else -dist
+        if signed >= 0:
+            outside.append(signed)
+        else:
+            inside.append((round(-signed * 1000, 2), [round(c, 4) for c in p]))
+
+    total = len(outside) + len(inside)
+    if total == 0:
+        return {"error": "no shell verts could be sampled against the surface"}
+    frac_outside = len(outside) / total
+    min_clear_mm = round(min(outside) * 1000, 2) if outside else None
+    mean_clear_mm = round(sum(outside) / len(outside) * 1000, 2) if outside else None
+    inside.sort(key=lambda t: -t[0])
+    worst = [{"depth_mm": d, "at": loc} for d, loc in inside[:8]]
+
+    result = {
+        "success": True,
+        "shell": shell_name,
+        "surface": surface_name,
+        "samples": total,
+        "fraction_outside": round(frac_outside, 4),
+        "min_clearance_mm": min_clear_mm,
+        "mean_clearance_mm": mean_clear_mm,
+        "penetrations": len(inside),
+        "worst_penetrations": worst,
+    }
+    if threshold is not None:
+        thr = float(threshold)
+        result["threshold_mm"] = thr
+        result["clears"] = bool(len(inside) == 0 and min_clear_mm is not None
+                                and min_clear_mm >= thr)
+    return result
+
+
 # ─────────────────────────── framing (P9) ───────────────────────────
 
 def _occlusion_fraction(scene, depsgraph, cam, obj, cap=120):
@@ -568,6 +665,7 @@ def diff_since(params):
 
 TOOLS = {
     "check_contacts": check_contacts,
+    "check_clearance": check_clearance,
     "check_resting":  check_resting,
     "check_framing":  check_framing,
     "trace_profile":  trace_profile,

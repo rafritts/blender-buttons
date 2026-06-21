@@ -88,7 +88,8 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
     "zoom_to_selected", "orbit_viewport",
     # read-only introspection / lint tools (P3-P12) — pure queries, no scene mutation
     "find_coplanar_overlaps", "validate_scene", "check_mesh", "audit_asset",
-    "check_contacts", "trace_profile", "check_framing", "check_resting", "diff_since",
+    "check_contacts", "check_clearance", "trace_profile", "check_framing",
+    "check_resting", "diff_since",
     # render config read (G11) — pure query
     "render_settings",
     # rig + metadata introspection (U1, U2, U9) — read-only

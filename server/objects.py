@@ -80,6 +80,44 @@ def duplicate_object(name: str, new_name: str = "", linked: bool = False) -> str
 
 
 @mcp.tool()
+def clad_surface(target: str = "", region: str = "whole", clearance: float = 0.005,
+                 thickness: float = 0.004, new_name: str = "", label: str = "") -> str:
+    """
+    Create a watertight offset SHELL that follows a surface region — clothing, armor,
+    plating, a phone case, bark over a trunk, an apple's skin, candle wax, shrink-wrap.
+    The create-half of shrinkwrap: SHRINKWRAP fits a shell you've ALREADY modelled and
+    has no standoff dial; this CREATES the region-following shell with the clearance baked
+    in (clothing floats just above the skin). One call replaces the 8-step retopo dance
+    (duplicate → restrict to region → delete the rest → inflate off the skin → solidify).
+
+    target:    surface to clad (empty = active object).
+    region:    'whole' = the whole surface | 'selection' = the live vertex selection
+               (select the band/patch first, then clad) | 'trunk' = the mesh minus its
+               limbs/protrusions, so a garment dodges T-posed arms.
+    clearance: outward standoff in m — how far the shell's inner wall floats off the skin
+               (default 0.005 = 5mm).
+    thickness: wall thickness in m (default 0.004 = 4mm), a live SOLIDIFY grown outward so
+               the inner wall keeps its clearance.
+    new_name:  shell object name (default '<target>_shell').
+
+    Verify the result with feel op=clearance shell=<shell> surface=<target> — the signed
+    read that confirms the shell sits everywhere outside the skin.
+    """
+    result = call_blender("clad_surface", {
+        "target": target, "region": region, "clearance": clearance,
+        "thickness": thickness, "new_name": new_name,
+    }, label=label)
+    if result.get("success"):
+        main = (f"clad '{result['target']}' → shell '{result['shell']}' "
+                f"(region={result['region']}, clearance {round(result['clearance']*1000,1)}mm, "
+                f"wall {round(result['thickness']*1000,1)}mm, {result['verts']} verts, "
+                f"dims {result['dimensions']}) [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def duplicate_mirrored(target: str, axis: str = "X", pivot: str = "WORLD",
                        new_name: str = "", label: str = "") -> str:
     """

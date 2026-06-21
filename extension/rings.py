@@ -515,12 +515,25 @@ def flute(params):
     mat_inv = mat.inverted()
     other = [i for i in range(3) if i != axis_idx]
     u_i, v_i = other[0], other[1]
-    verts = list(bm.verts)
-    if not verts:
+    all_verts = list(bm.verts)
+    if not all_verts:
         return {"error": "mesh has no vertices"}
+    # G96: restrict to the live selection when one exists, so a band can be reeded
+    # without touching the rest of a single-lathe body. Compute the rotation center
+    # from the operated verts only (bbox center on the cross-plane), so an off-axis
+    # selection still corrugates around its own axis rather than the whole-mesh centroid.
+    selected = [v for v in all_verts if v.select]
+    scoped = bool(selected)
+    verts = selected if scoped else all_verts
     world = [mat @ v.co for v in verts]
-    cu = sum(w[u_i] for w in world) / len(world)
-    cv = sum(w[v_i] for w in world) / len(world)
+    if scoped:
+        us = [w[u_i] for w in world]
+        vs = [w[v_i] for w in world]
+        cu = 0.5 * (min(us) + max(us))
+        cv = 0.5 * (min(vs) + max(vs))
+    else:
+        cu = sum(w[u_i] for w in world) / len(world)
+        cv = sum(w[v_i] for w in world) / len(world)
 
     affected = 0
     for v, w in zip(verts, world):
@@ -549,6 +562,7 @@ def flute(params):
         "depth": round(depth, 5),
         "profile": profile,
         "verts_affected": affected,
+        "scope": "selection" if scoped else "whole_mesh",
         "warnings": warnings,
     }
 

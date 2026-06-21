@@ -42,6 +42,57 @@ def check_contacts(targets: str = "") -> str:
 
 
 @mcp.tool()
+def check_clearance(shell: str, surface: str, threshold: float = None, samples: int = 2000) -> str:
+    """
+    SIGNED nearest-surface clearance — "is my shell everywhere OUTSIDE the surface it
+    wraps?". The one cladding read a bbox-overlap contacts number can't give: a garment
+    that correctly envelops a torso and one that stabs through the ribs produce the SAME
+    alarming overlap figure, because the wrapped body is meant to live inside the shell's
+    bounding box. This signs the distance by the surface normal instead.
+
+    Per sampled shell vert: positive ⇒ outside the surface (correct clearance), negative ⇒
+    dipping inside it (stabbing through). Reports min/mean clearance, the fraction of the
+    shell outside the surface, and the worst penetration patches.
+
+    General: armor over a body, a phone case over a phone, a lid over a jar, a press-fit
+    sleeve — anything that must clear what it claddes.
+
+    shell:     the cladding object (garment / case / armor / plating).
+    surface:   the surface being wrapped (body / phone / jar).
+    threshold: optional min clearance in mm; when set, adds a pass/fail verdict.
+    samples:   cap on shell verts sampled (default 2000).
+    """
+    params = {"shell": shell, "surface": surface, "samples": samples}
+    if threshold is not None:
+        params["threshold"] = threshold
+    result = call_blender("check_clearance", params)
+    if not result.get("success"):
+        return result.get("error", "failed")
+    frac = result["fraction_outside"]
+    pen = result["penetrations"]
+    minc = result["min_clearance_mm"]
+    meanc = result["mean_clearance_mm"]
+    head = (f"{result['shell']} vs {result['surface']}: "
+            f"{round(frac * 100, 1)}% of the shell clears the surface")
+    if minc is not None:
+        head += f"; clearance min {minc}mm, mean {meanc}mm"
+    lines = [head]
+    if pen:
+        lines.append(f"  {pen} sampled vert(s) STAB INSIDE the surface — shell is not "
+                     f"a clean envelope:")
+        for w in result["worst_penetrations"]:
+            lines.append(f"    inside by {w['depth_mm']}mm at {w['at']}")
+    else:
+        lines.append("  no penetrations — shell is everywhere outside the surface")
+    if "clears" in result:
+        verdict = "PASS" if result["clears"] else "FAIL"
+        lines.append(f"  {verdict} — clears by ≥{result['threshold_mm']}mm everywhere"
+                     if result["clears"] else
+                     f"  {verdict} — does NOT clear by ≥{result['threshold_mm']}mm everywhere")
+    return "\n".join(lines) + _status(result)
+
+
+@mcp.tool()
 def check_resting(targets: str = "") -> str:
     """
     Gravity sanity per part: what it rests on (floor or another object), how many

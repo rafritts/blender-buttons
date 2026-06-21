@@ -127,6 +127,9 @@ run("add_cylinder", name="col", radius=0.2, height=1.0, segments=64)
 run("loop_cut", target="col", axis="Z", cuts=6)
 before = ring_radii(bpy.data.objects["col"])
 mid_pos = sorted(before)[len(before) // 2]
+# G96: flute now respects the live selection. loop_cut leaves only the new loops
+# selected, so flute the WHOLE surface of revolution by selecting all first.
+run("select_all", action="SELECT")
 r = run("flute", target="col", axis="Z", count=8, depth=0.03, profile="concave")
 check("flute succeeds", r.get("success"), r.get("error"))
 check("flute moved verts", r.get("verts_affected", 0) > 0, r)
