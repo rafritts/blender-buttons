@@ -664,6 +664,73 @@ def select_by_vgroup(params):
             "selected": count, "min_weight": min_weight}
 
 
+def select_by_material(params):
+    """Select faces by MATERIAL SLOT — the named-handle selector for imported garments
+    that SHARE bone weights with the body. A jacket/coat torso rides the same spine/chest
+    bones as the skin underneath, so no vertex group isolates it — but its material slot
+    does. VRoid/VRM meshes give every garment its own material (Tops, Bottoms, Shoes,
+    Hair, ...), so the material is the garment's real name.
+
+    name:   substring, case-insensitive, matched against material names. Empty = DISCOVERY:
+            list every material slot with index, name, and face count (the 'grep').
+    action: SELECT (default) | DESELECT.
+    extend: SELECT only — union onto the current selection instead of replacing.
+
+    Multiple matching slots are UNIONED (so name='Tops' grabs every Tops cloth layer).
+    Reports which materials matched."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.type != 'MESH':
+        return {"error": "active object is not a mesh"}
+    name   = (params.get("name") or "").strip()
+    action = params.get("action", "SELECT").upper()
+    extend = bool(params.get("extend", False))
+    slots  = [(i, (s.material.name if s.material else "<empty>"))
+              for i, s in enumerate(obj.material_slots)]
+
+    if obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    bm = bmesh.from_edit_mesh(obj.data)
+
+    if not name:
+        counts = {}
+        for f in bm.faces:
+            counts[f.material_index] = counts.get(f.material_index, 0) + 1
+        return {"success": True,
+                "slots": [{"slot": i, "material": nm, "faces": counts.get(i, 0)}
+                          for i, nm in slots],
+                "slot_count": len(slots)}
+
+    needle = name.lower()
+    matched = [(i, nm) for i, nm in slots if needle in nm.lower()]
+    if not matched:
+        return {"error": f"no material matching '{name}'. "
+                         f"Available ({len(slots)}): {[nm for _, nm in slots]}"}
+    midx = {i for i, _ in matched}
+
+    if action == "SELECT" and not extend:
+        for v in bm.verts:
+            v.select = False
+        for e in bm.edges:
+            e.select = False
+        for f in bm.faces:
+            f.select = False
+
+    sel_faces = 0
+    for f in bm.faces:
+        if f.material_index in midx:
+            f.select_set(action != "DESELECT")
+            if f.select:
+                sel_faces += 1
+    bm.select_flush_mode()
+    bmesh.update_edit_mesh(obj.data)
+    nverts = sum(1 for v in bm.verts if v.select)
+    return {"success": True,
+            "matched_materials": [nm for _, nm in matched],
+            "matched_slots": sorted(midx),
+            "selected_faces": sel_faces, "selected_verts": nverts}
+
+
 def loop_cut(params):
     import bmesh
     import mathutils
@@ -2243,6 +2310,7 @@ TOOLS = {
     "select_by_axis":     select_by_axis,
     "select_between":     select_between,
     "select_by_vgroup":   select_by_vgroup,
+    "select_by_material": select_by_material,
     "grow_selection":     grow_selection,
     "verify_selection":   verify_selection,
     "flood_to_crease":    flood_to_crease,

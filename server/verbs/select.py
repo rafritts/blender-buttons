@@ -10,18 +10,18 @@ from server._core import mcp
 from server import editmode, objects, rings, queries, handles
 from ._common import tag, unknown
 
-_OPS = ["all", "none", "object", "by_axis", "between", "group", "boundary", "limb", "grow",
-        "shrink", "flood", "random", "in_sphere", "ring", "rings", "component_mode",
+_OPS = ["all", "none", "object", "by_axis", "between", "group", "material", "boundary", "limb",
+        "grow", "shrink", "flood", "random", "in_sphere", "ring", "rings", "component_mode",
         "current"]
 
 
 @mcp.tool(name="select")
 def select(
-    op: Literal["all", "none", "object", "by_axis", "between", "group", "boundary", "limb",
-                "grow", "shrink", "flood", "random", "in_sphere", "ring", "rings",
+    op: Literal["all", "none", "object", "by_axis", "between", "group", "material", "boundary",
+                "limb", "grow", "shrink", "flood", "random", "in_sphere", "ring", "rings",
                 "component_mode", "current"],
     # object selection
-    name: tag(str, "[object] object name to select; [group] vertex-group name substring (case-insensitive, unions all matches; empty = LIST every vgroup)") = "",
+    name: tag(str, "[object] object name to select; [group] vertex-group name substring; [material] material-name substring (case-insensitive, unions all matches; empty = LIST every vgroup/material slot)") = "",
     # generic
     action: tag(str, "[all/by_axis/between/boundary/in_sphere/ring/rings] SELECT|DESELECT|INVERT|TOGGLE; on by_axis/between/in_sphere also INTERSECT (keep only verts BOTH already selected AND matching — 'frontmost ∩ chest-band' in one call instead of a deselect dance)") = "SELECT",
     extend: tag(bool, "[by_axis/between/in_sphere] True = ADD to current selection (union regions across calls) instead of replacing") = False,
@@ -73,6 +73,11 @@ def select(
                     so name='skirt' grabs every skirt layer at once. The named-handle
                     selector for IMPORTED rigs — address a garment/part by its own name
                     instead of box-selecting a shell out of a fused mesh.
+      material    — faces in a named MATERIAL SLOT  (name substring, action, extend).
+                    name='' LISTS every slot with its face count (the grep). For garments
+                    that SHARE bone weights with the body — a jacket torso rides the same
+                    chest/spine bones as the skin, so no vgroup isolates it — the material
+                    IS the garment's handle. Unions all matching slots.
       boundary    — open-edge boundary loop        (from_selection, action)
       limb        — a whole protrusion (sleeve/limb/finger), anchored to the mesh's
                     OWN topology — selects out to its base ring (the armhole), no
@@ -104,6 +109,8 @@ def select(
         return editmode.select_between(axis, lo, hi, action, extend, target)
     if o == "group":
         return editmode.select_by_vgroup(name, action, extend, min_weight, target)
+    if o == "material":
+        return editmode.select_by_material(name, action, extend, target)
     if o == "boundary":
         return editmode.select_boundary(action, from_selection, target)
     if o == "limb":

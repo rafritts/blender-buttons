@@ -618,6 +618,29 @@ def select_by_vgroup(name: str = "", action: str = "SELECT", extend: bool = Fals
     return main + _status(result)
 
 
+def select_by_material(name: str = "", action: str = "SELECT", extend: bool = False,
+                       target: str = "", label: str = "") -> str:
+    """Select faces by MATERIAL SLOT — the named-handle selector for imported garments
+    that share bone weights with the body (a jacket torso has no vgroup of its own, but
+    its material names it). name='' lists every slot (the grep); a substring unions all
+    matching slots."""
+    result = call_blender("select_by_material",
+                          {"name": name, "action": action, "extend": extend,
+                           "target": target}, label=label)
+    if not result.get("success"):
+        return result.get("error", "failed") + _status(result)
+    if "slots" in result:
+        rows = [f"[{s['slot']}] {s['material']}  ({s['faces']} faces)"
+                for s in result["slots"]]
+        main = f"{result['slot_count']} material slots:\n  " + "\n  ".join(rows)
+    else:
+        main = (f"selected {result['selected_faces']} faces "
+                f"({result['selected_verts']} verts) in "
+                f"{len(result['matched_materials'])} slot(s): "
+                f"{', '.join(result['matched_materials'])}")
+    return main + _status(result)
+
+
 @mcp.tool()
 def select_between(axis: str = "Z", lo: float = 0.0, hi: float = 1.0,
                    action: str = "SELECT", extend: bool = False, target: str = "") -> str:
