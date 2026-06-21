@@ -85,7 +85,7 @@ def transform(
     name_prefix: tag(str, "[array_*/scatter] name prefix for copies") = "",
     center_object: tag(str, "[array_radial] object at the ring center") = "",
     start_angle: tag(float, "[array_radial] start angle (deg)") = 0.0,
-    end_angle: tag(float, "[array_radial] end angle (deg)") = 360.0,
+    end_angle: tag(float, "[array_radial] end angle (deg); default = full ring from start (start+360). Set for a partial arc") = None,
     radius: tag(float, "[array_radial] ring radius (m)") = None,
     align_to_tangent: tag(bool, "[array_radial] rotate copies to the ring tangent") = False,
     # scatter

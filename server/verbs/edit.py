@@ -14,7 +14,8 @@ from ._common import tag, unknown, teach
 _OPS = ["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
         "mark_sharp", "crease", "inflate", "jitter", "noise_displace", "proportional_move",
         "extrude_along_curve", "round", "bend", "smooth_edges", "taper_end",
-        "taper_section", "scale_rings", "band", "trace", "boolean", "subdivide", "bridge",
+        "taper_section", "shape_profile", "flute", "scale_rings", "band", "trace",
+        "boolean", "subdivide", "bridge",
         "connect", "reshape", "resample", "strands", "relax", "slide", "poke", "inset",
         "grid_fill"]
 
@@ -25,7 +26,8 @@ def edit(
                 "mark_sharp", "crease", "inflate", "jitter", "noise_displace",
                 "proportional_move",
                 "extrude_along_curve", "round", "bend", "smooth_edges", "taper_end",
-                "taper_section", "scale_rings", "band", "trace", "boolean", "subdivide",
+                "taper_section", "shape_profile", "flute", "scale_rings", "band", "trace",
+                "boolean", "subdivide",
                 "bridge", "connect", "reshape", "resample", "strands", "relax", "slide",
                 "poke", "inset", "grid_fill"],
     target: tag(str, "mesh object to edit (empty=active)") = "",
@@ -113,6 +115,12 @@ def edit(
     y_start: tag(float, "[taper_section] Y scale at from_ring") = 1.0,
     y_end: tag(float, "[taper_section] Y scale at to_ring") = 1.0,
     curve_shape: tag(str, "[taper_section] interpolation: linear|ease_in|ease_out|ease_in_out|smoothstep") = "linear",
+    # shape_profile / flute (G92 / G94) — absolute-radius lathe + meridional corrugation
+    points: tag(list, "[shape_profile] control points [[ring_index, radius_m], ...]; rings between interpolate, outside untouched") = None,
+    flute_count: tag(int, "[flute] number of flutes/lobes around the axis (>=1)") = 0,
+    flute_depth: tag(float, "[flute] radial depth of each flute (m, >0)") = 0.0,
+    flute_profile: tag(str, "[flute] convex (lobes bulge out — gadroons) | concave (grooves cut in — flutes)") = "convex",
+    phase: tag(float, "[flute] rotate the lobe pattern (deg)") = 0.0,
     # ring scale (op=scale_rings uses x/y as ring-plane scale factors)
     ring_x: tag(float, "[scale_rings] X scale of the rings") = 1.0,
     ring_y: tag(float, "[scale_rings] Y scale of the rings") = 1.0,
@@ -181,6 +189,14 @@ def edit(
       taper_end   — taper one end to a scale     (axis, end=MAX|MIN, scale)
       taper_section — taper a ring range (axis, from_ring, to_ring, x_start/x_end/
                     y_start/y_end, curve_shape)
+      shape_profile — LATHE: set ring radii in ABSOLUTE meters and interpolate between
+                    control points (axis, points=[[ring,radius],…]). Seam-safe and
+                    idempotent — unlike taper_section's relative scale, touching ranges
+                    don't double-scale a shared ring into a pinhole. The surface-of-
+                    revolution shaper (goblet, hourglass, baluster).
+      flute       — corrugate a surface of revolution with N vertical flutes/lobes by
+                    modulating radius vs azimuth — flutes (concave), gadroons/reeding
+                    (convex). (axis, flute_count, flute_depth, flute_profile, phase)
       scale_rings — scale specific rings   (axis, indices=[...], ring_x, ring_y)
       band        — wrap a raised band     (name, target(s), axis, at, width, thickness)
       trace       — trace a cross-section profile  (target, axis, sections)
@@ -259,6 +275,11 @@ def edit(
                     "edit op=extrude_along_curve target=ring curve=path"),
         "round":   (bool(corners), "corners=[...] (named corners to round)",
                     "edit op=round target=panel corners=[c1,c2] width=0.02"),
+        "shape_profile": (bool(points), "points=[[ring_index, radius_m], ...]",
+                    "edit op=shape_profile axis=Z points=[[0,0.05],[11,0.009],[22,0.06]]"),
+        "flute":   (bool(flute_count >= 1 and flute_depth > 0),
+                    "flute_count=N (>=1) and flute_depth=<m> (>0)",
+                    "edit op=flute axis=Z flute_count=12 flute_depth=0.004 flute_profile=concave"),
     })
     if bad:
         return bad
@@ -305,6 +326,11 @@ def edit(
     if o == "taper_section":
         return rings.taper_section(axis, from_ring, to_ring, x_start, x_end,
                                    y_start, y_end, curve_shape, label, target)
+    if o == "shape_profile":
+        return rings.shape_profile(axis, points or [], label, target)
+    if o == "flute":
+        return rings.flute(axis, flute_count, flute_depth, flute_profile, phase,
+                           label, target)
     if o == "scale_rings":
         return rings.scale_rings(axis, indices or [], ring_x, ring_y, label, target)
     if o == "band":

@@ -137,7 +137,7 @@ def array_along(prototype: str, count: int, between: list, axis: str = "X",
 
 @mcp.tool()
 def array_radial(prototype: str, count: int, center: list = None, center_object: str = "",
-                 axis: str = "Z", start_angle: float = 0.0, end_angle: float = 360.0,
+                 axis: str = "Z", start_angle: float = 0.0, end_angle: float = None,
                  radius: float = None, align_to_tangent: bool = False,
                  keep_original: bool = False, name_prefix: str = "",
                  linked: bool = False, label: str = "") -> str:
@@ -151,9 +151,11 @@ def array_radial(prototype: str, count: int, center: list = None, center_object:
                             Default world origin.
     axis:             X | Y | Z — axis the ring spins around (ring lies in the other
                       two). Default Z (a ring lying flat in the XY plane).
-    start_angle/end_angle: degrees. Default 0→360 = a full evenly-spaced circle with no
-                      overlapping seam. Any other span is an ARC, spread inclusive of
-                      both ends (e.g. 0→180 with count=5 gives copies at 0,45,90,135,180).
+    start_angle/end_angle: degrees. end_angle defaults to a FULL TURN from the start
+                      (start_angle+360) = an evenly-spaced full circle with no overlapping
+                      seam, for ANY start_angle (start just rotates the ring). Pass
+                      end_angle to force an ARC, spread inclusive of both ends (e.g.
+                      0→180 with count=5 gives copies at 0,45,90,135,180).
     radius:           force every copy onto this distance from center. Omit to keep the
                       prototype's current distance.
     align_to_tangent: True = each copy also spins to face along the arc (gear teeth,

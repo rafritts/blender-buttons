@@ -931,6 +931,11 @@ def move_vertices(params):
 
     for v in selected:
         v.co += local
+    # G87: re-derive edge/face selection from the vert flags before the editmesh→mesh
+    # sync, so the live selection survives the OBJECT↔EDIT round-trip a following edit
+    # op triggers (without this flush, moved verts could re-enter with a stale/empty
+    # selection, silently no-op'ing the next op). Matches every select_* op's flush.
+    bm.select_flush_mode()
     bmesh.update_edit_mesh(obj.data)
     push_undo("move_vertices")
     result = {"success": True, "verts_moved": len(selected), "delta_world": world_delta}
@@ -976,6 +981,7 @@ def scale_vertices(params):
             normal_comp = n_local * offset.dot(n_local)
             tangent = offset - normal_comp
             v.co = c + normal_comp + tangent * f
+        bm.select_flush_mode()  # G87: keep the selection live across the edit-mode round-trip
         bmesh.update_edit_mesh(obj.data)
         push_undo(f"scale_vertices in_plane={f}")
         return {"success": True, "verts_scaled": len(selected),
@@ -994,6 +1000,7 @@ def scale_vertices(params):
         v.co.x = cx + (v.co.x - cx) * sx
         v.co.y = cy + (v.co.y - cy) * sy
         v.co.z = cz + (v.co.z - cz) * sz
+    bm.select_flush_mode()  # G87: keep the selection live across the edit-mode round-trip
     bmesh.update_edit_mesh(obj.data)
     push_undo("scale_vertices")
     return {"success": True, "verts_scaled": len(selected)}

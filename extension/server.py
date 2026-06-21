@@ -93,6 +93,7 @@ EDIT_MODE_TOOLS = {
     "random_select", "proportional_move", "inflate_selection", "mark_sharp",
     "set_edge_crease", "merge_by_distance", "select_in_sphere", "split_by_part",
     "get_rings", "select_ring", "select_rings", "scale_rings", "taper_end", "taper_section",
+    "shape_profile", "flute",
     "assign_weight", "select_boundary", "select_limb",
     "relax_selection", "slide_selection", "poke_faces", "inset_faces", "grid_fill",
 }
@@ -108,7 +109,7 @@ SHAPE_KEY_SHADOW_TOOLS = {
     "jitter_vertices", "bevel", "extrude", "extrude_along_curve", "scale_rings",
     "subdivide_selection", "relax_selection", "slide_selection",
     "poke_faces", "inset_faces", "grid_fill",
-    "taper_end", "taper_section",
+    "taper_end", "taper_section", "shape_profile", "flute",
     "sculpt_grab", "sculpt_inflate", "sculpt_draw", "sculpt_smooth", "sculpt_crease",
     "sculpt_pinch", "sculpt_flatten", "sculpt_gravity",
 }
@@ -129,7 +130,8 @@ NOOP_CHECK_TOOLS = {
     "inflate_selection", "jitter_vertices", "bevel", "extrude",
     "extrude_along_curve", "scale_rings", "subdivide_selection",
     "relax_selection", "slide_selection", "poke_faces", "inset_faces",
-    "grid_fill", "taper_end", "taper_section", "loop_cut", "merge_by_distance",
+    "grid_fill", "taper_end", "taper_section", "shape_profile", "flute",
+    "loop_cut", "merge_by_distance",
     "delete_geometry", "separate_selection", "bridge_handles",
     # object transforms (caught via the TRS component of the signature)
     "nudge", "place", "aim_axis", "rest_on", "move_to", "rotate_to",

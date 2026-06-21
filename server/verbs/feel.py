@@ -13,7 +13,7 @@ from server import topology, queries, rings, introspect, lint, handles, assembly
 from ._common import tag, unknown
 
 _OPS = ["topology", "profile", "silhouette", "section", "rings", "distance", "gap",
-        "aligned", "symmetry", "mesh", "overlaps", "validate", "audit", "contacts",
+        "aligned", "linked", "symmetry", "mesh", "overlaps", "validate", "audit", "contacts",
         "resting", "aim", "place", "radial", "anchor", "verify", "baseline", "diff",
         "handle", "handles", "accept", "forget", "assembly", "map", "relate", "curve"]
 
@@ -21,8 +21,8 @@ _OPS = ["topology", "profile", "silhouette", "section", "rings", "distance", "ga
 @mcp.tool(name="feel")
 def feel(
     op: Literal["topology", "profile", "silhouette", "section", "rings", "distance",
-                "gap", "aligned", "symmetry", "mesh", "overlaps", "validate", "audit",
-                "contacts", "resting", "aim", "place", "radial", "anchor", "verify",
+                "gap", "aligned", "linked", "symmetry", "mesh", "overlaps", "validate",
+                "audit", "contacts", "resting", "aim", "place", "radial", "anchor", "verify",
                 "baseline", "diff", "handle", "handles", "accept", "forget", "assembly",
                 "map", "relate", "curve"] = "topology",
     target: tag(str, "[topology/profile/silhouette/section/rings/symmetry/mesh] mesh "
@@ -52,8 +52,8 @@ def feel(
     sections: tag(int, "[section] number of evenly spaced slices (default 12)") = 12,
     selection: tag(bool, "[silhouette] project only the live selection's verts") = False,
     # measurements
-    a: tag(str, "[distance/gap/aligned] first object; [relate] first boundary handle") = "",
-    b: tag(str, "[distance/gap/aligned] second object; [relate] second boundary handle") = "",
+    a: tag(str, "[distance/gap/aligned/linked] first object; [relate] first boundary handle") = "",
+    b: tag(str, "[distance/gap/aligned/linked] second object; [relate] second boundary handle") = "",
     side: tag(str, "[aligned] TOP|BOTTOM|… side to compare") = "TOP",
     tolerance: tag(float, "[aligned] alignment tolerance (m)") = 0.001,
     # symmetry
@@ -142,6 +142,10 @@ def feel(
                  reconciles with contacts; axis=X|Y|Z = single-axis centre-to-centre)
       gap      — surface-to-surface gap between two objects   (a, b)
       aligned  — are two objects aligned on a side?    (a, b, side=TOP|BOTTOM|…, tolerance)
+      linked   — are two closed-loop wire shells LINKED (threaded) or merely touching?
+                 The read distance can't give: extracts each loop's centerline and counts
+                 signed pierces through the other's spanning disk → boolean + linking
+                 number. Confirm a bail/jump-ring actually interlocks.        (a, b)
       symmetry — mirror symmetry of a mesh    (target, axis, plane, epsilon)
       mesh     — lint one mesh (non-manifold, doubles, normals, …)   (target)
       overlaps — coplanar overlapping faces (z-fighting)     (targets, epsilon→tolerance)
@@ -230,6 +234,8 @@ def feel(
         return queries.gap_between(a, b)
     if o == "aligned":
         return queries.is_aligned(a, b, side, tolerance)
+    if o == "linked":
+        return queries.check_linked(a, b)
     if o == "symmetry":
         return queries.check_symmetry(target, axis, plane, epsilon)
     if o == "mesh":

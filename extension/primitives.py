@@ -394,7 +394,7 @@ def add_floor(params):
         name=name,
         ptype="PLANE",
         target_dims=(size, size, 0.0),
-        on={"z": 0.0},
+        on={"on_floor": True},  # G95: 'z' is not a placement key; on_floor seats z_min at 0
         rotation_deg=[0, 0, 0],
     )
 

@@ -373,6 +373,39 @@ def gap_between(a: str, b: str) -> str:
 
 
 @mcp.tool()
+def check_linked(a: str, b: str) -> str:
+    """
+    Are two closed-loop wire shells topologically LINKED (threaded through each other)
+    or merely TOUCHING? Surface distance reads ~0 for both a bail threaded through a ring
+    AND two rings resting outer-face to outer-face — this answers the question distance
+    can't: it extracts each loop's centerline and counts its SIGNED crossings through the
+    other loop's spanning disk. A net |crossings| >= 1 ⇒ linked; a touching pair (or a
+    poke-in/poke-out clip) nets 0.
+
+    Use it to confirm a bail/jump-ring/chain link actually interlocks instead of resting
+    against the outside — the verification a place-nudge-resize loop otherwise can't get.
+    Both meshes must be loop/ring-like (a torus, a closed wire); reads world geometry, no
+    bake. Returns the boolean, the linking number, and the per-direction crossing counts.
+    """
+    result = call_blender("check_linked", {"a": a, "b": b})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    verdict = "LINKED ✓" if result["linked"] else "not linked (touching/separate)"
+    lk = result["linking_number"]
+    ab = result["b_through_a"]
+    ba = result["a_through_b"]
+    main = (f"{result['a']} ↔ {result['b']}: {verdict}  (linking number {lk})\n"
+            f"  {result['b']}'s loop through {result['a']}'s hole: net {ab['net']} "
+            f"({ab['hits']} pierces, disk r={ab['disk_radius']}m)\n"
+            f"  {result['a']}'s loop through {result['b']}'s hole: net {ba['net']} "
+            f"({ba['hits']} pierces, disk r={ba['disk_radius']}m)")
+    if not result.get("agree", True):
+        main += ("\n  ⚠ the two directions disagree — low confidence; one mesh may not be "
+                 "a clean closed loop. Eyeball it.")
+    return main
+
+
+@mcp.tool()
 def check_symmetry(target: str = "", axis: str = "X", plane: float = 0.0,
                    epsilon: float = None) -> str:
     """

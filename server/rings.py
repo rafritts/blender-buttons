@@ -173,3 +173,79 @@ def taper_section(axis: str = "Z", from_ring: int = 0, to_ring: int = -1,
     else:
         main = result.get("error", "failed")
     return main + _status(result)
+
+
+@mcp.tool()
+def shape_profile(axis: str = "Z", points: list = [], label: str = "",
+                  target: str = "") -> str:
+    """
+    Set ring radii in ABSOLUTE meters, interpolating between control points — the lathe.
+
+    Unlike taper_section (which scales each ring's CURRENT radius, so tiling touching
+    ranges double-scales the shared seam ring into a pinhole), shape_profile addresses
+    radius outright: idempotent and seam-safe by construction. Say "ring 7 = 12mm"
+    without remembering a ratio.
+
+    points: list of [ring_index, radius_m] pairs (negatives wrap, -1 = top ring).
+            Rings between listed control rings interpolate linearly by axis position;
+            rings outside the lowest..highest control ring are left untouched. Radius is
+            the distance from the lathe axis to the surface.
+    target: optional object name — auto-selects it, enters edit mode, exits after.
+
+    Example — a goblet profile in one call (call get_rings first for indices):
+      shape_profile(axis="Z", points=[[0,0.05],[4,0.012],[11,0.009],[22,0.06]])
+
+    Must be in edit mode (or provide target).
+    """
+    result = call_blender("shape_profile", {"axis": axis, "points": points,
+                                            "target": target}, label=label)
+    if result.get("success"):
+        rs = result.get("rings_set", [])
+        main = (f"shaped {result['rings_affected']} rings of {result['ring_count']} "
+                f"({result['verts_affected']} verts)")
+        if rs:
+            main += "  " + ", ".join(f"[{r['ring']}]={r['radius']}m" for r in rs[:8])
+            if len(rs) > 8:
+                main += f", …+{len(rs)-8}"
+        for w in result.get("warnings", []):
+            main += f"\n⚠ {w}"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def flute(axis: str = "Z", count: int = 0, depth: float = 0.0,
+          profile: str = "convex", phase: float = 0.0, label: str = "",
+          target: str = "") -> str:
+    """
+    Corrugate a surface of revolution with N evenly-spaced vertical flutes/lobes.
+
+    The "reed a turned surface" primitive — flutes (concave grooves), gadroons/reeding
+    (convex lobes), columns all fall out of it. Modulates each vert's radius (distance
+    from the lathe axis) by a cosine of its azimuth, so the count is exact and the
+    pattern follows the flare of the profile automatically. No meridional edge-picking,
+    no boolean cutter array.
+
+    count:   number of flutes/lobes around the axis (>= 1).
+    depth:   radial depth of each feature, meters (> 0).
+    profile: convex (lobes bulge OUT — gadroons/reeding) | concave (grooves cut IN — flutes).
+    phase:   rotate the pattern, degrees.
+    target:  optional object name — auto-selects it, enters edit mode, exits after.
+
+    Needs meridional resolution: aim for >= ~4 verts per lobe around each ring (add
+    cylinder sides / loop cuts first); it warns if under-resolved.
+
+    Must be in edit mode (or provide target).
+    """
+    result = call_blender("flute", {"axis": axis, "count": count, "depth": depth,
+                                    "profile": profile, "phase": phase,
+                                    "target": target}, label=label)
+    if result.get("success"):
+        main = (f"fluted {result['count']} {result['profile']} lobes "
+                f"(depth {result['depth']}m) — {result['verts_affected']} verts")
+        for w in result.get("warnings", []):
+            main += f"\n⚠ {w}"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
