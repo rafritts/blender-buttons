@@ -96,7 +96,7 @@ EDIT_MODE_TOOLS = {
     "set_edge_crease", "merge_by_distance", "select_in_sphere", "split_by_part",
     "get_rings", "select_ring", "select_rings", "scale_rings", "taper_end", "taper_section",
     "shape_profile", "flute", "field",
-    "assign_weight", "select_boundary", "select_limb",
+    "assign_weight", "select_boundary", "select_limb", "flood_to_crease",
     "relax_selection", "slide_selection", "poke_faces", "inset_faces", "grid_fill",
 }
 
