@@ -8,13 +8,13 @@ selects the operation. The flat handlers manage entering Edit Mode on `target`.
 from typing import Literal
 
 from server._core import mcp
-from server import editmode, finishes, rings, bands, introspect, modifiers
+from server import editmode, finishes, rings, bands, introspect, modifiers, fields
 from ._common import tag, unknown, teach
 
 _OPS = ["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
         "mark_sharp", "crease", "inflate", "jitter", "noise_displace", "proportional_move",
         "extrude_along_curve", "round", "bend", "smooth_edges", "taper_end",
-        "taper_section", "shape_profile", "flute", "scale_rings", "band", "trace",
+        "taper_section", "shape_profile", "flute", "field", "scale_rings", "band", "trace",
         "boolean", "subdivide", "bridge",
         "connect", "reshape", "resample", "strands", "relax", "slide", "poke", "inset",
         "grid_fill"]
@@ -26,7 +26,8 @@ def edit(
                 "mark_sharp", "crease", "inflate", "jitter", "noise_displace",
                 "proportional_move",
                 "extrude_along_curve", "round", "bend", "smooth_edges", "taper_end",
-                "taper_section", "shape_profile", "flute", "scale_rings", "band", "trace",
+                "taper_section", "shape_profile", "flute", "field", "scale_rings",
+                "band", "trace",
                 "boolean", "subdivide",
                 "bridge", "connect", "reshape", "resample", "strands", "relax", "slide",
                 "poke", "inset", "grid_fill"],
@@ -120,7 +121,30 @@ def edit(
     flute_count: tag(int, "[flute] number of flutes/lobes around the axis (>=1)") = 0,
     flute_depth: tag(float, "[flute] radial depth of each flute (m, >0)") = 0.0,
     flute_profile: tag(str, "[flute] convex (lobes bulge out — gadroons) | concave (grooves cut in — flutes)") = "convex",
-    phase: tag(float, "[flute] rotate the lobe pattern (deg)") = 0.0,
+    phase: tag(float, "[flute] rotate the lobe pattern (deg); [field] sine preset/expr phase (radians)") = 0.0,
+    # field (SPEC-13 / G99) — per-vertex p'=F(vars(p)) over the selection
+    about: tag(str, "[field] radial pivot: axis (ship) | spine (deferred)") = "axis",
+    channel: tag(str, "[field] how F displaces: radial | normal | axis:<X|Y|Z|long|u|v> | twist | vector") = "radial",
+    field_mode: tag(str, "[field] add | multiply | set (radial: multiply default; offset channels: add)") = "",
+    per_component: tag(bool, "[field] parameterize + apply independently per connected sub-shell (resets s/theta/crnd)") = False,
+    frame: tag(str, "[field] channel=vector basis: world | local | tangent_normal") = "world",
+    preset: tag(str, "[field] taper|power|smoothstep|bell|sine|lobes (one function source)") = "",
+    preset_a: tag(float, "[field] preset endpoint value at t=0 (taper/power/smoothstep)") = 1.0,
+    preset_b: tag(float, "[field] preset endpoint value at t=1 (taper/power/smoothstep)") = 1.0,
+    k: tag(float, "[field] power preset exponent (k>1 late bulge, k<1 early)") = 1.0,
+    amp: tag(float, "[field] amplitude (bell/sine/lobes)") = 1.0,
+    freq: tag(float, "[field] frequency: cycles over t (sine) / lobes around theta (lobes)") = 1.0,
+    center: tag(float, "[field] bell center in t (0..1)") = 0.5,
+    bell_width: tag(float, "[field] bell gaussian width in t") = 0.2,
+    interp: tag(str, "[field] points curve interpolation: linear | smooth | cubic") = "smooth",
+    expr: tag(str, "[field] sandboxed scalar expression over the var namespace") = "",
+    expr_x: tag(str, "[field] channel=vector X-component expression") = "",
+    expr_y: tag(str, "[field] channel=vector Y-component expression") = "",
+    expr_z: tag(str, "[field] channel=vector Z-component expression") = "",
+    sigma_x: tag(float, "[field] radial anisotropy on the U cross-axis (keeps ellipses elliptical)") = 1.0,
+    sigma_y: tag(float, "[field] radial anisotropy on the V cross-axis") = 1.0,
+    clamp_min: tag(float, "[field] lower bound on F (None=unbounded)") = None,
+    clamp_max: tag(float, "[field] upper bound on F (None=unbounded)") = None,
     # ring scale (op=scale_rings uses x/y as ring-plane scale factors)
     ring_x: tag(float, "[scale_rings] X scale of the rings") = 1.0,
     ring_y: tag(float, "[scale_rings] Y scale of the rings") = 1.0,
@@ -197,6 +221,21 @@ def edit(
       flute       — corrugate a surface of revolution with N vertical flutes/lobes by
                     modulating radius vs azimuth — flutes (concave), gadroons/reeding
                     (convex). (axis, flute_count, flute_depth, flute_profile, phase)
+      field       — THE FIELD DEFORMER (SPEC-13): apply an explicit per-vertex function
+                    p'=F(vars(p)) over the SELECTION. vars are measured from the selected
+                    geometry (t/u/v along the frame, r/theta in the cross-plane, arc-length
+                    s/L per strand, normal, x/y/z local, rnd/crnd) — NOT the global mesh
+                    ring index, so it works on one sub-shell of a fused mesh where
+                    taper_end/shape_profile break. F is a preset (taper|power|smoothstep|
+                    bell|sine|lobes), a control-point curve (points+interp), or a sandboxed
+                    expr. Output displaces through channel=radial|normal|axis:<dir>|twist|
+                    vector (field_mode add|multiply|set). Smooth F ⇒ smooth surface by
+                    construction (no facets). per_component parameterizes each connected
+                    sub-shell independently. The general engine taper_end/scale_rings/
+                    shape_profile/flute/jitter are named cases of.
+                    (axis, channel, field_mode, per_component, preset, preset_a/preset_b/k/
+                    amp/freq/center/bell_width/phase, points/interp, expr/expr_x/y/z,
+                    sigma_x/sigma_y, seed, clamp_min/clamp_max)
       scale_rings — scale specific rings   (axis, indices=[...], ring_x, ring_y)
       band        — wrap a raised band     (name, target(s), axis, at, width, thickness)
       trace       — trace a cross-section profile  (target, axis, sections)
@@ -280,6 +319,10 @@ def edit(
         "flute":   (bool(flute_count >= 1 and flute_depth > 0),
                     "flute_count=N (>=1) and flute_depth=<m> (>0)",
                     "edit op=flute axis=Z flute_count=12 flute_depth=0.004 flute_profile=concave"),
+        "field":   (sum([bool(preset), bool(points),
+                         bool(expr or expr_x or expr_y or expr_z)]) == 1,
+                    "EXACTLY one function source: preset=<name> | points=[[t,val],…] | expr=\"…\"",
+                    "edit op=field axis=Z channel=radial field_mode=multiply preset=smoothstep preset_a=1.0 preset_b=0.6"),
     })
     if bad:
         return bad
@@ -331,6 +374,12 @@ def edit(
     if o == "flute":
         return rings.flute(axis, flute_count, flute_depth, flute_profile, phase,
                            label, target)
+    if o == "field":
+        return fields.field(axis, about, channel, field_mode, per_component,
+                            preset, preset_a, preset_b, k, amp, freq, center,
+                            bell_width, phase, points or [], interp, expr,
+                            expr_x, expr_y, expr_z, sigma_x, sigma_y, seed,
+                            clamp_min, clamp_max, label, target)
     if o == "scale_rings":
         return rings.scale_rings(axis, indices or [], ring_x, ring_y, label, target)
     if o == "band":
