@@ -38,3 +38,29 @@ whether a call enters via the "already in EDIT, skip the toggle" branch or force
 modes depends on what mode the previous op left behind, and the toggle round-trips the
 component selection through Blender's editmesh↔mesh sync. A deterministic fix likely lives
 in making that entry/exit consistent rather than in `taper_end` (which reads no selection).
+
+## G91 — no way to verify TOPOLOGICAL LINKAGE between two parts (threaded vs merely touching)
+
+Connecting a chain to a watch bow needed a bail (a ring threaded through both the bow's
+wire and the chain's end link). The agent could place and size the bail, but had **no way
+to confirm it was actually linked** rather than resting against the outside: `feel
+op=distance` returns ~0 for BOTH "threaded through the hole, wires near contact" and "two
+rings tangent on their outer surfaces." `op=overlaps` only catches coplanar interpenetration
+(useless for perpendicular rings), and `op=contacts` reports bbox penetration depth, which a
+correct interlink and a bad clip share. So the one fact that matters here — *is A linked to
+B?* — is unreadable, and the agent was forced into blind place-nudge-resize-eyeball loops
+toward a result it could not verify (and nearly reported "linked ✓" off an ambiguous number).
+The human closed it in ~2 s with `G`/`S` because they could SEE the linkage. This is the
+canonical hand-off case, but it's a gap precisely because the agent had no ground-truth read
+to stand on.
+**Want:** a `feel` read that answers linkage directly — e.g. `op=linked a=<part> b=<part>`
+returning a boolean + linking-number (does A's wire pass through B's hole / are they a
+non-separable pair), computed from the meshes (Gauss linking integral over the two loops, or
+a pierce test of one shell's hole-disk against the other's wire). Bonus: a relational
+primitive to CREATE the link — `add`/`transform` "thread ring through <A> and <B>" that
+seats a new loop linking two existing loops without hand-placed coordinates.
+**Lead (unconfirmed):** for two closed-loop wire shells, extract each shell's centerline
+loop and compute the Gauss linking number pairwise; |Lk|≥1 ⇒ linked. Cheap approximation:
+cap one ring's hole with a disk and count signed intersections of the other ring's
+centerline through it. Both are robust to the touching/threaded ambiguity that defeats
+surface distance.
