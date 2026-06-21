@@ -80,3 +80,4 @@ normal} × transform ∈ {radial-scale, axial-offset, normal-offset, twist, free
 Displace are narrower native versions) — not new capability, but the intent-space front-end
 (select region → named geometry-derived vars → one expression) that dodges hand-wiring a node
 graph. `edit op=shape_profile` is the embryo; rebase on selection-binned normalized params.
+**Spec:** full self-contained design in `docs/SPEC-13-field-deformer.md`.
