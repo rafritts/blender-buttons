@@ -17,6 +17,7 @@ module whose name matches the tool family:
                   proportional_move / inflate_selection
   rings.py        get_rings / select_ring(s) / scale_rings / taper_end / taper_section
   fields.py       field — per-vertex p'=F(vars(p)) deformer over a selection (SPEC-13/G99)
+  fit.py          fit — describe a selection as parametric form (the inverse; SPEC-14/G100)
   shading.py      shade_smooth / shade_flat / set_material (Principled BSDF)
   lighting.py     add_light / modify_light / set_world_background / set_camera_dof
   scatter.py      scatter_on_surface (the donut-tutorial sprinkle step)

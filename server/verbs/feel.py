@@ -9,13 +9,13 @@ feel; op="topology" (default) is the structural sense.
 from typing import Literal
 
 from server._core import mcp
-from server import topology, queries, rings, introspect, lint, handles, assembly, editmode
+from server import topology, queries, rings, introspect, lint, handles, assembly, editmode, fit
 from ._common import tag, unknown
 
 _OPS = ["topology", "profile", "silhouette", "section", "rings", "distance", "gap",
         "aligned", "linked", "symmetry", "mesh", "overlaps", "validate", "audit", "contacts",
         "clearance", "resting", "aim", "place", "radial", "anchor", "verify", "baseline", "diff",
-        "handle", "handles", "accept", "forget", "assembly", "map", "relate", "curve"]
+        "handle", "handles", "accept", "forget", "assembly", "map", "relate", "curve", "fit"]
 
 
 @mcp.tool(name="feel")
@@ -24,7 +24,7 @@ def feel(
                 "gap", "aligned", "linked", "symmetry", "mesh", "overlaps", "validate",
                 "audit", "contacts", "clearance", "resting", "aim", "place", "radial",
                 "anchor", "verify", "baseline", "diff", "handle", "handles", "accept",
-                "forget", "assembly", "map", "relate", "curve"] = "topology",
+                "forget", "assembly", "map", "relate", "curve", "fit"] = "topology",
     target: tag(str, "[topology/profile/silhouette/section/rings/symmetry/mesh] mesh "
                      "object (empty=active); "
                      "[map] cast from every boundary handle on this mesh") = "",
@@ -94,6 +94,11 @@ def feel(
                         "so the measured point is addressable by name (transform op=move_to "
                         "handle=, aim_axis, sculpt handle=) — no coordinate ever typed (G78)") = "",
     steps: tag(int, "[verify] rings to grow/shrink the selection when perturbing (default 1)") = 1,
+    # fit (SPEC-14 / G100) — describe a selection as parametric form
+    model: tag(str, "[fit] auto|plane|sphere|cylinder|cone|ellipsoid|torus|swept_tube") = "auto",
+    tol: tag(float, "[fit] residual threshold in mm for the clean/organic verdict (default ~3mm or 1% of the selection diagonal)") = None,
+    per_component: tag(bool, "[fit] fit each connected sub-shell separately (never average a model across a gap)") = False,
+    as_curve: tag(str, "[fit] mint the fitted swept_tube centerline as a named Bézier curve object (then extend it + extrude_along_curve to continue the form)") = "",
 ) -> str:
     """
     Feel a mesh — structure, measurements, correctness. Read-only (no status block).
@@ -226,6 +231,21 @@ def feel(
                  directions. 'Clean arc or lump' as numbers; profile_radius= adds the
                  sweep-feasibility preflight. Live read, no bake. (target, resolution,
                  profile_radius)
+      fit      — GEOMETRY FIT (SPEC-14): describe the SELECTION as parametric form — the
+                 analytic INVERSE of edit op=field. Fits a library of generative models
+                 (plane|sphere|cylinder|cone|ellipsoid|torus|swept_tube) and returns the
+                 best fit's type, named unit-tagged params, and — the load-bearing output
+                 — a RESIDUAL (mm) + COVERAGE that say WHEN the math describes the shape
+                 and when it's lying ("cylinder, r=4.6cm, len 31cm, residual 2.8mm,
+                 coverage 94% — clean fit" vs "residual 41mm — no clean parametric form").
+                 model=auto tries cheap rigid primitives then swept_tube, returns the
+                 lowest residual, tie-breaking toward the SIMPLER model. swept_tube
+                 decomposes a limb into centerline + R(s) taper + cross-section and reports
+                 empty ring bins as gaps (the direct continuity/void read). as_handle mints
+                 the fitted axis line; as_curve mints the centerline as a Bézier to extend +
+                 re-sweep. Reads the edit-mode selection (whole mesh if none, warned).
+                 Read-only (mints only on as_handle/as_curve).
+                 (target, model, axis, tol, per_component, bands, as_handle, as_curve, lod)
     """
     o = op.lower().strip()
     if o == "topology":
@@ -296,4 +316,11 @@ def feel(
         return assembly.feel_relate(a, b)
     if o == "curve":
         return queries.curve_quality(target, resolution, profile_radius)
+    if o == "fit":
+        # fit's natural default axis is `auto` (PCA), but the shared `axis` param defaults
+        # to Z; translate the unset default Z→auto. auto recovers Z for Z-aligned data
+        # anyway, so no capability is lost — only X/Y need to be forced explicitly.
+        fit_axis = "auto" if axis == "Z" else axis
+        return fit.fit_region(target, model, fit_axis, tol, per_component, bands,
+                              as_handle, as_curve, lod)
     return unknown("feel", "op", op, _OPS)

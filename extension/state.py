@@ -106,6 +106,10 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
     # feel_assembly DOES mint boundary handles, so it stays mutating (logged + undoable)
     # and is NOT listed here. feel_relate (G16) is a pure handle-pair measurement.
     "feel_map", "feel_relate",
+    # geometry fit (SPEC-14) — a read: fits a parametric model to the selection and
+    # returns params/residual. The optional as_handle/as_curve minting is a deliberate
+    # opt-in side effect (like feel_map's read shape); the fit itself moves no geometry.
+    "fit",
     # new_scene reloads the startup file, wiping Blender's undo stack and the
     # scene; it resets the history log itself (designs.new_scene) rather than
     # pushing an undo step that would immediately be desynced.
@@ -121,7 +125,7 @@ NO_STATUS_TOOLS = {
     "list_handles", "resolve_handle", "accept_handle",
     # multi-feel (SPEC-07 Phase 4) — perception ops; assembly mints as a side effect
     # but is read-shaped, so neither carries the status block.
-    "feel_assembly", "feel_map", "feel_relate",
+    "feel_assembly", "feel_map", "feel_relate", "fit",
     # handle GC (G15) — registry tidying; deleting an Empty doesn't move geometry, so
     # the status block would be noise (matches list/accept). Still mutating/undoable.
     "prune_handles", "forget_handle",

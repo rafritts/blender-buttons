@@ -33,29 +33,19 @@ The headless round-trip case now passes (`tests/e2e_gaps_g91_g95.py`). **Still u
 on the live one-op-per-message path** — the original failure never reproduced headless, so
 keep this open until a live dogfood run confirms the intermittency is gone.
 
-## G100 — no "where are the voids / is this region continuous" read on a SELECTION
+## G100 (residual) — model-free continuity/coverage read for NON-tubular selections
 
-After deleting a garment shell, the question was: does the body skin underneath actually
-exist, or did removing the cloth reveal a hole (VRoid deletes body mesh under clothing)?
-The skin's full-mesh bbox was no help — head + legs set the Z-extremes, so a hollow torso
-or a missing arm segment is invisible in the bounds. There is no op that, given a live
-selection, reports **where its geometry is absent** — the internal voids, the discontinuities,
-the spans the surface skips. `feel op=topology boundaries` lists open edge loops, but
-whole-mesh and far too noisy (130 loops here from hair cards / lash strips / tube caps) to
-point at "the upper arm is gone."
+The motivating case — the missing upper-arm skin under a deleted garment — is now solved by
+**`feel op=fit model=swept_tube`** (SPEC-14): the ring-sweep decomposition reports empty axial
+bins as `gaps: s∈[…]`, naming the void directly instead of reverse-engineering it from a
+`sel_bounds` floor mismatch (which only ever betrayed axis-aligned gaps). That covers the
+**tubular** case (limbs, fingers, any swept region).
 
-What actually found the missing upper-arm skin: `select op=material` to isolate the skin,
-`select op=by_axis X>0.166 INTERSECT` to clip to the arm, then **reading the `sel_bounds` X
-floor** — I asked for verts past 0.166 and the selection's floor came back 0.344, an 18cm
-span with no geometry. The void announced itself only as a mismatch between the threshold I
-asked for and the floor I got. That's reverse-engineering a hole from a bounds number, and
-it only works because the gap happened to lie along a clean axis; a void in the middle of a
-patch, or a non-axis-aligned one, would leave the bounds unchanged and stay invisible.
-
-**Want:** a read that takes the current selection (or a named region) and reports its
-**continuity / coverage** in intent-legible terms — "this selection is N disjoint pieces
-with gaps at <where>", or a coverage map along an axis showing which bands are empty, or
-"the surface skips X∈[0.17,0.34]". The agent should be able to ask "is this region solid, or
-is there a hole, and where?" directly, instead of inferring absence from a bounds floor that
-only betrays axis-aligned gaps. Distinct from `components` (whole-mesh shell list, no
-selection scope, doesn't say *where* the missing material is relative to what's present).
+**What remains open:** a *cheaper, model-free* continuity/coverage read for selections that
+are **not** swept tubes — flat sheets, doubly-curved patches, branching regions — where
+fitting a generative model is the wrong frame. Want: given a selection, report "N disjoint
+pieces with gaps at <where>" / a 2D coverage map over the patch's own (u,v) showing which
+cells are empty / "the surface skips this interior region", without first asserting a model.
+SPEC-14's coverage grid is the embryo (it already grids the fit's parametric domain); the
+sibling op would expose that occupancy read on its own, model-free. Lower priority now that
+the limb case — the one that bit in dogfood — is handled.
