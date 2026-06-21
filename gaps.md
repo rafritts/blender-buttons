@@ -64,3 +64,67 @@ loop and compute the Gauss linking number pairwise; |Lk|≥1 ⇒ linked. Cheap a
 cap one ring's hole with a disk and count signed intersections of the other ring's
 centerline through it. Both are robust to the touching/threaded ambiguity that defeats
 surface distance.
+
+## G92 — `taper_section` scales RELATIVE TO CURRENT radius, so adjacent sections double-scale the shared boundary ring (collapse), and there's no absolute per-ring target
+
+Shaping a surface of revolution (goblet, hourglass) from a loop-cut cylinder is the
+intended lathe substitute: `taper_section from_ring..to_ring x_start..x_end`. But the
+scale factor is applied to each ring's **current** radius, not to a reference. So when you
+tile the profile as touching ranges — foot `0..4`, stem `4..11`, bowl `11..23` — the
+shared endpoints (rings 4 and 11) get scaled by BOTH sections and collapse: 0.055 × 0.18 ×
+0.16 = 0.0016 m, a pinhole pinch where the profile should be ~0.009. The interior rings are
+fine (scaled once); only the seams crater. The workaround is to leave a one-ring gap
+between ranges (hourglass: `0..12` and `13..25`, neck left as two rings) and then repair
+each seam by hand with `scale_rings [n]` at a back-computed factor (target ÷ current) — a
+divide-by-the-thing-you-just-broke dance, and you only learn it failed by reading `profile`
+after. The relative model also means you cannot say "make ring 7 exactly 12 mm"; every
+number is a ratio against a radius you have to remember or re-read.
+**Want:** a profile-shaping op addressed in **absolute radii** — e.g.
+`shape_profile axis=Z points=[(z|ring, radius), ...]` that sets each ring's radius outright
+and interpolates between, idempotent and seam-safe by construction. Failing that,
+`taper_section` should at minimum (a) take absolute `r_start`/`r_end` as an alternative to
+ratio scales, and (b) make touching ranges safe — a ring named as the endpoint of two
+calls should land at one well-defined radius, not the product of both scales.
+
+## G93 — `array_radial start_angle=` with the default `end_angle=360` makes an ARC, not an offset full circle (silent uneven spacing)
+
+Wanted 4 frame posts evenly at 90° but rotated 45° off-axis (so none sits dead-centre in
+the front view). `array_radial count=4 start_angle=45` produced "arc 45→360°, step 105°" —
+four copies at 45/150/255/360, uneven, with the last overlapping the first. The full-circle
+case only works when `start_angle=0` (then `360/count` divides cleanly); any nonzero start
+silently becomes a partial sweep because `end_angle` defaults to 360 instead of
+`start+360`. The fix as a user is to pass `end_angle=405`, which is non-obvious and easy to
+ship wrong (the copies look plausible until you count them). Partial arcs are a legitimate
+feature — the gap is that "evenly spaced full ring, just rotated" is the common intent and
+is the one that misfires.
+**Want:** when the arc spans a full turn, spacing should be `360/count` regardless of
+`start_angle` (treat default `end_angle` as `start_angle+360`), OR a distinct
+`offset_angle=` that rotates a full ring without touching the arc math. Reserve
+`start/end_angle` for deliberately partial fans.
+
+## G94 — no meridional (vertical) loop selection, so you can't flute/gadroon a surface of revolution
+
+A goblet bowl wants vertical flutes/gadroons — the signature ornament of a turned vessel.
+Every primitive for it is missing: `select op=ring/rings` selects loops **perpendicular to
+an axis** (the horizontal rings), but flutes need the **meridional** loops (the vertical
+columns from rim to foot). There's no "select every Nth meridian" and no radial-flute
+op, so the only paths are (a) boolean an array of cutter cylinders into the curved wall —
+heavy, and the cutters must follow the flare angle, or (b) hand-pick vertical edges, which
+the selection surface can't express. I fell back to *applied* ornament (arrayed bands,
+beads, gem cabochons) instead, which is fine but sidesteps the actual feature.
+**Want:** either meridional selection (`select op=meridians count=N` / every-Nth vertical
+loop on a lathed mesh), or a direct `edit op=flute axis=Z count=N depth= profile=concave|
+convex` that cuts evenly spaced grooves/lobes following the surface — the general
+"corrugate a surface of revolution" primitive (flutes, gadroons, reeding, columns all fall
+out of it).
+
+## G95 — `add type=floor` fails with "Unknown placement key(s) ['z']"
+
+`add type=floor size=3` errored: *Unknown placement key(s) ['z']. Valid keys:
+[at_corner, axis, behind, ...]*. The floor path injects a `z` placement key its own
+placement DSL then rejects — a self-inflicted bug; `floor` is unusable as documented. Worked
+around with `add type=plane width=3 depth=3 on={on_floor:true}`, which is what `floor`
+should reduce to anyway.
+**Want:** `add type=floor` to spawn a ground plane at z=0 without emitting an illegal
+placement key (or drop the type in favour of `plane on_floor`, but then remove it from the
+`add` menu so it isn't a trap).
