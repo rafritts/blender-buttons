@@ -53,24 +53,32 @@ def _object_signature(obj):
         "rot": [round(math.degrees(v), 4) for v in obj.rotation_euler],
         "scale": [round(v, 6) for v in obj.scale],
     }
+    # SPEC-15: modifiers are NON-DESTRUCTIVE — they never touch the base mesh, so a
+    # Solidify/Subdivision added in the UI would be invisible to a vertex-only fingerprint.
+    # Capturing the stack (name+type) means a modifier change trips the lock and shows up
+    # in the diff. (Only the stack identity, not per-modifier params — a v1 cut.)
+    mods = getattr(obj, "modifiers", None)
+    if mods is not None and len(mods):
+        sig["mods"] = [[m.name, m.type] for m in mods]
     me = getattr(obj, "data", None)
     if obj.type == 'MESH' and me is not None and hasattr(me, "vertices"):
-        verts = me.vertices
-        # SPEC-15: edit-mode edits live in a separate bmesh and DON'T flush to
-        # me.vertices until the session ends — so an in-progress viewport edit (e.g. an
-        # extrude made while still in Edit Mode) would be invisible to the base-mesh
-        # read. Read the live bmesh instead, so the interlock sees the change. (Mirrors
-        # server._geo_signature's edit-aware no-op read.)
+        verts, edges, faces = me.vertices, me.edges, me.polygons
+        # Edit-mode edits live in a separate bmesh and DON'T flush to me.vertices until
+        # the session ends — so an in-progress viewport edit (e.g. an extrude made while
+        # still in Edit Mode) would be invisible to the base-mesh read. Read the live
+        # bmesh instead. (Mirrors server._geo_signature's edit-aware no-op read.)
         if obj.mode == 'EDIT':
             try:
                 import bmesh
                 bm = bmesh.from_edit_mesh(me)
                 bm.verts.ensure_lookup_table()
-                verts = bm.verts
+                verts, edges, faces = bm.verts, bm.edges, bm.faces
             except Exception:
-                verts = me.vertices
+                verts, edges, faces = me.vertices, me.edges, me.polygons
         n = len(verts)
         sig["vcount"] = n
+        sig["ecount"] = len(edges)
+        sig["fcount"] = len(faces)
         step = max(1, n // _VSAMPLE_CAP)
         sig["vstep"] = step
         sig["vsample"] = [[round(c, 6) for c in verts[i].co] for i in range(0, n, step)]
@@ -127,20 +135,82 @@ def _diff_snapshots(old, new):
         dscl = max((abs(a - b) for a, b in zip(o["scale"], n["scale"])), default=0.0)
         if dscl > 0.001:
             kinds.append("scaled")
-        if "vcount" in o and "vcount" in n:
-            if o["vcount"] != n["vcount"]:
-                kinds.append(f"topology {n['vcount'] - o['vcount']:+d} verts")
-            elif (o.get("vsample") and n.get("vsample")
-                    and len(o["vsample"]) == len(n["vsample"])):
-                maxd = max((math.dist(a, b) for a, b in zip(o["vsample"], n["vsample"])),
-                           default=0.0)
-                if maxd > _TOUCH:
-                    kinds.append(f"deformed {round(maxd * 1000, 1)}mm")
+        # topology — verts/edges/faces deltas together (so deleting a face, which leaves
+        # the verts, still reads; a vcount-only check would miss it).
+        topo = []
+        for key, word in (("vcount", "verts"), ("ecount", "edges"), ("fcount", "faces")):
+            if key in o and key in n and o[key] != n[key]:
+                topo.append(f"{n[key] - o[key]:+d} {word}")
+        if topo:
+            kinds.append("topology " + "/".join(topo))
+        elif (o.get("vcount") == n.get("vcount") and o.get("vsample") and n.get("vsample")
+                and len(o["vsample"]) == len(n["vsample"])):
+            maxd = max((math.dist(a, b) for a, b in zip(o["vsample"], n["vsample"])),
+                       default=0.0)
+            if maxd > _TOUCH:
+                kinds.append(f"deformed {round(maxd * 1000, 1)}mm")
+        # modifier stack added/removed (the non-destructive change the vertex read misses)
+        om = {tuple(m) for m in o.get("mods", [])}
+        nm = {tuple(m) for m in n.get("mods", [])}
+        added_m = sorted(m[0] for m in nm - om)
+        removed_m = sorted(m[0] for m in om - nm)
+        if added_m:
+            kinds.append("+modifier " + ", ".join(added_m))
+        if removed_m:
+            kinds.append("-modifier " + ", ".join(removed_m))
         if kinds:
             changed.append({"object": name, "kinds": kinds})
     return {"added": sorted(new_names - old_names),
             "removed": sorted(old_names - new_names),
             "changed": changed}
+
+
+def rich_diff(old, new, only=None):
+    """Detailed per-object before→after breakdown for `history op=changes` (the lock's
+    'call for more detail' affordance). Snapshot-derived, so it reports WHAT is different
+    (transform deltas, vert/edge/face counts, modifier stack, deformation) — not the
+    sequence of operations, which Blender doesn't expose for UI edits. `only` filters to
+    objects whose name contains that substring."""
+    names = set(old) | set(new)
+    if only:
+        names = {x for x in names if only.lower() in x.lower()}
+    out = []
+    for name in sorted(names):
+        o, n = old.get(name), new.get(name)
+        if o is None:
+            out.append({"object": name, "status": "added", "type": (n or {}).get("type")})
+            continue
+        if n is None:
+            out.append({"object": name, "status": "removed", "type": o.get("type")})
+            continue
+        c = {}
+        dloc = math.dist(o["loc"], n["loc"])
+        if dloc > _TOUCH:
+            c["moved_mm"] = round(dloc * 1000, 1)
+        drot = max((abs(a - b) for a, b in zip(o["rot"], n["rot"])), default=0.0)
+        if drot > 0.1:
+            c["rotated_deg"] = round(drot, 1)
+        if any(abs(a - b) > 0.001 for a, b in zip(o["scale"], n["scale"])):
+            c["scale"] = {"from": o["scale"], "to": n["scale"]}
+        topo = {}
+        for key, word in (("vcount", "verts"), ("ecount", "edges"), ("fcount", "faces")):
+            if key in o and key in n and o[key] != n[key]:
+                topo[word] = {"from": o[key], "to": n[key], "delta": n[key] - o[key]}
+        if topo:
+            c["topology"] = topo
+        elif (o.get("vcount") == n.get("vcount") and o.get("vsample") and n.get("vsample")
+                and len(o["vsample"]) == len(n["vsample"])):
+            maxd = max((math.dist(a, b) for a, b in zip(o["vsample"], n["vsample"])),
+                       default=0.0)
+            if maxd > _TOUCH:
+                c["deformed_mm"] = round(maxd * 1000, 1)
+        om = [m[0] for m in o.get("mods", [])]
+        nm = [m[0] for m in n.get("mods", [])]
+        if om != nm:
+            c["modifiers"] = {"before": om, "after": nm}
+        if c:
+            out.append({"object": name, "status": "changed", "changes": c})
+    return out
 
 
 def detect_external_mutation():
@@ -180,6 +250,8 @@ def lock_error(tool):
         f"[{info.get('since_op')}] ({info.get('since_label')}) by something other than "
         "this server - you editing in the Blender UI, an autosave, or a script:\n"
         f"{body}\n"
+        "→ For the full per-object breakdown (transform, verts/edges/faces, modifiers), "
+        "call history op=changes [name=<object>].\n"
         "Any read or derivation from before now may be STALE. You can still READ to "
         "re-ground - select, feel, history op=diff, render. When you've re-grounded and "
         "intend to mutate again, call history op=acknowledge to clear the lock.\n"
@@ -217,6 +289,8 @@ NO_LOG_TOOLS = {
     # SPEC-15: acknowledging the external-mutation lock is pure state bookkeeping —
     # it clears a flag and re-baselines the scene hash, moves no geometry.
     "acknowledge_mutation",
+    # SPEC-15: the change-detail read — compares baseline vs live, mutates nothing.
+    "inspect_changes",
 }
 
 # Tools that neither log to history NOR consume an undo step: pure queries,
@@ -277,6 +351,9 @@ NO_STATUS_TOOLS = {
     # SPEC-12 collab panel: shared-state read — the status block would be pure noise
     # on a status round-trip (the agent reads geometry from the geometry verbs).
     "collab_status",
+    # SPEC-15: change-detail read — its own per-object breakdown IS the payload; the
+    # status block would be noise.
+    "inspect_changes",
 }
 
 

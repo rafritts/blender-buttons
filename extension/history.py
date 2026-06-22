@@ -160,6 +160,23 @@ def acknowledge_mutation(params):
     return state.acknowledge_mutation()
 
 
+def inspect_changes(params):
+    """SPEC-15: the lock's 'tell me more' affordance. Detailed per-object breakdown of
+    everything that differs between the clean baseline and the live scene — transform,
+    verts/edges/faces, modifier stack, deformation. Snapshot-derived, so it reports WHAT
+    changed, not the operation sequence (Blender doesn't expose that for UI edits). When
+    nothing meaningful differs it says so plainly. Read-only; works locked or not."""
+    name = (params.get("name") or "").strip()
+    if state._clean_snapshot is None:
+        return {"success": True, "objects": [], "since": {},
+                "note": "no baseline yet — make an edit through the server first, "
+                        "then there's something to compare against."}
+    after = state.capture_geometry_snapshot()
+    objs = state.rich_diff(state._clean_snapshot, after, only=name or None)
+    return {"success": True, "since": state._baseline_ref or {},
+            "locked": state._world_locked, "filter": name, "objects": objs}
+
+
 TOOLS = {
     "get_history": get_history,
     "undo_steps":  undo_steps,
@@ -168,4 +185,5 @@ TOOLS = {
     "mark_checkpoint":    mark_checkpoint,
     "restore_checkpoint": restore_checkpoint,
     "acknowledge_mutation": acknowledge_mutation,
+    "inspect_changes":    inspect_changes,
 }

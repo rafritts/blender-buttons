@@ -122,6 +122,52 @@ def mark_checkpoint(name: str) -> str:
             f"history op=restore name={result['mark']}")
 
 
+def inspect_changes(name: str = "") -> str:
+    """SPEC-15: the 'tell me more' breakdown — what differs between the clean baseline
+    and the live scene, per object. WHAT changed, not the operation sequence."""
+    result = call_blender("inspect_changes", {"name": name})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    if result.get("note"):
+        return result["note"]
+    since = result.get("since") or {}
+    since_lbl = since.get("label") or (f"op [{since['op']}]" if since.get("op") else "the baseline")
+    objs = result.get("objects", [])
+    if not objs:
+        scope = f" for '{result['filter']}'" if result.get("filter") else ""
+        return (f"No meaningful difference{scope} since {since_lbl} — I genuinely can't see "
+                f"anything changed. If you did something I can't detect (a modifier "
+                f"parameter, a purely visual setting), just tell me what and I'll take your "
+                f"word for it and clear the lock.")
+    lines = [f"Changes since {since_lbl}:"]
+    for o in objs:
+        st = o.get("status")
+        if st == "added":
+            lines.append(f"  + {o['object']} [{o.get('type')}] — NEW object")
+            continue
+        if st == "removed":
+            lines.append(f"  ✗ {o['object']} [{o.get('type')}] — DELETED")
+            continue
+        lines.append(f"  ~ {o['object']}:")
+        c = o.get("changes", {})
+        if "moved_mm" in c:
+            lines.append(f"      moved {c['moved_mm']}mm")
+        if "rotated_deg" in c:
+            lines.append(f"      rotated {c['rotated_deg']}°")
+        if "scale" in c:
+            lines.append(f"      scaled {c['scale']['from']} → {c['scale']['to']}")
+        if "topology" in c:
+            parts = [f"{v['delta']:+d} {k} ({v['from']}→{v['to']})"
+                     for k, v in c["topology"].items()]
+            lines.append("      topology: " + ", ".join(parts))
+        if "deformed_mm" in c:
+            lines.append(f"      deformed up to {c['deformed_mm']}mm")
+        if "modifiers" in c:
+            m = c["modifiers"]
+            lines.append(f"      modifiers: {m['before'] or '[]'} → {m['after'] or '[]'}")
+    return "\n".join(lines)
+
+
 def acknowledge_mutation() -> str:
     """SPEC-15: clear the external-mutation lock after re-grounding, so mutating resumes."""
     result = call_blender("acknowledge_mutation")

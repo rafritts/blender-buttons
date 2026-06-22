@@ -198,6 +198,52 @@ check("post-ack: a new trip says 'since your acknowledgement'",
       f"since_label={(state._lock_info or {}).get('since_label')}")
 state.acknowledge_mutation()
 
+# ───────────────── 9. modifiers + edge/face counts + the detail readout ─────────────────
+# Modifiers are non-destructive — the OLD vertex-only fingerprint missed them entirely.
+# Now the stack is captured, so adding one trips the lock and shows in the breakdown.
+print("== SPEC-15: modifier changes + face-count delta + history op=changes detail ==")
+clean()
+run("add_box", name="Modbox", width=1.0, depth=1.0, height=1.0)
+state.detect_external_mutation()
+check("modtest: clean after add", not state._world_locked)
+
+bpy.data.objects["Modbox"].modifiers.new(name="Solidify", type='SOLIDIFY')  # base mesh untouched
+state.detect_external_mutation()
+check("adding a modifier trips the lock (was invisible before)", state._world_locked)
+mc = [c for c in (state._lock_info or {}).get("changed", []) if c["object"] == "Modbox"]
+check("lock line names the added modifier",
+      bool(mc) and any("modifier" in k.lower() for k in mc[0]["kinds"]),
+      f"kinds={mc[0]['kinds'] if mc else None}")
+
+detail = run("inspect_changes", name="Modbox")
+mod_obj = [o for o in detail.get("objects", []) if o["object"] == "Modbox"]
+check("inspect_changes returns Modbox with modifier before→after",
+      bool(mod_obj) and mod_obj[0].get("changes", {}).get("modifiers", {}).get("after") == ["Solidify"],
+      f"objs={detail.get('objects')}")
+
+state.acknowledge_mutation()
+
+# face-only delete: fcount drops, vcount unchanged — the edge/face-count branch
+mb = bpy.data.objects["Modbox"]
+bpy.context.view_layer.objects.active = mb
+bpy.ops.object.mode_set(mode='EDIT')
+bmd = bmesh.from_edit_mesh(mb.data)
+bmd.faces.ensure_lookup_table()
+bmesh.ops.delete(bmd, geom=[bmd.faces[0]], context='FACES_ONLY')
+bmesh.update_edit_mesh(mb.data)
+state.detect_external_mutation()
+fc = [c for c in (state._lock_info or {}).get("changed", []) if c["object"] == "Modbox"]
+check("a face-only delete is reported as a face-count change",
+      bool(fc) and any("faces" in k for k in fc[0]["kinds"]),
+      f"kinds={fc[0]['kinds'] if fc else None}")
+bpy.ops.object.mode_set(mode='OBJECT')
+state.acknowledge_mutation()
+
+# honest "nothing changed" path
+detail2 = run("inspect_changes")
+check("inspect_changes reports no objects when nothing differs", detail2.get("objects") == [],
+      f"detail2={detail2}")
+
 # ───────────────── summary ─────────────────
 print()
 if failures:

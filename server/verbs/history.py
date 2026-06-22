@@ -9,16 +9,17 @@ from server._core import mcp
 from server import history as _h, introspect
 from ._common import tag, unknown
 
-_OPS = ["log", "undo", "redo", "undo_to", "mark", "restore", "diff", "acknowledge"]
+_OPS = ["log", "undo", "redo", "undo_to", "mark", "restore", "diff", "acknowledge",
+        "changes"]
 
 
 @mcp.tool(name="history")
 def history(
     op: Literal["log", "undo", "redo", "undo_to", "mark", "restore", "diff",
-                "acknowledge"] = "log",
+                "acknowledge", "changes"] = "log",
     steps: tag(int, "[undo/redo] number of steps") = 1,
     id: tag(str, "[undo_to] op id to undo back to") = "",
-    name: tag(str, "[mark/restore] checkpoint name") = "",
+    name: tag(str, "[mark/restore] checkpoint name; [changes] focus one object (substring)") = "",
     checkpoint: tag(str, "[diff] checkpoint op id (empty = last)") = "",
 ) -> str:
     """
@@ -33,10 +34,15 @@ def history(
       diff    — what changed since a checkpoint op id (checkpoint; empty = last)
       acknowledge — clear the SPEC-15 external-mutation lock after re-grounding, so
                     world-mutating tools work again (—)
+      changes — detailed per-object breakdown of what differs from the clean baseline
+                (transform / verts·edges·faces / modifiers); name= to focus one object.
+                What the lock points you to when it says the world is dirty.
     """
     o = op.lower().strip()
     if o in ("acknowledge", "ack"):
         return _h.acknowledge_mutation()
+    if o == "changes":
+        return _h.inspect_changes(name)
     if o == "log":
         return _h.get_history()
     if o == "undo":

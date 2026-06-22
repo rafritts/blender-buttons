@@ -73,9 +73,38 @@ direction for a safety feature.
   it and erase the divergence the report depends on. `acknowledge` re-grounds the baseline and
   stamps an honest "since your acknowledgement" reference for the next trip.
 
+## What the fingerprint captures
+
+`state._object_signature` records, per object: type, transform (loc/rot/scale), and — for
+meshes — vert/edge/face counts, a downsampled local vertex sample, **and the modifier stack
+(name+type)**. Modifiers matter because they are *non-destructive*: a Solidify or Subdivision
+added in the UI never touches the base mesh, so a vertex-only fingerprint missed them entirely
+(found in dogfood). Capturing the stack means a modifier change trips the lock and shows in the
+breakdown. (Only stack identity, not per-modifier params — a v1 cut.) Edit-mode geometry is
+read from the live bmesh, since edits don't flush to the base mesh until the session ends.
+
+## The "tell me more" affordance — `history op=changes`
+
+The lock line is a compact one-liner per object. For the full picture the block points to
+`history op=changes [name=<object>]` (`state.rich_diff` / `inspect_changes`): a per-object
+before→after of transform, verts/edges/faces, modifier stack, and deformation magnitude.
+
+It reports **WHAT differs, not the sequence of operations.** Blender does not expose its
+operation history to Python in any usable form — the undo stack isn't enumerable, `wm.operators`
+is a capped redo buffer (empty in background, unreliable in GUI), and `wm.print_undo_steps()`
+only prints generic global labels to the console. So a per-object operation tape ("inset → loop
+cut → solidify") is **not recoverable** for UI-driven edits; the snapshot diff is the honest
+ceiling. When nothing meaningful differs, the readout says so plainly and invites the user to
+just state what they did — the human-reconciliation path ("you tell me, I confirm against the
+diff, then acknowledge").
+
+A live `depsgraph_update_post` listener could add an *event counter* ("6 geometry updates"), but
+it still couldn't name operators, so it was deferred in favour of the reliable structural diff.
+
 ## Surface
 
-- Verb: `history op=acknowledge` (alias `ack`).
+- `history op=acknowledge` (alias `ack`) — clear the lock and re-ground.
+- `history op=changes [name=<obj>]` — the detailed per-object breakdown.
 - Error shape: `{"error": "…WORLD STATE IS DIRTY — ACTION BLOCKED…", "world_locked": true,
   "mutated": {since_op, since_label, added, removed, changed}}`.
 
