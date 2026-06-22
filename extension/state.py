@@ -33,6 +33,7 @@ _marks = {}             # G12: checkpoint name -> op_id of the history head when
 # acknowledges. Reads / selection / feel stay open so it can re-ground first.
 _clean_snapshot = None  # geometry snapshot as of the last server-known (clean) state
 _scene_hash = None      # md5 of _clean_snapshot — the "edit hash" we compare against
+_baseline_ref = None    # {op, label} the clean baseline corresponds to (for honest "since")
 _world_locked = False   # True once an external mutation is detected; cleared by ack
 _lock_info = None       # {since_op, since_label, added, removed, changed} for the error
 
@@ -95,14 +96,17 @@ def _hash_snapshot(snap):
     return hashlib.md5(json.dumps(snap, sort_keys=True).encode()).hexdigest()
 
 
-def set_clean_baseline(snap=None):
-    """Mark the scene as server-known-clean: stash its snapshot + hash. Called after
-    every logged op and on acknowledge, so the next call diffs against current reality."""
-    global _clean_snapshot, _scene_hash
+def set_clean_baseline(snap=None, ref=None):
+    """Mark the scene as server-known-clean: stash its snapshot + hash + what it
+    corresponds to (`ref` = {op, label}). Called after every logged op and on
+    acknowledge, so the next call diffs against current reality and reports an honest
+    'since' point."""
+    global _clean_snapshot, _scene_hash, _baseline_ref
     if snap is None:
         snap = capture_geometry_snapshot()
     _clean_snapshot = snap
     _scene_hash = _hash_snapshot(snap)
+    _baseline_ref = ref or {}
 
 
 def _diff_snapshots(old, new):
@@ -141,20 +145,24 @@ def _diff_snapshots(old, new):
 
 def detect_external_mutation():
     """Compare the live scene to the clean-baseline hash. A mismatch means something
-    other than this server changed the world → latch the lock and record what moved.
-    No-op once already locked (don't overwrite the original culprit list) and before the
-    first op (no baseline yet)."""
+    other than this server changed the world → latch the lock. The lock stays latched
+    until acknowledge, but the reported diff is RECOMPUTED in full on every call, so it
+    always describes EVERYTHING that currently differs from the baseline — not just the
+    first change that tripped it (an object deleted after the trip would otherwise be
+    reported as still-present). No-op before the first op (no baseline yet)."""
     global _world_locked, _lock_info
-    if _world_locked or _scene_hash is None:
+    if _scene_hash is None:
         return
     current = capture_geometry_snapshot()
-    if _hash_snapshot(current) == _scene_hash:
-        return
-    diff = _diff_snapshots(_clean_snapshot or {}, current)
-    head = _history[-1] if _history else None
-    _world_locked = True
-    _lock_info = {"since_op": head["id"] if head else None,
-                  "since_label": head["label"] if head else None, **diff}
+    diverged = _hash_snapshot(current) != _scene_hash
+    if not diverged and not _world_locked:
+        return  # clean and unlocked — nothing to do
+    if diverged:
+        _world_locked = True
+    # Refresh the FULL current diff vs the (frozen-while-locked) clean baseline.
+    ref = _baseline_ref or {}
+    _lock_info = {"since_op": ref.get("op"), "since_label": ref.get("label"),
+                  **_diff_snapshots(_clean_snapshot or {}, current)}
 
 
 def lock_error(tool):
@@ -164,7 +172,8 @@ def lock_error(tool):
     lines = [f"  - {c['object']}: {', '.join(c['kinds'])}" for c in info.get("changed", [])]
     lines += [f"  - added: {a}" for a in info.get("added", [])]
     lines += [f"  - removed: {r}" for r in info.get("removed", [])]
-    body = "\n".join(lines) or "  - (the scene's geometry hash changed)"
+    body = "\n".join(lines) or ("  - (the scene now matches the baseline again — the lock "
+                                "stays latched until you acknowledge)")
     return {"error": (
         "########## WORLD STATE IS DIRTY - ACTION BLOCKED ##########\n"
         f"'{tool}' was ABORTED. The scene changed since your last op "
@@ -186,7 +195,7 @@ def acknowledge_mutation():
     was_locked = _world_locked
     _world_locked = False
     _lock_info = None
-    set_clean_baseline()
+    set_clean_baseline(ref={"op": None, "label": "your acknowledgement"})
     if not was_locked:
         return {"success": True, "acknowledged": False,
                 "note": "world was already clean - nothing to acknowledge; baseline refreshed."}
@@ -280,7 +289,7 @@ def reset_history_state():
     describe a scene that no longer exists, and undo() would check against a
     snapshot from another file (gaps.md U11)."""
     global _undo_baseline, _pending_edit_bind, _eval_dirty
-    global _clean_snapshot, _scene_hash, _world_locked, _lock_info
+    global _clean_snapshot, _scene_hash, _baseline_ref, _world_locked, _lock_info
     _history.clear()
     _redo_stack.clear()
     _snapshots.clear()
@@ -291,6 +300,7 @@ def reset_history_state():
     # SPEC-15: the scene it described is gone — drop the baseline + any latched lock.
     _clean_snapshot = None
     _scene_hash = None
+    _baseline_ref = None
     _world_locked = False
     _lock_info = None
 
@@ -345,7 +355,12 @@ def log_operation(tool, params, label=""):
                      "active": getattr(bpy.context.active_object, "name", None)})
     snap = capture_geometry_snapshot()
     _snapshots[op_id] = snap          # diff_since (P11) checkpoint
-    set_clean_baseline(snap)          # SPEC-15: this op is the new server-known clean state
+    # SPEC-15: this op is the new server-known clean state — UNLESS the world is locked.
+    # While locked only exempt tools run, but some of those (selection) still log; letting
+    # them re-baseline to the dirty scene would erase the divergence the lock describes.
+    # The baseline stays frozen at the last real edit until acknowledge re-grounds it.
+    if not _world_locked:
+        set_clean_baseline(snap, ref={"op": op_id, "label": label or tool})
     _redo_stack.clear()  # a new operation forks history; old redo branch is dead
     return op_id
 

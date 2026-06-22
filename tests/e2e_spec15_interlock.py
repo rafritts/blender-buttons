@@ -79,11 +79,14 @@ check("lock records a 'moved' change",
       bool(moved) and any("moved" in k for k in moved[0]["kinds"]),
       f"kinds={moved[0]['kinds'] if moved else None}")
 
-# ───────────────── 5b. idempotent while locked ─────────────────
+# ───────────────── 5b. re-detect while locked: latched, but report refreshes ─────────────────
 prev = state._lock_info
 state.detect_external_mutation()
-check("detect is idempotent while locked (keeps original culprit list)",
-      state._world_locked and state._lock_info is prev)
+check("re-detect keeps the lock latched (only acknowledge clears it)", state._world_locked)
+check("re-detect refreshes the report (recomputed) and still names the move",
+      state._lock_info is not prev
+      and any(c["object"] == "Lockbox" for c in (state._lock_info or {}).get("changed", [])),
+      f"info={state._lock_info}")
 
 # ───────────────── 3. the allowlist ─────────────────
 print("== SPEC-15: the lock allowlist (blocked vs exempt) ==")
@@ -147,6 +150,53 @@ state.detect_external_mutation()
 check("edit-mode topology change latches the lock", state._world_locked,
       f"info={state._lock_info}")
 bpy.ops.object.mode_set(mode='OBJECT')
+
+# ───────────────── 8. the report is CUMULATIVE, not frozen at the first trip ─────────────────
+# The lock latches on the first divergence but RECOMPUTES the full diff every call, so it
+# always reflects everything currently different from the baseline — including changes made
+# AFTER the trip (e.g. an object deleted later must not still be reported as present).
+print("== SPEC-15: the lock report is the full current diff, recomputed ==")
+clean()
+run("add_box", name="Alpha", width=1.0, depth=1.0, height=1.0)
+run("add_box", name="Beta", width=1.0, depth=1.0, height=1.0)  # baseline: {Alpha, Beta}
+state.detect_external_mutation()
+check("cumulative: clean after the two adds", not state._world_locked)
+
+bpy.data.objects["Alpha"].location.x += 0.5          # 1st external change → trips the lock
+state.detect_external_mutation()
+info1 = state._lock_info or {}
+check("cumulative: lock trips on Alpha move",
+      state._world_locked and any(c["object"] == "Alpha" for c in info1.get("changed", [])),
+      f"info={info1}")
+check("cumulative: 'since' names the baseline op (add_box), not a stale point",
+      info1.get("since_label") == "add_box", f"since_label={info1.get('since_label')}")
+
+bpy.data.objects.remove(bpy.data.objects["Beta"], do_unlink=True)  # 2nd change, AFTER the trip
+state.detect_external_mutation()
+info2 = state._lock_info or {}
+moved_alpha = any(c["object"] == "Alpha" for c in info2.get("changed", []))
+removed_beta = "Beta" in info2.get("removed", [])
+check("cumulative: report now includes BOTH (Alpha moved + Beta removed)",
+      moved_alpha and removed_beta, f"info={info2}")
+
+# Frozen baseline: an exempt op that logs (selection) must NOT re-baseline while locked,
+# or the diff above would collapse to empty.
+run("select_all", action="SELECT", target="Alpha")
+state.detect_external_mutation()
+info3 = state._lock_info or {}
+check("frozen baseline: diff survives an exempt logging op while locked",
+      any(c["object"] == "Alpha" for c in info3.get("changed", []))
+      and "Beta" in info3.get("removed", []), f"info={info3}")
+
+# Acknowledge re-grounds and stamps an honest 'since' for any future trip.
+state.acknowledge_mutation()
+check("post-ack: lock cleared", not state._world_locked)
+bpy.data.objects["Alpha"].location.x += 0.5
+state.detect_external_mutation()
+check("post-ack: a new trip says 'since your acknowledgement'",
+      (state._lock_info or {}).get("since_label") == "your acknowledgement",
+      f"since_label={(state._lock_info or {}).get('since_label')}")
+state.acknowledge_mutation()
 
 # ───────────────── summary ─────────────────
 print()

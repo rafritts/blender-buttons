@@ -64,8 +64,14 @@ direction for a safety feature.
   the downsampled 150-vert/object sample, so a sub-sample edit can be missed — acceptable, as
   transforms and topology are always caught).
 - **No auto-revert.** It refuses to build on a dirty world; it never undoes the user's change.
-- **One latch per mutation.** Detection is idempotent while locked (it preserves the original
-  culprit list); the first `acknowledge` re-grounds.
+- **Latch once, report live.** The lock latches on the first divergence and stays latched
+  until `acknowledge` — but the diff it reports is **recomputed in full on every call**, so it
+  always describes *everything currently different from the baseline*, not a frozen snapshot
+  of the first tripping change. (A first version froze the culprit list; dogfood showed it then
+  lied — it kept naming an object the user had since deleted.) The baseline itself is **frozen
+  while locked** so that an allowed selection op — which still logs — can't silently re-ground
+  it and erase the divergence the report depends on. `acknowledge` re-grounds the baseline and
+  stamps an honest "since your acknowledgement" reference for the next trip.
 
 ## Surface
 
