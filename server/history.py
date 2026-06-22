@@ -122,6 +122,20 @@ def mark_checkpoint(name: str) -> str:
             f"history op=restore name={result['mark']}")
 
 
+def acknowledge_mutation() -> str:
+    """SPEC-15: clear the external-mutation lock after re-grounding, so mutating resumes."""
+    result = call_blender("acknowledge_mutation")
+    if not result.get("success"):
+        return result.get("error", "failed")
+    if not result.get("acknowledged"):
+        return result.get("note", "world was already clean — nothing to acknowledge")
+    info = result.get("cleared") or {}
+    n = (len(info.get("changed", [])) + len(info.get("added", []))
+         + len(info.get("removed", [])))
+    return (f"✓ lock cleared — acknowledged external mutation of {n} object(s); baseline "
+            f"re-grounded to the live scene. World-mutating tools work again.")
+
+
 def restore_checkpoint(name: str) -> str:
     """Roll the scene back to a named checkpoint — undo to where the mark was set.
     Verified against the history snapshot, like undo_to."""

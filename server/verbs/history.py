@@ -9,12 +9,13 @@ from server._core import mcp
 from server import history as _h, introspect
 from ._common import tag, unknown
 
-_OPS = ["log", "undo", "redo", "undo_to", "mark", "restore", "diff"]
+_OPS = ["log", "undo", "redo", "undo_to", "mark", "restore", "diff", "acknowledge"]
 
 
 @mcp.tool(name="history")
 def history(
-    op: Literal["log", "undo", "redo", "undo_to", "mark", "restore", "diff"] = "log",
+    op: Literal["log", "undo", "redo", "undo_to", "mark", "restore", "diff",
+                "acknowledge"] = "log",
     steps: tag(int, "[undo/redo] number of steps") = 1,
     id: tag(str, "[undo_to] op id to undo back to") = "",
     name: tag(str, "[mark/restore] checkpoint name") = "",
@@ -30,8 +31,12 @@ def history(
       mark    — name the current point as a checkpoint, to restore to later  (name)
       restore — roll the scene back to a named checkpoint (mark, try, restore) (name)
       diff    — what changed since a checkpoint op id (checkpoint; empty = last)
+      acknowledge — clear the SPEC-15 external-mutation lock after re-grounding, so
+                    world-mutating tools work again (—)
     """
     o = op.lower().strip()
+    if o in ("acknowledge", "ack"):
+        return _h.acknowledge_mutation()
     if o == "log":
         return _h.get_history()
     if o == "undo":

@@ -24,6 +24,20 @@ _snapshots = {}         # op_id -> {obj_name: geometry signature} for diff_since
 _marks = {}             # G12: checkpoint name -> op_id of the history head when marked
                         # (None = marked at the empty baseline). `restore` undoes to it.
 
+# ── SPEC-15: external-mutation interlock ──────────────────────────────────────
+# THE ONE RULE made operational. The scene is a SHARED canvas: the user can edit in
+# the Blender UI, an autosave or script can fire — it is only "static between our calls"
+# by the user's courtesy, never by guarantee. So every server-known state carries a
+# geometry hash; before each tool runs we re-hash the live scene and, on a mismatch,
+# LATCH a lock that hard-blocks every world-mutating tool until the agent explicitly
+# acknowledges. Reads / selection / feel stay open so it can re-ground first.
+_clean_snapshot = None  # geometry snapshot as of the last server-known (clean) state
+_scene_hash = None      # md5 of _clean_snapshot — the "edit hash" we compare against
+_world_locked = False   # True once an external mutation is detected; cleared by ack
+_lock_info = None       # {since_op, since_label, added, removed, changed} for the error
+
+_TOUCH = 0.0005         # 0.5 mm — matches introspect.diff_since's change floor
+
 _VSAMPLE_CAP = 150      # max per-object vertices stored per snapshot (downsampled)
 
 
@@ -60,6 +74,112 @@ def capture_geometry_snapshot():
         pass
     return snap
 
+
+# ── SPEC-15 interlock helpers ─────────────────────────────────────────────────
+
+def _hash_snapshot(snap):
+    """Stable digest of a whole-scene geometry snapshot — the scene's 'edit hash'."""
+    return hashlib.md5(json.dumps(snap, sort_keys=True).encode()).hexdigest()
+
+
+def set_clean_baseline(snap=None):
+    """Mark the scene as server-known-clean: stash its snapshot + hash. Called after
+    every logged op and on acknowledge, so the next call diffs against current reality."""
+    global _clean_snapshot, _scene_hash
+    if snap is None:
+        snap = capture_geometry_snapshot()
+    _clean_snapshot = snap
+    _scene_hash = _hash_snapshot(snap)
+
+
+def _diff_snapshots(old, new):
+    """Lightweight per-object diff between two snapshots — added / removed / changed
+    (moved / rotated / scaled / deformed / topology). Pure (no bpy) so it's safe to call
+    from anywhere; the rich region-aware version lives in introspect.diff_since."""
+    old_names, new_names = set(old), set(new)
+    changed = []
+    for name in sorted(old_names & new_names):
+        o, n = old[name], new[name]
+        kinds = []
+        dloc = math.dist(o["loc"], n["loc"])
+        if dloc > _TOUCH:
+            kinds.append(f"moved {round(dloc * 1000, 1)}mm")
+        drot = max((abs(a - b) for a, b in zip(o["rot"], n["rot"])), default=0.0)
+        if drot > 0.1:
+            kinds.append(f"rotated {round(drot, 1)}deg")
+        dscl = max((abs(a - b) for a, b in zip(o["scale"], n["scale"])), default=0.0)
+        if dscl > 0.001:
+            kinds.append("scaled")
+        if "vcount" in o and "vcount" in n:
+            if o["vcount"] != n["vcount"]:
+                kinds.append(f"topology {n['vcount'] - o['vcount']:+d} verts")
+            elif (o.get("vsample") and n.get("vsample")
+                    and len(o["vsample"]) == len(n["vsample"])):
+                maxd = max((math.dist(a, b) for a, b in zip(o["vsample"], n["vsample"])),
+                           default=0.0)
+                if maxd > _TOUCH:
+                    kinds.append(f"deformed {round(maxd * 1000, 1)}mm")
+        if kinds:
+            changed.append({"object": name, "kinds": kinds})
+    return {"added": sorted(new_names - old_names),
+            "removed": sorted(old_names - new_names),
+            "changed": changed}
+
+
+def detect_external_mutation():
+    """Compare the live scene to the clean-baseline hash. A mismatch means something
+    other than this server changed the world → latch the lock and record what moved.
+    No-op once already locked (don't overwrite the original culprit list) and before the
+    first op (no baseline yet)."""
+    global _world_locked, _lock_info
+    if _world_locked or _scene_hash is None:
+        return
+    current = capture_geometry_snapshot()
+    if _hash_snapshot(current) == _scene_hash:
+        return
+    diff = _diff_snapshots(_clean_snapshot or {}, current)
+    head = _history[-1] if _history else None
+    _world_locked = True
+    _lock_info = {"since_op": head["id"] if head else None,
+                  "since_label": head["label"] if head else None, **diff}
+
+
+def lock_error(tool):
+    """The hard-stop error returned for a world-mutating tool while the lock is set —
+    names what was mutated and how to clear it."""
+    info = _lock_info or {}
+    lines = [f"  - {c['object']}: {', '.join(c['kinds'])}" for c in info.get("changed", [])]
+    lines += [f"  - added: {a}" for a in info.get("added", [])]
+    lines += [f"  - removed: {r}" for r in info.get("removed", [])]
+    body = "\n".join(lines) or "  - (the scene's geometry hash changed)"
+    return {"error": (
+        "########## WORLD STATE IS DIRTY - ACTION BLOCKED ##########\n"
+        f"'{tool}' was ABORTED. The scene changed since your last op "
+        f"[{info.get('since_op')}] ({info.get('since_label')}) by something other than "
+        "this server - you editing in the Blender UI, an autosave, or a script:\n"
+        f"{body}\n"
+        "Any read or derivation from before now may be STALE. You can still READ to "
+        "re-ground - select, feel, history op=diff, render. When you've re-grounded and "
+        "intend to mutate again, call history op=acknowledge to clear the lock.\n"
+        "##########################################################"),
+        "world_locked": True, "mutated": info}
+
+
+def acknowledge_mutation():
+    """Clear the dirty lock and re-baseline to the live scene, so mutating resumes.
+    Honest no-op when nothing was locked (still refreshes the baseline)."""
+    global _world_locked, _lock_info
+    cleared = _lock_info
+    was_locked = _world_locked
+    _world_locked = False
+    _lock_info = None
+    set_clean_baseline()
+    if not was_locked:
+        return {"success": True, "acknowledged": False,
+                "note": "world was already clean - nothing to acknowledge; baseline refreshed."}
+    return {"success": True, "acknowledged": True, "cleared": cleared}
+
+
 # Tools whose invocation should NOT be recorded in the history log.
 NO_LOG_TOOLS = {
     "get_scene_tree",
@@ -72,6 +192,9 @@ NO_LOG_TOOLS = {
     # or an undo step. (The queue fills automatically from the dispatch; Reject undoes
     # via the history path.)
     "collab_status",
+    # SPEC-15: acknowledging the external-mutation lock is pure state bookkeeping —
+    # it clears a flag and re-baselines the scene hash, moves no geometry.
+    "acknowledge_mutation",
 }
 
 # Tools that neither log to history NOR consume an undo step: pure queries,
@@ -144,6 +267,7 @@ def reset_history_state():
     describe a scene that no longer exists, and undo() would check against a
     snapshot from another file (gaps.md U11)."""
     global _undo_baseline, _pending_edit_bind, _eval_dirty
+    global _clean_snapshot, _scene_hash, _world_locked, _lock_info
     _history.clear()
     _redo_stack.clear()
     _snapshots.clear()
@@ -151,6 +275,11 @@ def reset_history_state():
     _undo_baseline = None
     _pending_edit_bind = None
     _eval_dirty = set()
+    # SPEC-15: the scene it described is gone — drop the baseline + any latched lock.
+    _clean_snapshot = None
+    _scene_hash = None
+    _world_locked = False
+    _lock_info = None
 
 
 def scene_object_names():
@@ -201,7 +330,9 @@ def log_operation(tool, params, label=""):
     _history.append({"id": op_id, "label": label or tool, "tool": tool,
                      "params": params, "objects": scene_object_names(),
                      "active": getattr(bpy.context.active_object, "name", None)})
-    _snapshots[op_id] = capture_geometry_snapshot()  # diff_since (P11) checkpoint
+    snap = capture_geometry_snapshot()
+    _snapshots[op_id] = snap          # diff_since (P11) checkpoint
+    set_clean_baseline(snap)          # SPEC-15: this op is the new server-known clean state
     _redo_stack.clear()  # a new operation forks history; old redo branch is dead
     return op_id
 

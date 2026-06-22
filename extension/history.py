@@ -153,6 +153,13 @@ def restore_checkpoint(params):
     return result
 
 
+def acknowledge_mutation(params):
+    """SPEC-15: clear the external-mutation lock and re-baseline to the live scene, so
+    world-mutating tools work again. Call only after re-grounding via reads (select/feel/
+    diff/render) — it accepts the current scene as the new ground truth."""
+    return state.acknowledge_mutation()
+
+
 TOOLS = {
     "get_history": get_history,
     "undo_steps":  undo_steps,
@@ -160,4 +167,5 @@ TOOLS = {
     "undo_to":     undo_to,
     "mark_checkpoint":    mark_checkpoint,
     "restore_checkpoint": restore_checkpoint,
+    "acknowledge_mutation": acknowledge_mutation,
 }

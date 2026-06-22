@@ -88,6 +88,22 @@ TOOLS = {}
 for _mod in _TOOL_MODULES:
     TOOLS.update(_mod.TOOLS)
 
+# SPEC-15: tools that stay available while the external-mutation lock is SET. The lock
+# is an ALLOWLIST (fail-closed) — anything not named here is blocked until acknowledge.
+# Reads (state.NON_UNDOABLE_TOOLS) ∪ pure selection ∪ mode/nav ∪ render (a read→image)
+# ∪ status ∪ the acknowledge op itself. Selection mutates only the SELECTION, never world
+# geometry, so it's safe — it's how the agent re-grounds before clearing the lock.
+_SELECTION_TOOLS = {
+    "set_component_mode", "select_all", "select_by_axis", "select_between",
+    "select_by_vgroup", "select_by_material", "grow_selection", "flood_to_crease",
+    "random_select", "select_in_sphere", "select_boundary", "select_limb",
+    "select_ring", "select_rings", "verify_selection", "select_object",
+}
+LOCK_EXEMPT_TOOLS = (
+    state.NON_UNDOABLE_TOOLS | _SELECTION_TOOLS |
+    {"acknowledge_mutation", "render_to_file", "get_blender_status", "set_mode"}
+)
+
 # Tools that require edit mode — support an optional `target` param that auto-selects the
 # named object and enters edit mode, then exits back to OBJECT mode after the call.
 EDIT_MODE_TOOLS = {
@@ -455,7 +471,18 @@ def handle_client(conn):
         result_box = [None]
 
         def on_main_thread():
-            result_box[0] = execute_command(command)
+            # SPEC-15: external-mutation interlock, enforced at the CLIENT boundary (not
+            # in execute_command, so headless test harnesses that orchestrate the scene
+            # via direct bpy + execute_command calls are unaffected). Re-hash the live
+            # scene; if something the server didn't do changed it, latch the lock and
+            # HARD-BLOCK every world-mutating tool until the agent acknowledges. Reads /
+            # selection / feel / render stay open so it can re-ground first.
+            state.detect_external_mutation()
+            tool = command.get("tool")
+            if state._world_locked and tool not in LOCK_EXEMPT_TOOLS:
+                result_box[0] = state.lock_error(tool)
+            else:
+                result_box[0] = execute_command(command)
             result_event.set()
             return None
 
