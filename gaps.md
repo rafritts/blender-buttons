@@ -116,3 +116,20 @@ unasked, one-line guard that penetration gets, so an open shell can't masquerade
 through the rest of a build. (Workflow lesson also stands: `feel` a multi-step carved part
 before dressing it — don't dead-reckon a whole mug. But the tool should make the failure
 loud, not silent.)
+
+## G106 — `edit op=extrude` on an inset cap leaves the original face → sealed double-walled pocket, not an open cavity
+
+Carving a coffee-mug cup the textbook way — cylinder → select top → `inset` → `extrude
+down` — did **not** hollow an open cup. Ground truth after the fact: the inset cap face
+stayed put capping the top while the extrude built a *second* wall + floor below it, yielding
+a SEALED internal pocket (`feel` read χ=3 with an internal void) that from outside looks like
+a solid cylinder — no visible opening. Deleting the top cap by hand opened it but left
+near-coincident internal geometry that `feel op=overlaps` couldn't see and yet the renderer
+z-fought on. A `edit op=boolean DIFFERENCE` with a cutter cylinder produced a clean
+thick-walled open cup in **one** step (χ=2, watertight, consistent normals). Two asks:
+**(a)** `extrude` on a face region should reliably *move* the face (consume the original, the
+Blender default) so inset→extrude carves an open well as expected — the current behavior
+silently doubles geometry; **(b)** a first-class `op=hollow` (wall thickness + depth, wrapping
+the boolean) would make cup/bowl/vessel carving a single intent-level call instead of a manual
+cutter-cylinder dance. Until then: **carve cavities with `edit op=boolean`, not
+inset→extrude.**
