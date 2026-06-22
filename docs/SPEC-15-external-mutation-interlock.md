@@ -77,11 +77,14 @@ direction for a safety feature.
 
 `state._object_signature` records, per object: type, transform (loc/rot/scale), and — for
 meshes — vert/edge/face counts, a downsampled local vertex sample, **and the modifier stack
-(name+type)**. Modifiers matter because they are *non-destructive*: a Solidify or Subdivision
-added in the UI never touches the base mesh, so a vertex-only fingerprint missed them entirely
-(found in dogfood). Capturing the stack means a modifier change trips the lock and shows in the
-breakdown. (Only stack identity, not per-modifier params — a v1 cut.) Edit-mode geometry is
-read from the live bmesh, since edits don't flush to the base mesh until the session ends.
+(name + type + per-modifier parameters)**. Modifiers matter because they are *non-destructive*:
+a Solidify/Subdivision added — or *retuned* (thickness, levels) — in the UI never touches the
+base mesh, so a vertex-only fingerprint missed them entirely (found in dogfood, in two rounds:
+first add/remove, then parameter changes). Each modifier's writable params are read generically
+from its RNA (`state._modifier_props`): pointers collapse to a name, vectors to lists, pure
+UI/panel state is skipped. So adding, removing, OR retuning a modifier trips the lock and shows
+in the breakdown. Edit-mode geometry is read from the live bmesh, since edits don't flush to the
+base mesh until the session ends.
 
 ## The "tell me more" affordance — `history op=changes`
 

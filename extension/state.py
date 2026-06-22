@@ -42,6 +42,40 @@ _TOUCH = 0.0005         # 0.5 mm — matches introspect.diff_since's change floo
 _VSAMPLE_CAP = 150      # max per-object vertices stored per snapshot (downsampled)
 
 
+# Modifier props that are pure UI/panel state — toggling them isn't a meaningful change.
+_MOD_PROP_SKIP = {"show_expanded", "is_active", "use_pin_to_last"}
+
+
+def _modifier_props(m):
+    """A JSON-stable dict of a modifier's writable parameters, read generically from its
+    RNA so no per-type knowledge is needed. Pointers (target objects, vertex groups)
+    collapse to their name; vectors/arrays to lists; UI-only panel state is skipped. This
+    is what lets the interlock notice a modifier *retuned* (Solidify thickness, Subsurf
+    levels), not just added/removed."""
+    props = {}
+    for p in m.bl_rna.properties:
+        k = p.identifier
+        if k == "rna_type" or k in _MOD_PROP_SKIP or p.is_readonly:
+            continue
+        try:
+            v = getattr(m, k)
+        except Exception:
+            continue
+        if isinstance(v, (bool, int, str)):
+            props[k] = v
+        elif isinstance(v, float):
+            props[k] = round(v, 6)
+        elif hasattr(v, "name"):           # pointer to a datablock (object/mesh/…)
+            props[k] = v.name
+        elif hasattr(v, "__len__"):        # vector / color / array
+            try:
+                props[k] = [round(x, 6) if isinstance(x, float) else x for x in v]
+            except Exception:
+                props[k] = str(v)
+        # collections / unhandled types are skipped (consistently → no spurious diff)
+    return props
+
+
 def _object_signature(obj):
     """Compact, cheap geometry signature for diff_since. Transform (loc/rot/scale)
     is stored separately from a LOCAL-space vertex sample, so rigid motion and
@@ -54,12 +88,13 @@ def _object_signature(obj):
         "scale": [round(v, 6) for v in obj.scale],
     }
     # SPEC-15: modifiers are NON-DESTRUCTIVE — they never touch the base mesh, so a
-    # Solidify/Subdivision added in the UI would be invisible to a vertex-only fingerprint.
-    # Capturing the stack (name+type) means a modifier change trips the lock and shows up
-    # in the diff. (Only the stack identity, not per-modifier params — a v1 cut.)
+    # Solidify/Subdivision added OR retuned in the UI would be invisible to a vertex-only
+    # fingerprint. Capture each modifier's identity AND its parameters, so adding,
+    # removing, OR tweaking a modifier (e.g. Solidify thickness) trips the lock.
     mods = getattr(obj, "modifiers", None)
     if mods is not None and len(mods):
-        sig["mods"] = [[m.name, m.type] for m in mods]
+        sig["mods"] = [{"name": m.name, "type": m.type, "props": _modifier_props(m)}
+                       for m in mods]
     me = getattr(obj, "data", None)
     if obj.type == 'MESH' and me is not None and hasattr(me, "vertices"):
         verts, edges, faces = me.vertices, me.edges, me.polygons
@@ -117,6 +152,29 @@ def set_clean_baseline(snap=None, ref=None):
     _baseline_ref = ref or {}
 
 
+def _mods_index(mods):
+    return {m["name"]: m for m in (mods or [])}
+
+
+def _modifier_changes(old_mods, new_mods):
+    """(added, removed, changed) between two modifier stacks. `changed` entries name the
+    modifier and which params differ — so a retuned Solidify reads as changed, not just
+    add/remove."""
+    o, n = _mods_index(old_mods), _mods_index(new_mods)
+    added = sorted(set(n) - set(o))
+    removed = sorted(set(o) - set(n))
+    changed = []
+    for name in sorted(set(o) & set(n)):
+        if o[name].get("type") != n[name].get("type"):
+            changed.append({"name": name, "params": ["type"]})
+            continue
+        op, np_ = o[name].get("props", {}), n[name].get("props", {})
+        keys = sorted(k for k in set(op) | set(np_) if op.get(k) != np_.get(k))
+        if keys:
+            changed.append({"name": name, "params": keys})
+    return added, removed, changed
+
+
 def _diff_snapshots(old, new):
     """Lightweight per-object diff between two snapshots — added / removed / changed
     (moved / rotated / scaled / deformed / topology). Pure (no bpy) so it's safe to call
@@ -149,15 +207,15 @@ def _diff_snapshots(old, new):
                        default=0.0)
             if maxd > _TOUCH:
                 kinds.append(f"deformed {round(maxd * 1000, 1)}mm")
-        # modifier stack added/removed (the non-destructive change the vertex read misses)
-        om = {tuple(m) for m in o.get("mods", [])}
-        nm = {tuple(m) for m in n.get("mods", [])}
-        added_m = sorted(m[0] for m in nm - om)
-        removed_m = sorted(m[0] for m in om - nm)
+        # modifier stack added/removed/retuned (non-destructive changes the vertex read misses)
+        added_m, removed_m, changed_m = _modifier_changes(o.get("mods"), n.get("mods"))
         if added_m:
             kinds.append("+modifier " + ", ".join(added_m))
         if removed_m:
             kinds.append("-modifier " + ", ".join(removed_m))
+        for cm in changed_m:
+            shown = ", ".join(cm["params"][:4]) + ("…" if len(cm["params"]) > 4 else "")
+            kinds.append(f"modifier {cm['name']} retuned ({shown})")
         if kinds:
             changed.append({"object": name, "kinds": kinds})
     return {"added": sorted(new_names - old_names),
@@ -204,10 +262,22 @@ def rich_diff(old, new, only=None):
                        default=0.0)
             if maxd > _TOUCH:
                 c["deformed_mm"] = round(maxd * 1000, 1)
-        om = [m[0] for m in o.get("mods", [])]
-        nm = [m[0] for m in n.get("mods", [])]
-        if om != nm:
-            c["modifiers"] = {"before": om, "after": nm}
+        added_m, removed_m, changed_m = _modifier_changes(o.get("mods"), n.get("mods"))
+        if added_m or removed_m or changed_m:
+            md = {}
+            if added_m:
+                md["added"] = added_m
+            if removed_m:
+                md["removed"] = removed_m
+            if changed_m:
+                oi, ni = _mods_index(o.get("mods")), _mods_index(n.get("mods"))
+                md["changed"] = [
+                    {"name": cm["name"],
+                     "params": {k: {"from": oi[cm["name"]].get("props", {}).get(k),
+                                    "to": ni[cm["name"]].get("props", {}).get(k)}
+                                for k in cm["params"]}}
+                    for cm in changed_m]
+            c["modifiers"] = md
         if c:
             out.append({"object": name, "status": "changed", "changes": c})
     return out

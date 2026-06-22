@@ -217,10 +217,28 @@ check("lock line names the added modifier",
 
 detail = run("inspect_changes", name="Modbox")
 mod_obj = [o for o in detail.get("objects", []) if o["object"] == "Modbox"]
-check("inspect_changes returns Modbox with modifier before→after",
-      bool(mod_obj) and mod_obj[0].get("changes", {}).get("modifiers", {}).get("after") == ["Solidify"],
+check("inspect_changes reports the added modifier",
+      bool(mod_obj) and mod_obj[0].get("changes", {}).get("modifiers", {}).get("added") == ["Solidify"],
       f"objs={detail.get('objects')}")
 
+state.acknowledge_mutation()
+
+# modifier PARAMETER change — the deeper gap: retuning a modifier touches neither the
+# base mesh nor the stack identity, so only capturing per-modifier params catches it.
+sol = bpy.data.objects["Modbox"].modifiers["Solidify"]
+sol.thickness = sol.thickness + 0.25
+state.detect_external_mutation()
+pc = [c for c in (state._lock_info or {}).get("changed", []) if c["object"] == "Modbox"]
+check("retuning a modifier param trips the lock",
+      state._world_locked and bool(pc)
+      and any("Solidify" in k and "retuned" in k for k in pc[0]["kinds"]),
+      f"kinds={pc[0]['kinds'] if pc else None}")
+detail_p = run("inspect_changes", name="Modbox")
+mp = [o for o in detail_p.get("objects", []) if o["object"] == "Modbox"]
+chg = mp[0].get("changes", {}).get("modifiers", {}).get("changed", []) if mp else []
+check("inspect_changes shows the retuned param before→after",
+      bool(chg) and "thickness" in chg[0].get("params", {}),
+      f"objs={detail_p.get('objects')}")
 state.acknowledge_mutation()
 
 # face-only delete: fcount drops, vcount unchanged — the edge/face-count branch

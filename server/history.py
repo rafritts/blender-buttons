@@ -164,7 +164,13 @@ def inspect_changes(name: str = "") -> str:
             lines.append(f"      deformed up to {c['deformed_mm']}mm")
         if "modifiers" in c:
             m = c["modifiers"]
-            lines.append(f"      modifiers: {m['before'] or '[]'} → {m['after'] or '[]'}")
+            if m.get("added"):
+                lines.append(f"      + modifier: {', '.join(m['added'])}")
+            if m.get("removed"):
+                lines.append(f"      ✗ modifier: {', '.join(m['removed'])}")
+            for cm in m.get("changed", []):
+                ps = ", ".join(f"{k} {v['from']}→{v['to']}" for k, v in cm["params"].items())
+                lines.append(f"      ~ modifier {cm['name']}: {ps}")
     return "\n".join(lines)
 
 
