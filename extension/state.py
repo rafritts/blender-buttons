@@ -55,6 +55,19 @@ def _object_signature(obj):
     me = getattr(obj, "data", None)
     if obj.type == 'MESH' and me is not None and hasattr(me, "vertices"):
         verts = me.vertices
+        # SPEC-15: edit-mode edits live in a separate bmesh and DON'T flush to
+        # me.vertices until the session ends — so an in-progress viewport edit (e.g. an
+        # extrude made while still in Edit Mode) would be invisible to the base-mesh
+        # read. Read the live bmesh instead, so the interlock sees the change. (Mirrors
+        # server._geo_signature's edit-aware no-op read.)
+        if obj.mode == 'EDIT':
+            try:
+                import bmesh
+                bm = bmesh.from_edit_mesh(me)
+                bm.verts.ensure_lookup_table()
+                verts = bm.verts
+            except Exception:
+                verts = me.vertices
         n = len(verts)
         sig["vcount"] = n
         step = max(1, n // _VSAMPLE_CAP)

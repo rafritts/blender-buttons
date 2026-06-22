@@ -25,6 +25,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import bpy  # noqa: E402
+import bmesh  # noqa: E402
 
 from extension import server as bb_server  # noqa: E402
 from extension import state  # noqa: E402
@@ -120,6 +121,32 @@ check("post-ack clean: no re-latch (baseline re-grounded to live)", not state._w
 ack2 = state.acknowledge_mutation()
 check("ack on an already-clean world: honest no-op (acknowledged=False)",
       ack2.get("success") and ack2.get("acknowledged") is False)
+
+# ───────────────── 7. edit-mode change is visible (the in-session gap) ─────────────────
+# An external edit made while the object is STILL in Edit Mode lives in a separate bmesh
+# that doesn't flush to me.vertices until the session ends — so a base-mesh-only read
+# would miss it. The signature must read the live bmesh in Edit Mode.
+print("== SPEC-15: a change made while still in Edit Mode is detected ==")
+clean()
+run("add_box", name="EditBox", width=1.0, depth=1.0, height=1.0)  # baseline: 8 verts, OBJECT mode
+state.detect_external_mutation()
+check("edit-test: clean after add", not state._world_locked)
+
+eb = bpy.data.objects["EditBox"]
+bpy.context.view_layer.objects.active = eb
+bpy.ops.object.mode_set(mode='EDIT')
+bm = bmesh.from_edit_mesh(eb.data)
+bm.verts.ensure_lookup_table()
+base_vcount = len(eb.data.vertices)
+bm.verts.new((2.0, 2.0, 2.0))            # add geometry — STAY in edit mode (no mode_set back)
+bmesh.update_edit_mesh(eb.data)
+sig = state._object_signature(eb)
+check("edit-mode signature reads the LIVE bmesh vcount", sig.get("vcount") == len(bm.verts),
+      f"sig.vcount={sig.get('vcount')} bmesh={len(bm.verts)} base={base_vcount}")
+state.detect_external_mutation()
+check("edit-mode topology change latches the lock", state._world_locked,
+      f"info={state._lock_info}")
+bpy.ops.object.mode_set(mode='OBJECT')
 
 # ───────────────── summary ─────────────────
 print()
