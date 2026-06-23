@@ -189,6 +189,11 @@ source's lowest geometry is at/below the target and **lift** it to contact, or a
 refuse-and-report ("source already below target, not dropping") rather than silently pushing
 it deeper. Until then: seat parts that start straddling a plane by arithmetic on the status
 bbox (lowest-bound → target-top delta), not `rest_on`.
+**RESOLVED 2026-06-23:** rest_on now casts each ray from ABOVE the target's top (not from the
+vert), so a vert already at/below the target still finds the surface beneath it and yields a
+SIGNED clearance — the part is LIFTED to rest (negative `dropped_mm`, shown as ↑ in the verb)
+when it straddles or sits below, dropped when above. Genuine resting from any starting side.
+Tested in e2e_g108_rest_on.py (straddle / above / fully-below).
 
 ## G109 — boolean UNION (EXACT) on a tube-meets-thin-wall join shatters into degenerate boundary loops; DIFFERENCE at the same scale is clean
 

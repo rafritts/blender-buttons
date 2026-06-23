@@ -89,7 +89,11 @@ def rest_on(targets: str = "", target: str = "", axis: str = "Z",
     result = call_blender("rest_on", {"targets": _targets(targets), "target": target,
                                       "axis": axis, "offset": offset}, label=label)
     if result.get("success"):
-        drops = ", ".join(f"{r['name']}↓{r['dropped_mm']}mm" for r in result["rested"]) or "nothing"
+        # G108: a negative dropped_mm means the part STRADDLED/sat below the target and
+        # was LIFTED to rest, not dropped — show the direction so it reads true.
+        def _mv(d):
+            return f"↑{abs(d)}mm (lifted to rest)" if d < 0 else f"↓{d}mm"
+        drops = ", ".join(f"{r['name']}{_mv(r['dropped_mm'])}" for r in result["rested"]) or "nothing"
         main = f"rested on {target} ({result['axis']}): {drops} [{result.get('op_id','')}]"
     else:
         main = result.get("error", "failed")

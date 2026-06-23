@@ -507,6 +507,12 @@ def rest_on(params):
     gets wrong for anything tilted). Closes the loop between feel op=contacts saying
     'floating 3mm' and an action that fixes it without the agent doing arithmetic.
 
+    G108: resting is resolved regardless of starting side. The clearance per vert is
+    SIGNED — measured by casting down the axis from ABOVE the target's top through each
+    vert's lateral position, so a part that already straddles or sits below the target
+    is LIFTED to contact, not pushed deeper (the old per-vert down-ray found nothing
+    beneath a sub-plane vert and could only drop).
+
     targets: the object to drop (name / group / list / active).
     target:  the surface object to rest ON (required).
     axis:    drop axis — X|Y|Z. Default Z (gravity).
@@ -539,14 +545,20 @@ def rest_on(params):
         src = _prepare(o, cap=500)
         if src is None:
             continue
-        # Smallest clearance over source verts that have target surface directly
-        # beneath them = how far the object can fall before the first vert touches.
+        # Smallest SIGNED clearance over source verts that have target surface beneath
+        # their lateral position = how far the object moves to seat its lowest point.
+        # G108: start each ray ABOVE the target's top (not at the vert), so a vert that
+        # already sits at/below the target still finds the surface beneath it and yields
+        # a NEGATIVE clearance — the part is lifted to rest, not dropped deeper.
+        ray_top = tgt["bbox"][axis_idx + 3] + 1.0   # 1 m above the target's highest point
         min_clear = None
         for v in src["verts"]:
-            loc, normal, idx, dist = tgt["bvh"].ray_cast(v, down)
+            origin = v.copy()
+            origin[axis_idx] = ray_top
+            loc, normal, idx, dist = tgt["bvh"].ray_cast(origin, down)
             if loc is None:
                 continue
-            clear = v[axis_idx] - loc[axis_idx]   # ≥0 when surface is below the vert
+            clear = v[axis_idx] - loc[axis_idx]   # signed: + above surface, − below it
             if min_clear is None or clear < min_clear:
                 min_clear = clear
         if min_clear is None:
