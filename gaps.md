@@ -159,12 +159,23 @@ donut now reads `resting`, not `sunk 5mm`. And it's **legible**: the result carr
 the surface measured against and the rim it is NOT — shown in the agent text as a `↳`
 sub-line. Silent for flat supports (no new noise). Regression: `tests/e2e_gaps_g107.py`
 (seated→resting, datum=floor, concave→note, flat→no note, real float still caught).
-**Still open (same root, deliberately not bundled):** `check_contacts` /
-`auto_proximity_note` still derive penetration *depth* from bbox-axis overlap, so a part
-seated in a recess auto-flags "penetrates X <well-depth>mm". Fixing that needs a signed
-vertex-inside test (like `check_clearance`) on the most-used spatial path, and must NOT flip
-the chain-link / sunk-marker cases that are *supposed* to interpenetrate — its own change,
-not a rider on this one.
+**Fixed (contacts half) — `check_contacts` + `auto_proximity_note`:** penetration is now
+gated on BOTH the old all-axis bbox overlap (kept, so nothing new is ever flagged) AND a
+signed crossing test `_penetration_depth` — for each of a part's verts, a point pulled 25%
+toward its centroid (just INSIDE its own surface) is tested against the other solid by the
+nearest face's outward normal. Pulling inward is the trick that survives MATCHED FOOTPRINTS
+(the case the old comment defended bbox-overlap for): raw verts on a shared plane are
+sign-ambiguous, but an interior point is unambiguously in/out. A part seated in a recess has
+its interior in the open cavity → reads 0 → no false "penetrates Nmm" unasked on every
+placement; a genuine sunk marker / chain link still crosses → still flagged, now with a true
+inside-depth instead of the bbox overlap. Because it's an AND-gate it can only REMOVE a false
+penetration, never invent or lose one. Regression: `tests/e2e_gaps_g107b.py` — an
+8-vertex matched-footprint interpenetration (the hard case) still reads penetrating with a
+real depth; recess-seating reads connected; flush stacks read connected. **Caveat noted:** the
+signed test trusts nearest-face normals, so on a NON-watertight other-mesh (an open shell with
+ill-defined normals) the gate can miss a real crossing — acceptable because (a) bbox-overlap
+was the only signal there anyway and (b) a missed flag is safer than the recess false-flag it
+replaces; logged for a future watertight-guard if it bites.
 
 ## G108 — `transform op=rest_on` pushes a part that straddles the target plane DEEPER instead of lifting it to rest
 

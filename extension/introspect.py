@@ -88,6 +88,34 @@ def _bbox_overlaps(a, b):
             min(a[5], b[5]) - max(a[2], b[2]))
 
 
+def _penetration_depth(src, dst):
+    """How far src crosses INSIDE dst's solid, in metres (0 = no crossing). For each of
+    src's sampled verts we test a point pulled 25% toward src's centroid — a point just
+    INSIDE src's own surface — against dst, signed by dst's nearest-face outward normal.
+    Pulling inward is what makes this robust to MATCHED FOOTPRINTS: a sunk marker / chain
+    link whose raw verts land exactly on the other's shared plane (G32) is sign-ambiguous
+    vert-by-vert, but a point pulled inside src is unambiguously inside-or-outside dst. A
+    part merely SEATED in a recess (a donut in a well) has its interior in the open cavity,
+    OUTSIDE dst's solid, so it reads 0 (G107). Used only as a gate ON TOP of bbox overlap,
+    so it can only REMOVE a false penetration, never invent or lose one."""
+    verts = src["verts"]
+    if not verts:
+        return 0.0
+    c = mathutils.Vector((0.0, 0.0, 0.0))
+    for v in verts:
+        c += v
+    c /= len(verts)
+    worst = 0.0
+    for v in verts:
+        p = v + (c - v) * 0.25          # a point just inside src's surface
+        loc, normal, idx, dist = dst["bvh"].find_nearest(p)
+        if loc is None or normal is None:
+            continue
+        if (p - loc).dot(normal) < 0.0 and dist > worst:
+            worst = dist
+    return worst
+
+
 def auto_proximity_note(obj_name):
     """G77 — after a placement op, the single highest-signal spatial fact the agent would
     otherwise hand-compute: does the just-placed object now PENETRATE a neighbour? Surfaced
@@ -110,13 +138,15 @@ def auto_proximity_note(obj_name):
         p = _prepare(o)
         if p is None:
             continue
-        gap = min(_surface_gap(me, p), _surface_gap(p, me))
+        # Real crossing: bboxes overlap on every axis (the robust old signal, kept) AND the
+        # solids actually cross (signed inside-distance). A part SEATED in a recess overlaps
+        # bboxes without crossing, so it no longer false-flags 'penetrates Nmm' unasked on
+        # every placement (G107).
         ox, oy, oz = _bbox_overlaps(me["bbox"], p["bbox"])
-        # Penetration = surfaces cross (gap≈0) AND bboxes overlap on every axis — the
-        # same robust signal check_contacts uses at hobby scale.
-        if gap <= _TOUCH and ox > 0 and oy > 0 and oz > 0:
-            depth_mm = round(min(ox, oy, oz) * 1000, 1)
-            if depth_mm >= 0.3:             # ignore sub-0.3mm grazes / coplanar touches
+        pen = max(_penetration_depth(me, p), _penetration_depth(p, me))
+        if ox > _TOUCH and oy > _TOUCH and oz > _TOUCH and pen > _TOUCH:
+            depth_mm = round(pen * 1000, 1)
+            if depth_mm >= 0.3:             # ignore sub-0.3mm grazes
                 pens.append((o.name, depth_mm))
     if not pens:
         return None
@@ -162,12 +192,17 @@ def check_contacts(params):
                 break
             gap = min(_surface_gap(me, p), _surface_gap(p, me))
             ox, oy, oz = _bbox_overlaps(me["bbox"], p["bbox"])
-            # Penetration = surfaces cross AND the bboxes overlap on every axis.
-            # Vertex-inside tests fail for matched footprints (verts land on shared
-            # planes); all-axis bbox overlap is the robust signal at hobby scale.
-            if gap <= _TOUCH and ox > _TOUCH and oy > _TOUCH and oz > _TOUCH:
+            # Penetration requires BOTH the bboxes to overlap on every axis (the old robust
+            # signal — kept, so nothing new is ever flagged) AND the solids to actually
+            # CROSS, measured as a signed inside-distance. The signed gate is what stops a
+            # part merely SEATED in a recess (a donut in a plate well) from reading
+            # 'penetrating <well-depth>mm' off the bbox overlap alone (G107). A genuine
+            # matched-footprint interpenetration (sunk marker / chain link, G32) still
+            # crosses, so it stays caught — now reported with a true inside-depth.
+            pen = max(_penetration_depth(me, p), _penetration_depth(p, me))
+            if ox > _TOUCH and oy > _TOUCH and oz > _TOUCH and pen > _TOUCH:
                 penetrations.append({"other": p["name"],
-                                     "depth_mm": round(min(ox, oy, oz) * 1000, 1)})
+                                     "depth_mm": round(pen * 1000, 1)})
             elif gap <= _TOUCH:
                 touching.append(p["name"])
 
