@@ -34,7 +34,7 @@ _CLIP_FLOOR_MM = 0.3   # ignore sub-0.3mm grazes (matches auto_proximity_note)
 
 # Intent-free defect checks — there is NO suppression path for any of these.
 _INTENT_FREE = ("z_fight", "below_floor", "degenerate", "inverted_normals",
-                "non_manifold", "self_intersection")
+                "non_manifold", "self_intersection", "euler_inconsistent")
 # The one intent-laden check — suppressible only by a DECLARED intent.
 _CLIPPING = "clipping"
 _ALL_CHECKS = _INTENT_FREE + (_CLIPPING,)
@@ -95,22 +95,29 @@ def _prune_dead_intents():
                 break
 
 
-def add_intent(a, b, reason, check=_CLIPPING, source="agent"):
+def add_intent(a, b, reason, check=_CLIPPING, source="agent", max_depth_mm=None):
     """Declare a clip/penetration INTENDED — a positive, falsifiable assertion carrying
-    its reason verbatim. Re-declaring a pair updates its reason. Returns the entry."""
+    its reason verbatim. Re-declaring a pair updates its reason. An optional
+    `max_depth_mm` ENVELOPE (G119) blesses the contact only up to that depth: a clip
+    between the pair that runs deeper is still surfaced, so a broad pair-level intent
+    can't quietly mask a second, deeper defect. Returns the entry."""
     if not a or not b:
         return {"error": "expect needs both objects (a, b) of the intended pair"}
     if not (reason or "").strip():
         return {"error": "expect needs a reason — 'I intend X to clip Y because …'. "
                          "An assertion you can't justify is a bug you're hiding."}
+    cap = None
+    if isinstance(max_depth_mm, (int, float)) and max_depth_mm > 0:
+        cap = round(float(max_depth_mm), 2)
     e = _find_intent(check, a, b)
     if e is None:
         e = {"check": check, "a": a, "b": b, "reason": reason.strip(),
-             "status": "holding", "source": source}
+             "status": "holding", "source": source, "max_depth_mm": cap}
         _intents.append(e)
     else:
         e["reason"] = reason.strip()
         e["source"] = source
+        e["max_depth_mm"] = cap
     record_intend(check)
     _tag_redraw()
     return {"success": True, "intent": dict(e)}
@@ -276,6 +283,26 @@ def run_validate(touched_names=None, scene_wide=False, verbose=False):
                                 "message": f"{o.name} dips {round(-zmin * 1000, 1)}mm below z=0"})
         bm = eval_world_bmesh(o)
         inv = bm is not None and len(bm.faces) >= 8 and lint._normals_inward_fraction(bm) > 0.7
+        # G118: an inconsistent Euler characteristic is a near-free, decisive tell that a
+        # construction op produced a topologically IMPOSSIBLE surface (e.g. a "hollow" that
+        # sealed one end and opened the other → χ=2 with a single boundary loop). For ANY
+        # orientable 2-manifold, χ + (boundary-loop count) is EVEN; an odd sum cannot be a
+        # real surface. Computed here while the bmesh is alive; gated below on manifoldness
+        # (a non-manifold mesh is already flagged and breaks the invariant's premise).
+        euler_bad = euler_junction = False
+        if bm is not None and len(bm.faces) >= 4:
+            chi = len(bm.verts) - len(bm.edges) + len(bm.faces)
+            from . import topology
+            b_loops = len(topology._boundary_loops(bm))
+            euler_bad = (chi + b_loops) % 2 != 0
+            # The parity invariant is only meaningful without a TRUE non-manifold junction
+            # (an edge shared by ≥3 faces). Open BOUNDARY edges (1 face) are fine — they are
+            # exactly what the invariant counts — so this gate, unlike `nm` below, must not
+            # treat them as disqualifying.
+            euler_junction = any(len(e.link_faces) > 2 for e in bm.edges)
+            euler_msg = (f"{o.name}: impossible surface — Euler χ={chi} with {b_loops} "
+                         f"boundary loop(s) (χ+boundaries must be even). A construction op "
+                         f"likely sealed or opened the wrong side; `feel op=topology`.")
         if bm is not None:
             bm.free()
         _bump("inverted_normals", inv)
@@ -298,11 +325,19 @@ def run_validate(touched_names=None, scene_wide=False, verbose=False):
         if sx:
             intent_free.append({"check": "self_intersection",
                                 "message": f"{o.name} has {sx} self-intersection(s)"})
+        # G118: only trust the parity invariant when there's no non-manifold JUNCTION
+        # (≥3-face edge) — that's already flagged above as non_manifold and voids χ's
+        # surface meaning. Open boundaries are allowed (they're part of the invariant).
+        euler_flag = euler_bad and not euler_junction
+        _bump("euler_inconsistent", euler_flag)
+        if euler_flag:
+            intent_free.append({"check": "euler_inconsistent", "message": euler_msg})
 
     # clipping / penetration — intent-laden, DELTA-SCOPED to what this op touched.
     clip = _clipping_findings(introspect, scope, scope_names, live_names)
 
-    passed = not intent_free and not clip["new"] and not clip["vanished"]
+    passed = (not intent_free and not clip["new"] and not clip["vanished"]
+              and not clip["exceeded"])
     line = _render_line(intent_free, clip, excluded, verbose)
     return {"off": False, "passed": passed, "excluded": excluded,
             "intent_free": intent_free, "clipping": clip, "line": line}
@@ -310,7 +345,7 @@ def run_validate(touched_names=None, scene_wide=False, verbose=False):
 
 def _empty_clip():
     return {"declared": len([e for e in _intents if e["check"] == _CLIPPING]),
-            "new": [], "vanished": [], "intended_in_scope": 0}
+            "new": [], "vanished": [], "exceeded": [], "intended_in_scope": 0}
 
 
 def _true_penetration_mm(a_name, b_name):
@@ -340,6 +375,24 @@ def _true_penetration_mm(a_name, b_name):
     return round(worst * 1000, 1)
 
 
+def _is_watertight(name):
+    """True when every edge of the (evaluated) mesh is manifold — no open boundary, no
+    non-manifold junction. The signed inside/outside test that `_true_penetration_mm`
+    relies on is only DEFINED against a watertight solid; on an open shell the nearest-face
+    normal is ill-defined and the depth it returns is fiction (gaps.md G124). Non-mesh →
+    True (not a clip party we measure that way)."""
+    from .common import eval_world_bmesh
+    obj = bpy.data.objects.get(name)
+    if obj is None or obj.type != 'MESH':
+        return True
+    bm = eval_world_bmesh(obj)
+    if bm is None:
+        return True
+    wt = all(e.is_manifold for e in bm.edges) if bm.edges else False
+    bm.free()
+    return wt
+
+
 def _min_bbox_overlap_mm(a_name, b_name):
     """Smallest per-axis world-bbox overlap (mm), 0 if separated on any axis — the cheap
     fallback magnitude when vertex sampling can't measure a matched-footprint overlap."""
@@ -366,30 +419,51 @@ def _clipping_findings(introspect, scope, scope_names, live_names):
         for p in c.get("penetrating", []):
             candidates.add(frozenset((c["object"], p["other"])))
 
+    # Depth value per candidate: a float (true mm), None (matched-footprint overlap the
+    # vertex sampling can't measure), or the sentinel "open" (G124 — a non-watertight party,
+    # where the signed depth is undefined and would be fiction).
     depths = {}
     for key in candidates:
         a, b = tuple(key)
-        d = _true_penetration_mm(a, b)
-        if d >= _CLIP_FLOOR_MM:
-            depths[key] = d                          # precise true depth
-        elif _min_bbox_overlap_mm(a, b) >= 1.0:
-            # A real overlap the vertex sampling can't measure (matched footprints — every
-            # vert sits on a coincident face). Flag it WITHOUT a number rather than drop it
-            # (no false-negative) or print a wrong one (feedback P0.2): hint at clearance.
-            depths[key] = None
-        # else: a sub-graze the proxy used to over-report — correctly dropped.
+        if not (_is_watertight(a) and _is_watertight(b)):
+            depths[key] = "open"                     # G124: don't fabricate a magnitude
+        else:
+            d = _true_penetration_mm(a, b)
+            if d >= _CLIP_FLOOR_MM:
+                depths[key] = d                      # precise true depth
+            elif _min_bbox_overlap_mm(a, b) >= 1.0:
+                # A real overlap the vertex sampling can't measure (matched footprints —
+                # every vert sits on a coincident face). Flag it WITHOUT a number rather
+                # than drop it (no false-negative) or print a wrong one: hint at clearance.
+                depths[key] = None
+            # else: a sub-graze the proxy used to over-report — correctly dropped.
 
-    intended_in_scope, new = 0, []
+    intended_in_scope, new, exceeded = 0, [], []
     for key, depth in depths.items():
         a, b = tuple(key)
         e = _intent_for_pair(_CLIPPING, a, b)
         if e is not None:
             e["status"] = "holding"
             intended_in_scope += 1
+            # G119: a declaration may carry a DEPTH ENVELOPE (max_depth_mm). A clip between
+            # the declared pair that runs DEEPER than the blessed envelope is NOT silenced —
+            # it surfaces as its own finding, so a broad pair-level intent can't become an
+            # ignore-by-the-back-door for a second, deeper defect between the same pair.
+            cap = e.get("max_depth_mm")
+            if isinstance(cap, (int, float)) and isinstance(depth, (int, float)) \
+                    and depth > cap + _CLIP_FLOOR_MM:
+                exceeded.append({"a": a, "b": b, "depth_mm": depth, "cap_mm": cap,
+                                 "message": f"{a}↔{b} {depth}mm exceeds intended ≤{cap}mm"})
         else:
-            msg = f"{a}↔{b} {depth}mm" if depth is not None else \
-                f"{a}↔{b} (overlap — `feel op=clearance` to measure)"
-            new.append({"a": a, "b": b, "depth_mm": depth, "message": msg})
+            if depth == "open":
+                msg = f"{a}↔{b} (open shell — depth N/A, `feel op=clearance` to measure)"
+            elif depth is None:
+                msg = f"{a}↔{b} (overlap — `feel op=clearance` to measure)"
+            else:
+                msg = f"{a}↔{b} {depth}mm"
+            new.append({"a": a, "b": b,
+                        "depth_mm": depth if isinstance(depth, (int, float)) else None,
+                        "message": msg})
 
     # Bidirectional invariant — but ONLY for declared OBJECT pairs this op touched (in
     # scope). A pair the op never read tells us nothing, so it must NOT print VANISHED
@@ -407,9 +481,10 @@ def _clipping_findings(introspect, scope, scope_names, live_names):
             e["status"] = "vanished"
             vanished.append({"a": a, "b": b, "reason": e["reason"]})
 
-    _bump(_CLIPPING, len(new) > 0)
+    _bump(_CLIPPING, len(new) > 0 or len(exceeded) > 0)
     return {"declared": len([e for e in _intents if e["check"] == _CLIPPING]),
-            "new": new, "vanished": vanished, "intended_in_scope": intended_in_scope}
+            "new": new, "vanished": vanished, "exceeded": exceeded,
+            "intended_in_scope": intended_in_scope}
 
 
 def _render_line(intent_free, clip, excluded, verbose=False):
@@ -436,6 +511,8 @@ def _render_line(intent_free, clip, excluded, verbose=False):
         more = "" if verbose or len(clip["new"]) <= cap else \
             f" …(+{len(clip['new']) - cap}; validate op=run verbose to list)"
         cl.append(f"{len(clip['new'])} new: {shown}{more}")
+    for x in clip.get("exceeded", [])[:cap]:
+        cl.append(f"ENVELOPE {x['message']} (declared pair, deeper than blessed — still a finding)")
     for v in clip["vanished"][:cap]:
         cl.append(f"VANISHED {v['a']}↔{v['b']} (declared intended — confirm or clear)")
     if cl:
@@ -580,9 +657,11 @@ def validate_run(params):
 
 
 def validate_expect(params):
-    """op=expect / intend — declare a clip intended (a or b may name a COLLECTION)."""
+    """op=expect / intend — declare a clip intended (a or b may name a COLLECTION). An
+    optional max_depth_mm blesses the contact only up to that depth (G119)."""
     return add_intent(params.get("a", ""), params.get("b", ""),
-                      params.get("reason", ""), source="agent")
+                      params.get("reason", ""), source="agent",
+                      max_depth_mm=params.get("max_depth_mm"))
 
 
 def validate_forget(params):

@@ -35,6 +35,10 @@ def validate(
     reason: tag(str, "[expect/intend] WHY the clip is intended — a falsifiable design "
                      "claim ('hair roots seat under the scalp'). Required; an assertion "
                      "you can't justify is a bug you're hiding.") = "",
+    max_depth: tag(float, "[expect/intend] optional DEPTH ENVELOPE in mm — bless the "
+                          "contact only up to this depth; a clip between the pair that "
+                          "runs deeper is still flagged (so a broad declaration can't mask "
+                          "a second, deeper defect). 0 = no envelope (bless any depth).") = 0.0,
     targets: tag(str, "[run] object(s) to sweep ('' = whole scene)") = "",
     verbose: tag(bool, "[run] list EVERY finding instead of capping the line") = False,
 ) -> str:
@@ -75,11 +79,14 @@ def validate(
         return _format_run(r)
 
     if o in ("expect", "intend"):
-        r = call_blender("validate_expect", {"a": a, "b": b, "reason": reason})
+        r = call_blender("validate_expect",
+                         {"a": a, "b": b, "reason": reason, "max_depth_mm": max_depth})
         if r.get("error"):
             return r["error"]
         e = r["intent"]
-        return (f'declared intended: {e["check"]} {e["a"]}↔{e["b"]} — "{e["reason"]}". '
+        env = (f" up to {e['max_depth_mm']}mm (deeper still flags)"
+               if e.get("max_depth_mm") else "")
+        return (f'declared intended: {e["check"]} {e["a"]}↔{e["b"]}{env} — "{e["reason"]}". '
                 f"It now collapses to a count, and will fire if it ever vanishes.")
 
     if o == "forget":

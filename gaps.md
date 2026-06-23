@@ -152,42 +152,7 @@ from a list" over a group, or at minimum a one-line note in the `scatter` schema
 share one mesh — for colour/material variety pass `sources=` (multiple prototypes) now; it
 cannot be added later."*
 
-## G118 — a construction op can betray its own intent (hollow that seals the top, opens the bottom) and report success
 
-Hollowing a capped cylinder with `edit inset` (top cap) → `edit extrude down` (inner face)
-produced a mug that was sealed by a flat cap at the TOP and open at the BOTTOM — the cavity
-opened *downward* against the table, the exact inverse of intent. Every op reported success, the
-status block's world bbox looked correct (a cylinder is a cylinder by its bounds), and the
-always-on validate floor passed it: the floor checks manifold/normals/z-fight/clipping, none of
-which fire on "this carved the cavity the wrong way." The mesh even carried an inconsistent Euler
-characteristic (χ=2 with 1 boundary loop — impossible for a real surface), which is a cheap,
-decisive tell that nothing surfaced. The agent only caught it when the HUMAN said "feel the mug,"
-and a deliberate `feel op=topology genus,boundaries` + a boundary-loop Z read exposed it. By then
-coffee, intend-declarations, and three renders had been built on top of the broken part. The
-deeper problem: the whole server doctrine is "trust ground truth, not your eyes," so an op that
-succeeds-but-does-the-opposite is the single most expensive failure mode, and right now nothing
-guards it. Candidate fixes: (a) flag an inconsistent Euler characteristic (χ vs boundary-loop
-count) as a hard defect — it's a near-free invariant; (b) a post-hollow sanity read that the new
-open boundary is where the cut was made; (c) make `feel` cheaper to reach for on a freshly-built
-part (the agent felt the donut/plate/icing thoroughly and rushed the mug — the epistemic-drift
-re-ground of G117 nudges this but didn't force a re-read of the just-built object).
-
-## G119 — `validate expect` is pair-scoped, so a broad intent declaration masks a *real* defect between the same pair
-
-Declaring `coffee↔mug` intended (reason: "the coffee surface meets the inner wall") to quiet the
-rim-contact finding ALSO silenced a genuine, unrelated defect: the coffee cylinder's wide flat
-base was punching through the mug's converging bottom floor (an 11mm poke-through). The
-declaration is scoped to the (a,b) *relationship*, so it collapses EVERY clip between those two
-objects to a count — including ones the human never blessed and never saw. The floor's entire
-selling point is "there is no ignore, only declared intent," but a blunt pair-level intent is an
-ignore-by-the-back-door for any second clip between the same pair. The human caught it
-("coffee is clipping through the bottom — does validate not show that?"); clearing the
-declaration immediately re-surfaced `coffee↔mug 11.1mm`. The agent also reached for the broad
-declaration instead of fixing geometry — a scalpel used as a lid — but the tool made that the path
-of least resistance. Candidate fixes: scope a declaration to a contact REGION or a depth/extent
-envelope ("intended up to ~1mm at the rim; anything deeper is still a finding"), and/or report
-"this intended pair now also has a clip 10x deeper / in a new location than when declared" as its
-own tripwire rather than folding it into the blessed count.
 
 ## G120 — subsurf domes the base of an unsupported capped cylinder; bounds hide it, only a profile read catches it
 
@@ -246,17 +211,6 @@ surprise — eroding the trust the relational DSL is meant to earn. A `place rig
 preserve the mover's floor contact (or its current Z) unless told otherwise, and `rest_on` should
 clamp at first contact, not overshoot a convex base.
 
-## G124 — BVH penetration depth is meaningless against open/non-watertight shells; the validate "clipping Xmm" number lies, `feel op=clearance` is the truth
-
-Sprinkles resting ON the open icing shell reported validate clippings like "sprinkle↔icing 84.9mm"
-and "donut↔sprinkle 83.6mm" — physically impossible (a 6mm sprinkle, a 26mm donut). The inside/
-outside test that drives the penetration-depth metric is undefined for an open (non-manifold-
-boundary) shell, so it returns garbage magnitudes. The trustworthy read was `feel op=clearance
-shell=… surface=…`, which correctly reported 100% clearance / 0 penetration. The agent had to
-*know* to distrust one number and trust the other; nothing in the output marks the clipping depth
-as unreliable when one party is an open shell. Candidate fix: when a clip party isn't watertight,
-either suppress the bogus depth (report "contact, depth N/A — open shell, use clearance") or fall
-back to a signed-distance-free overlap test, so the headline number can't be a fabrication.
 
 ## G125 — a large intended scatter floods the validate line and buries genuinely-new findings until it's declared
 
