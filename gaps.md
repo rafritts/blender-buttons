@@ -270,3 +270,20 @@ should make the target single-user before appending (or refuse + warn when the t
 datablock with objects outside the join set). Safe workaround found: join **all** instances of
 a shared mesh then delete the result — with no survivors there's nothing to corrupt — but a
 subset join is a silent footgun. (Same shared-datablock root as G103/G113.)
+
+## G115 — no way to VALIDATE camera focus / depth-of-field; macro-scale DOF silently blurs everything and the agent can't see it
+
+Set `view op=camera_dof focus_object=Donut aperture=4` on a sub-metre tabletop (subject 9cm,
+camera 0.27–0.78m away). At those distances f/4 behaves like extreme macro — the in-focus slab
+is a few mm deep — so **all three delivered renders came back blurry**, and there was no signal
+anywhere to catch it: `view op=check_framing` validates *composition* (coverage/clipping) but
+says nothing about *focus*, and the (correct, G-respected) "don't read the render back" rule
+means the agent has **no** feedback loop on sharpness at all. The aperture f-number is also
+scale-blind — f/4 is "readable tabletop" guidance for a human-scale set but paper-thin here —
+and nothing warns that the subject's own depth exceeds the DOF. **Want:** a focus analogue of
+`check_framing` — e.g. `view op=check_focus` (or a `focus:` block on `check_framing`) reporting
+the near/far focus limits at the current lens+aperture+distance and a pass/fail for whether each
+named target's bbox falls inside the in-focus zone ("Donut 27mm deep vs DOF slab 4mm → 85%
+out of focus"). Bonus: an `aperture` resolver that, given "keep the whole donut sharp," solves
+the f-stop from subject depth + distance instead of making the agent dead-reckon it. Until then
+the agent is flying blind on the one render property it's explicitly forbidden to eyeball.
