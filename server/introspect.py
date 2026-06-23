@@ -114,7 +114,10 @@ def check_resting(targets: str = "") -> str:
             bits.append(f"sunk {-r['clearance_mm']}mm")
         if not r["com_over_support"]:
             bits.append(f"COM off support — tips toward {r['tip_direction']}")
-        lines.append(f"  {r['object']}: " + ", ".join(bits))
+        line = f"  {r['object']}: " + ", ".join(bits)
+        if r.get("note"):
+            line += f"\n    ↳ {r['note']}"
+        lines.append(line)
     return "\n".join(lines) + _status(result)
 
 

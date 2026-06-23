@@ -151,6 +151,21 @@ its underside), not the tallest footprint-overlapping face — the rim is not wh
 on. Workflow corollary already proven: to verify a part seated in a well, trust a downward
 `op=aim` cast onto the floor over `op=resting`'s rim-referenced verdict.
 
+**Fixed (resting half) — `check_resting`:** the datum is no longer the support's bbox top.
+`_surface_under` casts straight DOWN from the part's lowest verts onto the support's BVH and
+takes the highest hit — the real load-bearing surface (the well floor), not the rim. A seated
+donut now reads `resting`, not `sunk 5mm`. And it's **legible**: the result carries
+`support_z`, and when the support is concave (rim well above the floor) a `note` names BOTH
+the surface measured against and the rim it is NOT — shown in the agent text as a `↳`
+sub-line. Silent for flat supports (no new noise). Regression: `tests/e2e_gaps_g107.py`
+(seated→resting, datum=floor, concave→note, flat→no note, real float still caught).
+**Still open (same root, deliberately not bundled):** `check_contacts` /
+`auto_proximity_note` still derive penetration *depth* from bbox-axis overlap, so a part
+seated in a recess auto-flags "penetrates X <well-depth>mm". Fixing that needs a signed
+vertex-inside test (like `check_clearance`) on the most-used spatial path, and must NOT flip
+the chain-link / sunk-marker cases that are *supposed* to interpenetrate — its own change,
+not a rider on this one.
+
 ## G108 — `transform op=rest_on` pushes a part that straddles the target plane DEEPER instead of lifting it to rest
 
 A plate cylinder centered on the origin (bounds z=[-0.0065, 0.0065], so half *below* the

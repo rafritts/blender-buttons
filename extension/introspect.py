@@ -222,6 +222,21 @@ def _support_below(obj, prepared, zmin):
     return best
 
 
+def _surface_under(low_verts, bvh):
+    """The actual height the part rests ON: cast straight DOWN from the part's lowest
+    verts onto the support's BVH and take the highest hit. Unlike a candidate's bbox TOP,
+    this is the real load-bearing surface — the well FLOOR a donut sits in, not the plate
+    RIM that merely overlaps its footprint and reads 5mm higher (G107). Returns the
+    highest hit z, or None if nothing lies below any sampled vert."""
+    down = mathutils.Vector((0.0, 0.0, -1.0))
+    best = None
+    for v in low_verts:
+        loc = bvh.ray_cast(mathutils.Vector((v.x, v.y, v.z + 0.05)), down)[0]
+        if loc is not None and (best is None or loc.z > best):
+            best = loc.z
+    return best
+
+
 def check_resting(params):
     """Gravity sanity per part: floor/support contact points, sink/float height,
     and whether the centre of mass sits over the support footprint (else it tips)."""
@@ -240,7 +255,23 @@ def check_resting(params):
         zmin = bb[2]
         support = _support_below(o, prepared, zmin)
         support_name = support[0] if support else "floor"
-        support_z = support[1] if support else 0.0
+        bbox_top_z = support[1] if support else 0.0
+
+        # _support_below picks the support by bbox overlap and hands back its bbox TOP.
+        # For a CONCAVE support (a plate well, a bowl, a recessed seat) that top is the
+        # RIM, not the floor the part actually rests on — so measuring clearance against it
+        # reports a properly-seated part as "sunk" by the well depth, a confident wrong
+        # number with no hint of the assumption (G107). Recast the datum to the real
+        # load-bearing surface: the highest geometry of that object directly BENEATH the
+        # part's own lowest verts.
+        support_z = bbox_top_z
+        rim_above = 0.0
+        if support is not None:
+            low = [v for v in me["verts"] if v.z <= zmin + 0.002]
+            surf_z = _surface_under(low or me["verts"], prepared[support_name]["bvh"])
+            if surf_z is not None:
+                support_z = surf_z
+                rim_above = bbox_top_z - surf_z  # how far the rim sits above the floor
         clearance = zmin - support_z  # >0 floats, <0 sinks
 
         contacts = [v for v in me["verts"] if abs(v.z - support_z) < _TOUCH]
@@ -264,16 +295,27 @@ def check_resting(params):
         elif com.y > symax + margin: tip_dir = "+Y (back)"
         com_over = tip_dir is None
 
-        results.append({
+        result = {
             "object": o.name,
             "support": support_name,
+            "support_z": round(support_z, 4),
             "contacts": len(contacts),
             "clearance_mm": round(clearance * 1000, 1),
             "state": ("floating" if clearance > _TOUCH else
                       "sunk" if clearance < -_TOUCH else "resting"),
             "com_over_support": com_over,
             "tip_direction": tip_dir,
-        })
+        }
+        # Legibility (G107): when the support is concave — its rim sits well above the
+        # surface the part rests on — name BOTH the datum used AND the rim it is NOT, so a
+        # rim/floor mix-up can never again pass as a confident "sunk Nmm". Silent for flat
+        # supports (rim_above≈0), keeping the common case noise-free.
+        if rim_above > _TOUCH:
+            result["note"] = (
+                f"measured against {support_name}'s surface beneath the part "
+                f"(z={round(support_z, 4)}m); its rim/bbox-top is {round(rim_above * 1000, 1)}mm "
+                f"higher (z={round(bbox_top_z, 4)}m) and is not load-bearing here")
+        results.append(result)
     return {"success": True, "resting": results}
 
 
