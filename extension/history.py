@@ -40,6 +40,22 @@ def _verify(target_objects):
     return sorted(expected - live), sorted(live - expected)
 
 
+def _rebaseline_after_history(action):
+    """SPEC-15 / G110: undo & redo CHANGE the scene, but they are the server's OWN ops —
+    not an external edit. Without re-grounding, the next mutating call's
+    detect_external_mutation sees the undo's vert/face delta and wrongly latches the
+    dirty-world lock, forcing a needless acknowledge round-trip. So re-baseline to the
+    post-undo scene here — but ONLY when we're not already locked, so a genuine external
+    edit (which freezes the baseline by design) is never silently erased."""
+    if state._world_locked:
+        return
+    head = state._history[-1] if state._history else None
+    state.set_clean_baseline(ref={
+        "op": head["id"] if head else None,
+        "label": f"after {action} to [{head['id'] if head else 'baseline'}]",
+    })
+
+
 def _attach_verification(result, target_objects):
     missing, extra = _verify(target_objects)
     if missing or extra:
@@ -74,6 +90,7 @@ def undo_steps(params):
     result = {"success": True, "steps": steps, "reverted": reverted,
               "history_remaining": len(state._history),
               "redo_available": len(state._redo_stack)}
+    _rebaseline_after_history("undo")
     return _attach_verification(result, target)
 
 
@@ -96,6 +113,7 @@ def redo_steps(params):
     result = {"success": True, "steps": steps, "redone": redone,
               "history_remaining": len(state._history),
               "redo_available": len(state._redo_stack)}
+    _rebaseline_after_history("redo")
     return _attach_verification(result, target)
 
 

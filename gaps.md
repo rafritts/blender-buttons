@@ -213,6 +213,11 @@ external edit that forces a `history op=acknowledge` round-trip before work can 
 self-mis-attribution family as G103's aborted-op case.) **Want:** state changes the server
 itself causes via `history` undo/redo should update the baseline in-place, never arm the
 external-mutation lock.
+**RESOLVED 2026-06-23:** `history.undo_steps`/`redo_steps` now call `_rebaseline_after_history`
+on success — re-grounding the SPEC-15 clean baseline to the post-undo scene so the next op sees
+it as server-known, not external. Guarded by `if not _world_locked` so a genuine external edit
+(which freezes the baseline) is never erased. (undo_to/restore delegate to undo_steps → covered.)
+Tested in e2e_spec15_interlock.py.
 
 ## G111 — `validate` clipping DEPTH is nonsensical for small objects and doesn't update after a real move
 

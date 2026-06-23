@@ -262,6 +262,32 @@ detail2 = run("inspect_changes")
 check("inspect_changes reports no objects when nothing differs", detail2.get("objects") == [],
       f"detail2={detail2}")
 
+# ───────────────── G110: the server's OWN undo/redo must not self-trip the lock ─────────────────
+print("== G110: undo/redo re-baseline in-place instead of arming the lock ==")
+clean()
+run("add_box", name="U1", width=1.0, depth=1.0, height=1.0)
+state.detect_external_mutation()
+run("add_box", name="U2", width=1.0, depth=1.0, height=1.0)
+state.detect_external_mutation()
+check("G110 setup: clean after two server adds", not state._world_locked)
+u = run("undo_steps", steps=1)            # a server op that CHANGES the scene (removes U2)
+check("G110: undo succeeds", u.get("success"), u.get("error"))
+state.detect_external_mutation()          # the next turn's pre-op detect
+check("G110: undo does NOT latch the lock (self-attributed)",
+      not state._world_locked, f"info={state._lock_info}")
+ru = run("redo_steps", steps=1)           # re-adds U2 — also a scene-changing server op
+check("G110: redo succeeds", ru.get("success"), ru.get("error"))
+state.detect_external_mutation()
+check("G110: redo does NOT latch the lock either", not state._world_locked, f"info={state._lock_info}")
+# the fix must NOT blind real external-edit detection.
+run("undo_steps", steps=1)
+state.detect_external_mutation()
+check("G110: still clean right after undo", not state._world_locked)
+bpy.data.objects["U1"].location.x += 0.5  # a genuine UI edit between turns
+state.detect_external_mutation()
+check("G110: a real external edit after undo STILL latches", state._world_locked)
+state.acknowledge_mutation()
+
 # ───────────────── summary ─────────────────
 print()
 if failures:
