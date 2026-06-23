@@ -128,20 +128,62 @@ not to be noise, and it calibrates the agent that the floor is real.
   relation-debt, object diagnostics clear that object's topology-debt. (Prevents a future
   manual cheap `feel` from silencing the wrong bucket.)
 
-### Manual `feel`: a comprehensive default, not a quantity mandate
+### Manual `feel`: `all` by default, opt out the rest
 
-A rejected alternative was *requiring* manual `feel` to pass ≥2 ops. It reaches for a real
-thing — a single `op=topology` call gives **false breadth** ("I felt it" when only one axis was
-checked) — but a mandate is the wrong tool: it is redundant with auto-feel (which already
-delivers breadth involuntarily) and invites the exact cargo-cult we are killing (bolt on a
-throwaway second op to satisfy the rule). Quantity is not the lever.
+The friction is currently **backwards** — it sits *going into* the tool. The agent must know
+which op to ask for and type it in, and *choosing the right read is itself an inspector-move the
+reactor is bad at*. So inverting the default does more than save keystrokes: it removes a decision
+the agent keeps getting wrong.
 
-Instead, put the **carrot in the default**: `feel` with no / minimal args runs the comprehensive
-diagnostic sweep, so a *lazy* single call is *already* broad. Make the generous thing the easy
-thing; reward the one inspector-move the reactor does make. A **manual `feel` also pre-empts and
-resets** the relevant counter — like `/compact` before autocompact. The careful move is rewarded
-(resets the gauge); the careless default is safe (auto-feel catches it anyway). Flow is never
-punished.
+**`feel op=all` is the generous default** (a bare `feel` resolves to it): it runs the full
+diagnostic bundle, and the agent **opts *out*** of operands with `exclude=`
+(`feel op=all exclude=silhouette,symmetry`). Getting everything is free; trimming costs a
+keystroke — the reverse of today.
+
+- `op=all` covers the **diagnostic** set only (§"run wide, speak narrow"); the work-tools are
+  never in it.
+- **Targeted reads still work.** `feel op=overlaps a=… b=…` is unchanged. Inverting the *default*
+  must not remove the *precise* path — it only stops breadth from requiring effort.
+- **Graceful auto-skip.** Diagnostics needing context the call lacks — a live selection
+  (`region_form`, `protrusion`), minted handles (`relate`, `map`) — are **skipped, not errored**,
+  and the skip is recorded as *context-unavailable*, kept distinct from an explicit `exclude`
+  (the distinction is load-bearing for the telemetry below).
+- **Verbosity rides the existing `lod`.** A *manual* `op=all` is a deliberate question, so it
+  reports **fuller** than the involuntary auto-feel pass (which stays exception-only) — the auto
+  pass interrupts you, so it whispers; a manual sweep is you asking, so it talks. `lod=low` pulls
+  it back toward a summary.
+
+This also **rejects the ≥2-ops mandate** floated earlier. A mandate reaches for a real thing — a
+lone `op=topology` gives **false breadth** ("I felt it" when only one axis was checked) — but it
+is redundant with an all-by-default (breadth is already free) and invites the exact cargo-cult we
+are killing (a throwaway second op to satisfy the rule). Make breadth the *default*; don't police
+the *count*.
+
+A **manual `feel` pre-empts and resets** the auto-feel counter — like `/compact` before
+autocompact. The careful move is rewarded (resets the gauge); the careless default stays safe
+(auto-feel catches it anyway). Flow is never punished.
+
+## Telemetry: tune the bundle from data, not taste
+
+What `op=all` — and therefore the auto-feel bundle, since they share one definition — *should*
+contain is an empirical question, not a guess. Instrument it and let dogfood choose:
+
+- **Finding-yield per op** (lead with this). How often each operand, *when it actually runs*,
+  produces a finding vs comes back clean. An op that has surfaced **zero** findings across
+  hundreds of runs is pure cost, regardless of whether anyone excluded it. Yield measures *value*
+  directly.
+- **Exclusion-rate per op.** How often each operand is `exclude=`'d, as a fraction of `op=all`
+  invocations, ranked ("`silhouette` excluded in 88% of calls" → drop candidate). This measures
+  only *preference*, so it is the weaker signal — and it has a conflation bug to design around:
+  - Keep **explicit `exclude`** apart from **context auto-skip** — a skip for no-selection is not
+    a vote that the op is noise; conflating them poisons the data used to pick defaults.
+  - A call that excludes *almost everything* is a **targeted read**, not a verdict on the excluded
+    ops; normalize or flag those so bulk-exclusions don't dominate the ranking.
+
+Persist the tally **across sessions** to a small on-disk JSON (per-session counts are too sparse
+to choose defaults from), readable via `feel op=stats` (ranked yield + exclusion-rate per op).
+Bundle membership then becomes a periodic, data-driven edit — and the **same telemetry tunes both**
+`op=all` and the auto-feel pass.
 
 ## Why this preserves "let it rip"
 
@@ -170,7 +212,9 @@ expensive — and stays loose on the simple meshes where the reactor is already 
 - Status-block line (always): `auto-feel in N edits · last: <clean|⚠ k findings>, M ago`.
 - Scene-relation line when relevant (scene-global, alongside `render`/`viewport`).
 - Injected pass result on a trigger: `auto-feel ran (N edits) — <findings> · K checks clean`.
-- Manual `feel` (no/min args) → comprehensive sweep + counter reset.
+- Manual `feel op=all [exclude=…] [lod=…]` (the default operand; bare `feel` resolves to it) →
+  comprehensive sweep + counter reset. Targeted ops (`op=overlaps …`) still addressable directly.
+- `feel op=stats` → ranked per-op finding-yield + exclusion-rate, persisted across sessions.
 
 ## Open questions / tuning
 
@@ -181,6 +225,9 @@ expensive — and stays loose on the simple meshes where the reactor is already 
   large scene at every trigger, scope tighter (only object-pairs whose bboxes moved) rather than
   firing less often. Keep individual ops in their sampled/capped tiers.
 - **Anti-thrash floor value** for blur — tune against interleaved relational work.
+- **Initial `op=all` membership.** Seed it *generously* — include borderline reads like
+  `silhouette` / `sections` — and let finding-yield + exclusion-rate trim it over the first weeks
+  of dogfood, rather than guessing the lean set up front.
 
 ## Tests (sketch)
 
@@ -190,7 +237,12 @@ expensive — and stays loose on the simple meshes where the reactor is already 
   the anti-thrash floor); A↔B interleaving under the floor does not thrash.
 - Auto-feel bundle excludes the work-tool ops; covers object + relational diagnostics.
 - Typed reset: a relational pass clears relation-debt but not an untouched object's topology-debt.
-- Manual `feel` with no args runs the comprehensive sweep.
+- `feel op=all` (and bare `feel`) runs the comprehensive sweep; `exclude=` trims it; targeted ops
+  (`op=overlaps …`) still resolve to a single read.
+- Context-dependent diagnostics auto-skip (no selection/handles) and are tallied as
+  *context-unavailable*, distinct from an explicit `exclude`.
+- `feel op=stats` reports per-op finding-yield + exclusion-rate, persisted across sessions; a
+  bulk-exclude (almost-everything) call is flagged so it doesn't dominate the ranking.
 
 ## Agent-facing copy (to land with implementation)
 
@@ -210,9 +262,10 @@ expensive — and stays loose on the simple meshes where the reactor is already 
 > Why this exists: good tools tempt you to let it rip and never `feel` anything — which is fine on
 > a simple mesh and disastrous on a complex scene, where unverified edits compound into a rebuild.
 > Auto-feel is the guaranteed floor so that never happens. It does **not** replace your judgement:
-> a manual `feel` whenever you are unsure both answers your question *and* resets the counter (and
-> `feel` with no args now runs the full sweep — a lazy read is already a broad one). Reaching for
-> `feel` yourself is always better than waiting for the floor.
+> a manual `feel` whenever you are unsure both answers your question *and* resets the counter.
+> `feel op=all` (the default — a bare `feel` resolves to it) runs the full sweep, so a lazy read is
+> already a broad one; opt out with `exclude=` only when you have a reason. Reaching for `feel`
+> yourself is always better than waiting for the floor.
 
 **For `server/_instructions.py`** — appended to THE ONE RULE bullets:
 
