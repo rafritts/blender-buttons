@@ -507,21 +507,29 @@ def selection_anchor(target: str = "", as_handle: str = "") -> str:
 
 
 def radial_landmark(anchor: str = "", angle: float = 0.0, radius: float = 0.0,
-                    axis: str = "Z", snap: bool = True, as_handle: str = "") -> str:
+                    axis: str = "Z", snap: bool = True, as_handle: str = "",
+                    crossing: str = "outer") -> str:
     """G81 — mint a landmark by ANGLE on a round face. Clock-position a point on a ring
     of `radius` around `anchor`'s centre, plane ⟂ `axis`. `angle` = degrees CLOCKWISE
     from 12 o'clock (0=top, 90=3 o'clock, 180=6, 270=9), so a sub-dial register or an
     off-cardinal hour stays in intent-space instead of hand-trig. anchor = a round object
     (bbox centre) or a handle (its point + plane). Pair with as_handle to make the point
     addressable by name (G78). Example: feel op=radial anchor=Dial angle=60 radius=0.11
-    as_handle=hour2 → the 2-o'clock surface point, minted."""
+    as_handle=hour2 → the 2-o'clock surface point, minted.
+
+    G102 — with NO radius the point lands on a SURFACE CROSSING cast outward from the
+    centre, and `crossing` names which one on a ring/holed mesh (a donut is crossed twice
+    along any radial line): outer (default — the rim), inner (the hole wall), first|last, or
+    a 1-based index. So 'the point on the outer edge at 2 o'clock' is a single read."""
     result = call_blender("radial_landmark", {"anchor": anchor, "angle": angle,
-        "radius": radius, "axis": axis, "snap": snap, "as_handle": as_handle})
+        "radius": radius, "axis": axis, "snap": snap, "as_handle": as_handle,
+        "crossing": crossing})
     if not result.get("success"):
         return result.get("error", "failed")
     p = result["point"]; n = result["normal"]
+    cr = f" {result.get('crossing')}" if not radius else ""
     return (f"radial landmark @ {result.get('region', '?')} "
-            f"(angle {result['angle']}° r={result['radius']}m on {result['axis']}): "
+            f"(angle {result['angle']}°{cr} r={result['radius']}m on {result['axis']}): "
             f"point=[{p[0]}, {p[1]}, {p[2]}]  normal=[{n[0]}, {n[1]}, {n[2]}]"
             + _minted_line(result, "feel op=radial … as_handle=NAME"))
 

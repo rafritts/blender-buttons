@@ -606,19 +606,69 @@ def radial_landmark(params):
                  "Y": (Vector((0, 0, 1)), Vector((1, 0, 0))),
                  "X": (Vector((0, 0, 1)), Vector((0, 1, 0)))}[axis]
     th = math.radians(angle)
-    p = center + radius * (math.sin(th) * right + math.cos(th) * up)
+    dir_vec = (math.sin(th) * right + math.cos(th) * up).normalized()
+    crossing = str(params.get("crossing", "outer")).strip().lower()
 
     normal = None
-    if params.get("snap", True) and obj is not None and obj.type == 'MESH':
-        snap_w, nrm_w = _snap_to_surface(obj, p)
-        if snap_w is not None:
-            p, normal = snap_w, nrm_w
+    if radius > 0:
+        # Explicit radius: the point IS at that radius; optionally snap onto the surface
+        # (unchanged behaviour — the caller named the distance).
+        p = center + radius * dir_vec
+        if params.get("snap", True) and obj is not None and obj.type == 'MESH':
+            snap_w, nrm_w = _snap_to_surface(obj, p)
+            if snap_w is not None:
+                p, normal = snap_w, nrm_w
+    else:
+        # G102: no radius given — cast OUTWARD from the centre and pick which crossing of
+        # the surface to land on. A ring/holed mesh (a donut) is crossed twice along any
+        # radial line — inner hole wall then outer rim — and `find_nearest` from the
+        # centre would always grab the INNER wall. `crossing` names which edge you mean:
+        # outer (default — the rim, the obvious landmark), inner, or a 1-based index.
+        hits = _radial_crossings(obj, center, dir_vec) if (obj is not None and obj.type == 'MESH') else []
+        if hits:
+            if crossing in ("outer", "last"):
+                chosen = max(hits, key=lambda h: h[0])
+            elif crossing in ("inner", "first"):
+                chosen = min(hits, key=lambda h: h[0])
+            elif crossing.isdigit():
+                idx = max(1, min(int(crossing), len(hits)))
+                chosen = sorted(hits, key=lambda h: h[0])[idx - 1]
+            else:
+                return {"error": f"crossing '{crossing}' invalid — outer|inner|first|last|<index>"}
+            radius, p, normal = chosen
+        else:
+            # No mesh / no crossing (e.g. a handle anchor) — fall back to the centre.
+            p = center
     res = {"success": True, "point": [round(c, 5) for c in p],
            "normal": [round(c, 4) for c in (normal or Vector((0.0, 0.0, 1.0)))],
-           "angle": angle, "radius": radius, "axis": axis}
+           "angle": angle, "radius": round(radius, 5), "axis": axis, "crossing": crossing}
     if obj is not None:
         res["region"] = region_words(world_bbox(obj), p)
     return handles.mint_point_from_result(params, res)
+
+
+def _radial_crossings(obj, center, dir_vec, max_hits=8):
+    """Every surface crossing along the outward ray from `center` in direction `dir_vec`,
+    as (radius_from_center, world_point, world_normal). Advances a hair past each hit so a
+    ring (inner wall + outer rim) yields BOTH, letting radial pick which edge (G102)."""
+    from mathutils import Vector
+    from .common import object_bvh, world_bbox
+    tree = object_bvh(obj)
+    if tree is None:
+        return []
+    bb = world_bbox(obj)
+    diag = math.dist((bb[0], bb[1], bb[2]), (bb[3], bb[4], bb[5])) or 1.0
+    eps = max(diag * 1e-4, 1e-5)
+    hits, origin, travelled = [], center.copy(), 0.0
+    while travelled < diag * 2.5 and len(hits) < max_hits:
+        loc, nrm, idx, dist = tree.ray_cast(origin, dir_vec)
+        if loc is None:
+            break
+        r = (Vector(loc) - center).length
+        hits.append((r, Vector(loc), nrm.normalized() if nrm is not None else Vector((0, 0, 1))))
+        origin = Vector(loc) + dir_vec * eps
+        travelled = r + eps
+    return hits
 
 
 def _snap_to_surface(obj, point_world):

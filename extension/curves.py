@@ -407,7 +407,7 @@ def add_curve(params):
 
     bpy.context.view_layer.update()
     xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
-    return {
+    result = {
         "success": True,
         "object_name": obj.name,
         "type": ctype,
@@ -417,6 +417,24 @@ def add_curve(params):
         "anchored": anchored,
         "dimensions": [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)],
     }
+    # G121: a beveled curve is a swept TUBE. Where the centreline bends tighter than the
+    # tube radius, the sweep self-intersects (interior crossings — hidden in render but a
+    # permanent, unclearable self_intersection finding). Run the min-bend check the server
+    # already has (feel op=curve profile_radius=) at creation and warn, so the trap is
+    # caught before three rebuilds chasing it.
+    if bevel_depth > 0.0:
+        fc = feel_curve({"target": obj.name, "profile_radius": bevel_depth})
+        tight = [s for s in fc.get("splines", []) if s.get("sweep_feasible") is False]
+        if tight:
+            s = min(tight, key=lambda d: d.get("min_bend_radius_cm") or 1e9)
+            warn = (f"this tube SELF-INTERSECTS: the centreline bends to min radius "
+                    f"{s.get('min_bend_radius_cm')}cm, tighter than the tube radius "
+                    f"{round(bevel_depth * 100, 2)}cm (tightest at {s.get('tightest_at')} along). "
+                    f"The crossings are interior (invisible in render) but register as a "
+                    f"permanent self_intersection finding. Widen the bend or reduce bevel_depth.")
+            result["self_intersection_warning"] = warn
+            result["note"] = warn
+    return result
 
 
 _AXES = {"X": 0, "Y": 1, "Z": 2}

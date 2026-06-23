@@ -51,17 +51,6 @@ sibling op would expose that occupancy read on its own, model-free. Lower priori
 the limb case — the one that bit in dogfood — is handled.
 
 
-## G102 — `feel op=radial` takes the inner wall on a holed/ring mesh; no way to name the outer edge
-
-On the donut, `radial anchor=Donut angle=130` returned a point on the **inner** rim (the
-hole wall, r≈0.022) reporting `r=0.0m`, when the intent was the **outer** edge at the bbox
-radius — the obvious landmark for "where does the glaze drip over the rim?". A ring presents
-two surfaces along any radial cast and `radial` silently takes the one nearest the axis.
-Fallback was `select op=boundary` → `between` axis-band INTERSECT (computing the band factor
-from the reported bounds) — three calls and a derivation for what should be one read.
-**Want:** `radial` to let you name which crossing you mean — outer vs inner, first vs last
-hit, or a target radius — so "the point on the outer edge at 2 o'clock" is a single landmark.
-
 
 ## G105 — mutating ops don't auto-flag a NEW/leftover open boundary the way they auto-flag penetration
 
@@ -111,65 +100,8 @@ sliver/degenerate output it knows it just produced). Workflow fallback proven: f
 a vessel, keep it a **separate object** with a small (~1mm) verified overlap — it reads as
 connected, no gap, no lump, and dodges the UNION shatter entirely.
 
-## G113 — per-instance MATERIAL variety is impossible after `scatter` (shared mesh) — `material op=set` writes the datablock, last colour wins for all
-
-`transform op=scatter` makes linked instances sharing one mesh (cf. G103). Assigning four
-colours to four name-list subsets via `material op=set` left **all 37 sprinkles the last
-colour** — each call wrote the shared mesh's material slot, so the spec's "colour variety"
-was unreachable post-hoc. The only handle is the `sources=` param **at scatter time** (scatter
-N differently-materialed prototypes, each instance picks one), which isn't discoverable from
-the failure and can't be applied retroactively without a full delete + re-scatter. **Want:**
-either `material op=set` on a scattered instance auto-makes-single-user that one object (so
-per-object colour sticks), or a post-scatter `transform op=tint_palette`/"randomize material
-from a list" over a group, or at minimum a one-line note in the `scatter` schema: *"instances
-share one mesh — for colour/material variety pass `sources=` (multiple prototypes) now; it
-cannot be added later."*
 
 
-
-## G120 — subsurf domes the base of an unsupported capped cylinder; bounds hide it, only a profile read catches it
-
-Applying SUBSURF (level 2) to a capped cylinder with no holding loop near the bottom edge pulled
-the bottom cap into a downward dome converging to a single center vertex — the form sat on a point
-like an egg, and the lower third of the wall tapered inward, when the intent was a flat-based mug.
-The world bbox was unchanged-looking (still ~a cylinder), so the status block gave no hint; the
-defect lives in *surface shape*, which bounds don't encode. It took `feel op=profile axis=Z` over
-the bottom window (single-vertex girth-0 bands at the base) to see it, and the agent only looked
-because the human asked. The human's instinct — "would a loop cut work? just drag it down" — was
-exactly the fix (a holding edge loop at the base before subsurf), confirmed by a rebuild that put
-the base at z=0, full-width by z=4mm. Gap: subsurf-on-a-capped-primitive with no support loop is a
-known-classic doming trap, and nothing warns at `modifier add SUBSURF` time (e.g. "no holding loop
-within N% of a capped end — expect rounding"). The build-blind doctrine has no ground-truth read
-for "is this form plausible," so form-betrayal sails through unless you already suspect it.
-
-## G121 — `add tube` self-intersects at bends tighter than the tube radius, with no min-bend guard
-
-Building a mug handle as a swept `add tube` self-intersected (12 interior crossings) wherever the
-centerline's bend radius fell below the tube radius — i.e. the natural sharp turns where a handle
-meets the body. The crossings are interior to an opaque tube (invisible in render) but register as
-a permanent `self_intersection` finding that can never be cleared (no intent path for self-int,
-correctly — but also no way to say "this is hidden/benign"), so they sit as standing noise. It
-cost three rebuilds chasing radius/point tweaks. The server already HAS the right check —
-`feel op=curve profile_radius=` reports min-bend-vs-profile — but `add tube` doesn't consult it at
-creation. Candidate fixes: have `add tube`/`add curve bevel_depth` auto-run the min-bend check and
-warn (or auto-resample/auto-shrink the radius at the tight spans), and/or let a self-intersection
-that is fully interior to a closed shell be reported separately from surface-breaking ones.
-
-## G122 — isolating one of two concentric boundary loops takes a 6-call dance; `in_sphere` can't center on an object/coordinate, and select→feel drops edit mode
-
-To drip ONLY the outer rim of the icing shell (it has two concentric open boundary loops, inner +
-outer), the agent had to: select-all → boundary (gets both) → `between X` ∩ `between Y` to isolate
-the inner loop → enter edit mode → mint a center handle from that loop → re-select boundary →
-`in_sphere DESELECT` by radius around the handle. Six calls to express "the outer of two rim
-loops." Two underlying gaps: (1) `select op=in_sphere` requires a named handle to center on — it
-won't take an object's bbox center or a derived point directly, so isolating-by-radius needs a
-handle minted first, which itself needs a vertex selection (chicken-and-egg solved only by the
-X∩Y trick). A `center=<object>` or `center=<bbox of selection>` option would collapse this. (2)
-There is no "select boundary loop by index / by radius / outer-vs-inner" — boundary is all-or-
-nothing. (3) The `select`→`feel op=handle source=selection` handoff failed silently because the
-select ops leave the mesh in OBJECT mode (status even reads `mode: OBJECT` after a select), so
-`feel op=handle` errored "must be in edit mode" until an explicit `object mode=EDIT`; the
-select→mint→sculpt loop the guidance advertises has a hidden mode-state seam.
 
 
 ## G125 — a large intended scatter floods the validate line and buries genuinely-new findings until it's declared

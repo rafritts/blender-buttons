@@ -235,17 +235,38 @@ def set_material(params):
         applied.append(f"emission_strength={es}")
 
     slot_idx = int(slot) if slot is not None else 0
-    for obj in meshes:
-        mats = obj.data.materials
-        if slot_idx < len(mats):
-            mats[slot_idx] = mat
-        elif slot_idx == len(mats):
-            mats.append(mat)
-        else:
-            return {"error": f"'{obj.name}' has {len(mats)} slot(s); slot {slot_idx} is "
-                             f"out of range (can only append at index {len(mats)})"}
+    # G113: detect objects whose MESH is shared with other objects (scatter makes linked
+    # instances). Writing the DATA material slot there recolors EVERY instance (last colour
+    # wins). For those, assign via an OBJECT-LINKED slot instead — the material sticks to
+    # THIS instance only, with no geometry duplication (the mesh stays shared).
+    mesh_users = {}
+    for ob in bpy.data.objects:
+        if ob.type == 'MESH' and ob.data is not None:
+            mesh_users[ob.data.name] = mesh_users.get(ob.data.name, 0) + 1
 
-    return {
+    object_linked = []
+    for obj in meshes:
+        shared = mesh_users.get(obj.data.name, 1) > 1
+        if shared:
+            # Ensure the object has a slot at slot_idx (slot count follows the mesh data,
+            # shared — but the per-object LINK overrides the material so the shared data
+            # slot can stay empty). Grow the data slot list if needed.
+            while len(obj.data.materials) <= slot_idx:
+                obj.data.materials.append(None)
+            obj.material_slots[slot_idx].link = 'OBJECT'
+            obj.material_slots[slot_idx].material = mat
+            object_linked.append(obj.name)
+        else:
+            mats = obj.data.materials
+            if slot_idx < len(mats):
+                mats[slot_idx] = mat
+            elif slot_idx == len(mats):
+                mats.append(mat)
+            else:
+                return {"error": f"'{obj.name}' has {len(mats)} slot(s); slot {slot_idx} is "
+                                 f"out of range (can only append at index {len(mats)})"}
+
+    result = {
         "success": True,
         "target": target,
         "assigned_to": [o.name for o in meshes],
@@ -254,6 +275,13 @@ def set_material(params):
         "edited_in_place": not meshes,
         "applied": applied,
     }
+    if object_linked:
+        result["object_linked"] = object_linked
+        result["note"] = (f"{len(object_linked)} instance(s) share a mesh — assigned via an "
+                          f"OBJECT-linked slot so the material is per-instance (the other "
+                          f"instances keep their own). This is how scattered copies get "
+                          f"colour variety without un-sharing the mesh.")
+    return result
 
 
 TOOLS = {

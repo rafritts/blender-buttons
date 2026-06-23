@@ -338,6 +338,59 @@ def _configure_array(mod, params):
 _PARTNER_TYPES = {"SHRINKWRAP", "MESH_DEFORM", "ARMATURE", "LATTICE"}
 
 
+def _subsurf_doming_warning(obj):
+    """G120: SUBSURF on a capped ROUND primitive with no holding loop near a flat cap
+    domes that cap inward (the egg-on-a-point base) while the round body holds — a
+    form-betrayal the world bbox hides. Detect a flat NGON cap (a round cap, ≥5 verts,
+    normal along a principal axis, at a bbox extreme) whose nearest interior vertex layer
+    is far (>8% of the axis extent → no support loop), and warn. False-positive-averse: a
+    cube's caps are quads (skipped), and a holding loop puts the next layer close (no warn).
+    Returns a one-line warning or None."""
+    import bmesh
+    me = getattr(obj, "data", None)
+    if me is None or not me.polygons:
+        return None
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    try:
+        bm.normal_update()
+        bm.verts.ensure_lookup_table()
+        coords = [v.co.copy() for v in bm.verts]
+        ends = []
+        for axis in range(3):
+            vals = [c[axis] for c in coords]
+            lo, hi = min(vals), max(vals)
+            extent = hi - lo
+            if extent < 1e-6:
+                continue
+            for end, _sign in ((hi, 1), (lo, -1)):
+                caps = [f for f in bm.faces if len(f.verts) >= 5
+                        and abs(f.normal[axis]) > 0.9
+                        and abs(f.calc_center_median()[axis] - end) < extent * 1e-2]
+                if not caps:
+                    continue
+                cap_v = {v.index for f in caps for v in f.verts}
+                interior = [coords[i][axis] for i in range(len(coords)) if i not in cap_v]
+                if not interior:
+                    continue
+                if end == hi:
+                    near = max((x for x in interior if x < end - extent * 1e-3), default=lo)
+                    dist = end - near
+                else:
+                    near = min((x for x in interior if x > end + extent * 1e-3), default=hi)
+                    dist = near - end
+                if dist > extent * 0.08:
+                    ends.append("XYZ"[axis] + ("+" if end == hi else "-"))
+    finally:
+        bm.free()
+    if not ends:
+        return None
+    return ("SUBSURF will DOME the flat, unsupported cap(s) at " + ", ".join(ends) +
+            " (the cap rounds inward while the round body holds — an egg-on-a-point base). "
+            "Add a holding edge loop just inside each capped end (edit op=loop_cut near the "
+            "cap) BEFORE subsurf, or the form betrays intent.")
+
+
 def add_modifier(params):
     mod_type = params.get("type", "SUBSURF").upper()
     name     = params.get("name", mod_type.capitalize())
@@ -515,7 +568,13 @@ def add_modifier(params):
         return {"success": True, "modifier": mod.name, "note": note}
     # status_focus so the status block reports the HOST object's bounds (G89) even when
     # the modifier was added to a named, non-active object.
-    return {"success": True, "modifier": mod.name, "status_focus": obj.name}
+    result = {"success": True, "modifier": mod.name, "status_focus": obj.name}
+    if mod_type == "SUBSURF":
+        warn = _subsurf_doming_warning(obj)
+        if warn:
+            result["doming_warning"] = warn
+            result["note"] = warn
+    return result
 
 
 def bind_mesh_deform(params):

@@ -1828,7 +1828,11 @@ def bridge_handles(params):
 def select_in_sphere(params):
     """Select vertices inside a world-space sphere — for localized region editing on joined meshes.
 
-    center: [x, y, z] world coords (required).
+    center: WHERE to centre the sphere. Either an explicit [x, y, z] world point, an
+            OBJECT NAME (its world-bbox centre), or the string "selection" (the bbox
+            centre of the currently-selected verts). The latter two remove the old
+            chicken-and-egg of having to mint a handle first just to isolate a region
+            by radius (G122).
     radius: meters (required).
     action: SELECT (replace) | ADD | DESELECT. Default SELECT.
 
@@ -1839,8 +1843,6 @@ def select_in_sphere(params):
     if obj is None or obj.mode != 'EDIT':
         return {"error": "Must be in edit mode"}
     center = params.get("center")
-    if not (isinstance(center, list) and len(center) == 3):
-        return {"error": "'center' must be a [x, y, z] list"}
     radius = float(params.get("radius", 0.1))
     if radius <= 0:
         return {"error": "'radius' must be > 0"}
@@ -1849,10 +1851,33 @@ def select_in_sphere(params):
     # the current selection (reuses the existing additive ADD path).
     if bool(params.get("extend", False)) and action == "SELECT":
         action = "ADD"
-    cx, cy, cz = float(center[0]), float(center[1]), float(center[2])
-    r2 = radius * radius
     bm = bmesh.from_edit_mesh(obj.data)
     mat = obj.matrix_world
+
+    # G122: resolve `center` to a world point — explicit coords, an object's bbox centre,
+    # or the centre of the current selection (read BEFORE we change it below).
+    if isinstance(center, list) and len(center) == 3:
+        cx, cy, cz = float(center[0]), float(center[1]), float(center[2])
+    elif isinstance(center, str) and center.strip():
+        tok = center.strip()
+        if tok.lower() in ("selection", "sel"):
+            sel = [mat @ v.co for v in bm.verts if v.select]
+            if not sel:
+                return {"error": "center='selection' but nothing is selected — select the "
+                                 "region to centre on first (e.g. a boundary loop)."}
+            cx = sum(p.x for p in sel) / len(sel)
+            cy = sum(p.y for p in sel) / len(sel)
+            cz = sum(p.z for p in sel) / len(sel)
+        else:
+            anchor = bpy.data.objects.get(tok)
+            if anchor is None:
+                return {"error": f"center '{tok}' is not [x,y,z], 'selection', or an object name"}
+            from .common import world_bbox
+            xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(anchor)
+            cx, cy, cz = (xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2
+    else:
+        return {"error": "'center' must be a [x, y, z] list, an object name, or 'selection'"}
+    r2 = radius * radius
     count = 0
     for v in bm.verts:
         wv = mat @ v.co

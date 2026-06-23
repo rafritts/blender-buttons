@@ -49,6 +49,10 @@ def select(
     radius: tag(float, "[in_sphere] sphere radius (m)") = 0.0,
     handle: tag(str, "[in_sphere] center the sphere on a named handle's live point "
                      "(recomputed)") = "",
+    center: tag(str, "[in_sphere] center on an OBJECT (its bbox center) or on 'selection' "
+                     "(the current selection's center) — an alternative to handle= that "
+                     "needs no minted handle (e.g. select a boundary loop, then "
+                     "center='selection' to isolate it by radius)") = "",
     # ring / rings
     index: tag(int, "[ring] ring index along axis") = 0,
     indices: tag(list, "[rings] list of ring indices") = None,
@@ -124,9 +128,12 @@ def select(
     if o == "random":
         return editmode.random_select(fraction, seed)
     if o == "in_sphere":
+        if center:
+            return editmode.select_in_sphere_at(center, radius, action, extend, target)
         if not handle:
-            return ("select op=in_sphere: needs handle=<name> — center the sphere on a "
-                    "named handle's live point (no typed coordinates).")
+            return ("select op=in_sphere: needs handle=<name> or center=<object|'selection'> "
+                    "— center the sphere on a named handle's live point, an object's bbox "
+                    "center, or the current selection's center (no typed coordinates).")
         pt, err, drift = handles.resolve_point(handle)
         if err:
             return err

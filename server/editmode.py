@@ -970,6 +970,24 @@ def select_in_sphere(center_x: float, center_y: float, center_z: float, radius: 
     return main + _status(result)
 
 
+def select_in_sphere_at(center: str, radius: float, action: str = "SELECT",
+                        extend: bool = False, target: str = "") -> str:
+    """G122 — centre the sphere on an OBJECT's bbox centre (center=<name>) or on the
+    current selection's centre (center='selection'), instead of a typed point or a minted
+    handle. Lets you isolate one of two concentric boundary loops by radius in one call:
+    select the loop, then in_sphere center='selection'."""
+    result = call_blender("select_in_sphere", {
+        "center": center, "radius": radius, "action": action,
+        "extend": extend, "target": target,
+    })
+    if result.get("success"):
+        main = (f"{action} {result['selected']} verts within {result['radius']}m of "
+                f"{center} ({result['center']})")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 def relax_selection(iterations: int = 5, factor: float = 0.5, reproject: bool = True,
                     label: str = "", target: str = "") -> str:
     """G49 — RELAX the selected verts: even out their spacing over the existing form
