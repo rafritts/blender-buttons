@@ -87,16 +87,14 @@ connected, no gap, no lump, and dodges the UNION shatter entirely.
 
 
 
-## G125 — a large intended scatter floods the validate line and buries genuinely-new findings until it's declared
+## G125 (residual) — auto-recognize a settled scatter so its intent doesn't need a manual declaration
 
-Once 70 sprinkles were resting (intentionally embedded) in the icing, EVERY subsequent op's
-status block carried a truncated wall of `clipping 12x new: sprinkle_0048↔icing …(+121 more)`,
-drowning the one or two findings that were actually new and relevant to the op just performed.
-The fix exists — group the scatter into a collection and `validate expect Sprinkles↔icing` — but
-until then the floor is pure noise, and a real new defect on the touched part would have been lost
-in the truncation. (Compounding: those declarations are runtime-only and were silently lost when
-the agent re-opened the .blend, so the noise wall returned and had to be re-declared.) Candidate
-fixes: auto-recognize a settled scatter (N instances of one source resting on one surface) and
-offer/auto-apply a collection-level intent; persist the intend-registry into the .blend so a
-re-open doesn't drop it; and always show NEW-this-op findings above the truncation line, never
-behind it.
+A large intended scatter (70 sprinkles resting in the icing) floods the validate line until
+declared. Two of the three original asks are now handled: a COLLECTION-level declaration
+(`validate expect Sprinkles↔Icing`) collapses the whole class in one call (G112), and the
+intend-registry now PERSISTS into the .blend (a scene custom property reloaded on open), so a
+reopen no longer drops the declarations and resurrects the noise wall. **What remains:** the
+floor should AUTO-RECOGNIZE a settled scatter (N instances of one source resting on one
+surface) and offer / auto-apply the collection-level intent, so the agent doesn't have to
+notice and declare it by hand at all. Lower priority now that the declaration is one call and
+survives a reopen.

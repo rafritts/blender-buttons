@@ -50,6 +50,11 @@ def _on_load_post(*_args):
     any tool, leaving the history/undo/diff bookkeeping describing the dead scene
     (gaps.md U11). Reset it on every load, the same reset new_scene does inline."""
     state.reset_history_state()
+    # G125: reset_history_state cleared the in-memory declared-intent registry; repopulate
+    # it from the just-loaded scene's custom property, so an "intended clip" declaration
+    # survives a .blend reopen instead of the noise wall returning.
+    from . import validation
+    validation.load_intents_from_scene()
 
 
 def register():

@@ -88,11 +88,48 @@ def _intent_for_pair(check, x, y):
 def _prune_dead_intents():
     """Auto-GC declarations whose object (or collection) no longer exists, so deleting a
     declared part never leaves a permanent un-clearable VANISHED tripwire (feedback P1.5)."""
+    removed = False
     for e in list(_intents):
         for tok in (e["a"], e["b"]):
             if bpy.data.objects.get(tok) is None and bpy.data.collections.get(tok) is None:
                 _intents.remove(e)
+                removed = True
                 break
+    if removed:
+        _persist_intents()
+
+
+# G125: the declared-intent registry is module-global (cleared on scene load), so a
+# settled scatter's "Sprinkles↔Icing intended" declaration was lost on every .blend reopen
+# and the noise wall returned. Mirror the registry into a SCENE custom property on every
+# change — it rides into the saved .blend — and reload it after a file open, so a
+# declaration survives a reopen the way the geometry it describes does.
+_INTENTS_PROP = "bb_intents"
+
+
+def _persist_intents():
+    try:
+        scene = bpy.context.scene
+        if scene is not None:
+            scene[_INTENTS_PROP] = json.dumps(_intents)
+    except Exception:
+        pass
+
+
+def load_intents_from_scene():
+    """Repopulate the registry from the scene custom property written on the last change
+    (G125). Called from the load_post handler after reset_history_state has cleared the
+    stale in-memory list, so declarations survive a .blend reopen."""
+    global _intents
+    try:
+        scene = bpy.context.scene
+        raw = scene.get(_INTENTS_PROP) if scene is not None else None
+        if raw:
+            data = json.loads(raw)
+            if isinstance(data, list):
+                _intents = [e for e in data if isinstance(e, dict) and "check" in e]
+    except Exception:
+        pass
 
 
 def add_intent(a, b, reason, check=_CLIPPING, source="agent", max_depth_mm=None):
@@ -119,6 +156,7 @@ def add_intent(a, b, reason, check=_CLIPPING, source="agent", max_depth_mm=None)
         e["source"] = source
         e["max_depth_mm"] = cap
     record_intend(check)
+    _persist_intents()
     _tag_redraw()
     return {"success": True, "intent": dict(e)}
 
@@ -130,6 +168,7 @@ def revoke_intent(a, b, check=_CLIPPING):
     if e is None:
         return {"error": f"no declared {check} intent for {a}↔{b}"}
     _intents.remove(e)
+    _persist_intents()
     _tag_redraw()
     return {"success": True, "revoked": {"check": check, "a": a, "b": b}}
 
