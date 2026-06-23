@@ -133,3 +133,57 @@ silently doubles geometry; **(b)** a first-class `op=hollow` (wall thickness + d
 the boolean) would make cup/bowl/vessel carving a single intent-level call instead of a manual
 cutter-cylinder dance. Until then: **carve cavities with `edit op=boolean`, not
 inset→extrude.**
+
+## G107 — `feel op=resting`/`contacts` measures a cavity-seated part against the cavity RIM, not the support surface under its footprint
+
+A slumped donut (outer radius 4.5cm) seated into a shallow plate **well** (floor flat at
+z=0.008 out past radius 5cm, rim lip at z=0.013) was reported `sunk 5.0mm` /
+`penetrating Plate 5.0mm` when its underside ring actually rested *exactly* on the well
+floor. The 5.0mm is precisely the rim-to-floor depth: the op took the plate's **highest face
+overlapping the donut's XY footprint** — the rim lip — as the support datum, even though the
+donut sits entirely *inside* the well where the real support is the floor 5mm lower. Acting
+on that bad reading lifted the donut 5mm and floated it; only four `feel op=aim` raycasts
+(which hit the true floor at 0.008 across radii 0–5cm) exposed it. Every placing op also
+volunteered the same wrong "penetrates Plate 5mm" auto-flag for the rest of the build. **Want:**
+when a part nests inside a concave region, `resting`/`contacts` should measure against the
+**nearest support surface directly beneath the part's lowest geometry** (a downward cast from
+its underside), not the tallest footprint-overlapping face — the rim is not what it's standing
+on. Workflow corollary already proven: to verify a part seated in a well, trust a downward
+`op=aim` cast onto the floor over `op=resting`'s rim-referenced verdict.
+
+## G108 — `transform op=rest_on` pushes a part that straddles the target plane DEEPER instead of lifting it to rest
+
+A plate cylinder centered on the origin (bounds z=[-0.0065, 0.0065], so half *below* the
+table plane at z=0) sent through `rest_on target=floor` moved **down** 1.5mm (to
+z=[-0.008, 0.005]) — further into penetration — instead of rising 6.5mm to seat its bottom on
+z=0. `rest_on` only travels along −axis, so a part that already intersects/sits below the
+target has no way to come up; it drops to some lower BVH hit and deepens the overlap. **Want:**
+`rest_on` should resolve to genuine resting regardless of starting side — detect that the
+source's lowest geometry is at/below the target and **lift** it to contact, or at minimum
+refuse-and-report ("source already below target, not dropping") rather than silently pushing
+it deeper. Until then: seat parts that start straddling a plane by arithmetic on the status
+bbox (lowest-bound → target-top delta), not `rest_on`.
+
+## G109 — boolean UNION (EXACT) on a tube-meets-thin-wall join shatters into degenerate boundary loops; DIFFERENCE at the same scale is clean
+
+Welding a 4.5mm-radius handle tube onto a 4mm-walled mug where they overlapped a clean 1.1mm
+(verified by `feel op=contacts`) via `edit op=boolean UNION EXACT` produced a **26-boundary-loop
+mess** — one real rim plus ~25 degenerate 1–2-vertex "holes" (`feel genus` χ=−50). The same
+build's `edit op=boolean DIFFERENCE EXACT` (mug cavity carve, cutter cylinder through a 4mm
+wall) came back flawless: closed genus-0, watertight, 1 shell. So the fragility is specific to
+UNION across a thin-wall/tube tangential join, not booleans in general. **Want:** UNION should
+weld a shallow tangential overlap as robustly as DIFFERENCE cuts one (or auto-clean the
+sliver/degenerate output it knows it just produced). Workflow fallback proven: for a handle on
+a vessel, keep it a **separate object** with a small (~1mm) verified overlap — it reads as
+connected, no gap, no lump, and dodges the UNION shatter entirely.
+
+## G110 — `history op=undo` trips the SPEC-15 external-mutation lock on the server's OWN undo
+
+After a bad `edit op=boolean`, `history op=undo steps=2` correctly reverted it — then the very
+next mutating call (`shade_smooth`) was **ABORTED** with "WORLD STATE IS DIRTY … the scene
+changed by something other than this server" citing the undo's own vert/face delta on the Mug.
+The undo *is* a server op; its topology change should be self-attributed, not flagged as an
+external edit that forces a `history op=acknowledge` round-trip before work can resume. (Same
+self-mis-attribution family as G103's aborted-op case.) **Want:** state changes the server
+itself causes via `history` undo/redo should update the baseline in-place, never arm the
+external-mutation lock.
