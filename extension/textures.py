@@ -17,9 +17,14 @@ def set_textured_material(params):
     set_textured_material MCP tool resolves the Poly Haven asset to paths first.
 
     target:     object OR group name.
-    maps:       {"diffuse": path, "normal": path, "roughness": path, "metal": path}
-                (any subset; diffuse expected). Paths are local files the server
-                already cached.
+    maps:       {role: path} — any subset of: diffuse, roughness, gloss (inverted
+                into roughness), metal, normal, height (→ bump displacement),
+                ao (multiplied into base color), emission, alpha. Paths are local
+                files the server already resolved. (Poly Haven passes the first four;
+                the PBR-folder importer can pass the rest.)
+    displacement: optional >0 — wire the height map through a Displacement node at
+                this strength (BUMP method). 0/omitted = no displacement (matches a
+                normal-map-only setup).
     scale:      texture tiling scale (Mapping node), default 1.0.
     base_color: optional [r,g,b(,a)] — REPLACES the diffuse map (no diffuse node
                 is created): the scan contributes roughness/normal/metal surface
@@ -85,26 +90,42 @@ def set_textured_material(params):
         nt.links.new(mapping.outputs['Vector'], n.inputs['Vector'])
         return n
 
+    def mix_multiply(a_socket, b_value_or_socket, y):
+        mx = nt.nodes.new('ShaderNodeMix'); mx.location = (90, y)
+        mx.data_type = 'RGBA'
+        mx.blend_type = 'MULTIPLY'
+        mx.inputs['Factor'].default_value = 1.0
+        nt.links.new(a_socket, mx.inputs['A'])
+        if isinstance(b_value_or_socket, bpy.types.NodeSocket):
+            nt.links.new(b_value_or_socket, mx.inputs['B'])
+        else:
+            mx.inputs['B'].default_value = b_value_or_socket
+        return mx.outputs['Result']
+
     wired = []
+    # --- Base color: diffuse map (optional tint, optional AO multiply) or scalar override ---
+    color_socket = None
     if base_color is not None:
         c = list(base_color) + [1.0] if len(base_color) == 3 else list(base_color)
         bsdf.inputs['Base Color'].default_value = tuple(float(x) for x in c[:4])
         wired.append("base_color override")
     elif maps.get("diffuse"):
         d = image_node(maps["diffuse"], 'sRGB', 250)
+        color_socket = d.outputs['Color']
+        wired.append("diffuse")
         if tint is not None:
             t = list(tint) + [1.0] if len(tint) == 3 else list(tint)
-            mix = nt.nodes.new('ShaderNodeMix'); mix.location = (60, 250)
-            mix.data_type = 'RGBA'
-            mix.blend_type = 'MULTIPLY'
-            mix.inputs['Factor'].default_value = 1.0
-            nt.links.new(d.outputs['Color'], mix.inputs['A'])
-            mix.inputs['B'].default_value = tuple(float(x) for x in t[:4])
-            nt.links.new(mix.outputs['Result'], bsdf.inputs['Base Color'])
-            wired.append("diffuse*tint")
-        else:
-            nt.links.new(d.outputs['Color'], bsdf.inputs['Base Color'])
-            wired.append("diffuse")
+            color_socket = mix_multiply(color_socket, tuple(float(x) for x in t[:4]), 300)
+            wired.append("tint")
+    # AO darkens the base color (only meaningful when a color map feeds it).
+    if maps.get("ao") and color_socket is not None:
+        ao = image_node(maps["ao"], 'Non-Color', 150)
+        color_socket = mix_multiply(color_socket, ao.outputs['Color'], 250)
+        wired.append("ao")
+    if color_socket is not None:
+        nt.links.new(color_socket, bsdf.inputs['Base Color'])
+
+    # --- Roughness: map, or gloss inverted, or scalar override ---
     if roughness is not None:
         bsdf.inputs['Roughness'].default_value = float(roughness)
         wired.append(f"roughness={float(roughness)}")
@@ -112,6 +133,14 @@ def set_textured_material(params):
         r = image_node(maps["roughness"], 'Non-Color', 0)
         nt.links.new(r.outputs['Color'], bsdf.inputs['Roughness'])
         wired.append("roughness")
+    elif maps.get("gloss"):
+        g = image_node(maps["gloss"], 'Non-Color', 0)
+        inv = nt.nodes.new('ShaderNodeInvert'); inv.location = (60, 0)
+        nt.links.new(g.outputs['Color'], inv.inputs['Color'])
+        nt.links.new(inv.outputs['Color'], bsdf.inputs['Roughness'])
+        wired.append("gloss→roughness")
+
+    # --- Metallic ---
     if metallic is not None:
         bsdf.inputs['Metallic'].default_value = float(metallic)
         wired.append(f"metallic={float(metallic)}")
@@ -119,12 +148,47 @@ def set_textured_material(params):
         m = image_node(maps["metal"], 'Non-Color', 500)
         nt.links.new(m.outputs['Color'], bsdf.inputs['Metallic'])
         wired.append("metal")
+
+    # --- Normal ---
     if maps.get("normal"):
         n = image_node(maps["normal"], 'Non-Color', -250)
         nm = nt.nodes.new('ShaderNodeNormalMap'); nm.location = (0, -250)
         nt.links.new(n.outputs['Color'], nm.inputs['Color'])
         nt.links.new(nm.outputs['Normal'], bsdf.inputs['Normal'])
         wired.append("normal")
+
+    # --- Emission ---
+    if maps.get("emission"):
+        e = image_node(maps["emission"], 'sRGB', -500)
+        ecol = 'Emission Color' if 'Emission Color' in bsdf.inputs else 'Emission'
+        nt.links.new(e.outputs['Color'], bsdf.inputs[ecol])
+        if 'Emission Strength' in bsdf.inputs:
+            bsdf.inputs['Emission Strength'].default_value = 1.0
+        wired.append("emission")
+
+    # --- Alpha / opacity ---
+    if maps.get("alpha"):
+        a = image_node(maps["alpha"], 'Non-Color', -750)
+        nt.links.new(a.outputs['Color'], bsdf.inputs['Alpha'])
+        try:
+            mat.blend_method = 'CLIP'
+        except Exception:
+            pass
+        wired.append("alpha")
+
+    # --- Displacement (height → Displacement node → Output), opt-in via `displacement` ---
+    disp_amt = params.get("displacement")
+    if maps.get("height") and disp_amt is not None and float(disp_amt) > 0:
+        h = image_node(maps["height"], 'Non-Color', -1000)
+        disp = nt.nodes.new('ShaderNodeDisplacement'); disp.location = (350, -400)
+        disp.inputs['Scale'].default_value = float(disp_amt)
+        nt.links.new(h.outputs['Color'], disp.inputs['Height'])
+        nt.links.new(disp.outputs['Displacement'], out.inputs['Displacement'])
+        try:
+            mat.displacement_method = 'BUMP'
+        except Exception:
+            pass
+        wired.append(f"displacement={float(disp_amt)}")
 
     store = {"asset_id": asset_id, "resolution": resolution, "scale": scale}
     if base_color is not None:
@@ -135,6 +199,8 @@ def set_textured_material(params):
         store["tint"] = [float(x) for x in tint]
     if roughness is not None:
         store["roughness"] = float(roughness)
+    if params.get("displacement"):
+        store["displacement"] = float(params.get("displacement"))
     mat["bb_texture"] = json.dumps(store)
 
     slot_idx = int(params.get("slot")) if params.get("slot") is not None else 0

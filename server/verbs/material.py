@@ -10,13 +10,13 @@ from server._core import mcp
 from server import finishes, shaders, textures, scene
 from ._common import tag, unknown
 
-_OPS = ["set", "toon", "textured", "outline", "remove_outline", "shade_smooth",
+_OPS = ["set", "toon", "textured", "pbr", "outline", "remove_outline", "shade_smooth",
         "shade_flat", "search_textures", "search_hdris"]
 
 
 @mcp.tool(name="material")
 def material(
-    op: Literal["set", "toon", "textured", "outline", "remove_outline",
+    op: Literal["set", "toon", "textured", "pbr", "outline", "remove_outline",
                 "shade_smooth", "shade_flat", "search_textures", "search_hdris"],
     target: tag(str, "object(s) to shade: 'name', group, or 'a,b,c'") = "",
     # PBR (set)
@@ -40,11 +40,14 @@ def material(
     rim_width: tag(float, "[toon] rim width") = 0.2,
     gradient_top: tag(list, "[toon] gradient top [r,g,b]") = None,
     gradient_bottom: tag(list, "[toon] gradient bottom [r,g,b]") = None,
-    # textured
+    # textured (Poly Haven) + pbr (local folder)
     asset_id: tag(str, "[textured] Poly Haven texture id") = "",
-    scale: tag(float, "[textured] UV/texture scale") = 1.0,
+    scale: tag(float, "[textured/pbr] UV/texture scale") = 1.0,
     resolution: tag(str, "[textured] 1k|2k|4k") = "1k",
-    tint: tag(list, "[textured] tint [r,g,b]") = None,
+    tint: tag(list, "[textured/pbr] tint [r,g,b]") = None,
+    folder: tag(str, "[pbr] local texture-set folder (Poliigon/Megascans/etc.) — maps auto-detected by filename") = "",
+    size: tag(str, "[pbr] resolution subfolder/token to pick, e.g. 4K (default: largest present)") = "",
+    displacement: tag(float, "[pbr] bump-displacement strength from the height map (0=off)") = 0.0,
     # outline
     thickness: tag(float, "[outline] outline thickness (m)") = 0.01,
     color: tag(list, "[outline] outline [r,g,b]") = None,
@@ -63,6 +66,10 @@ def material(
       toon      — flat cel material (target, base_color|hex, shadow_color, bands,
                   shadow_softness, rim_color/width, gradient_top/bottom)
       textured  — Poly Haven PBR texture set (target, asset_id, scale, resolution,
+                  base_color/tint, metallic, roughness, slot)
+      pbr       — PBR material from a LOCAL texture-set folder, maps auto-detected by
+                  filename — vendor-neutral (Poliigon/Megascans/ambientCG/loose folders),
+                  no addon or login needed (target, folder, size, scale, displacement,
                   base_color/tint, metallic, roughness, slot)
       outline   — add an inverted-hull outline (target, thickness, color)
       remove_outline — strip it                (target)
@@ -86,6 +93,10 @@ def material(
         return textures.set_textured_material(target, asset_id, scale, resolution,
                                               base_color, tint, metallic, roughness,
                                               material_name, slot, label)
+    if o == "pbr":
+        return textures.set_pbr_material(target, folder, size, scale, displacement,
+                                         base_color, tint, metallic, roughness,
+                                         material_name, slot, label)
     if o == "outline":
         return shaders.add_outline(target, thickness, color, label)
     if o == "remove_outline":
