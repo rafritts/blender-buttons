@@ -60,6 +60,19 @@ def _status(result: dict) -> str:
     # happened. Surfaced ahead of the block like the bind/shape-key warnings.
     for note in (result.get("notes") or []):
         bind += "\n⚠ " + note
+    # SPEC-16: the two forced senses, surfaced ahead of the status block so they're
+    # never lost. `feel` (what you just changed — perception, no verdict) then
+    # `validate` (what's broken — the always-on correctness floor, report-by-exception).
+    # A disabled floor announces its own absence on EVERY block (validate_off), so
+    # silence-because-off can never read as silence-because-clean.
+    if result.get("feel_delta"):
+        bind += "\n" + result["feel_delta"]
+    v = result.get("validate")
+    if isinstance(v, dict) and v.get("line"):
+        mark = "" if v.get("passed") else "⚠ "
+        bind += "\n" + mark + v["line"]
+    elif result.get("validate_off"):
+        bind += "\n⚠ validate: OFF (human override) — floor is down"
     s = result.get("blender_status")
     if not s:
         return bind

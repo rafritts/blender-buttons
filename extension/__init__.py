@@ -88,6 +88,21 @@ def register():
         ],
         default='blockout',
     )
+    # SPEC-16: the human's GLOBAL validation override — the sledgehammer the agent is
+    # denied. Session-scoped (a WindowManager bool); while True the floor is down and
+    # every status block announces `validate: OFF` so blind-flow can never be silent.
+    bpy.types.WindowManager.bb_validate_off = bpy.props.BoolProperty(
+        name="Validation OFF",
+        description="Human override — disable the always-on validate floor scene-wide "
+                    "(e.g. a huge imported backdrop). Every block will say the floor is down.",
+        default=False,
+    )
+    # SPEC-16: load the cross-session telemetry that tunes the perceptual/validate bundles.
+    try:
+        from . import validation
+        validation.load()
+    except Exception:
+        pass
     # SPEC-07: right-click → Save as Handle in the edit-mode component context menu.
     bpy.types.VIEW3D_MT_edit_mesh_context_menu.append(ui._draw_save_as_handle)
     if _on_load_post not in bpy.app.handlers.load_post:
@@ -116,5 +131,7 @@ def unregister():
         bpy.app.timers.unregister(server.process_queue)
     if hasattr(bpy.types.WindowManager, "bb_phase"):
         del bpy.types.WindowManager.bb_phase
+    if hasattr(bpy.types.WindowManager, "bb_validate_off"):
+        del bpy.types.WindowManager.bb_validate_off
     for cls in reversed(ui.CLASSES):
         bpy.utils.unregister_class(cls)

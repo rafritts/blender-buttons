@@ -30,6 +30,7 @@ from . import (  # noqa: F401
     history,
     file,
     feel,
+    validate,
     collab,
 )
 
@@ -38,7 +39,7 @@ from . import (  # noqa: F401
 VERB_NAMES = {
     "add", "object", "edit", "select", "transform", "modifier", "material",
     "sculpt", "pose", "scene", "view", "render", "history", "file", "feel",
-    "collab",
+    "validate", "collab",
 }
 
 

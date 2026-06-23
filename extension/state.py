@@ -361,6 +361,10 @@ NO_LOG_TOOLS = {
     "acknowledge_mutation",
     # SPEC-15: the change-detail read — compares baseline vs live, mutates nothing.
     "inspect_changes",
+    # SPEC-16: the validate verb's ops are reads / registry bookkeeping — an on-demand
+    # sweep, declaring an intent, listing the registry, telemetry. None move geometry.
+    "validate_run", "validate_expect", "validate_intended", "validate_stats",
+    "feel_telemetry",
 }
 
 # Tools that neither log to history NOR consume an undo step: pure queries,
@@ -424,6 +428,10 @@ NO_STATUS_TOOLS = {
     # SPEC-15: change-detail read — its own per-object breakdown IS the payload; the
     # status block would be noise.
     "inspect_changes",
+    # SPEC-16: validate verb ops — their own structured payload IS the answer; the
+    # status block would be noise on a registry/stats round-trip.
+    "validate_run", "validate_expect", "validate_intended", "validate_stats",
+    "feel_telemetry",
 }
 
 
@@ -450,6 +458,13 @@ def reset_history_state():
     _baseline_ref = None
     _world_locked = False
     _lock_info = None
+    # SPEC-16: the declared-intent registry describes THIS scene's design ("Hair clips
+    # Body") — a new scene starts with no declarations, so drop them too.
+    try:
+        from . import validation
+        validation.clear_intents()
+    except Exception:
+        pass
 
 
 def scene_object_names():

@@ -12,19 +12,27 @@ from server._core import mcp
 from server import topology, queries, rings, introspect, lint, handles, assembly, editmode, fit
 from ._common import tag, unknown
 
-_OPS = ["topology", "profile", "silhouette", "section", "rings", "distance", "gap",
+_OPS = ["all", "topology", "profile", "silhouette", "section", "rings", "distance", "gap",
         "aligned", "linked", "symmetry", "mesh", "overlaps", "validate", "audit", "contacts",
         "clearance", "resting", "aim", "place", "radial", "anchor", "verify", "baseline", "diff",
-        "handle", "handles", "accept", "forget", "assembly", "map", "relate", "curve", "fit"]
+        "handle", "handles", "accept", "forget", "assembly", "map", "relate", "curve", "fit",
+        "stats"]
+
+# SPEC-16: the perceptual bundle a bare `feel` / `feel op=all` runs — the whole-mesh
+# reads that need only a target (no live selection, no second object). The agent opts
+# OUT with exclude=, not in: breadth is free, trimming costs a keystroke.
+_ALL_BUNDLE = ["topology", "profile", "section", "silhouette"]
 
 
 @mcp.tool(name="feel")
 def feel(
-    op: Literal["topology", "profile", "silhouette", "section", "rings", "distance",
+    op: Literal["all", "topology", "profile", "silhouette", "section", "rings", "distance",
                 "gap", "aligned", "linked", "symmetry", "mesh", "overlaps", "validate",
                 "audit", "contacts", "clearance", "resting", "aim", "place", "radial",
                 "anchor", "verify", "baseline", "diff", "handle", "handles", "accept",
-                "forget", "assembly", "map", "relate", "curve", "fit"] = "topology",
+                "forget", "assembly", "map", "relate", "curve", "fit", "stats"] = "all",
+    exclude: tag(str, "[all] comma list of bundle reads to SKIP "
+                      "(e.g. silhouette,section) — opt out, don't opt in") = "",
     target: tag(str, "[topology/profile/silhouette/section/rings/symmetry/mesh] mesh "
                      "object (empty=active); "
                      "[map] cast from every boundary handle on this mesh") = "",
@@ -104,7 +112,13 @@ def feel(
     Feel a mesh — structure, measurements, correctness. Read-only (no status block).
     `op` selects:
 
-      topology — STRUCTURE (default). `method` = comma list of these tokens
+      all      — THE DEFAULT (a bare `feel` resolves to it). The full perceptual sweep
+                 over the target: topology structure + profile + section + silhouette in
+                 one read. Breadth is free; trim with exclude=silhouette,section only
+                 when you have a reason — a lazy read is already a broad one (SPEC-16).
+                 Targeted reads (op=section …) still resolve to a single read.
+      stats    — exclusion telemetry for the op=all bundle (which reads get trimmed most).
+      topology — STRUCTURE. `method` = comma list of these tokens
                  (empty = the cheap bundle, the first seven):
                    structure  — THE structural read (a DISPATCHER): triages the
                                 mesh (open holes? solid? through-holes? shells?) and
@@ -248,6 +262,10 @@ def feel(
                  (target, model, axis, tol, per_component, bands, as_handle, as_curve, lod)
     """
     o = op.lower().strip()
+    if o == "all":
+        return _feel_all(target, lod, base, exclude)
+    if o == "stats":
+        return _feel_stats()
     if o == "topology":
         return topology.get_topology(target, method, lod, base, seed, radius, top_n)
     if o == "profile":
@@ -324,3 +342,55 @@ def feel(
         return fit.fit_region(target, model, fit_axis, tol, per_component, bands,
                               as_handle, as_curve, lod)
     return unknown("feel", "op", op, _OPS)
+
+
+def _feel_all(target, lod, base, exclude):
+    """SPEC-16 — the deliberate perceptual sweep. Runs the whole-mesh bundle; the agent
+    trims with exclude=. Each read is guarded so one failure never sinks the sweep, and
+    the exclusions are recorded so the op=all defaults can be tuned from data, not taste.
+    Targeted reads (op=section …) still resolve to a single read — only breadth is free."""
+    from server._core import call_blender
+    skip = {s.strip().lower() for s in (exclude or "").split(",") if s.strip()}
+    runners = {
+        "topology": lambda: topology.get_topology(
+            target, "components,genus,boundaries,sections,poles,symmetry,frame,facing,curvature",
+            lod, base, "", 0, 0),
+        "profile": lambda: queries.get_mesh_profile("Z", None, None, 200, 0, False, target),
+        "section": lambda: queries.get_section("Z", 12, None, None, target),
+        "silhouette": lambda: queries.get_silhouette("Z", 32, False, target),
+    }
+    out, excluded = [], []
+    for name in _ALL_BUNDLE:
+        if name in skip:
+            excluded.append(name)
+            continue
+        try:
+            out.append(f"── {name} ──\n{runners[name]()}")
+        except Exception as e:                       # a single bad read never sinks the sweep
+            out.append(f"── {name} ──\n(skipped: {e})")
+    # Record what was trimmed (the weak, preference signal that tunes the bundle).
+    if excluded:
+        try:
+            call_blender("feel_telemetry", {"excluded": excluded})
+        except Exception:
+            pass
+    head = ("feel op=all — full perceptual sweep"
+            + (f" (excluded: {', '.join(excluded)})" if excluded else "")
+            + ". A lazy read is a broad one; opt out with exclude=, never in.\n")
+    return head + "\n\n".join(out)
+
+
+def _feel_stats():
+    """Telemetry for the perceptual bundle — which reads callers exclude most, so the
+    op=all default membership is tuned from data (SPEC-16)."""
+    from server._core import call_blender
+    r = call_blender("validate_stats")
+    if r.get("error"):
+        return r["error"]
+    feel = r.get("feel") or []
+    if not feel:
+        return "feel: no exclusion telemetry yet — op=all has run clean so far."
+    lines = ["feel — exclusion rate per perceptual op (tunes op=all defaults):"]
+    for f in feel:
+        lines.append(f"  {f['op']}: excluded×{f['excluded']}, auto-skipped×{f['auto_skipped']}")
+    return "\n".join(lines)

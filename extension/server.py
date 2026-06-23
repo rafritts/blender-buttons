@@ -44,6 +44,7 @@ from . import (
     textures,
     topology,
     transforms,
+    validation,
     viewport,
 )
 
@@ -82,6 +83,7 @@ _TOOL_MODULES = (
     topology,
     handles,
     assembly,
+    validation,  # SPEC-16: validate_* ops (expect / intended / stats / run)
 )
 
 TOOLS = {}
@@ -184,6 +186,16 @@ PLACEMENT_TOOLS = {
     "add_box", "add_plane", "add_cylinder", "add_sphere", "add_cone",
     "add_torus", "add_icosphere", "add_circle", "add_text",
 }
+
+
+# SPEC-16: the ops after which the always-on `validate` floor runs (scoped to the
+# touched delta) and the ambient `feel` delta is attached. Geometry/transform mutators
+# plus the single-part placers — every op that can introduce a z-fight, a penetration,
+# a flipped normal, or non-manifold junk. The relational `validate` clipping check
+# SUBSUMES the old G77 placement self-report (auto_proximity_note), so that separate
+# emission is retired here — validate is now the single relational authority, with
+# intent-suppression the raw note never had.
+VALIDATE_AFTER = NOOP_CHECK_TOOLS | PLACEMENT_TOOLS
 
 
 def _noop_obj(tool, params, edit_target):
@@ -434,14 +446,20 @@ def execute_command(command):
         # with the undo stack (the whole diff), never an agent-curated subset.
         collab.enqueue(result["op_id"], label or tool)
 
-    # G77: after a placement op, auto-surface a NEW penetration against neighbours so the
-    # agent verifies clearance by READING (effortless, unasked), never hand-computing it.
-    if tool in PLACEMENT_TOOLS and isinstance(result, dict) and result.get("success"):
+    # SPEC-16: the two forced senses. After a geometry/placement op, run the always-on
+    # correctness floor (`validate`, scoped to the touched delta + its relations) and
+    # attach the ambient perceptual delta (`feel`, the touched object). Both ride the
+    # result so _core._status renders them. validate's clipping check generalises the
+    # old G77 placement self-report — there is no separate auto_proximity_note emission.
+    if tool in VALIDATE_AFTER and isinstance(result, dict) and result.get("success"):
         try:
             focus = _status_focus(result)
-            note = introspect.auto_proximity_note(focus) if focus else None
-            if note:
-                result.setdefault("notes", []).append(note)
+            touched = [focus] if focus else None
+            result["validate"] = validation.run_validate(touched)
+            if focus:
+                fd = validation.feel_delta(focus)
+                if fd:
+                    result["feel_delta"] = fd
         except Exception:
             pass
 
@@ -450,6 +468,11 @@ def execute_command(command):
             focus = _status_focus(result) if result.get("success") else None
             sp = {"focus": focus} if focus else {}
             result["blender_status"] = status.get_blender_status(sp).get("status")
+            # The floor must announce its own absence on EVERY block, so a disabled
+            # validator can never be mistaken for a clean one (SPEC-16). For geometry
+            # ops the validate dict already carries the OFF line; for the rest, flag it.
+            if "validate" not in result and validation.is_global_off():
+                result["validate_off"] = True
         except Exception:
             pass
     return result
