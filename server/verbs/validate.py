@@ -23,18 +23,20 @@ from typing import Literal
 from server._core import mcp, call_blender
 from ._common import tag, unknown
 
-_OPS = ["run", "expect", "intend", "intended", "stats"]
+_OPS = ["run", "expect", "intend", "forget", "intended", "stats"]
 
 
 @mcp.tool(name="validate")
 def validate(
-    op: Literal["run", "expect", "intend", "intended", "stats"] = "run",
-    a: tag(str, "[expect/intend] first object of the intended-clip pair") = "",
-    b: tag(str, "[expect/intend] second object of the intended-clip pair") = "",
+    op: Literal["run", "expect", "intend", "forget", "intended", "stats"] = "run",
+    a: tag(str, "[expect/intend/forget] first object of the clip pair (may name a "
+                "COLLECTION to cover a whole scatter, e.g. Sprinkles↔Icing)") = "",
+    b: tag(str, "[expect/intend/forget] second object (or collection) of the clip pair") = "",
     reason: tag(str, "[expect/intend] WHY the clip is intended — a falsifiable design "
                      "claim ('hair roots seat under the scalp'). Required; an assertion "
                      "you can't justify is a bug you're hiding.") = "",
     targets: tag(str, "[run] object(s) to sweep ('' = whole scene)") = "",
+    verbose: tag(bool, "[run] list EVERY finding instead of capping the line") = False,
 ) -> str:
     """
     The always-on correctness floor (SPEC-16). It runs after every geometry op on its
@@ -42,15 +44,19 @@ def validate(
 
       run      — run the floor NOW over the whole scene (or `targets=`), not just the
                  last touched delta. Reports by exception: clean checks collapse to a
-                 line; defects and undeclared clips are listed.
+                 line; defects and undeclared clips are listed. `verbose` lists EVERY
+                 finding (no cap).
       expect   — DECLARE a clip/penetration intended (alias `intend`). Name the pair
-                 (a, b) and the `reason`. This is the ONLY way to quiet a clipping
+                 (a, b) and the `reason`. a or b may be a COLLECTION to cover a whole
+                 scatter in one call (Sprinkles↔Icing). This is the ONLY way to quiet a clipping
                  finding — there is deliberately no "ignore". The declaration is scoped
                  to the (a,b) RELATIONSHIP (so Hair↔Body intended does NOT also hide a
                  later Hair↔Hat clip), it collapses the finding to a COUNT (never
                  silences it), and it becomes a TRIPWIRE: if the intended overlap ever
                  vanishes, that is itself a finding. Declare the few real ones; never
                  paper over the noisy ones — the noise is the mesh telling you it's broken.
+      forget   — retire a declaration (a, b) — clears its tripwire. (Deleting a declared
+                 object auto-clears it too; use this to drop one you no longer mean.)
       intended — list the live registry of declarations (pair, reason, holding/vanished),
                  and whether the human has the floor globally OFF.
       stats    — the cross-session telemetry: per-check finding-yield (a check that has
@@ -63,7 +69,7 @@ def validate(
     o = op.lower().strip()
 
     if o == "run":
-        r = call_blender("validate_run", {"targets": targets})
+        r = call_blender("validate_run", {"targets": targets, "verbose": verbose})
         if r.get("error"):
             return r["error"]
         return _format_run(r)
@@ -75,6 +81,12 @@ def validate(
         e = r["intent"]
         return (f'declared intended: {e["check"]} {e["a"]}↔{e["b"]} — "{e["reason"]}". '
                 f"It now collapses to a count, and will fire if it ever vanishes.")
+
+    if o == "forget":
+        r = call_blender("validate_forget", {"a": a, "b": b})
+        if r.get("error"):
+            return r["error"]
+        return f"forgot the {a}↔{b} declaration — its tripwire is cleared."
 
     if o == "intended":
         r = call_blender("validate_intended")

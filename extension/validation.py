@@ -30,6 +30,7 @@ import bpy
 
 # Spatial epsilons, shared with the detectors so findings reconcile (gaps.md G107).
 _EPS = 1e-4        # coplanar / below-floor (0.1 mm)
+_CLIP_FLOOR_MM = 0.3   # ignore sub-0.3mm grazes (matches auto_proximity_note)
 
 # Intent-free defect checks — there is NO suppression path for any of these.
 _INTENT_FREE = ("z_fight", "below_floor", "degenerate", "inverted_normals",
@@ -52,11 +53,46 @@ def _pair_key(check, a, b):
 
 
 def _find_intent(check, a, b):
+    """Exact (a,b) lookup — for add/revoke dedup."""
     key = _pair_key(check, a, b)
     for e in _intents:
         if _pair_key(e["check"], e["a"], e["b"]) == key:
             return e
     return None
+
+
+def _token_matches(token, objname):
+    """A declaration token matches an object either by exact name OR — so a single
+    `expect Sprinkles↔Icing` covers a whole scatter — by COLLECTION membership when the
+    token names a collection (feedback P1.5)."""
+    if token == objname:
+        return True
+    coll = bpy.data.collections.get(token)
+    if coll is not None:
+        return objname in coll.all_objects
+    return False
+
+
+def _intent_for_pair(check, x, y):
+    """Fuzzy match a live penetrating pair (x,y) against the registry, honouring the
+    collection-membership tokens above. Used when classifying findings (not for dedup)."""
+    for e in _intents:
+        if e["check"] != check:
+            continue
+        if (_token_matches(e["a"], x) and _token_matches(e["b"], y)) or \
+           (_token_matches(e["a"], y) and _token_matches(e["b"], x)):
+            return e
+    return None
+
+
+def _prune_dead_intents():
+    """Auto-GC declarations whose object (or collection) no longer exists, so deleting a
+    declared part never leaves a permanent un-clearable VANISHED tripwire (feedback P1.5)."""
+    for e in list(_intents):
+        for tok in (e["a"], e["b"]):
+            if bpy.data.objects.get(tok) is None and bpy.data.collections.get(tok) is None:
+                _intents.remove(e)
+                break
 
 
 def add_intent(a, b, reason, check=_CLIPPING, source="agent"):
@@ -128,14 +164,16 @@ def mesh_excluded(name):
 
 # ── the validate aggregator ─────────────────────────────────────────────────
 
-def run_validate(touched_names=None, scene_wide=False):
+def run_validate(touched_names=None, scene_wide=False, verbose=False):
     """Run the floor over the touched delta (or the whole scene, for op=run). Returns a
     structured dict plus a pre-rendered one-line `line` for the status block. Reports BY
     EXCEPTION: clean checks collapse to counts. Adds no detection logic — it composes
-    lint.validate_scene / lint.check_mesh / introspect.check_contacts."""
+    lint.check_mesh / introspect.check_contacts (+ a true-depth recompute). verbose=True
+    (op=run) lists every finding instead of capping the line."""
     if is_global_off():
         return {"off": True, "scope": "global", "passed": None,
                 "line": "validate: OFF (human override) — floor is down"}
+    _prune_dead_intents()
 
     from . import lint, introspect
     from .common import scene_mesh_objects, world_bbox, eval_world_bmesh
@@ -208,82 +246,144 @@ def run_validate(touched_names=None, scene_wide=False):
             intent_free.append({"check": "self_intersection",
                                 "message": f"{o.name} has {sx} self-intersection(s)"})
 
-    # clipping / penetration — intent-laden. Run check_contacts on the scope; each
-    # penetrating pair is checked against the declared-intent registry.
-    clip = _clipping_findings(introspect, scope, live_names)
+    # clipping / penetration — intent-laden, DELTA-SCOPED to what this op touched.
+    clip = _clipping_findings(introspect, scope, scope_names, live_names)
 
     passed = not intent_free and not clip["new"] and not clip["vanished"]
-    line = _render_line(intent_free, clip, excluded)
+    line = _render_line(intent_free, clip, excluded, verbose)
     return {"off": False, "passed": passed, "excluded": excluded,
             "intent_free": intent_free, "clipping": clip, "line": line}
 
 
 def _empty_clip():
-    return {"intended": 0, "new": [], "vanished": [], "clean": 0, "intended_pairs": []}
+    return {"declared": len([e for e in _intents if e["check"] == _CLIPPING]),
+            "new": [], "vanished": [], "intended_in_scope": 0}
 
 
-def _clipping_findings(introspect, scope, live_names):
-    """Penetration findings split by the declared-intent registry: intended pairs
-    collapse to a count; undeclared pairs are NEW findings; declared-intended pairs
-    that are no longer penetrating are VANISHED findings (the bidirectional invariant)."""
-    scope_names = [o.name for o in scope]
-    res = introspect.check_contacts({"targets": scope_names})
-    # Current penetrating pairs (normalised, deduped) involving the scope.
-    current = {}   # frozenset({a,b}) -> depth_mm
+def _true_penetration_mm(a_name, b_name):
+    """The REAL max vertex-penetration depth between two meshes, recomputed every report:
+    for each sampled vert of one inside the other (signed by the nearest-face normal, the
+    method `feel op=clearance` uses), the distance to that surface. This replaces
+    check_contacts' interior-sample proxy, which over-reported grazes as tens of mm and
+    didn't track a lift (feedback P0.2). Returns mm (0 = no real crossing)."""
+    from . import introspect
+    a = bpy.data.objects.get(a_name)
+    b = bpy.data.objects.get(b_name)
+    if a is None or b is None:
+        return 0.0
+    pa = introspect._prepare(a)
+    pb = introspect._prepare(b)
+    if pa is None or pb is None:
+        return 0.0
+    worst = 0.0
+    for src, dst in ((pa, pb), (pb, pa)):
+        bvh = dst["bvh"]
+        for v in src["verts"]:
+            loc, normal, _idx, dist = bvh.find_nearest(v)
+            if loc is None:
+                continue
+            if (v - loc).dot(normal) < 0.0 and dist > worst:   # v is inside dst
+                worst = dist
+    return round(worst * 1000, 1)
+
+
+def _min_bbox_overlap_mm(a_name, b_name):
+    """Smallest per-axis world-bbox overlap (mm), 0 if separated on any axis — the cheap
+    fallback magnitude when vertex sampling can't measure a matched-footprint overlap."""
+    from .common import world_bbox
+    a = bpy.data.objects.get(a_name)
+    b = bpy.data.objects.get(b_name)
+    if a is None or b is None:
+        return 0.0
+    ax = world_bbox(a)
+    bx = world_bbox(b)
+    m = min((min(ax[i + 3], bx[i + 3]) - max(ax[i], bx[i])) for i in range(3))
+    return round(m * 1000, 1) if m > 0 else 0.0
+
+
+def _clipping_findings(introspect, scope, scope_names, live_names):
+    """Penetration findings, DELTA-SCOPED. check_contacts (robust bbox+gate) finds the
+    candidate pairs touching this op's scope; each candidate's TRUE depth is recomputed
+    and sub-graze pairs dropped. Declared pairs collapse to a count (never re-listed);
+    undeclared pairs are NEW; a declared pair that this op TOUCHED and that no longer
+    crosses is VANISHED (the bidirectional invariant — only for pairs we actually read)."""
+    res = introspect.check_contacts({"targets": list(scope_names)})
+    candidates = set()
     for c in res.get("contacts", []):
-        a = c["object"]
         for p in c.get("penetrating", []):
-            key = frozenset((a, p["other"]))
-            current[key] = max(current.get(key, 0.0), p["depth_mm"])
+            candidates.add(frozenset((c["object"], p["other"])))
 
-    intended_now, new = [], []
-    for key, depth in current.items():
-        a, b = tuple(key) if len(key) == 2 else (next(iter(key)), next(iter(key)))
-        e = _find_intent(_CLIPPING, a, b)
+    depths = {}
+    for key in candidates:
+        a, b = tuple(key)
+        d = _true_penetration_mm(a, b)
+        if d >= _CLIP_FLOOR_MM:
+            depths[key] = d                          # precise true depth
+        elif _min_bbox_overlap_mm(a, b) >= 1.0:
+            # A real overlap the vertex sampling can't measure (matched footprints — every
+            # vert sits on a coincident face). Flag it WITHOUT a number rather than drop it
+            # (no false-negative) or print a wrong one (feedback P0.2): hint at clearance.
+            depths[key] = None
+        # else: a sub-graze the proxy used to over-report — correctly dropped.
+
+    intended_in_scope, new = 0, []
+    for key, depth in depths.items():
+        a, b = tuple(key)
+        e = _intent_for_pair(_CLIPPING, a, b)
         if e is not None:
             e["status"] = "holding"
-            intended_now.append({"a": a, "b": b, "depth_mm": depth})
+            intended_in_scope += 1
         else:
-            new.append({"a": a, "b": b, "depth_mm": depth, "message": f"{a}↔{b} {depth}mm"})
+            msg = f"{a}↔{b} {depth}mm" if depth is not None else \
+                f"{a}↔{b} (overlap — `feel op=clearance` to measure)"
+            new.append({"a": a, "b": b, "depth_mm": depth, "message": msg})
 
-    # Bidirectional: a declared-intended pair that is NOT currently penetrating — but only
-    # when BOTH its objects are still live (a deleted/excluded object isn't a vanished clip).
+    # Bidirectional invariant — but ONLY for declared OBJECT pairs this op touched (in
+    # scope). A pair the op never read tells us nothing, so it must NOT print VANISHED
+    # (feedback P0.1). Collection-scoped declarations don't vanish (too broad).
     vanished = []
     for e in _intents:
         if e["check"] != _CLIPPING:
             continue
-        key = frozenset((e["a"], e["b"]))
-        if e["a"] in live_names and e["b"] in live_names and key not in current:
+        a, b = e["a"], e["b"]
+        is_obj_pair = (bpy.data.objects.get(a) is not None and
+                       bpy.data.objects.get(b) is not None)
+        touched = a in scope_names or b in scope_names
+        if (is_obj_pair and touched and a in live_names and b in live_names
+                and frozenset((a, b)) not in depths):
             e["status"] = "vanished"
-            vanished.append({"a": e["a"], "b": e["b"], "reason": e["reason"]})
+            vanished.append({"a": a, "b": b, "reason": e["reason"]})
 
-    found = len(new) > 0
-    _bump(_CLIPPING, found)
-    clean = max(0, len(scope_names) - len({n for k in current for n in k}))
-    return {"intended": len(intended_now), "intended_pairs": intended_now,
-            "new": new, "vanished": vanished, "clean": clean}
+    _bump(_CLIPPING, len(new) > 0)
+    return {"declared": len([e for e in _intents if e["check"] == _CLIPPING]),
+            "new": new, "vanished": vanished, "intended_in_scope": intended_in_scope}
 
 
-def _render_line(intent_free, clip, excluded):
+def _render_line(intent_free, clip, excluded, verbose=False):
     """Compact, report-by-exception status line. Clean ⇒ a short reassurance (so
-    silence-because-clean is explicit, never absent)."""
+    silence-because-clean is explicit, never absent). Clips collapse to a COUNT by
+    default; only the NEW delta is listed. verbose lists everything (op=run)."""
+    cap = 999 if verbose else 4
     segs = []
-    # intent-free, grouped by check with a count.
     by_check = {}
     for f in intent_free:
         by_check.setdefault(f["check"], []).append(f["message"])
     for check in _INTENT_FREE:
         msgs = by_check.get(check)
         if msgs:
-            segs.append(f"{check} {len(msgs)}: " + "; ".join(msgs[:3]))
-    # clipping: intended collapses to a count; NEW + VANISHED surface.
+            shown = "; ".join(msgs[:cap])
+            more = "" if verbose or len(msgs) <= cap else f" …(+{len(msgs) - cap})"
+            segs.append(f"{check} {len(msgs)}: {shown}{more}")
+    # clipping: declared collapses to a count; only the NEW delta is listed.
     cl = []
-    if clip["intended"]:
-        pairs = ", ".join(f"{p['a']}↔{p['b']}" for p in clip["intended_pairs"][:4])
-        cl.append(f"{clip['intended']} intended ({pairs})")
-    for n in clip["new"][:4]:
-        cl.append(f"NEW {n['message']}")
-    for v in clip["vanished"][:4]:
+    if clip["declared"]:
+        cl.append(f"{clip['declared']} intended")
+    if clip["new"]:
+        shown = ", ".join(n["message"] for n in clip["new"][:cap])
+        more = "" if verbose or len(clip["new"]) <= cap else \
+            f" …(+{len(clip['new']) - cap}; validate op=run verbose to list)"
+        cl.append(f"{len(clip['new'])} new: {shown}{more}")
+    for v in clip["vanished"][:cap]:
         cl.append(f"VANISHED {v['a']}↔{v['b']} (declared intended — confirm or clear)")
     if cl:
         segs.append("clipping " + " · ".join(cl))
@@ -415,19 +515,26 @@ def _tag_redraw():
 # ── socket-addressable ops (the agent verb routes here) ─────────────────────
 
 def validate_run(params):
-    """op=run — the on-demand full sweep (scene-wide, not delta-scoped)."""
+    """op=run — the on-demand full sweep (scene-wide, not delta-scoped). verbose lists
+    every finding (no cap)."""
     touched = params.get("targets")
     if isinstance(touched, str) and touched:
         touched = [s.strip() for s in touched.split(",")]
     elif isinstance(touched, str):
         touched = None
-    return {"success": True, **run_validate(touched, scene_wide=not touched)}
+    return {"success": True, **run_validate(touched, scene_wide=not touched,
+                                            verbose=bool(params.get("verbose")))}
 
 
 def validate_expect(params):
-    """op=expect / intend — declare a clip intended."""
+    """op=expect / intend — declare a clip intended (a or b may name a COLLECTION)."""
     return add_intent(params.get("a", ""), params.get("b", ""),
                       params.get("reason", ""), source="agent")
+
+
+def validate_forget(params):
+    """op=forget — retire a declaration (clears a stale tripwire)."""
+    return revoke_intent(params.get("a", ""), params.get("b", ""))
 
 
 def validate_intended(params):
@@ -451,6 +558,7 @@ def feel_telemetry(params):
 TOOLS = {
     "validate_run": validate_run,
     "validate_expect": validate_expect,
+    "validate_forget": validate_forget,
     "validate_intended": validate_intended,
     "validate_stats": validate_stats,
     "feel_telemetry": feel_telemetry,

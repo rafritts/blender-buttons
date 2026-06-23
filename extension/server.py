@@ -197,6 +197,18 @@ PLACEMENT_TOOLS = {
 # intent-suppression the raw note never had.
 VALIDATE_AFTER = NOOP_CHECK_TOOLS | PLACEMENT_TOOLS
 
+# SPEC-16 (feedback P1.4): the ambient `feel` delta only earns its keep on ops that
+# change TOPOLOGY (or create geometry) — for a pure transform (nudge/place/rotate/
+# resize/snap) the status block already carries the new dims, so a `feel: …42v… dims…`
+# line every nudge is pure chatter across a 130-call build. validate still runs on
+# transforms (a nudge can author a clip); only the perceptual echo is gated.
+_PURE_TRANSFORMS = {
+    "nudge", "place", "aim_axis", "rest_on", "seat_into", "move_to", "rotate_to",
+    "resize", "scale_group", "rotate_object", "apply_transform", "snap_to",
+    "snap_to_grid", "set_origin", "match_dimension",
+}
+FEEL_DELTA_AFTER = VALIDATE_AFTER - _PURE_TRANSFORMS
+
 
 def _noop_obj(tool, params, edit_target):
     """The object a no-op-checked op should change. EDIT_MODE_TOOLS already resolved it
@@ -456,7 +468,7 @@ def execute_command(command):
             focus = _status_focus(result)
             touched = [focus] if focus else None
             result["validate"] = validation.run_validate(touched)
-            if focus:
+            if focus and tool in FEEL_DELTA_AFTER:
                 fd = validation.feel_delta(focus)
                 if fd:
                     result["feel_delta"] = fd

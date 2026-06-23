@@ -363,7 +363,7 @@ NO_LOG_TOOLS = {
     "inspect_changes",
     # SPEC-16: the validate verb's ops are reads / registry bookkeeping — an on-demand
     # sweep, declaring an intent, listing the registry, telemetry. None move geometry.
-    "validate_run", "validate_expect", "validate_intended", "validate_stats",
+    "validate_run", "validate_expect", "validate_forget", "validate_intended", "validate_stats",
     "feel_telemetry",
 }
 
@@ -430,7 +430,7 @@ NO_STATUS_TOOLS = {
     "inspect_changes",
     # SPEC-16: validate verb ops — their own structured payload IS the answer; the
     # status block would be noise on a registry/stats round-trip.
-    "validate_run", "validate_expect", "validate_intended", "validate_stats",
+    "validate_run", "validate_expect", "validate_forget", "validate_intended", "validate_stats",
     "feel_telemetry",
 }
 

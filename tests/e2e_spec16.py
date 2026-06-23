@@ -107,15 +107,20 @@ make_box("Body", 0, 0, 0.7, 0.5)     # overlaps Hair volumetrically → penetrat
 v = validation.run_validate(["Hair", "Body"])
 check("undeclared penetration → a NEW clipping finding",
       len(v["clipping"]["new"]) >= 1, str(v["clipping"]))
-check("nothing intended yet", v["clipping"]["intended"] == 0)
+check("nothing intended yet", v["clipping"]["declared"] == 0)
+# P0.2: the reported depth is the REAL penetration, not a tens-of-mm proxy.
+new_depth = v["clipping"]["new"][0]["depth_mm"]
+check("clip depth is a real penetration (Hair sits 0.2m into Body, so ~tens of mm here)",
+      50 <= new_depth <= 300, f"depth={new_depth}")
 
 r = validation.add_intent("Hair", "Body", "hair roots seat under the scalp")
 check("expect requires a reason (empty rejected)",
       "error" in validation.add_intent("Hair", "Body", ""))
 v = validation.run_validate(["Hair", "Body"])
-check("declared clip collapses to an intended COUNT", v["clipping"]["intended"] == 1, str(v["clipping"]))
+check("declared clip collapses to a COUNT (declared registry)", v["clipping"]["declared"] == 1, str(v["clipping"]))
+check("declared clip counted intended-in-scope", v["clipping"]["intended_in_scope"] == 1, str(v["clipping"]))
 check("declared clip is no longer a NEW finding", v["clipping"]["new"] == [], str(v["clipping"]["new"]))
-check("intended pair shown in the line", "intended" in v["line"], v["line"])
+check("intended count shown in the line", "intended" in v["line"], v["line"])
 
 # a DIFFERENT, undeclared clip still fires (scoped to the relationship, not the mesh).
 make_box("Hat", 0, 0, 1.3, 0.45)     # overlaps Hair, NOT declared
@@ -132,14 +137,79 @@ make_box("P", 0, 0, 1.0, 0.4)
 make_box("Q", 0, 0, 0.7, 0.5)
 validation.add_intent("P", "Q", "intended overlap")
 v = validation.run_validate(["P", "Q"])
-check("declared overlap holds while present", v["clipping"]["intended"] == 1)
+check("declared overlap holds while present", v["clipping"]["intended_in_scope"] == 1)
 # pull Q far away — the intended clip vanishes.
 bpy.data.objects["Q"].location = (5, 5, 0.7)
 bpy.context.view_layer.update()
 v = validation.run_validate(["P", "Q"])
 vanished = {frozenset((x["a"], x["b"])) for x in v["clipping"]["vanished"]}
-check("a vanished declared-intended clip raises a finding",
+check("a vanished declared-intended clip raises a finding (op TOUCHED the pair)",
       frozenset(("P", "Q")) in vanished, str(v["clipping"]["vanished"]))
+
+# ── 4b. P0.1: VANISHED is DELTA-SCOPED — an op that didn't touch the pair stays silent ─
+clean()
+make_box("P", 0, 0, 1.0, 0.4)
+make_box("Q", 0, 0, 0.7, 0.5)
+make_box("Other", 8, 8, 0.5, 0.4)
+validation.add_intent("P", "Q", "intended overlap")
+# move P↔Q apart, but run validate scoped to an UNRELATED object.
+bpy.data.objects["Q"].location = (5, 5, 0.7)
+bpy.context.view_layer.update()
+v = validation.run_validate(["Other"])
+vanished = {frozenset((x["a"], x["b"])) for x in v["clipping"]["vanished"]}
+check("an op that didn't touch P↔Q does NOT print VANISHED", frozenset(("P", "Q")) not in vanished,
+      str(v["clipping"]["vanished"]))
+
+# ── 4c. P0.2: true depth tracks a lift (the real sprinkle-into-icing case: a small
+#         part dipping into a large surface, NOT a matched-footprint stack) ─────────
+clean()
+make_box("Base", 0, 0, 0.5, 0.5)     # big surface, top at z=1.0
+make_box("Pin", 0, 0, 0.95, 0.1)     # small, dips ~150mm below Base's top
+d0 = validation.run_validate(["Pin", "Base"])["clipping"]["new"]
+depth0 = d0[0]["depth_mm"] if d0 else 0
+check("a small part dipping into a big surface reports a real depth (~150mm)",
+      100 <= depth0 <= 200, f"depth={depth0}")
+bpy.data.objects["Pin"].location = (0, 0, 0.95 + 0.1)   # lift 100mm
+bpy.context.view_layer.update()
+d1 = validation.run_validate(["Pin", "Base"])["clipping"]["new"]
+depth1 = d1[0]["depth_mm"] if d1 else 0
+check("lifting the part REDUCES the reported depth by ~the lift (proxy bug fixed)",
+      depth1 < depth0 - 50, f"before={depth0} after={depth1}")
+
+# ── 4d. P1.5: collection-scoped declaration covers members ────────────────────
+clean()
+icing = make_box("Icing", 0, 0, 0.5, 0.6)
+coll = bpy.data.collections.new("Sprinkles")
+bpy.context.scene.collection.children.link(coll)
+for i in range(2):
+    s = make_box(f"sprinkle{i}", 0.8 * i - 0.4, 0, 0.6, 0.15)   # spaced apart; each clips Icing only
+    bpy.context.scene.collection.objects.unlink(s)
+    coll.objects.link(s)
+v = validation.run_validate(["sprinkle0", "sprinkle1"])
+check("undeclared sprinkles clip Icing (NEW)", len(v["clipping"]["new"]) >= 1, str(v["clipping"]["new"]))
+validation.add_intent("Sprinkles", "Icing", "sprinkles sit pressed into the icing")
+v = validation.run_validate(["sprinkle0", "sprinkle1"])
+check("one collection declaration covers every member → no NEW clips",
+      v["clipping"]["new"] == [], str(v["clipping"]["new"]))
+
+# ── 4e. P1.5: forget clears a declaration ─────────────────────────────────────
+res = validation.revoke_intent("Sprinkles", "Icing")
+check("forget/revoke succeeds", res.get("success") is True, str(res))
+v = validation.run_validate(["sprinkle0", "sprinkle1"])
+check("after forget, the clips fire again", len(v["clipping"]["new"]) >= 1)
+
+# ── 4f. P0.2 fallback: a matched-footprint overlap (every vert on a coincident face)
+#         is still FLAGGED, without a wrong number — no false-negative regression ──
+clean()
+make_box("Box1", 0, 0, 0.5, 0.5)     # z[0,1]
+make_box("Box2", 0, 0, 0.6, 0.5)     # same footprint, up 0.1 → real volume overlap
+v = validation.run_validate(["Box1", "Box2"])
+flagged = {frozenset((n["a"], n["b"])) for n in v["clipping"]["new"]}
+check("matched-footprint overlap is still flagged (no false-negative)",
+      frozenset(("Box1", "Box2")) in flagged, str(v["clipping"]["new"]))
+nf = [n for n in v["clipping"]["new"] if frozenset((n["a"], n["b"])) == frozenset(("Box1", "Box2"))][0]
+check("unmeasurable overlap reports the clearance hint, not a wrong number",
+      nf["depth_mm"] is None and "clearance" in nf["message"], str(nf))
 
 # ── 5. human overrides ────────────────────────────────────────────────────────
 clean()
@@ -170,7 +240,13 @@ clean()
 res = run("add_box", name="Crate", width=1.0, depth=1.0, height=1.0)
 check("the op succeeded", res.get("success") is True, str(res.get("error")))
 check("a real op attaches result['validate']", isinstance(res.get("validate"), dict), str(res.get("validate")))
-check("a real op attaches result['feel_delta']", bool(res.get("feel_delta")), str(res.get("feel_delta")))
+check("a creation op attaches result['feel_delta']", bool(res.get("feel_delta")), str(res.get("feel_delta")))
+
+# P1.4: a PURE TRANSFORM gets validate but NOT the redundant feel echo.
+res = run("nudge", name="Crate", up=0.2)
+check("a pure transform still runs validate", isinstance(res.get("validate"), dict), str(res.get("validate")))
+check("a pure transform does NOT attach feel_delta (status block has dims)",
+      res.get("feel_delta") is None, str(res.get("feel_delta")))
 
 clean()
 make_box("Hair", 0, 0, 1.0, 0.4)
@@ -181,6 +257,10 @@ ri = run("validate_intended")
 check("validate_intended lists the declaration", ri.get("success") and len(ri.get("intents", [])) == 1, str(ri))
 rrun = run("validate_run")
 check("validate_run sweeps the scene", rrun.get("success") is True and "clipping" in rrun, str(rrun.keys()))
+rforget = run("validate_forget", a="Hair", b="Body")
+check("validate_forget retires a declaration", rforget.get("success") is True, str(rforget))
+ri2 = run("validate_intended")
+check("registry is empty after forget", len(ri2.get("intents", [])) == 0, str(ri2))
 rt = run("feel_telemetry", excluded=["silhouette"])
 check("feel_telemetry records an exclusion", rt.get("success") is True, str(rt))
 rs = run("validate_stats")
