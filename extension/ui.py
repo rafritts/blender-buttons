@@ -5,7 +5,7 @@ import threading
 
 import bpy
 
-from . import collab, handles, server, state
+from . import collab, handles, server, state, validation
 
 
 def start_server():
@@ -161,6 +161,70 @@ class BB_OT_CollabHandleDelete(bpy.types.Operator):
         return {'FINISHED'}
 
 
+# ── SPEC-16: the human's governance of the validate floor ────────────────────
+# Asymmetry: the agent gets the fine instrument (narrow `expect`); the human gets the
+# blunt ones — revoke a declaration, add one, exclude a mesh from computation, or pull
+# the whole floor down. All live here in the panel.
+
+class BB_OT_ValidateRevoke(bpy.types.Operator):
+    """Revoke a declared-intent assertion — overruling the agent ('that clip is a bug,
+    fix it'). Re-arms the finding."""
+    bl_idname = "bb.validate_revoke"
+    bl_label = "Revoke"
+    a: bpy.props.StringProperty()
+    b: bpy.props.StringProperty()
+    check: bpy.props.StringProperty(default="clipping")
+
+    def execute(self, context):
+        res = validation.revoke_intent(self.a, self.b, self.check)
+        if res.get("error"):
+            self.report({'ERROR'}, res["error"])
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Revoked {self.a}↔{self.b}")
+        return {'FINISHED'}
+
+
+class BB_OT_ValidateAddIntent(bpy.types.Operator):
+    """Declare a clip intended on the agent's behalf — the human adding to the registry."""
+    bl_idname = "bb.validate_add_intent"
+    bl_label = "Declare intended clip"
+    a: bpy.props.StringProperty(name="Object A")
+    b: bpy.props.StringProperty(name="Object B")
+    reason: bpy.props.StringProperty(name="Reason",
+                                     description="Why this clip is intended (required)")
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        res = validation.add_intent(self.a, self.b, self.reason, source="human")
+        if res.get("error"):
+            self.report({'ERROR'}, res["error"])
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Declared {self.a}↔{self.b} intended")
+        return {'FINISHED'}
+
+
+class BB_OT_ValidateExcludeMesh(bpy.types.Operator):
+    """Toggle the active object's per-mesh validation override — EXCLUSION FROM
+    COMPUTATION (the check never runs on it), for a huge imported part the agent
+    shouldn't burn cycles validating."""
+    bl_idname = "bb.validate_exclude_mesh"
+    bl_label = "Toggle validate-exclude (active object)"
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object is not None
+
+    def execute(self, context):
+        obj = context.active_object
+        now = not bool(obj.get("bb_no_validate"))
+        obj["bb_no_validate"] = now
+        collab.tag_redraw()
+        self.report({'INFO'}, f"'{obj.name}' validate-exclude {'ON' if now else 'OFF'}")
+        return {'FINISHED'}
+
+
 def _wrap(text, width):
     """Greedy word-wrap for panel labels (Blender labels don't wrap)."""
     out, line = [], ""
@@ -215,6 +279,42 @@ class BB_PT_CollabPanel(bpy.types.Panel):
                 row.operator("bb.collab_reject", text="Reject",
                              icon='X').op_id = e["op_id"]
 
+        # ── Validate floor (SPEC-16: the human's governance) ──
+        box = layout.box()
+        off = getattr(wm, "bb_validate_off", False)
+        box.label(text="Validate floor", icon='SHADERFX')
+        box.prop(wm, "bb_validate_off", text="Floor OFF (global override)")
+        if off:
+            box.label(text="⚠ floor is down — agent is blind", icon='ERROR')
+        # Per-mesh exclusion for the active object.
+        act = context.active_object
+        if act is not None:
+            excl = bool(act.get("bb_no_validate"))
+            row = box.row(align=True)
+            row.label(text=f"{act.name}: {'EXCLUDED' if excl else 'validated'}")
+            row.operator("bb.validate_exclude_mesh", text="",
+                         icon='CHECKBOX_HLT' if excl else 'CHECKBOX_DEHLT')
+        # The intended-clip registry.
+        intents = validation.list_intents()
+        sub = box.column(align=True)
+        sub.label(text=f"Declared clips ({len(intents)}):")
+        if not intents:
+            sub.label(text="(none)")
+        else:
+            for e in intents:
+                vanished = e.get("status") != "holding"
+                col = sub.column(align=True)
+                head = col.row(align=True)
+                head.label(text=f"{e['a']}↔{e['b']}",
+                           icon='ERROR' if vanished else 'CHECKMARK')
+                rev = head.operator("bb.validate_revoke", text="", icon='TRASH')
+                rev.a, rev.b, rev.check = e["a"], e["b"], e.get("check", "clipping")
+                for i, line in enumerate(_wrap(e.get("reason", ""), 34)):
+                    col.label(text=("  " + line) if not i else line)
+                if vanished:
+                    col.label(text="  VANISHED — confirm or revoke", icon='ERROR')
+        box.operator("bb.validate_add_intent", text="Declare clip", icon='ADD')
+
         # ── Handles (live scaffold) ──
         box = layout.box()
         box.label(text="Handles", icon='EMPTY_ARROWS')
@@ -234,4 +334,5 @@ class BB_PT_CollabPanel(bpy.types.Panel):
 CLASSES = (BB_OT_StartServer, BB_OT_StopServer, BB_OT_SaveAsHandle,
            BB_OT_CollabAccept, BB_OT_CollabReject,
            BB_OT_CollabHandleSelect, BB_OT_CollabHandleDelete,
+           BB_OT_ValidateRevoke, BB_OT_ValidateAddIntent, BB_OT_ValidateExcludeMesh,
            BB_PT_Panel, BB_PT_CollabPanel)
