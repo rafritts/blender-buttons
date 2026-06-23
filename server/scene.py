@@ -296,7 +296,7 @@ def render_to_file(filepath: str,
                    resolution_x: int = None, resolution_y: int = None,
                    samples: int = None, engine: str = "",
                    format: str = "PNG", transparent: bool = None,
-                   timeout: float = 300, label: str = "") -> str:
+                   timeout: float = 300, output_dir: str = "", label: str = "") -> str:
     """
     Render the scene camera to an image file on disk. Requires a camera — add_camera first.
 
@@ -313,7 +313,14 @@ def render_to_file(filepath: str,
     they are precise and cheap: get_topology, describe, get_object_info, check_mesh,
     list_modifiers, get_scene_tree, diff_since. Those are almost always what you want.
 
-    filepath:     output path (~ expanded; extension auto-added to match format).
+    filepath:     the render NAME (e.g. "donut_hero" or "donut_hero.png"). Any directory
+                  you put here is dropped on purpose — renders ALWAYS land in the
+                  configured render_dir (server/settings.json, default
+                  ~/blender-buttons-renders/) so they stop scattering. An 8-char tag is
+                  appended before the extension (donut_hero -> donut_hero_gh75kddh.png)
+                  so names can never collide; the format's extension is added for you.
+    output_dir:   OVERRIDE — save this render somewhere other than the configured
+                  render_dir. Only set this when the user asked for a specific location.
     resolution_x/y: pixel dimensions (default: keep the scene's current).
     samples:      render sample count (higher = cleaner + slower).
     engine:       'BLENDER_EEVEE_NEXT' | 'CYCLES' (default: keep current).
@@ -325,10 +332,14 @@ def render_to_file(filepath: str,
     SYNCHRONOUS: this blocks Blender's main thread (the viewport freezes) for the
     whole render. Keep samples modest for interactive sessions.
 
-    Example: render_to_file("~/renders/hero.png", resolution_x=1920, resolution_y=1080,
+    Example: render_to_file("hero", resolution_x=1920, resolution_y=1080,
                             samples=128, transparent=True)
     """
-    params = {"filepath": filepath, "format": format}
+    from server._settings import resolve_render_path
+    if not (filepath or "").strip():
+        return "render failed: a render name (filepath) is required."
+    resolved = resolve_render_path(filepath, output_dir)
+    params = {"filepath": resolved, "format": format}
     if resolution_x is not None: params["resolution_x"] = resolution_x
     if resolution_y is not None: params["resolution_y"] = resolution_y
     if samples is not None:      params["samples"] = samples

@@ -17,7 +17,8 @@ _OPS = ["image", "settings", "quality", "cycles", "color"]
 def render(
     op: Literal["image", "settings", "quality", "cycles", "color"],
     # image (render_to_file)
-    filepath: tag(str, "[image] output path (~ expanded)") = "",
+    filepath: tag(str, "[image] render NAME (dir is dropped; renders go to settings render_dir, with an 8-char anti-collision tag + auto extension)") = "",
+    output_dir: tag(str, "[image] OVERRIDE the settings render_dir — only when the user asked for a specific location") = "",
     resolution_x: tag(int, "[image] pixel width") = None,
     resolution_y: tag(int, "[image] pixel height") = None,
     engine: tag(str, "[image] engine id — `render op=settings` lists this build's (e.g. CYCLES, BLENDER_EEVEE); empty=keep current") = "",
@@ -46,7 +47,10 @@ def render(
     Render & look — the **Render** menu. `op` selects:
 
       image   — render the scene camera to a file (filepath, resolution_x/y, samples,
-                engine, format, transparent, timeout)
+                engine, format, transparent, timeout, output_dir). filepath is just a
+                NAME — every render lands in the configured render_dir
+                (server/settings.json) with an 8-char anti-collision tag; pass
+                output_dir only to override that location at the user's request.
                 (engine: the build's id, NOT a hardcoded name — Blender 5.x Eevee is
                 `BLENDER_EEVEE`, not `_NEXT`; `render op=settings` lists what's real.)
 
@@ -88,7 +92,7 @@ def render(
     o = op.lower().strip()
     if o == "image":
         return scene.render_to_file(filepath, resolution_x, resolution_y, samples,
-                                    engine, format, transparent, timeout, label)
+                                    engine, format, transparent, timeout, output_dir, label)
     if o == "settings":
         return scene.render_settings()
     if o == "quality":
