@@ -50,17 +50,6 @@ SPEC-14's coverage grid is the embryo (it already grids the fit's parametric dom
 sibling op would expose that occupancy read on its own, model-free. Lower priority now that
 the limb case — the one that bit in dogfood — is handled.
 
-## G101 — shading-only ops (`edit op=smooth_edges`, etc.) trip the geometry no-op detector
-
-`edit op=smooth_edges` on the whole donut returned `⚠ no-op: byte-identical before and
-after` even though shade-smooth applied correctly. Shade-smooth changes normals / the
-sharp-edge + smooth flags, never vertex positions, so the geometry-diff guard — built for
-deforming ops — fires a false alarm on every shading-only mutation (smooth/flat shading,
-autosmooth angle, a material assignment that moves no verts). The agent has to *know* the
-warning is spurious to trust the result. **Want:** the no-op detector to scope its verdict
-to what the op claims to touch — diff shading attributes for shading ops, vert positions for
-deform ops — so a successful shade-smooth reports success, not a warning that reads as
-failure.
 
 ## G102 — `feel op=radial` takes the inner wall on a holed/ring mesh; no way to name the outer edge
 

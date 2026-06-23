@@ -171,6 +171,14 @@ NOOP_CHECK_TOOLS = {
 }
 
 
+# G101: ops in NOOP_CHECK_TOOLS whose CLAIMED effect can be shading-only — they may move
+# no verts yet still do their job (smooth_edges bevels only sharp edges, so on a smooth
+# surface it beveled nothing but the shade-smooth + autosmooth DID apply). For these the
+# no-op verdict must also consider the SHADING signature, not vert positions alone, or a
+# successful shade reads as a byte-identical no-op.
+SHADING_AWARE_TOOLS = {"smooth_edges"}
+
+
 # Bakers whose CHANGED object is the `target` param (their other object — cutter /
 # reference — is a separate param). Everywhere else the moved object is `targets` (the
 # moved selection) or `name`/`names`; for snap_to / rest_on the `target` param is the
@@ -275,6 +283,24 @@ def _geo_signature(obj):
             acc = (acc + hash((int(co.x * 1e5), int(co.y * 1e5), int(co.z * 1e5)))) \
                 & 0xFFFFFFFFFFFFFFFF
     return (vcount, fcount, acc, trs)
+
+
+def _shading_signature(obj):
+    """G101 — a cheap fingerprint of an object's SHADING state: how many faces are
+    smooth-shaded, how many edges are marked sharp, and the autosmooth setting. A
+    shading-only op (a shade-smooth that beveled no sharp edge) leaves the geometry
+    signature byte-identical but moves THIS, so pairing the two stops a successful shade
+    from reading as a no-op. None for a non-mesh."""
+    if obj is None or getattr(obj, "type", None) != 'MESH' or obj.data is None:
+        return None
+    me = obj.data
+    if obj.mode == 'EDIT':
+        return None   # shading-aware ops run in OBJECT mode; skip a stale edit-mesh read
+    smooth = sum(1 for p in me.polygons if p.use_smooth)
+    sharp = sum(1 for e in me.edges if e.use_edge_sharp)
+    auto = (bool(getattr(me, "use_auto_smooth", False)),
+            round(float(getattr(me, "auto_smooth_angle", 0.0)), 5))
+    return (smooth, sharp, auto)
 
 
 def _enter_edit_for_target(target_name):
@@ -383,11 +409,14 @@ def execute_command(command):
     # the target= edit-mode entry, so we read the right object) and compared post-op.
     noop_name = None
     geo_before = None
+    shade_before = None
     if tool in NOOP_CHECK_TOOLS:
         _gobj = _noop_obj(tool, params, target)
         if _gobj is not None:
             noop_name = _gobj.name
             geo_before = _geo_signature(_gobj)
+            if tool in SHADING_AWARE_TOOLS:
+                shade_before = _shading_signature(_gobj)
 
     try:
         result = fn(params)
@@ -442,7 +471,11 @@ def execute_command(command):
             and result.get("success")):
         _gobj2 = bpy.data.objects.get(noop_name)
         geo_after = _geo_signature(_gobj2) if _gobj2 is not None else None
-        if geo_after is not None and geo_after == geo_before:
+        # G101: a shading-aware op is a no-op only if NEITHER geometry NOR shading moved —
+        # a shade-smooth that beveled nothing still changed the smooth/sharp flags.
+        shade_unchanged = (shade_before is None or
+                           _shading_signature(_gobj2) == shade_before)
+        if geo_after is not None and geo_after == geo_before and shade_unchanged:
             result["no_op"] = True
             result["no_op_warning"] = (
                 "no-op: this op reported success but the geometry is byte-identical "
