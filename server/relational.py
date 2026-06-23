@@ -205,7 +205,8 @@ def scatter_on_surface(target: str, source: str = "", count: int = 100,
                        name_prefix: str = "", avoid: str = "",
                        avoid_margin: float = 0.0, sources: str = "",
                        within: str = "", within_margin: float = 0.0,
-                       density: float = 0.0, label: str = "") -> str:
+                       density: float = 0.0, up_only: bool = False,
+                       max_slope: float = 45.0, label: str = "") -> str:
     """
     Scatter copies of one or more sources across `target`'s surface — the
     donut-tutorial sprinkles step, aimable (G57).
@@ -224,6 +225,9 @@ def scatter_on_surface(target: str, source: str = "", count: int = 100,
     within_margin: meters to expand the within footprint by (default 0).
     scale_min/max: per-instance scale jitter range.
     align_normal: rotate each copy's +Z to match the surface normal at its location.
+    up_only: scatter ONLY onto up-facing faces (normal within max_slope° of +Z) — G104,
+             so "sprinkles on top" doesn't also coat the underside and inner walls.
+    max_slope: cone half-angle in degrees for up_only (default 45).
     rotate_z: also apply random spin around that normal.
     parent_to_target: parent every instance to target so they move/animate with it.
     seed: RNG seed for reproducibility.
@@ -244,6 +248,7 @@ def scatter_on_surface(target: str, source: str = "", count: int = 100,
         "avoid_margin": avoid_margin,
         "sources": sources or None, "within": within or None,
         "within_margin": within_margin, "density": density,
+        "up_only": up_only, "max_slope": max_slope,
     }, label=label)
     if result.get("success"):
         srcs = result.get("sources") or [result.get("source")]

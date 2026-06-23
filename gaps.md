@@ -98,6 +98,12 @@ XY footprint but cannot say *which faces by orientation*. **Want:** a normal-gat
 whose normal is within N° of +Z, or of a given direction) or "scatter only onto the live face
 selection," so "sprinkles on top only" doesn't mean scattering 2× the count and hiding the
 rest.
+**RESOLVED 2026-06-23:** `transform op=scatter up_only=True` (with `max_slope`, default 45°)
+gates sampling to up-facing faces, so the underside and inner-hole walls are excluded;
+`normal_dir=[x,y,z]` gates to an arbitrary direction. Density is computed over the gated area.
+A gate that matches no face errors cleanly. Tested in e2e_g104_scatter_up.py. (The fuller
+weight-painted / scatter-as-modifier toolchain from the dogfood's P0.3 — and per-instance
+material variety, G113 — remain open as larger follow-ons.)
 
 ## G105 — mutating ops don't auto-flag a NEW/leftover open boundary the way they auto-flag penetration
 

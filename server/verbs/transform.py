@@ -94,6 +94,8 @@ def transform(
     scale_min: tag(float, "[scatter] min random scale") = 0.8,
     scale_max: tag(float, "[scatter] max random scale") = 1.2,
     align_normal: tag(bool, "[scatter] align copies to surface normal") = True,
+    up_only: tag(bool, "[scatter] scatter ONLY onto up-facing faces (top, not underside/inner walls)") = False,
+    max_slope: tag(float, "[scatter] up_only cone half-angle from +Z in degrees (default 45)") = 45.0,
     rotate_z: tag(bool, "[scatter] random Z rotation") = True,
     parent_to_target: tag(bool, "[scatter] parent copies to the surface") = True,
     seed: tag(int, "[scatter] random seed") = 0,
@@ -276,7 +278,8 @@ def transform(
                                              scale_max, align_normal, rotate_z,
                                              parent_to_target, seed, name_prefix,
                                              avoid, avoid_margin, sources, within,
-                                             within_margin, density, label)
+                                             within_margin, density, up_only, max_slope,
+                                             label)
     if o == "move_verts":
         return editmode.move_vertices(out, inward, up, down, left, right, forward,
                                       back, x, y, z, label, target)

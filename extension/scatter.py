@@ -73,6 +73,10 @@ def scatter_on_surface(params):
     scale_min, scale_max: per-instance scale multiplier range. Default 0.8, 1.2.
     align_normal:  if true, each copy's +Z is rotated to point along the target's
                    surface normal at its position. Default true.
+    up_only:       G104 — only scatter onto UP-FACING faces (normal within max_slope° of
+                   +Z), so sprinkles land on top, not on the underside or inner walls.
+    max_slope:     cone half-angle in degrees for up_only/normal_dir. Default 45.
+    normal_dir:    [x,y,z] — gate to faces near THIS direction instead of +Z (advanced).
     rotate_z:      if true, also apply random rotation around the (already-aligned)
                    Z axis. Default true.
     seed:          RNG seed for reproducibility. Default 0.
@@ -166,6 +170,24 @@ def scatter_on_surface(params):
 
     if not triangles:
         return {"error": "Target has no usable surface area"}
+
+    # G104: a normal-gate so "sprinkles on top only" doesn't mean scattering 2× the count
+    # and hiding half underneath. up_only keeps faces whose normal sits within max_slope°
+    # of +Z (so the icing's underside and inner-hole walls are excluded). A general
+    # direction is supported via normal_dir=[x,y,z].
+    up_only = bool(params.get("up_only", False))
+    nd = params.get("normal_dir")
+    if up_only or nd:
+        gate_dir = mathutils.Vector(nd).normalized() if nd else mathutils.Vector((0, 0, 1))
+        max_slope = float(params.get("max_slope", 45.0))
+        cos_lim = math.cos(math.radians(max_slope))
+        kept = [(t, a) for t, a in zip(triangles, areas) if t[3].dot(gate_dir) >= cos_lim]
+        if not kept:
+            return {"error": (f"no faces within {max_slope}° of "
+                              f"{'+Z' if not nd else list(nd)} to scatter onto — widen "
+                              f"max_slope or drop up_only/normal_dir")}
+        triangles = [t for t, _ in kept]
+        areas = [a for _, a in kept]
 
     total_area = sum(areas)
     rng = _random.Random(seed)
