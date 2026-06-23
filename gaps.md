@@ -227,6 +227,11 @@ clip line report the true BVH penetration depth (the number `feel op=clearance` 
 computes), or drop the bogus magnitude and just name the pair + a verified-or-unknown flag, so
 the floor's number can be trusted the way the status bbox can. Until fixed: **never act on a
 `validate` clip magnitude for small parts — confirm with `feel op=clearance`/`overlaps` first.**
+**RESOLVED 2026-06-23 (SPEC-16):** the clip line now recomputes the TRUE max vertex-penetration
+depth (the signed nearest-surface read `feel op=clearance` uses) on every report, and gates on
+it — sub-0.3mm grazes are dropped, not screamed as tens of mm. A matched-footprint overlap the
+vertex sampling can't measure is still flagged but with a `feel op=clearance to measure` hint
+instead of a bogus number (extension/validation.py `_true_penetration_mm`).
 
 ## G112 — `validate` reports "by exception" capped at ~4 findings, with no full-list mode, no bulk-declare, and no way to forget a declaration
 
@@ -245,6 +250,12 @@ icing/donut) impractical:
 group/collection (or a wildcard) for one-shot class declarations; and `op=forget a= b=` to
 retire a stale declaration. Together these turn "declare the few real ones" from aspiration
 into something actually doable when the count is >4.
+**RESOLVED 2026-06-23 (SPEC-16):** `validate op=run verbose` lists every finding (cap lifted);
+`op=expect` accepts a COLLECTION token in a/b (one `Sprinkles↔Icing` covers every member);
+`op=forget a= b=` retires a declaration; and declarations whose object/collection is deleted are
+auto-pruned, so a re-scatter no longer leaves un-retirable VANISHED tripwires. Also (feedback
+P0.1) the per-op clip line is now delta-scoped — only NEW clips on objects the op TOUCHED, with
+VANISHED gated to touched pairs, so a nudge on an unrelated object no longer re-prints the registry.
 
 ## G113 — per-instance MATERIAL variety is impossible after `scatter` (shared mesh) — `material op=set` writes the datablock, last colour wins for all
 
