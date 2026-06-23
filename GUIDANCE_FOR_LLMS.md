@@ -21,14 +21,16 @@ you go (part A 0→0.035, part B 0.035→0.135, ...). `get_object_info` is almos
 needed; the answer was in the last status block.
 
 **But watch for exact equality.** Two numbers that *match* in your stack-up table
-are a bug, not a coincidence: coplanar faces from different objects z-fight.
+are a bug, not a coincidence: coplanar faces from different objects z-fight — and the
+always-on `validate` floor (below) will catch it for you the moment it happens.
 
-**Placement self-reports collisions — don't hand-check clearance.** After a placing op
-(add a primitive, nudge / place / move_to / rest_on / seat / snap / rotate), the status
-block auto-flags any NEW penetration of the placed part into a neighbour ("spatial: 'X'
-now penetrates Y 6mm…"). So never compute whether two parts collide by differencing their
-bounds — the read is done for you, unasked. No note = it sits clear. For an explicit or
-deeper check (contacts, resting, facing, overlaps) reach for `feel`, never arithmetic.
+**The floor self-reports collisions — don't hand-check clearance.** After every geometry
+op the `validate` line auto-flags any NEW penetration of the touched part into a neighbour
+(`validate: clipping NEW Hair↔Hat 8mm`). So never compute whether two parts collide by
+differencing their bounds — the read is done for you, unasked. A clean line = it sits
+clear. When a clip is *intended* (a seated tenon, hair under a scalp), declare it with
+`validate op=expect` (see "two senses" below); for a deeper read (contacts, resting,
+facing, overlaps) reach for `feel`, never arithmetic.
 
 **One dependent edit op per message.** Tool calls you batch in a single message reach
 Blender over separate connections and run in ARRIVAL order, not the order you wrote
@@ -37,6 +39,30 @@ them. For object placement that's harmless (each reads the bounds it needs). But
 `bevel` on the new face — the second can run before the first and silently no-op
 against geometry that isn't there yet. Issue chained edit ops one per message, each
 seeing the prior result in its status block. Edits on *different* meshes batch fine.
+
+## You build with two senses, and you don't get to close your eyes
+
+After every edit you get two things you did not ask for, because building blind is the most
+expensive failure here — it works on a simple mesh and quietly drives a complex scene into a
+wall that costs a full rework.
+
+- **`feel` (what exists)** — a short note on *what you just changed*. No verdict; it's your
+  eyes. Read it against what you *meant* to build. When you want a closer look, `feel op=all`
+  (the default — a bare `feel` resolves to it) runs the full perceptual sweep; opt out with
+  `exclude=` only when you have a reason. A lazy read is already a broad one.
+- **`validate` (what's broken)** — a correctness check that runs whether you like it or not.
+  z-fighting, non-manifold edges, flipped normals, degenerate faces are **never OK and cannot
+  be silenced** — if you see one, fix it before you build on top of it. Clipping/collision is
+  different: it's sometimes *intended* (hair through a scalp, a tenon in its mortise). When it
+  genuinely is, **declare it** — `validate op=expect` naming the pair and *why* ("Hair clips
+  Body — roots seat under the scalp"). There is no "ignore" — only "I intend this." That bar is
+  on purpose: an `expect` you can't honestly justify is a bug you're hiding, it stays visible to
+  the human in the panel as a count, and it becomes a tripwire that fires if the intended
+  overlap ever *disappears*. Declare the few real ones; never paper over the noisy ones — the
+  noise is the mesh telling you it's broken.
+
+If you ever see `validate: OFF (human override)`, the floor is down by the human's choice — you
+are genuinely blind, so slow down, `feel` deliberately, and ask before trusting anything.
 
 
 ## How to find specific geometry (you judge *where*, the server measures it)

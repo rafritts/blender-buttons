@@ -46,6 +46,13 @@ bbox; cast, then confirm with `feel`) — never as a fact you build on. Therefor
     new mutating call) before acting on geometry you haven't touched in a while.
   • To find a feature you lack numbers for, cast a WIDE `feel` net, verify its SHAPE,
     confirm CAPTURE, then drill — cross-check more than one read before you act.
+  • You build with two forced senses, neither optional. After each op you get a `feel`
+    note (what you just changed — your eyes, no verdict) and a `validate` result (what's
+    broken — z-fight / non-manifold / flipped normals / degenerate are never OK and
+    unsilenceable; clipping is suppressible only by DECLARING intent, `validate op=expect`
+    with a reason, never an "ignore"). Treat a `validate` finding as ground truth to act
+    on. If you see `validate: OFF`, the human disabled the floor — you are blind, so
+    `feel` deliberately and ask.
 
 BEFORE you improvise any multi-step task — locating geometry, constructing a form,
 assembling parts — READ THE `guidance://llms` RESOURCE. It is battle-tested loops

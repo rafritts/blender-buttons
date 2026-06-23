@@ -1,8 +1,25 @@
 # SPEC-16 — Agent feedback: forced perception (`feel`) + an always-on correctness floor (`validate`)
 
-_Status: Proposed 2026-06-23. Net-new **perception/correctness** primitive. Supersedes this
+_Status: Implemented 2026-06-23. Net-new **perception/correctness** primitive. Supersedes this
 spec's earlier "auto-feel" draft, whose gauge/trigger machinery dissolved once the two jobs it
 conflated were split apart (see "What this supersedes")._
+
+> **Implementation notes (2026-06-23).** The engine lives in `extension/validation.py` (a thin
+> aggregator over the existing detectors in `lint.py` / `introspect.py` — no new detection
+> logic), wired into the single post-op chokepoint (`extension/server.py::execute_command`) and
+> rendered by `server/_core.py::_status`. The `validate` verb is `server/verbs/validate.py`;
+> `feel op=all`/`exclude`/`stats` extend `server/verbs/feel.py`; the human panel is the SPEC-12
+> Collab panel (`extension/ui.py`). Tests: `tests/e2e_spec16.py` (31 checks). Deliberate scoping
+> choices that depart from a literal reading: (a) the always-on `validate` runs after
+> **geometry/placement** ops (`VALIDATE_AFTER`), not literally every op — a material/rename
+> changes no geometry, so there is nothing new to validate; (b) the declared-intent registry is
+> **scene-scoped** (module-global, cleared on scene load) rather than persisted — a "Hair↔Body"
+> intent is a fact about *this* scene; only the telemetry persists cross-session; (c) the ambient
+> `feel` delta is a minimal counts+dims note on the touched object (honest + self-bounding, not
+> yet edit-proportional); (d) the `feel op=all` bundle is the whole-mesh reads — selection-scoped
+> members (`region_form`, `fit`) and their context auto-skip telemetry are a follow-on. validate's
+> clipping check generalises the old G77 placement self-report, which is retired from the dispatch
+> (the `auto_proximity_note` function stays for `feel op=contacts`)._
 
 ---
 
