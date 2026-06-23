@@ -62,22 +62,6 @@ from the reported bounds) — three calls and a derivation for what should be on
 **Want:** `radial` to let you name which crossing you mean — outer vs inner, first vs last
 hit, or a target radius — so "the point on the outer edge at 2 o'clock" is a single landmark.
 
-## G103 — `transform op=scale` (scale_group) on instanced/multi-user meshes half-applies, then dirties the world
-
-The 120 scattered sprinkles share one mesh datablock (scatter makes multi-user instances).
-`scale_group ×1.07` on the group **mutated all 120 object transforms and then aborted** with
-"Cannot apply to a multi user" when it reached the `transform_apply` that bakes scale into
-mesh data — leaving the objects half-transformed AND tripping the SPEC-15 dirty-world lock,
-which then mis-attributed the server's *own* aborted op as external mutation (120 phantom
-"moved/scaled by something other than this server" entries). Two distinct gaps: **(a)
-atomicity** — a group op that can't finish should mutate nothing and raise before touching
-state, not half-apply; **(b)** instanced objects don't need the mesh-data bake at all —
-object-level scale renders correctly — so `scale_group` should keep object-level scale on
-multi-user meshes instead of forcing an apply that cannot run. **Workflow corollary for the
-guidance doc:** finalize a substrate's size BEFORE scattering onto it — scaling the substrate
-afterward buries/displaces every scattered child, and there is no cheap re-seat (the only fix
-was delete + re-scatter). The good news: `object op=delete name=<group>` cleanly removed all
-120 + the group in one call.
 
 ## G105 — mutating ops don't auto-flag a NEW/leftover open boundary the way they auto-flag penetration
 

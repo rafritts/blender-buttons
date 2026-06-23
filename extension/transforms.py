@@ -197,23 +197,52 @@ def scale_group(params):
         o.location = tuple(pivot[i] + factor * (o.location[i] - pivot[i]) for i in range(3))
         o.scale = tuple(s * factor for s in o.scale)
     bpy.context.view_layer.update()
+
+    # G103: bake the scale into mesh DATA only where it's safe and useful. A SHARED
+    # (multi-user instance) or library-linked mesh CANNOT take the bake — Blender raises
+    # "Cannot apply to a multi user" — and doesn't need it: the object-level scale we just
+    # set renders correctly. The old code applied unconditionally, so it aborted on the
+    # first instanced member AFTER already moving all 120 transforms, leaving the group
+    # half-applied and the world dirty. Counting object users up front and skipping the
+    # bake for shared/linked data keeps the op atomic-by-construction (no partial apply).
+    obj_users = {}
+    for ob in bpy.data.objects:
+        if ob.type == 'MESH' and ob.data is not None:
+            obj_users[ob.data.name] = obj_users.get(ob.data.name, 0) + 1
+
+    baked, kept = [], []
     for o in objs:
-        if o.type == 'MESH':
+        if o.type != 'MESH' or o.data is None:
+            continue
+        shared = obj_users.get(o.data.name, 1) > 1 or o.data.library is not None
+        if shared:
+            kept.append(o.name)            # object-level scale stands; no bake possible/needed
+            continue
+        try:
             activate(o)
             bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+            baked.append(o.name)
+        except RuntimeError:
+            kept.append(o.name)            # any other apply refusal → keep object scale, don't abort
 
     boxes = [world_bbox(o) for o in objs]
-    return {
+    result = {
         "success": True,
         "scaled": [o.name for o in objs],
         "factor": factor,
         "pivot": [round(v, 5) for v in pivot],
+        "baked": baked,
         "bounds_after": {
             "x": [round(min(b[0] for b in boxes), 4), round(max(b[3] for b in boxes), 4)],
             "y": [round(min(b[1] for b in boxes), 4), round(max(b[4] for b in boxes), 4)],
             "z": [round(min(b[2] for b in boxes), 4), round(max(b[5] for b in boxes), 4)],
         },
     }
+    if kept:
+        result["kept_object_scale"] = kept
+        result["note"] = (f"{len(kept)} instanced/linked member(s) kept object-level scale "
+                          f"(shared mesh data can't take a scale bake, and doesn't need one).")
+    return result
 
 
 def apply_transform(params):
