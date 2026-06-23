@@ -9,7 +9,8 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
                  axis: str = "X", merge_threshold: float = None,
                  mirror_object: str = "", precision: int = None,
                  rest_source: str = "", factor: float = None, iterations: int = None,
-                 vertex_group: str = "", count: int = None, label: str = "") -> str:
+                 vertex_group: str = "", count: int = None, label: str = "",
+                 host: str = "") -> str:
     """
     Add a modifier to the active object.
     type: SUBSURF | BEVEL | SOLIDIFY | MIRROR | ARRAY | SCREW | SHRINKWRAP
@@ -20,6 +21,10 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
       apart") OR factor (a RELATIVE offset = multiple of the bbox along `axis`); axis
       picks the run direction (default X). Default with neither: copies touch end-to-end
       (relative 1.0 along X). Constant wins if both are given.
+    host: for the PARTNER modifiers (SHRINKWRAP/MESH_DEFORM/ARMATURE/LATTICE) the object
+      that RECEIVES the modifier — name it instead of relying on which object is active,
+      so the modifier never lands on the wrong part (and you never get a target==host
+      "assignment to itself" error). Defaults to the active object. Must differ from target.
     target: the partner object. Required for —
       SHRINKWRAP  : the surface to wrap onto.
       MESH_DEFORM : the cage mesh that drives the deform (added UNBOUND — then
@@ -78,6 +83,8 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
         params["vertex_group"] = vertex_group
     if count is not None:
         params["count"] = count
+    if host:
+        params["host"] = host
     result = call_blender("add_modifier", params, label=label)
     if result.get("success"):
         main = f"{result['modifier']} [{result.get('op_id','')}]"

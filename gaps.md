@@ -313,3 +313,15 @@ named target's bbox falls inside the in-focus zone ("Donut 27mm deep vs DOF slab
 out of focus"). Bonus: an `aperture` resolver that, given "keep the whole donut sharp," solves
 the f-stop from subject depth + distance instead of making the agent dead-reckon it. Until then
 the agent is flying blind on the one render property it's explicitly forbidden to eyeball.
+
+## G116 — `modifier add SHRINKWRAP` could land on the wrong (active) object and leave a half-built modifier on error
+
+The partner-modifier family forces host = the active object, so `modifier add type=SHRINKWRAP
+target=Cap` while Cap is active set target==host and Blender raised "target ID … assignment to
+itself" — AND the modifier created just before the failing assignment was left in the stack
+(a half-built SHRINKWRAP). The agent had no way to name the receiving object, only the wrap
+surface. **RESOLVED 2026-06-23:** added a `host=` param for the partner mods (SHRINKWRAP/
+MESH_DEFORM/ARMATURE/LATTICE) so the agent names the object that RECEIVES the modifier instead
+of relying on selection; SHRINKWRAP now rejects a self-target with a clear message and removes
+the just-created modifier, and the `mod.target` assignment is wrapped so ANY failure cleans up
+(no half-built modifier ever survives). Tested in e2e_shrinkwrap_partial.py.

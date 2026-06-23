@@ -347,7 +347,16 @@ def add_modifier(params):
     # so an ARRAY/SUBSURF/BEVEL/… lands on the named part even when it isn't active.
     # The partner family keeps host=active (their tested, documented semantics).
     if mod_type in _PARTNER_TYPES:
-        obj = bpy.context.active_object
+        # P2.8: let the agent NAME the host (the object that receives the modifier) so a
+        # partner mod never lands on whatever happens to be active — the trap that made
+        # target==active and produced a "target ID assignment to itself" error.
+        host = params.get("host")
+        if host:
+            obj = bpy.data.objects.get(host)
+            if obj is None:
+                return {"error": f"host '{host}' not found"}
+        else:
+            obj = bpy.context.active_object
     elif target:
         obj = bpy.data.objects.get(target)
         if obj is None:
@@ -411,7 +420,20 @@ def add_modifier(params):
         if tgt is None:
             obj.modifiers.remove(mod)
             return {"error": f"target '{target_name}' not found"}
-        mod.target = tgt
+        # P2.8: a SHRINKWRAP can't wrap an object onto ITSELF. Catch it with a clear
+        # message (and remove the just-created modifier) instead of letting Blender raise
+        # "target ID assignment to itself" deep inside and leave a half-built modifier.
+        if tgt is obj:
+            obj.modifiers.remove(mod)
+            return {"error": (f"SHRINKWRAP target must be a DIFFERENT object than the host "
+                              f"'{obj.name}' — name the surface to wrap ONTO via target=, and "
+                              f"the object that receives the modifier via host= (or make it "
+                              f"active). For draping a new shell over a form, prefer object op=clad.")}
+        try:
+            mod.target = tgt
+        except Exception as e:
+            obj.modifiers.remove(mod)
+            return {"error": f"SHRINKWRAP target assignment failed ({e}); no modifier left behind."}
         offset = params.get("offset")
         if offset is not None and hasattr(mod, 'offset'):
             mod.offset = float(offset)

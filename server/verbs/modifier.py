@@ -33,6 +33,9 @@ def modifier(
     mirror_object: tag(str, "[add] mirror across this object") = "",
     precision: tag(int, "[add] mesh-deform bind precision") = None,
     rest_source: tag(str, "[add] corrective-smooth rest source") = "",
+    host: tag(str, "[add] for PARTNER mods (SHRINKWRAP/MESH_DEFORM/ARMATURE/LATTICE) the object "
+                   "that RECEIVES the modifier; name it instead of relying on the active object "
+                   "(must differ from target)") = "",
     factor: tag(float, "[add/modify] generic strength/factor; ARRAY relative offset (×bbox) along axis") = None,
     iterations: tag(int, "[add/modify] smooth iterations") = None,
     # modify (extra dials)
@@ -77,7 +80,7 @@ def modifier(
             segments if segments is not None else 1,
             target, offset, wrap_method or "NEAREST_SURFACEPOINT", axis,
             merge_threshold, mirror_object, precision, rest_source, factor,
-            iterations, vertex_group, count, label)
+            iterations, vertex_group, count, label, host=host)
     if o == "modify":
         return modifiers.modify_modifier(
             target, modifier_name or modifier, levels, render_levels, width, segments,
