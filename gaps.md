@@ -350,3 +350,123 @@ threshold (100) the next result carries a whole-scene re-ground recap (object ma
 intent/tripwire registry) and the counter resets. It triggers on DRIFT, not mutation count, and
 never windows the hard-defect validate floor — per-op feedback stays the spine. Tested in
 e2e_spec16.py.
+
+## G118 — a construction op can betray its own intent (hollow that seals the top, opens the bottom) and report success
+
+Hollowing a capped cylinder with `edit inset` (top cap) → `edit extrude down` (inner face)
+produced a mug that was sealed by a flat cap at the TOP and open at the BOTTOM — the cavity
+opened *downward* against the table, the exact inverse of intent. Every op reported success, the
+status block's world bbox looked correct (a cylinder is a cylinder by its bounds), and the
+always-on validate floor passed it: the floor checks manifold/normals/z-fight/clipping, none of
+which fire on "this carved the cavity the wrong way." The mesh even carried an inconsistent Euler
+characteristic (χ=2 with 1 boundary loop — impossible for a real surface), which is a cheap,
+decisive tell that nothing surfaced. The agent only caught it when the HUMAN said "feel the mug,"
+and a deliberate `feel op=topology genus,boundaries` + a boundary-loop Z read exposed it. By then
+coffee, intend-declarations, and three renders had been built on top of the broken part. The
+deeper problem: the whole server doctrine is "trust ground truth, not your eyes," so an op that
+succeeds-but-does-the-opposite is the single most expensive failure mode, and right now nothing
+guards it. Candidate fixes: (a) flag an inconsistent Euler characteristic (χ vs boundary-loop
+count) as a hard defect — it's a near-free invariant; (b) a post-hollow sanity read that the new
+open boundary is where the cut was made; (c) make `feel` cheaper to reach for on a freshly-built
+part (the agent felt the donut/plate/icing thoroughly and rushed the mug — the epistemic-drift
+re-ground of G117 nudges this but didn't force a re-read of the just-built object).
+
+## G119 — `validate expect` is pair-scoped, so a broad intent declaration masks a *real* defect between the same pair
+
+Declaring `coffee↔mug` intended (reason: "the coffee surface meets the inner wall") to quiet the
+rim-contact finding ALSO silenced a genuine, unrelated defect: the coffee cylinder's wide flat
+base was punching through the mug's converging bottom floor (an 11mm poke-through). The
+declaration is scoped to the (a,b) *relationship*, so it collapses EVERY clip between those two
+objects to a count — including ones the human never blessed and never saw. The floor's entire
+selling point is "there is no ignore, only declared intent," but a blunt pair-level intent is an
+ignore-by-the-back-door for any second clip between the same pair. The human caught it
+("coffee is clipping through the bottom — does validate not show that?"); clearing the
+declaration immediately re-surfaced `coffee↔mug 11.1mm`. The agent also reached for the broad
+declaration instead of fixing geometry — a scalpel used as a lid — but the tool made that the path
+of least resistance. Candidate fixes: scope a declaration to a contact REGION or a depth/extent
+envelope ("intended up to ~1mm at the rim; anything deeper is still a finding"), and/or report
+"this intended pair now also has a clip 10x deeper / in a new location than when declared" as its
+own tripwire rather than folding it into the blessed count.
+
+## G120 — subsurf domes the base of an unsupported capped cylinder; bounds hide it, only a profile read catches it
+
+Applying SUBSURF (level 2) to a capped cylinder with no holding loop near the bottom edge pulled
+the bottom cap into a downward dome converging to a single center vertex — the form sat on a point
+like an egg, and the lower third of the wall tapered inward, when the intent was a flat-based mug.
+The world bbox was unchanged-looking (still ~a cylinder), so the status block gave no hint; the
+defect lives in *surface shape*, which bounds don't encode. It took `feel op=profile axis=Z` over
+the bottom window (single-vertex girth-0 bands at the base) to see it, and the agent only looked
+because the human asked. The human's instinct — "would a loop cut work? just drag it down" — was
+exactly the fix (a holding edge loop at the base before subsurf), confirmed by a rebuild that put
+the base at z=0, full-width by z=4mm. Gap: subsurf-on-a-capped-primitive with no support loop is a
+known-classic doming trap, and nothing warns at `modifier add SUBSURF` time (e.g. "no holding loop
+within N% of a capped end — expect rounding"). The build-blind doctrine has no ground-truth read
+for "is this form plausible," so form-betrayal sails through unless you already suspect it.
+
+## G121 — `add tube` self-intersects at bends tighter than the tube radius, with no min-bend guard
+
+Building a mug handle as a swept `add tube` self-intersected (12 interior crossings) wherever the
+centerline's bend radius fell below the tube radius — i.e. the natural sharp turns where a handle
+meets the body. The crossings are interior to an opaque tube (invisible in render) but register as
+a permanent `self_intersection` finding that can never be cleared (no intent path for self-int,
+correctly — but also no way to say "this is hidden/benign"), so they sit as standing noise. It
+cost three rebuilds chasing radius/point tweaks. The server already HAS the right check —
+`feel op=curve profile_radius=` reports min-bend-vs-profile — but `add tube` doesn't consult it at
+creation. Candidate fixes: have `add tube`/`add curve bevel_depth` auto-run the min-bend check and
+warn (or auto-resample/auto-shrink the radius at the tight spans), and/or let a self-intersection
+that is fully interior to a closed shell be reported separately from surface-breaking ones.
+
+## G122 — isolating one of two concentric boundary loops takes a 6-call dance; `in_sphere` can't center on an object/coordinate, and select→feel drops edit mode
+
+To drip ONLY the outer rim of the icing shell (it has two concentric open boundary loops, inner +
+outer), the agent had to: select-all → boundary (gets both) → `between X` ∩ `between Y` to isolate
+the inner loop → enter edit mode → mint a center handle from that loop → re-select boundary →
+`in_sphere DESELECT` by radius around the handle. Six calls to express "the outer of two rim
+loops." Two underlying gaps: (1) `select op=in_sphere` requires a named handle to center on — it
+won't take an object's bbox center or a derived point directly, so isolating-by-radius needs a
+handle minted first, which itself needs a vertex selection (chicken-and-egg solved only by the
+X∩Y trick). A `center=<object>` or `center=<bbox of selection>` option would collapse this. (2)
+There is no "select boundary loop by index / by radius / outer-vs-inner" — boundary is all-or-
+nothing. (3) The `select`→`feel op=handle source=selection` handoff failed silently because the
+select ops leave the mesh in OBJECT mode (status even reads `mode: OBJECT` after a select), so
+`feel op=handle` errored "must be in edit mode" until an explicit `object mode=EDIT`; the
+select→mint→sculpt loop the guidance advertises has a hidden mode-state seam.
+
+## G123 — `rest_on` overshoots below the floor, and relational `place right_of` silently rewrites Z
+
+Two relational placements produced sub-floor results that needed manual nudge corrections. (1)
+`transform op=rest_on target=floor` on the mug (which had a subsurf-rounded/domed bottom) dropped
+it 8mm BELOW z=0 instead of resting its lowest point at the floor — the BVH drop overshot on the
+convex base. (2) `transform op=place on={right_of: plate}` correctly set X but ALSO reseated Z to
+the plate's level, burying the mug 37mm below the floor; the relational vocabulary's "right_of"
+carried an unwanted vertical component. Both are "derive don't divine" ops that the agent reached
+for precisely to avoid typing coordinates, and both then required a hand-typed nudge to undo their
+surprise — eroding the trust the relational DSL is meant to earn. A `place right_of` should
+preserve the mover's floor contact (or its current Z) unless told otherwise, and `rest_on` should
+clamp at first contact, not overshoot a convex base.
+
+## G124 — BVH penetration depth is meaningless against open/non-watertight shells; the validate "clipping Xmm" number lies, `feel op=clearance` is the truth
+
+Sprinkles resting ON the open icing shell reported validate clippings like "sprinkle↔icing 84.9mm"
+and "donut↔sprinkle 83.6mm" — physically impossible (a 6mm sprinkle, a 26mm donut). The inside/
+outside test that drives the penetration-depth metric is undefined for an open (non-manifold-
+boundary) shell, so it returns garbage magnitudes. The trustworthy read was `feel op=clearance
+shell=… surface=…`, which correctly reported 100% clearance / 0 penetration. The agent had to
+*know* to distrust one number and trust the other; nothing in the output marks the clipping depth
+as unreliable when one party is an open shell. Candidate fix: when a clip party isn't watertight,
+either suppress the bogus depth (report "contact, depth N/A — open shell, use clearance") or fall
+back to a signed-distance-free overlap test, so the headline number can't be a fabrication.
+
+## G125 — a large intended scatter floods the validate line and buries genuinely-new findings until it's declared
+
+Once 70 sprinkles were resting (intentionally embedded) in the icing, EVERY subsequent op's
+status block carried a truncated wall of `clipping 12x new: sprinkle_0048↔icing …(+121 more)`,
+drowning the one or two findings that were actually new and relevant to the op just performed.
+The fix exists — group the scatter into a collection and `validate expect Sprinkles↔icing` — but
+until then the floor is pure noise, and a real new defect on the touched part would have been lost
+in the truncation. (Compounding: those declarations are runtime-only and were silently lost when
+the agent re-opened the .blend, so the noise wall returned and had to be re-declared.) Candidate
+fixes: auto-recognize a settled scatter (N instances of one source resting on one surface) and
+offer/auto-apply a collection-level intent; persist the intend-registry into the .blend so a
+re-open doesn't drop it; and always show NEW-this-op findings above the truncation line, never
+behind it.
