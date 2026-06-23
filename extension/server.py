@@ -179,6 +179,36 @@ NOOP_CHECK_TOOLS = {
 SHADING_AWARE_TOOLS = {"smooth_edges"}
 
 
+# G105: topology-editing ops after which a NEW open boundary on the focus object should be
+# auto-flagged — the same unasked one-line guard penetration gets, so a carve that opened a
+# shell (a missing cap, a consumed face, an unexpected rim) can't masquerade as a solid
+# through the rest of the build. Scoped to ops that can CHANGE the boundary-loop count;
+# pure transforms / sculpt / shading can't, so they're excluded (no wasted bmesh build).
+BOUNDARY_CHECK_TOOLS = {
+    "extrude", "extrude_along_curve", "inset_faces", "delete_geometry", "grid_fill",
+    "separate_selection", "bridge_handles", "merge_by_distance", "loop_cut",
+    "subdivide_selection", "poke_faces", "boolean", "remesh", "join_objects",
+}
+
+
+def _open_boundary_loops(obj):
+    """Count the OPEN boundary loops of an object's mesh (G105). Reads the live edit-mesh
+    in edit mode (so the pre-op snapshot is accurate) else the synced mesh data. None for
+    a non-mesh."""
+    if obj is None or getattr(obj, "type", None) != 'MESH' or obj.data is None:
+        return None
+    import bmesh
+    from . import topology
+    if obj.mode == 'EDIT':
+        bm = bmesh.from_edit_mesh(obj.data)
+        return len(topology._boundary_loops(bm))      # an edit bmesh must NOT be freed
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    n = len(topology._boundary_loops(bm))
+    bm.free()
+    return n
+
+
 # Bakers whose CHANGED object is the `target` param (their other object — cutter /
 # reference — is a separate param). Everywhere else the moved object is `targets` (the
 # moved selection) or `name`/`names`; for snap_to / rest_on the `target` param is the
@@ -410,13 +440,17 @@ def execute_command(command):
     noop_name = None
     geo_before = None
     shade_before = None
-    if tool in NOOP_CHECK_TOOLS:
+    bound_before = None
+    if tool in NOOP_CHECK_TOOLS or tool in BOUNDARY_CHECK_TOOLS:
         _gobj = _noop_obj(tool, params, target)
         if _gobj is not None:
             noop_name = _gobj.name
-            geo_before = _geo_signature(_gobj)
-            if tool in SHADING_AWARE_TOOLS:
-                shade_before = _shading_signature(_gobj)
+            if tool in NOOP_CHECK_TOOLS:
+                geo_before = _geo_signature(_gobj)
+                if tool in SHADING_AWARE_TOOLS:
+                    shade_before = _shading_signature(_gobj)
+            if tool in BOUNDARY_CHECK_TOOLS:
+                bound_before = _open_boundary_loops(_gobj)
 
     try:
         result = fn(params)
@@ -482,6 +516,21 @@ def execute_command(command):
                 "before and after — nothing moved. Check the selection captured what "
                 "you intended and the parameters are non-trivial (e.g. scale≠1, "
                 "amount≠0, a ring that actually has spread to scale).")
+
+    # G105: a topology edit that OPENED the focus object — more open boundary loops than
+    # before — gets the same unasked one-line flag penetration gets, so an open shell (a
+    # missing cap, a consumed face, an unexpected rim) can't sail through as a solid.
+    if (bound_before is not None and noop_name and isinstance(result, dict)
+            and result.get("success")):
+        _bobj = bpy.data.objects.get(noop_name)
+        bound_after = _open_boundary_loops(_bobj) if _bobj is not None else None
+        if bound_after is not None and bound_after > bound_before:
+            verb = "now has" if bound_before == 0 else f"went from {bound_before} to"
+            result["boundary_opened"] = {"before": bound_before, "after": bound_after}
+            result["boundary_warning"] = (
+                f"topology: '{noop_name}' {verb} {bound_after} open boundary loop(s) — this "
+                f"op left an open edge (a removed/consumed cap or an unexpected rim). If the "
+                f"part is meant to stay closed it is now an open shell; `feel op=topology`.")
 
     # Log + push the undo step AFTER edit-mode tools have returned to OBJECT mode,
     # so each step is an object-mode checkpoint (undoable from object mode) and

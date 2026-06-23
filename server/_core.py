@@ -145,6 +145,10 @@ def _status(result: dict) -> str:
     # block so a no-op can never masquerade as a successful edit.
     if result.get("no_op_warning"):
         bind += "\n⚠ " + result["no_op_warning"]
+    # G105: a topology edit that opened a NEW boundary loop on the focus object — the same
+    # unasked one-line flag penetration gets, so an open shell can't pass for a solid.
+    if result.get("boundary_warning"):
+        bind += "\n⚠ " + result["boundary_warning"]
     # Generalized postcondition-notes channel (SPEC-05 Improvement #4): any handler
     # can attach a `notes` list — e.g. an auto mode-switch the agent should know
     # happened. Surfaced ahead of the block like the bind/shape-key warnings.

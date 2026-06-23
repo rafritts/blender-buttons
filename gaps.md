@@ -52,23 +52,6 @@ the limb case — the one that bit in dogfood — is handled.
 
 
 
-## G105 — mutating ops don't auto-flag a NEW/leftover open boundary the way they auto-flag penetration
-
-A coffee mug built blind — `add cylinder cap_fill=NGON` → `select top` → `inset` → `extrude
-down` → `grid_fill` — came back an **open shell**: the bottom cap was missing (a 48-edge
-boundary loop at the outer rim), and nothing said so. The carve sailed through six steps and
-into materials + placement; only an explicit `feel op=topology` (because the human said "feel
-your mug") surfaced it. Contrast the **penetration auto-flag**: every placing op volunteers
-"X now penetrates Y 6mm" unasked, so collisions never hide. Open boundaries have no such
-volunteer — whether `cap_fill=NGON` silently skipped the bottom cap, or an edit consumed it,
-the *symptom* (a shell that was closed and is now open, or a carve that left an unexpected
-rim) is exactly the kind of thing the status block already knows how to surface cheaply.
-**Want:** mutating ops to auto-note a boundary-count *delta* on objects expected to stay
-closed — "⚠ topology: 'Mug' now has 1 open boundary loop (48 edges) @ bottom" — the same
-unasked, one-line guard that penetration gets, so an open shell can't masquerade as a solid
-through the rest of a build. (Workflow lesson also stands: `feel` a multi-step carved part
-before dressing it — don't dead-reckon a whole mug. But the tool should make the failure
-loud, not silent.)
 
 ## G106 — `edit op=extrude` on an inset cap leaves the original face → sealed double-walled pocket, not an open cavity
 
