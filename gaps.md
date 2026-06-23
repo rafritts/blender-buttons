@@ -213,3 +213,60 @@ external edit that forces a `history op=acknowledge` round-trip before work can 
 self-mis-attribution family as G103's aborted-op case.) **Want:** state changes the server
 itself causes via `history` undo/redo should update the baseline in-place, never arm the
 external-mutation lock.
+
+## G111 — `validate` clipping DEPTH is nonsensical for small objects and doesn't update after a real move
+
+The always-on floor reported `clipping NEW Donut↔Spr__0010 77.7mm` for a 6mm sprinkle that
+`feel op=clearance` showed grazing the donut by **0.5mm** (13 verts inside, max 0.52mm). The
+magnitude is off by ~150×, and after lifting the whole sprinkle group a real +0.9mm the floor
+reprinted the **identical** "77.7mm" — i.e. the reported depth is not a live penetration
+measurement at all (looks like a bbox-overlap or diagonal proxy), yet it's printed in `mm` as
+if it were. This actively misleads: trusting it, I deleted ~20 correctly-placed sprinkles
+chasing a "deep" clip that `feel` proved was a sub-millimetre graze. **Want:** either make the
+clip line report the true BVH penetration depth (the number `feel op=clearance` already
+computes), or drop the bogus magnitude and just name the pair + a verified-or-unknown flag, so
+the floor's number can be trusted the way the status bbox can. Until fixed: **never act on a
+`validate` clip magnitude for small parts — confirm with `feel op=clearance`/`overlaps` first.**
+
+## G112 — `validate` reports "by exception" capped at ~4 findings, with no full-list mode, no bulk-declare, and no way to forget a declaration
+
+Three compounding holes made declaring a *class* of intended contacts (37 sprinkles resting on
+icing/donut) impractical:
+- **Capped output:** every `validate op=run` (even `targets=Donut`) prints at most ~4 NEW
+  findings with no "…and N more" and no verbose/full-list flag, so enumerating a large set is
+  blind whack-a-mole (declare 4 → re-run → 4 more → …).
+- **No bulk declare:** `op=expect` only takes a single `(a,b)` object pair. There's no way to
+  declare a whole relationship intended (e.g. `Sprinkles`-group ↔ `Icing`, or `*`↔`Icing`),
+  so a legitimately-intended class of contacts can't be quieted in one move.
+- **No forget:** there is no `op=forget`/clear. After deleting a declared object its entry
+  becomes a permanent `VANISHED … (declared intended — confirm or clear)` line with no way to
+  *clear* it — so a re-scatter that renames parts leaves a trail of un-retir­able tripwires.
+**Want:** `validate op=run verbose` (or `limit=`) for the full list; `op=expect` accepting a
+group/collection (or a wildcard) for one-shot class declarations; and `op=forget a= b=` to
+retire a stale declaration. Together these turn "declare the few real ones" from aspiration
+into something actually doable when the count is >4.
+
+## G113 — per-instance MATERIAL variety is impossible after `scatter` (shared mesh) — `material op=set` writes the datablock, last colour wins for all
+
+`transform op=scatter` makes linked instances sharing one mesh (cf. G103). Assigning four
+colours to four name-list subsets via `material op=set` left **all 37 sprinkles the last
+colour** — each call wrote the shared mesh's material slot, so the spec's "colour variety"
+was unreachable post-hoc. The only handle is the `sources=` param **at scatter time** (scatter
+N differently-materialed prototypes, each instance picks one), which isn't discoverable from
+the failure and can't be applied retroactively without a full delete + re-scatter. **Want:**
+either `material op=set` on a scattered instance auto-makes-single-user that one object (so
+per-object colour sticks), or a post-scatter `transform op=tint_palette`/"randomize material
+from a list" over a group, or at minimum a one-line note in the `scatter` schema: *"instances
+share one mesh — for colour/material variety pass `sources=` (multiple prototypes) now; it
+cannot be added later."*
+
+## G114 — `object op=join` on a SUBSET of linked instances corrupts the shared mesh for the survivors
+
+Joining 5 of ~50 scattered (instanced, shared-mesh) sprinkles to cull them wrote the merged
+5-capsule geometry **into the shared datablock**, so every *non-joined* survivor instantly
+rendered as 5 overlapping capsules (bboxes exploding, dozens of spurious `below_floor`
+findings). Join must not mutate a mesh other instances still depend on. **Want:** `join`
+should make the target single-user before appending (or refuse + warn when the targets share a
+datablock with objects outside the join set). Safe workaround found: join **all** instances of
+a shared mesh then delete the result — with no survivors there's nothing to corrupt — but a
+subset join is a silent footgun. (Same shared-datablock root as G103/G113.)
