@@ -135,7 +135,60 @@ def list_intents():
 def clear_intents():
     """Scene load wiped the world the assertions described — drop them (called from
     state.reset_history_state)."""
+    global _drift
     _intents.clear()
+    _drift = 0.0
+
+
+# ── epistemic-drift re-grounding checkpoint (SPEC-16, feedback P1.6) ──────────
+# Per-op feedback is the spine; this is a periodic RE-ANCHOR on top of it. Each geometry
+# op accrues "drift" weighted by how much it can invalidate the agent's mental model — a
+# boolean rearranges everything, a nudge barely anything. When the accrued drift crosses a
+# threshold, the next result carries a whole-scene recap (object map + the intent/tripwire
+# registry) so a stale mental model re-grounds on a long build. It does NOT replace the
+# act→read loop, and it never windows the hard-defect validate floor.
+_drift = 0.0
+_DRIFT_THRESHOLD = 100.0
+_DRIFT_HIGH = {            # structural rearrangers — a lot can shift unseen
+    "boolean", "apply_modifiers", "remesh", "join_objects", "noise_displace", "bend",
+    "bake_shape_keys_to_basis", "scatter_on_surface", "separate_selection",
+}
+_DRIFT_MED = {             # local topology edits
+    "extrude", "extrude_along_curve", "inset_faces", "loop_cut", "subdivide_selection",
+    "poke_faces", "grid_fill", "bridge_handles", "delete_geometry", "field", "flute",
+    "taper_end", "taper_section", "shape_profile", "relax_selection", "slide_selection",
+    "merge_by_distance", "bevel", "round_corners", "smooth_edges",
+}
+
+
+def accrue_drift(tool):
+    """Add this op's drift weight; return a re-ground recap dict (and reset) when the
+    accrued drift crosses the threshold, else None."""
+    global _drift
+    w = 25.0 if tool in _DRIFT_HIGH else 8.0 if tool in _DRIFT_MED else 2.0
+    _drift += w
+    if _drift < _DRIFT_THRESHOLD:
+        return None
+    _drift = 0.0
+    return _reground_recap()
+
+
+def _reground_recap():
+    """A compact whole-scene re-anchor: object map + the live intent/tripwire registry."""
+    from .common import scene_mesh_objects
+    objs = scene_mesh_objects()
+    listed = ", ".join(o.name for o in objs[:24])
+    if len(objs) > 24:
+        listed += f", … (+{len(objs) - 24})"
+    intents = [e for e in _intents if e["check"] == _CLIPPING]
+    holding = [f"{e['a']}↔{e['b']}" for e in intents if e.get("status") == "holding"]
+    vanished = [f"{e['a']}↔{e['b']}" for e in intents if e.get("status") != "holding"]
+    return {
+        "object_count": len(objs),
+        "objects": listed,
+        "declared_clips_holding": holding,
+        "declared_clips_vanished": vanished,
+    }
 
 
 # ── human override state ──────────────────────────────────────────────────────

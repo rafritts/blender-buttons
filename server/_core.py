@@ -73,6 +73,18 @@ def _status(result: dict) -> str:
         bind += "\n" + mark + v["line"]
     elif result.get("validate_off"):
         bind += "\n⚠ validate: OFF (human override) — floor is down"
+    # SPEC-16 P1.6: a periodic re-ground recap — you've changed enough that a stale
+    # mental model is a liability; re-read geometry you haven't touched recently.
+    rg = result.get("reground")
+    if isinstance(rg, dict):
+        lines = ["", "── re-ground (significant changes since the last checkpoint) ──",
+                 f"  scene: {rg.get('object_count')} mesh object(s): {rg.get('objects')}"]
+        if rg.get("declared_clips_holding"):
+            lines.append(f"  intended clips holding: {', '.join(rg['declared_clips_holding'])}")
+        if rg.get("declared_clips_vanished"):
+            lines.append(f"  ⚠ intended clips VANISHED: {', '.join(rg['declared_clips_vanished'])}")
+        lines.append("  re-read anything you haven't felt in a while before building on it.")
+        bind += "\n" + "\n".join(lines)
     s = result.get("blender_status")
     if not s:
         return bind

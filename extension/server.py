@@ -472,6 +472,11 @@ def execute_command(command):
                 fd = validation.feel_delta(focus)
                 if fd:
                     result["feel_delta"] = fd
+            # SPEC-16 P1.6: accrue epistemic drift; periodically surface a whole-scene
+            # re-ground recap so a stale mental model re-anchors on a long build.
+            recap = validation.accrue_drift(tool)
+            if recap:
+                result["reground"] = recap
         except Exception:
             pass
 

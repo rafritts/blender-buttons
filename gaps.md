@@ -337,3 +337,16 @@ MESH_DEFORM/ARMATURE/LATTICE) so the agent names the object that RECEIVES the mo
 of relying on selection; SHRINKWRAP now rejects a self-target with a clear message and removes
 the just-created modifier, and the `mod.target` assignment is wrapped so ANY failure cleans up
 (no half-built modifier ever survives). Tested in e2e_shrinkwrap_partial.py.
+
+## G117 — no periodic whole-scene re-grounding on a long build (mental model goes stale)
+
+On a 100+-call build the per-op feedback is the right spine, but nothing ever re-surfaces the
+whole picture, so the agent's mental model of objects it hasn't touched in 40 ops silently goes
+stale (the SPEC-15 "ground truth is perishable" problem at the model-attention level, not the
+geometry level). **RESOLVED 2026-06-23 (feedback P1.6):** added an epistemic-DRIFT checkpoint in
+`extension/validation.py` — each geometry op accrues drift weighted by how much it can break
+(boolean/remesh/join 25, local topology edits 8, transforms 2); when the accrued drift crosses a
+threshold (100) the next result carries a whole-scene re-ground recap (object map + the
+intent/tripwire registry) and the counter resets. It triggers on DRIFT, not mutation count, and
+never windows the hard-defect validate floor — per-op feedback stays the spine. Tested in
+e2e_spec16.py.

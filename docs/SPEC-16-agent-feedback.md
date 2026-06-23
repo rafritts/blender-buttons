@@ -19,7 +19,11 @@ conflated were split apart (see "What this supersedes")._
 > yet edit-proportional); (d) the `feel op=all` bundle is the whole-mesh reads — selection-scoped
 > members (`region_form`, `fit`) and their context auto-skip telemetry are a follow-on. validate's
 > clipping check generalises the old G77 placement self-report, which is retired from the dispatch
-> (the `auto_proximity_note` function stays for `feel op=contacts`)._
+> (the `auto_proximity_note` function stays for `feel op=contacts`). Post-dogfood additions: an
+> epistemic-DRIFT re-ground checkpoint (G117 — the auto-feel gauge's idea recast as a re-anchor ON
+> TOP of the per-op spine, triggered by weighted drift not mutation count), delta-scoped clipping
+> with a TRUE recomputed penetration depth (G111), bulk/collection `expect` + `forget` + verbose
+> `run` (G112), and `feel` echo gated to topology-changing ops._
 
 ---
 

@@ -268,6 +268,33 @@ check("validate_stats returns ranked checks", rs.get("success") and isinstance(r
 fe = [f for f in rs.get("feel", []) if f["op"] == "silhouette"]
 check("feel exclusion telemetry recorded", fe and fe[0]["excluded"] >= 1, str(rs.get("feel")))
 
+# ── 8b. P1.6: epistemic-drift re-ground checkpoint ────────────────────────────
+clean()
+make_box("D1", 0, 0, 0.5, 0.4)
+validation.clear_intents()        # also resets the drift counter
+validation.add_intent("D1", "D1", "placeholder")  # rejected (a==b not allowed) → no-op
+r4 = [validation.accrue_drift("boolean") for _ in range(4)]   # weight 25 each
+check("drift below threshold returns no recap", all(x is None for x in r4[:3]), str(r4[:3]))
+check("crossing the drift threshold emits a re-ground recap", isinstance(r4[3], dict), str(r4[3]))
+check("recap reports the scene object count", r4[3].get("object_count", 0) >= 1, str(r4[3]))
+check("drift resets after a recap (a single low op is quiet)",
+      validation.accrue_drift("nudge") is None)
+validation.clear_intents()
+low = [validation.accrue_drift("nudge") for _ in range(49)]    # weight 2 each = 98
+check("49 low-weight ops stay under the threshold", all(x is None for x in low))
+check("the 50th low-weight op trips the recap", isinstance(validation.accrue_drift("nudge"), dict))
+# the recap carries the declared-clip registry
+clean()
+make_box("Hair", 0, 0, 1.0, 0.4)
+make_box("Body", 0, 0, 0.7, 0.5)
+validation.clear_intents()
+validation.add_intent("Hair", "Body", "roots seat under scalp")
+rg = None
+for _ in range(5):
+    rg = validation.accrue_drift("boolean") or rg
+check("the recap lists declared intended clips",
+      rg and "Hair↔Body" in rg.get("declared_clips_holding", []), str(rg))
+
 # ── 8. telemetry yield + persistence ──────────────────────────────────────────
 st = validation.stats()
 zf_stat = [c for c in st["validate"] if c["check"] == "z_fight"]
