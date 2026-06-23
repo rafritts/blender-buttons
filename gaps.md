@@ -187,19 +187,6 @@ select ops leave the mesh in OBJECT mode (status even reads `mode: OBJECT` after
 `feel op=handle` errored "must be in edit mode" until an explicit `object mode=EDIT`; the
 select→mint→sculpt loop the guidance advertises has a hidden mode-state seam.
 
-## G123 — `rest_on` overshoots below the floor, and relational `place right_of` silently rewrites Z
-
-Two relational placements produced sub-floor results that needed manual nudge corrections. (1)
-`transform op=rest_on target=floor` on the mug (which had a subsurf-rounded/domed bottom) dropped
-it 8mm BELOW z=0 instead of resting its lowest point at the floor — the BVH drop overshot on the
-convex base. (2) `transform op=place on={right_of: plate}` correctly set X but ALSO reseated Z to
-the plate's level, burying the mug 37mm below the floor; the relational vocabulary's "right_of"
-carried an unwanted vertical component. Both are "derive don't divine" ops that the agent reached
-for precisely to avoid typing coordinates, and both then required a hand-typed nudge to undo their
-surprise — eroding the trust the relational DSL is meant to earn. A `place right_of` should
-preserve the mover's floor contact (or its current Z) unless told otherwise, and `rest_on` should
-clamp at first contact, not overshoot a convex base.
-
 
 ## G125 — a large intended scatter floods the validate line and buries genuinely-new findings until it's declared
 

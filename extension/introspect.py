@@ -32,8 +32,15 @@ _AXES = "XYZ"
 _TOUCH = 0.0005  # 0.5 mm — below this two surfaces are "touching", not floating
 
 
-def _prepare(obj, cap=250):
-    """World-space BVH + downsampled world vertices + bbox for one object."""
+def _prepare(obj, cap=250, ensure_axis=None):
+    """World-space BVH + downsampled world vertices + bbox for one object.
+
+    G123: when `ensure_axis` (0|1|2) is given, the GLOBAL min/max vertices along that
+    world axis are forced into the sample. The plain every-Nth downsample can miss a
+    convex extremum that is a single vertex — e.g. the tip of a subsurf-domed base — and
+    a seating op (rest_on) that measured against the sample would then seat a higher vert
+    on the surface and leave the true tip poking below it. Including the extremes makes
+    the lowest/highest real point always available to the cast."""
     bm = eval_world_bmesh(obj)
     if bm is None or not bm.verts:
         if bm:
@@ -42,7 +49,11 @@ def _prepare(obj, cap=250):
     bvh = BVHTree.FromBMesh(bm)
     n = len(bm.verts)
     step = max(1, n // cap)
-    sample = [bm.verts[i].co.copy() for i in range(0, n, step)]
+    idxs = set(range(0, n, step))
+    if ensure_axis is not None:
+        idxs.add(min(range(n), key=lambda i: bm.verts[i].co[ensure_axis]))
+        idxs.add(max(range(n), key=lambda i: bm.verts[i].co[ensure_axis]))
+    sample = [bm.verts[i].co.copy() for i in sorted(idxs)]
     bm.free()
     return {"name": obj.name, "bvh": bvh, "verts": sample, "bbox": world_bbox(obj)}
 

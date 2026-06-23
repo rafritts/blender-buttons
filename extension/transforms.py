@@ -542,7 +542,9 @@ def rest_on(params):
     for o in objs:
         if o.name == target_name:
             continue
-        src = _prepare(o, cap=500)
+        # G123: force the axis-extreme verts into the sample, so a convex/subsurf-domed
+        # base seats by its TRUE lowest point and never ends up poking below the surface.
+        src = _prepare(o, cap=500, ensure_axis=axis_idx)
         if src is None:
             continue
         # Smallest SIGNED clearance over source verts that have target surface beneath
@@ -636,7 +638,7 @@ def seat_into(params):
     for o in objs:
         if o.name == target_name:
             continue
-        src = _prepare(o, cap=500)
+        src = _prepare(o, cap=500, ensure_axis=axis_idx)   # G123: include axis extremes
         if src is None:
             continue
         # Among the target surfaces directly below the source's verts, keep only FLOORS
@@ -675,7 +677,7 @@ def place(params):
 
     targets: object(s) to move (name / group / list / active).
     on:      a placement spec dict — same vocabulary as add's on= (see placement.py)."""
-    from .placement import resolve_placement
+    from .placement import resolve_placement, spec_authors_z
     objs, err = resolve_targets(params.get("targets"))
     if err:
         return {"error": err}
@@ -683,6 +685,11 @@ def place(params):
     if not spec:
         return {"error": "place needs 'on' — a placement spec "
                          "(e.g. {\"left_of\":\"base\",\"gap\":0})"}
+    # G123: a horizontal-only relation (right_of/left_of/in_front_of/behind) authors no
+    # vertical datum, so re-placing an EXISTING object must keep its current Z (its floor
+    # contact) instead of re-centring it on the target and burying it. add= can still
+    # centre Z for a fresh object; this guard is specific to re-placement.
+    keep_z = not spec_authors_z(spec)
 
     placed = []
     for o in objs:
@@ -693,6 +700,8 @@ def place(params):
             tx, ty, tz = resolve_placement(spec, dims)
         except ValueError as e:
             return {"error": str(e)}
+        if keep_z:
+            tz = cz
         o.location.x += tx - cx
         o.location.y += ty - cy
         o.location.z += tz - cz

@@ -53,6 +53,21 @@ VALID_SPEC_KEYS = {
 }
 
 
+# Keys that deliberately AUTHOR a Z (a vertical relation). A spec built only from the
+# horizontal adjacencies (left_of/right_of/in_front_of/behind) authors no Z — those
+# resolve cz to the target's CENTRE only to fill the unused axes, which is fine for adding
+# a fresh object but would re-seat (and bury) an existing one (G123). `place` consults this
+# to preserve the mover's current Z when no vertical relation was actually requested.
+_Z_AUTHORING_KEYS = {"on", "under", "between", "centered_on", "at_corner",
+                     "mirror_of", "on_floor"}
+
+
+def spec_authors_z(spec):
+    """True when the placement spec actually requests a vertical datum (so Z should be
+    resolved); False for a horizontal-only adjacency (so a re-placement keeps its Z)."""
+    return isinstance(spec, dict) and bool(set(spec) & _Z_AUTHORING_KEYS)
+
+
 def resolve_placement(spec, dims):
     """Compute world-space center (cx, cy, cz) for a new object with given dims.
     spec is None or a dict (see vocabulary above). dims is (w, d, h)."""
