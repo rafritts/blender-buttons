@@ -97,6 +97,14 @@ def register():
                     "(e.g. a huge imported backdrop). Every block will say the floor is down.",
         default=False,
     )
+    # Instance discovery: a human-friendly name for THIS Blender, surfaced by `ping`
+    # so an agent listing running instances picks "torso-sculpt", not a bare port.
+    bpy.types.WindowManager.bb_label = bpy.props.StringProperty(
+        name="Label",
+        description="Human-friendly name for this Blender instance, shown when an "
+                    "agent lists running instances to choose which one to drive.",
+        default="",
+    )
     # SPEC-16: load the cross-session telemetry that tunes the perceptual/validate bundles.
     try:
         from . import validation
@@ -116,7 +124,15 @@ def register():
             prefs.undo_steps = 256
     except Exception:
         pass
-    ui.start_server()
+    # Auto-start the command server (so this instance is immediately discoverable),
+    # unless the user opted out in the extension preferences.
+    auto_start = True
+    try:
+        auto_start = bpy.context.preferences.addons[__name__].preferences.auto_start
+    except (KeyError, AttributeError):
+        pass
+    if auto_start:
+        ui.start_server()
 
 
 def unregister():
@@ -133,5 +149,7 @@ def unregister():
         del bpy.types.WindowManager.bb_phase
     if hasattr(bpy.types.WindowManager, "bb_validate_off"):
         del bpy.types.WindowManager.bb_validate_off
+    if hasattr(bpy.types.WindowManager, "bb_label"):
+        del bpy.types.WindowManager.bb_label
     for cls in reversed(ui.CLASSES):
         bpy.utils.unregister_class(cls)

@@ -16,6 +16,11 @@ feel, select, transform, object, modifier, material, pose, sculpt, render, view,
 file, history). Each verb takes an `op=` that selects the operation; the verb's schema
 enumerates every op and the args each one uses.
 
+Several Blender instances can run at once, each on its own port; this session attaches
+to ONE. With a single Blender open it's automatic — the first command attaches. If the
+tools report multiple instances and ask which to drive, use `connect` (op=list to see
+them, op=attach port=<N> to bind one, op=launch to open a fresh instance).
+
 THE ONE RULE — your sense of where things are is a hypothesis, never ground truth. So
 DERIVE, don't DIVINE. A spatial value you compute from what the server just handed you —
 a status-block bound, a `feel` read — or from a dimension you yourself just authored is

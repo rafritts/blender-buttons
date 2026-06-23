@@ -274,7 +274,31 @@ def get_blender_status(params):
     return {"success": True, "status": status}
 
 
+def ping(params=None):
+    """Instance-identity probe for discovery (server/instances.py). Cheap enough to
+    fire across a port scan: who am I, what file, how busy, which pid/port. The MCP
+    side scans PORT_MIN..PORT_MAX and pings each — a refused connection means no
+    instance there, so discovery is self-cleaning (no registry file to go stale)."""
+    import os
+    wm = bpy.context.window_manager
+    label = (getattr(wm, "bb_label", "") or "").strip()
+    path = bpy.data.filepath or ""
+    meshes = sum(1 for o in bpy.context.scene.objects if o.type == 'MESH')
+    return {
+        "success": True,
+        "ok_ping": True,
+        "pid": os.getpid(),
+        "port": state.PORT,
+        "label": label,
+        "blend_file": os.path.basename(path) if path else "",
+        "blend_path": path,
+        "mode": bpy.context.mode,
+        "mesh_count": meshes,
+    }
+
+
 TOOLS = {
     "get_scene_tree":     get_scene_tree,
     "get_blender_status": get_blender_status,
+    "ping":               ping,
 }

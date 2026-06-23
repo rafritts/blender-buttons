@@ -11,7 +11,13 @@ import time
 
 import bpy
 
+# Each Blender instance grabs the first FREE port in [PORT_MIN, PORT_MAX) at start
+# (server.bind_free_port), so N instances coexist instead of colliding on one port.
+# PORT is overwritten with the actually-bound port; the MCP side scans the same range
+# and `ping`s each to discover live instances (server/instances.py).
 PORT = 8765
+PORT_MIN = 8765
+PORT_MAX = 8785          # exclusive — 20 instance slots
 
 _request_queue = queue.Queue()
 _server_thread = None
@@ -376,6 +382,8 @@ NO_LOG_TOOLS = {
 # 1:1 — the invariant that makes undo safe (see gaps.md E1, where they desynced
 # and undo(2) wiped a 27-op build back to the startup file).
 NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
+    # instance discovery: pure identity probe, mutates nothing (server/instances.py).
+    "ping",
     "describe", "distance_between", "gap_between", "is_aligned",
     "check_symmetry", "is_symmetric", "get_object_info", "get_current_selection",
     "get_mesh_profile", "get_silhouette", "get_section",
@@ -416,6 +424,7 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
 # (read-only visual / query tools — the status block would be noise).
 NO_STATUS_TOOLS = {
     "get_blender_status",
+    "ping",   # identity probe — its own payload IS the answer; status would be noise
     "get_scene_tree", "get_history", "get_bone_tree", "render_settings",
     "mark_checkpoint",
     "list_handles", "resolve_handle", "accept_handle",

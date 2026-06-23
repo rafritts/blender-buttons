@@ -566,12 +566,36 @@ def handle_client(conn):
         conn.close()
 
 
-def server_loop():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(("localhost", state.PORT))
-    sock.listen(5)
-    sock.settimeout(1.0)
+def bind_free_port():
+    """Bind the first free port in [PORT_MIN, PORT_MAX) and set state.PORT to it.
+
+    Returns a listening, accept-ready socket, or None if the whole range is taken
+    (≥20 instances). Binding here on the main thread — then handing the socket to
+    server_loop — avoids a TOCTOU race where a probe-bind-close leaves a window for
+    a sibling instance to grab the same port before the loop re-binds it."""
+    for p in range(state.PORT_MIN, state.PORT_MAX):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("localhost", p))
+        except OSError:
+            s.close()
+            continue
+        s.listen(5)
+        s.settimeout(1.0)
+        state.PORT = p
+        return s
+    return None
+
+
+def server_loop(sock=None):
+    if sock is None:
+        # Legacy / direct-call path: bind the fixed port ourselves.
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("localhost", state.PORT))
+        sock.listen(5)
+        sock.settimeout(1.0)
     while state._running:
         try:
             conn, _ = sock.accept()

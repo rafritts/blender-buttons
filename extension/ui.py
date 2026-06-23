@@ -9,11 +9,19 @@ from . import collab, handles, server, state, validation
 
 
 def start_server():
-    """Start the TCP server + queue processor. Safe to call when already running."""
+    """Start the TCP server + queue processor. Safe to call when already running.
+
+    Binds the first free port in the instance range (so multiple Blenders coexist)
+    before spinning up the accept loop. Returns False if already running OR the port
+    range is exhausted."""
     if state._running:
         return False
+    sock = server.bind_free_port()
+    if sock is None:
+        return False
     state._running = True
-    state._server_thread = threading.Thread(target=server.server_loop, daemon=True)
+    state._server_thread = threading.Thread(
+        target=server.server_loop, args=(sock,), daemon=True)
     state._server_thread.start()
     if not bpy.app.timers.is_registered(server.process_queue):
         bpy.app.timers.register(server.process_queue, persistent=True)
@@ -25,9 +33,13 @@ class BB_OT_StartServer(bpy.types.Operator):
     bl_label = "Start Server"
 
     def execute(self, context):
-        if not start_server():
-            self.report({'INFO'}, "Already running")
+        if state._running:
+            self.report({'INFO'}, f"Already running on port {state.PORT}")
             return {'FINISHED'}
+        if not start_server():
+            self.report({'ERROR'}, f"No free port in range "
+                                   f"{state.PORT_MIN}-{state.PORT_MAX - 1}")
+            return {'CANCELLED'}
         self.report({'INFO'}, f"Blender Buttons listening on port {state.PORT}")
         return {'FINISHED'}
 
@@ -95,6 +107,8 @@ class BB_PT_Panel(bpy.types.Panel):
         layout.operator("bb.stop_server", icon='PAUSE')
         layout.label(text=f"Status: {'Running' if state._running else 'Stopped'}")
         layout.label(text=f"Port: {state.PORT}")
+        # The name an agent sees when it lists running instances to pick which to drive.
+        layout.prop(context.window_manager, "bb_label", text="Label")
 
 
 # ── SPEC-12: shared-state collaboration panel ─────────────────────────────────
@@ -331,7 +345,26 @@ class BB_PT_CollabPanel(bpy.types.Panel):
                              icon='TRASH').name = h["name"]
 
 
-CLASSES = (BB_OT_StartServer, BB_OT_StopServer, BB_OT_SaveAsHandle,
+class BB_AddonPreferences(bpy.types.AddonPreferences):
+    """Extension preferences. `auto_start` gates whether register() spins up the
+    command server on enable/load — default ON so every Blender with the extension
+    is immediately discoverable, with an opt-out for users who'd rather click Start."""
+    bl_idname = __package__
+
+    auto_start: bpy.props.BoolProperty(
+        name="Auto-start server on enable",
+        description="Start the command server automatically when the extension is "
+                    "enabled or Blender loads, so this instance is immediately "
+                    "discoverable by an agent. Off = start it manually from the panel.",
+        default=True,
+    )
+
+    def draw(self, context):
+        self.layout.prop(self, "auto_start")
+
+
+CLASSES = (BB_AddonPreferences,
+           BB_OT_StartServer, BB_OT_StopServer, BB_OT_SaveAsHandle,
            BB_OT_CollabAccept, BB_OT_CollabReject,
            BB_OT_CollabHandleSelect, BB_OT_CollabHandleDelete,
            BB_OT_ValidateRevoke, BB_OT_ValidateAddIntent, BB_OT_ValidateExcludeMesh,

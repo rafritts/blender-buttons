@@ -5,12 +5,95 @@ from mcp.server.fastmcp import FastMCP
 from server._instructions import INSTRUCTIONS
 
 ADDON_HOST = "localhost"
-ADDON_PORT = 8765
+ADDON_PORT = 8765           # legacy default / range start
+
+# Instance discovery: each Blender binds the first free port in this range, so N
+# instances coexist. This MCP process (one per Claude session) scans the range,
+# `ping`s each, and binds to ONE — held in `_attached_port`, in-process, which makes
+# the attachment naturally per-session with zero cross-session coordination.
+PORT_MIN = 8765
+PORT_MAX = 8785             # exclusive — mirror of extension/state.py
+PORT_RANGE = range(PORT_MIN, PORT_MAX)
+
+_attached_port = None       # the Blender this session drives (None = unresolved)
 
 # `instructions` is returned at MCP initialize; the spec lets the client inject it
 # into the model's system prompt. It bootstraps baseline knowledge of this server
 # and points at the `guidance://llms` resource (server/resources.py) for depth.
 mcp = FastMCP("blender-buttons", instructions=INSTRUCTIONS)
+
+
+def _ping(port: int, timeout: float = 0.4) -> dict | None:
+    """Identity probe against one port. Returns the instance's `ping` payload (with
+    `port` stamped on), or None if nothing alive/answering there. Connection-refused
+    on localhost is instant, so scanning the whole range is cheap."""
+    try:
+        with socket.create_connection((ADDON_HOST, port), timeout=timeout) as sock:
+            sock.settimeout(timeout)
+            sock.sendall((json.dumps({"tool": "ping", "params": {}}) + "\n").encode())
+            data = b""
+            while b"\n" not in data:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+        r = json.loads(data.decode().strip())
+    except (ConnectionRefusedError, socket.timeout, OSError, ValueError):
+        return None
+    if isinstance(r, dict) and r.get("ok_ping"):
+        r["port"] = port
+        return r
+    return None
+
+
+def discover_instances(timeout: float = 0.4) -> list:
+    """Scan the port range and return the live instances (their `ping` payloads).
+    Stateless and self-cleaning: a dead instance simply refuses the connection."""
+    return [i for i in (_ping(p, timeout) for p in PORT_RANGE) if i]
+
+
+def attached_port():
+    return _attached_port
+
+
+def set_attached(port):
+    global _attached_port
+    _attached_port = int(port) if port is not None else None
+
+
+def _describe(i: dict) -> str:
+    name = i.get("label") or i.get("blend_file") or "(unsaved)"
+    return (f"  • port {i['port']}: {name}  [{i.get('mesh_count', '?')} meshes, "
+            f"mode {i.get('mode', '?')}, pid {i.get('pid', '?')}]")
+
+
+def _resolve_target():
+    """Decide which port this session's tool call should hit.
+
+    Returns (port, None) on success, or (None, error_dict) when the agent must
+    choose. Policy: a live attachment wins; a dead one is cleared and re-resolved;
+    exactly one live instance auto-attaches silently (the common case); zero or 2+
+    raise an actionable error. So the 'which Blender?' gate fires at most once per
+    session, only when there's a genuine ambiguity."""
+    global _attached_port
+    if _attached_port is not None:
+        if _ping(_attached_port):
+            return _attached_port, None
+        _attached_port = None       # it went away — fall through and re-resolve
+    live = discover_instances()
+    if not live:
+        return None, {"error": (
+            "No Blender instance is reachable. Open Blender with the 'Blender Buttons' "
+            "extension enabled (it auto-starts its command server), or use "
+            "`connect op=launch` to open one.")}
+    if len(live) == 1:
+        _attached_port = live[0]["port"]
+        return _attached_port, None
+    lines = "\n".join(_describe(i) for i in live)
+    return None, {"error": (
+        "Multiple Blender instances are running — pick one before issuing commands. "
+        "Ask the user which to drive, then call `connect op=attach port=<N>` (or "
+        f"label=/file=). Live instances:\n{lines}")}
 
 # SPEC-05 cutover switch. When False (default) the 137 flat tools are pruned from
 # the MCP surface after the verbs register, leaving ~15 verb tools. Set True to
@@ -18,11 +101,18 @@ mcp = FastMCP("blender-buttons", instructions=INSTRUCTIONS)
 EXPOSE_FLAT_TOOLS = False
 
 
-def call_blender(tool: str, params: dict = None, label: str = "", timeout: float = 30) -> dict:
+def call_blender(tool: str, params: dict = None, label: str = "", timeout: float = 30,
+                 port: int = None) -> dict:
+    # Resolve which instance to drive (auto-attach / ask-which / open-one) unless the
+    # caller pinned a port explicitly. A resolution error short-circuits the call.
+    if port is None:
+        port, err = _resolve_target()
+        if err:
+            return err
     payload = json.dumps({"tool": tool, "params": params or {}, "label": label,
                           "timeout": timeout}) + "\n"
     try:
-        with socket.create_connection((ADDON_HOST, ADDON_PORT), timeout=timeout) as sock:
+        with socket.create_connection((ADDON_HOST, port), timeout=timeout) as sock:
             sock.settimeout(timeout)  # cap each recv too, so long renders aren't cut at 30s
             sock.sendall(payload.encode())
             data = b""
@@ -35,9 +125,9 @@ def call_blender(tool: str, params: dict = None, label: str = "", timeout: float
                     break
     except (ConnectionRefusedError, socket.timeout, OSError) as e:
         return {"error": (
-            f"Cannot reach Blender extension on {ADDON_HOST}:{ADDON_PORT} ({type(e).__name__}). "
-            "Open Blender, enable the 'Blender Buttons' extension, and click 'Start Server' "
-            "in the Scene properties panel."
+            f"Cannot reach Blender extension on {ADDON_HOST}:{port} ({type(e).__name__}). "
+            "The instance may have closed — run `connect op=list` to see what's live, "
+            "or `connect op=launch` to open one."
         )}
     return json.loads(data.decode().strip())
 
