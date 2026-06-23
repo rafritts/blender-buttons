@@ -313,6 +313,12 @@ named target's bbox falls inside the in-focus zone ("Donut 27mm deep vs DOF slab
 out of focus"). Bonus: an `aperture` resolver that, given "keep the whole donut sharp," solves
 the f-stop from subject depth + distance instead of making the agent dead-reckon it. Until then
 the agent is flying blind on the one render property it's explicitly forbidden to eyeball.
+**RESOLVED 2026-06-23:** added `view op=check_focus` (introspect.check_focus) — a thin-lens DOF
+model (CoC = sensor_width/1500) that reports the near/far sharp limits + hyperfocal at the
+camera's current (or a hypothetical aperture/focus_distance/focus_object) settings, and a
+per-target SHARP/BLURRED verdict with in-focus-% by projecting each bbox onto the lens axis.
+`resolve_for=<obj>` solves the widest aperture that keeps a subject's full depth sharp ("keep
+the whole donut sharp" → an f-stop). Reports when DOF is disabled. Tested in e2e_g115_check_focus.py.
 
 ## G116 — `modifier add SHRINKWRAP` could land on the wrong (active) object and leave a half-built modifier on error
 

@@ -11,13 +11,13 @@ from server import viewport, introspect, scene
 from ._common import tag, unknown
 
 _OPS = ["shading", "angle", "overlays", "orbit", "rig", "zoom", "frame", "check_framing",
-        "camera_dof", "camera_lens", "active_camera"]
+        "check_focus", "camera_dof", "camera_lens", "active_camera"]
 
 
 @mcp.tool(name="view")
 def view(
     op: Literal["shading", "angle", "overlays", "orbit", "rig", "zoom", "frame",
-                "check_framing", "camera_dof", "camera_lens", "active_camera"],
+                "check_framing", "check_focus", "camera_dof", "camera_lens", "active_camera"],
     # shading / angle
     mode: tag(str, "[shading] WIREFRAME|SOLID|MATERIAL|RENDERED") = "MATERIAL",
     angle: tag(str, "[angle] FRONT|BACK|TOP|… or persp/ortho") = "",
@@ -46,7 +46,8 @@ def view(
     # camera_dof
     focus_distance: tag(float, "[camera_dof] focus distance (m)") = None,
     aperture: tag(float, "[camera_dof] f-stop (lower = shallower)") = None,
-    focus_object: tag(str, "[camera_dof] object to focus on") = "",
+    focus_object: tag(str, "[camera_dof/check_focus] object to focus on") = "",
+    resolve_for: tag(str, "[check_focus] object to solve the widest sharp-keeping aperture for") = "",
     # camera_lens
     lens: tag(float, "[camera_lens] focal length mm (24 wide · 50 neutral · 85 portrait · 135 hero)") = None,
 ) -> str:
@@ -69,6 +70,11 @@ def view(
                   the frame aspect, so each reading states the reference resolution;
                   aspect='WxH'|'W:H' validates against an intended output. (targets,
                   camera, aspect)
+      check_focus — VALIDATE depth of field (G115): near/far sharp limits at the current
+                  (or hypothetical aperture/focus_distance/focus_object) settings, and
+                  whether each target's full depth is inside the in-focus slab — the
+                  sharpness check you can't get from a render you're told not to read.
+                  resolve_for=<obj> also solves the widest aperture that keeps it sharp.
       camera_dof — depth of field on the camera (focus_distance OR focus_object,
                   aperture f-stop, camera)
       camera_lens — retune the focal length of an existing camera (lens mm, camera) —
@@ -94,6 +100,9 @@ def view(
         return viewport.frame_scene(targets, include_lights)
     if o == "check_framing":
         return introspect.check_framing(targets, camera, aspect)
+    if o == "check_focus":
+        return introspect.check_focus(targets, camera, aperture, focus_distance,
+                                      focus_object, resolve_for)
     if o == "camera_dof":
         return scene.set_camera_dof(focus_distance, aperture, focus_object, camera)
     if o == "camera_lens":

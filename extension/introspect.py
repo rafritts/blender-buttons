@@ -576,6 +576,147 @@ def check_framing(params):
             "frame_ref": frame_ref}
 
 
+# ─────────────────────────── check_focus (G115) ───────────────────────────
+
+_FSTOPS = [1.0, 1.4, 2.0, 2.8, 4.0, 5.6, 8.0, 11.0, 16.0, 22.0, 32.0]
+
+
+def _dof_limits(f_mm, n_fstop, coc_mm, focus_m):
+    """Near/far depth-of-field limits (m) + hyperfocal (m), thin-lens model. Df is None
+    when the far limit is at/beyond infinity (subject focus ≥ hyperfocal)."""
+    f = f_mm / 1000.0
+    c = coc_mm / 1000.0
+    s = max(focus_m, f + 1e-6)
+    H = (f * f) / (n_fstop * c) + f
+    sf = s - f
+    dn = (H * s) / (H + sf)
+    df = (H * s) / (H - sf) if sf < H else None      # None = ∞
+    return dn, df, H
+
+
+def _axis_depth_range(corners, cam_loc, forward):
+    ds = [(p - cam_loc).dot(forward) for p in corners]
+    return min(ds), max(ds)
+
+
+def check_focus(params):
+    """G115 — VALIDATE depth of field: at the camera's current (or a hypothetical) lens +
+    aperture + focus, where do the near/far SHARP limits fall, and does each target's full
+    depth sit inside that in-focus slab? The deterministic sharpness check the 'don't read
+    the render back' rule otherwise leaves blind. Can also RESOLVE the widest aperture
+    (smallest f-number) that keeps a subject fully sharp.
+
+    camera:          camera name (empty = scene cam).
+    targets:         objects to test (empty = the camera's focus_object, else all meshes).
+    aperture:        hypothetical f-stop to test (empty = the camera's current f-stop).
+    focus_distance / focus_object: hypothetical focus (empty = the camera's current focus).
+    resolve_for:     object name — also return the widest aperture that keeps it fully sharp.
+    """
+    import mathutils
+    from .common import resolve_camera, world_bbox_corners, scene_mesh_objects
+    scene = bpy.context.scene
+    cam, err = resolve_camera(params.get("camera"), scene)
+    if err:
+        return {"error": err}
+    cd = cam.data
+    dof = cd.dof
+
+    f_mm = float(cd.lens)
+    coc_mm = float(cd.sensor_width) / 1500.0          # acceptable circle of confusion
+    n_fstop = params.get("aperture")
+    n_fstop = float(n_fstop) if n_fstop is not None else float(dof.aperture_fstop)
+
+    cam_mat = cam.matrix_world
+    cam_loc = cam_mat.translation
+    forward = (cam_mat.to_3x3() @ mathutils.Vector((0, 0, -1))).normalized()
+
+    def _obj_focus_distance(name):
+        o = bpy.data.objects.get(name)
+        if o is None:
+            return None
+        corners = world_bbox_corners(o)
+        center = sum(corners, mathutils.Vector()) / 8.0
+        return (center - cam_loc).dot(forward)
+
+    fo_name = params.get("focus_object") or (dof.focus_object.name if dof.focus_object else None)
+    if params.get("focus_distance") is not None:
+        focus_m = float(params["focus_distance"])
+    elif fo_name:
+        focus_m = _obj_focus_distance(fo_name)
+        if focus_m is None:
+            return {"error": f"focus_object '{fo_name}' not found"}
+    else:
+        focus_m = float(dof.focus_distance)
+
+    # which objects to test
+    tnames = params.get("targets")
+    if tnames:
+        report_objs, terr = _report_targets(params)
+        if terr:
+            return {"error": terr}
+    elif fo_name and bpy.data.objects.get(fo_name):
+        report_objs = [bpy.data.objects[fo_name]]
+    else:
+        report_objs = scene_mesh_objects()
+
+    dn, df, H = _dof_limits(f_mm, n_fstop, coc_mm, focus_m)
+    dof_slab = None if df is None else round((df - dn) * 1000, 1)   # mm
+
+    targets = []
+    for o in report_objs:
+        near_t, far_t = _axis_depth_range(world_bbox_corners(o), cam_loc, forward)
+        depth_mm = round((far_t - near_t) * 1000, 1)
+        in_front = far_t > 0
+        within_near = near_t >= dn - 1e-6
+        within_far = (df is None) or (far_t <= df + 1e-6)
+        sharp = in_front and within_near and within_far
+        # fraction of the object's own depth that lands inside the slab
+        lo = max(near_t, dn)
+        hi = far_t if df is None else min(far_t, df)
+        overlap = max(0.0, hi - lo)
+        span = max(far_t - near_t, 1e-9)
+        frac = max(0.0, min(1.0, overlap / span)) if in_front else 0.0
+        targets.append({
+            "object": o.name,
+            "depth_mm": depth_mm,
+            "near_m": round(near_t, 4), "far_m": round(far_t, 4),
+            "in_focus": bool(sharp),
+            "in_focus_pct": round(frac * 100, 1),
+        })
+
+    result = {
+        "success": True, "camera": cam.name,
+        "use_dof": bool(dof.use_dof),
+        "lens_mm": round(f_mm, 2),
+        "aperture_fstop": round(n_fstop, 2),
+        "focus_distance_m": round(focus_m, 4),
+        "focus_object": fo_name,
+        "dof_near_m": round(dn, 4),
+        "dof_far_m": None if df is None else round(df, 4),
+        "dof_slab_mm": dof_slab,
+        "hyperfocal_m": round(H, 4),
+        "targets": targets,
+    }
+
+    # aperture resolver: the widest aperture (smallest f) that keeps resolve_for fully sharp.
+    resolve_for = params.get("resolve_for")
+    if resolve_for:
+        ro = bpy.data.objects.get(resolve_for)
+        if ro is None:
+            result["resolve_error"] = f"resolve_for '{resolve_for}' not found"
+        else:
+            near_t, far_t = _axis_depth_range(world_bbox_corners(ro), cam_loc, forward)
+            chosen = None
+            for n in _FSTOPS:
+                rdn, rdf, _ = _dof_limits(f_mm, n, coc_mm, focus_m)
+                if near_t >= rdn - 1e-6 and (rdf is None or far_t <= rdf + 1e-6):
+                    chosen = n
+                    break
+            result["resolve_for"] = resolve_for
+            result["resolved_aperture"] = chosen   # None = even f/32 can't hold it sharp
+    return result
+
+
 # ─────────────────────────── trace_profile (P7) ───────────────────────────
 
 def trace_profile(params):
@@ -745,6 +886,7 @@ TOOLS = {
     "check_clearance": check_clearance,
     "check_resting":  check_resting,
     "check_framing":  check_framing,
+    "check_focus":    check_focus,
     "trace_profile":  trace_profile,
     "diff_since":     diff_since,
 }

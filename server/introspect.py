@@ -161,6 +161,64 @@ def check_framing(targets: str = "", camera: str = "", aspect: str = "") -> str:
 
 
 @mcp.tool()
+def check_focus(targets: str = "", camera: str = "", aperture: float = None,
+                focus_distance: float = None, focus_object: str = "",
+                resolve_for: str = "") -> str:
+    """
+    VALIDATE depth of field (G115) — the deterministic sharpness check the "don't read
+    the render back" rule otherwise leaves blind. Reports the near/far in-focus limits at
+    the camera's current (or a hypothetical) lens + aperture + focus, and whether each
+    target's FULL depth sits inside that slab. Macro-scale sets (a tabletop at f/4) have a
+    DOF only millimetres deep — this catches the silent blur before you render.
+
+    targets:        objects to test. Empty = the camera's focus_object, else every mesh.
+    camera:         camera name. Empty = the active scene camera.
+    aperture:       a hypothetical f-stop to test. Empty = the camera's current f-stop.
+    focus_distance / focus_object: a hypothetical focus. Empty = the camera's current focus.
+    resolve_for:    object name — also solve the WIDEST aperture (smallest f-number) that
+                    keeps this subject fully sharp at the current focus ("keep the whole
+                    donut sharp" → an f-stop), instead of dead-reckoning it.
+    """
+    params = {"targets": _targets(targets)}
+    if camera:
+        params["camera"] = camera
+    if aperture is not None:
+        params["aperture"] = aperture
+    if focus_distance is not None:
+        params["focus_distance"] = focus_distance
+    if focus_object:
+        params["focus_object"] = focus_object
+    if resolve_for:
+        params["resolve_for"] = resolve_for
+    result = call_blender("check_focus", params)
+    if not result.get("success"):
+        return result.get("error", "failed")
+    far = result["dof_far_m"]
+    far_s = "∞" if far is None else f"{far}m"
+    slab = result["dof_slab_mm"]
+    slab_s = "∞" if slab is None else f"{slab}mm"
+    dof_state = "" if result["use_dof"] else "  ⚠ DOF is OFF on this camera (renders fully sharp)"
+    lines = [
+        f"camera '{result['camera']}': lens {result['lens_mm']}mm  f/{result['aperture_fstop']}  "
+        f"focus {result['focus_distance_m']}m"
+        + (f" on {result['focus_object']}" if result.get('focus_object') else "") + dof_state,
+        f"  in-focus zone: {result['dof_near_m']}m → {far_s}  (slab {slab_s}, "
+        f"hyperfocal {result['hyperfocal_m']}m)",
+    ]
+    for t in result["targets"]:
+        verdict = "SHARP" if t["in_focus"] else f"BLURRED ({t['in_focus_pct']}% of its depth in focus)"
+        lines.append(f"  {t['object']}: depth {t['depth_mm']}mm at {t['near_m']}–{t['far_m']}m → {verdict}")
+    if result.get("resolve_error"):
+        lines.append(f"  resolve: {result['resolve_error']}")
+    elif "resolved_aperture" in result:
+        ra = result["resolved_aperture"]
+        lines.append(f"  to keep {result['resolve_for']} fully sharp: "
+                     + (f"f/{ra} (or narrower)" if ra is not None
+                        else "no aperture up to f/32 holds its whole depth — move it / shrink its depth / refocus"))
+    return "\n".join(lines) + _status(result)
+
+
+@mcp.tool()
 def trace_profile(target: str, axis: str = "Z", sections: int = 24) -> str:
     """
     Run a fingertip along an axis and narrate the form — the curvature SEQUENCE a
