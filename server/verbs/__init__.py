@@ -32,6 +32,7 @@ from . import (  # noqa: F401
     feel,
     validate,
     collab,
+    addon,
 )
 
 # The complete MCP surface after the collapse. Every name here is a verb module's
@@ -39,7 +40,7 @@ from . import (  # noqa: F401
 VERB_NAMES = {
     "add", "object", "edit", "select", "transform", "modifier", "material",
     "sculpt", "pose", "scene", "view", "render", "history", "file", "feel",
-    "validate", "collab",
+    "validate", "collab", "addon",
 }
 
 

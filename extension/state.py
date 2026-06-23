@@ -365,6 +365,9 @@ NO_LOG_TOOLS = {
     # sweep, declaring an intent, listing the registry, telemetry. None move geometry.
     "validate_run", "validate_expect", "validate_forget", "validate_intended", "validate_stats",
     "feel_telemetry",
+    # generic addon bridge: listing addons + introspecting an operator are pure reads.
+    # addon_run is a mutator (logged + undoable) and is deliberately NOT here.
+    "addon_list", "addon_inspect",
 }
 
 # Tools that neither log to history NOR consume an undo step: pure queries,
@@ -432,6 +435,8 @@ NO_STATUS_TOOLS = {
     # status block would be noise on a registry/stats round-trip.
     "validate_run", "validate_expect", "validate_forget", "validate_intended", "validate_stats",
     "feel_telemetry",
+    # generic addon bridge reads — their own payload IS the answer; status would be noise.
+    "addon_list", "addon_inspect",
 }
 
 

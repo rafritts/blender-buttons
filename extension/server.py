@@ -12,6 +12,7 @@ import threading
 import bpy
 
 from . import (
+    addons,
     armature,
     assembly,
     bands,
@@ -84,6 +85,7 @@ _TOOL_MODULES = (
     handles,
     assembly,
     validation,  # SPEC-16: validate_* ops (expect / intended / stats / run)
+    addons,      # generic addon/operator bridge (addon_list / addon_inspect / addon_run)
 )
 
 TOOLS = {}
