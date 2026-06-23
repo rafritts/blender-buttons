@@ -291,6 +291,11 @@ should make the target single-user before appending (or refuse + warn when the t
 datablock with objects outside the join set). Safe workaround found: join **all** instances of
 a shared mesh then delete the result — with no survivors there's nothing to corrupt — but a
 subset join is a silent footgun. (Same shared-datablock root as G103/G113.)
+**RESOLVED 2026-06-23:** `join_objects` now makes the join target single-user before
+`bpy.ops.object.join()` — but only when its mesh is actually shared with an object OUTSIDE the
+join set (so join-all, with no survivors, copies nothing). The merge writes into the private
+copy; survivors keep the pristine datablock. Reported via `made_single_user` + a note. Tested
+in e2e_g114_join_linked.py (subset / join-all / independent).
 
 ## G115 — no way to VALIDATE camera focus / depth-of-field; macro-scale DOF silently blurs everything and the agent can't see it
 

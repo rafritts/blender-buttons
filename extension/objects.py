@@ -150,6 +150,21 @@ def join_objects(params):
         if first is None:
             first = obj
     bpy.context.view_layer.objects.active = first
+    # G114: join() folds every selected object's geometry INTO the active object's mesh
+    # datablock. If that datablock is shared (linked instances from a scatter), the merged
+    # geometry overwrites the mesh every OTHER instance also points at — so joining a
+    # SUBSET silently corrupts the survivors (they suddenly render as the merged blob).
+    # Make the active single-user first, but only when its mesh is actually shared with an
+    # object OUTSIDE the join set (otherwise the copy is needless).
+    made_single_user = False
+    names_set = set(names)
+    if getattr(first, "data", None) is not None and first.data.users > 1:
+        shared_outside = any(
+            o.name not in names_set and getattr(o, "data", None) is first.data
+            for o in bpy.data.objects)
+        if shared_outside:
+            first.data = first.data.copy()
+            made_single_user = True
     bpy.ops.object.join()
     result = bpy.context.active_object
 
@@ -187,6 +202,12 @@ def join_objects(params):
         out["merged"] = merged
     if rehomed:
         out["rehomed_handles"] = rehomed
+    if made_single_user:
+        out["made_single_user"] = True
+        out.setdefault("notes", []).append(
+            "G114: the join target shared its mesh with objects outside the join set "
+            "(linked instances) — made it single-user first so the merge didn't corrupt "
+            "the survivors. Those instances are unchanged.")
     return out
 
 
