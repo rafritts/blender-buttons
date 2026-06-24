@@ -35,6 +35,10 @@ def validate(
     reason: tag(str, "[expect/intend] WHY the clip is intended — a falsifiable design "
                      "claim ('hair roots seat under the scalp'). Required; an assertion "
                      "you can't justify is a bug you're hiding.") = "",
+    check: tag(str, "[expect/intend/forget] which check to declare for: 'clipping' "
+                    "(default, a penetration pair) or 'open_boundary' (G129 — declare a "
+                    "single part/collection a INTENTIONALLY open: a tabletop plane, a cup "
+                    "mouth, cloth; arms a seal-tripwire if it later closes)") = "clipping",
     targets: tag(str, "[run] object(s) to sweep ('' = whole scene)") = "",
     verbose: tag(bool, "[run] list EVERY finding instead of capping the line") = False,
 ) -> str:
@@ -75,15 +79,18 @@ def validate(
         return _format_run(r)
 
     if o in ("expect", "intend"):
-        r = call_blender("validate_expect", {"a": a, "b": b, "reason": reason})
+        r = call_blender("validate_expect", {"a": a, "b": b, "reason": reason, "check": check})
         if r.get("error"):
             return r["error"]
         e = r["intent"]
+        if e["check"] == "open_boundary":
+            return (f'declared intended: open boundary on {e["a"]} — "{e["reason"]}". '
+                    f"It's quiet now, and will fire if the part ever closes (seals).")
         return (f'declared intended: {e["check"]} {e["a"]}↔{e["b"]} — "{e["reason"]}". '
                 f"It now collapses to a count, and will fire if it ever vanishes.")
 
     if o == "forget":
-        r = call_blender("validate_forget", {"a": a, "b": b})
+        r = call_blender("validate_forget", {"a": a, "b": b, "check": check})
         if r.get("error"):
             return r["error"]
         return f"forgot the {a}↔{b} declaration — its tripwire is cleared."

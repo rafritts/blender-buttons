@@ -77,8 +77,11 @@ def check_mesh(target: str) -> str:
             lines.append(f"  ✓ {r['object']}: watertight, no issues{tw}")
             continue
         bits = []
-        if not r["watertight"]:
+        if r["non_manifold_edges"]:
             bits.append(f"non-manifold ({r['non_manifold_edges']} edges)")
+        if r.get("boundary_edges"):
+            bits.append(f"open boundary ({r['boundary_edges']} edges — intended for a "
+                        f"plane/rim/cloth, a defect for a solid)")
         if r["self_intersections"]:
             bits.append(f"{r['self_intersections']} self-intersection(s)")
         if r["zero_area_faces"]:

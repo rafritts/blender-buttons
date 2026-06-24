@@ -508,6 +508,71 @@ def apply_scale(obj):
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
 
 
+def boundary_loop_count(bm):
+    """Number of open-boundary LOOPS — connected components of the 1-face-edge subgraph.
+    O(E) union-find over the verts touching a boundary edge. Shared by the floor (Euler
+    invariant, G118) and the op-time topology-delta (G105)."""
+    parent = {}
+
+    def find(x):
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    seen = set()
+    for e in bm.edges:
+        if len(e.link_faces) == 1:
+            a, b = e.verts[0].index, e.verts[1].index
+            seen.add(a)
+            seen.add(b)
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+    return len({find(v) for v in seen})
+
+
+def mesh_components(bm):
+    """Number of connected components among verts that belong to ≥1 face (loose verts
+    don't inflate the count). O(E) union-find. Needed so the Euler invariant below is
+    correct for multi-shell objects (two separate closed spheres is valid, χ=4)."""
+    parent = {}
+
+    def find(x):
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    faced = set()
+    for f in bm.faces:
+        for v in f.verts:
+            faced.add(v.index)
+    for e in bm.edges:
+        if e.link_faces:
+            a, b = e.verts[0].index, e.verts[1].index
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+    return len({find(v) for v in faced}) if faced else 0
+
+
+def euler_consistent(v, e, f, boundary_loops, components):
+    """G118 — an orientable mesh of `components` connected shells with `boundary_loops`
+    rims total satisfies χ = V−E+F = 2c − 2g − b, so 2g = 2c − χ − b must be a
+    non-negative EVEN integer. When it isn't, the topology is impossible for a clean
+    surface (the χ=2-with-one-boundary tell of a hollow built inside-out). The component
+    count keeps a legitimate multi-shell object (e.g. two closed spheres, χ=4) from
+    false-flagging. Returns (consistent: bool, chi: int)."""
+    chi = v - e + f
+    if components <= 0:
+        return True, chi          # empty / point cloud — nothing to judge
+    g2 = 2 * components - chi - boundary_loops
+    return (g2 >= 0 and g2 % 2 == 0), chi
+
+
 def scale_unit_note(obj, local_value, what="thickness"):
     """G132: a local-unit modelling param (SOLIDIFY thickness, bevel width, inset depth)
     is silently rescaled by the object's UNAPPLIED scale — so thickness=0.004 on a 1.85×

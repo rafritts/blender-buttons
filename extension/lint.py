@@ -243,17 +243,40 @@ def check_mesh(params):
         bm = eval_world_bmesh(o)
         if bm is None:
             continue
-        non_manifold = sum(1 for e in bm.edges if not e.is_manifold)
+        # G129: split the two failure modes bmesh lumps under `not is_manifold`. A
+        # BOUNDARY edge (exactly 1 linked face) is the rim of an open shell — a tabletop
+        # plane, a cup mouth, a sheet of cloth — and is very often CORRECT geometry, not a
+        # defect. A true NON-MANIFOLD edge (0 linked faces = a wire, or 3+ = a T-junction)
+        # is always wrong. Counting them together made every open vessel read as broken.
+        boundary = 0
+        non_manifold = 0
+        for e in bm.edges:
+            lf = len(e.link_faces)
+            if lf == 1:
+                boundary += 1
+            elif lf != 2:
+                non_manifold += 1
         zero_area = sum(1 for f in bm.faces if f.calc_area() < 1e-9)
+        from .common import boundary_loop_count, euler_consistent, mesh_components
+        boundary_loops = boundary_loop_count(bm)
+        euler_ok, chi = euler_consistent(len(bm.verts), len(bm.edges), len(bm.faces),
+                                         boundary_loops, mesh_components(bm))
         bvh = object_bvh(o)
         self_x = _self_intersections(bm, bvh) if bvh else 0
         thin = _thinnest_wall(bm, bvh) if bvh else None
-        watertight = (non_manifold == 0)
+        # watertight still means CLOSED (no open rims AND no non-manifold junk); a
+        # game/print shell wants that. The floor, however, treats only `non_manifold_edges`
+        # (3+/0-face) as a hard defect — open boundaries get the intent path (G129).
+        watertight = (non_manifold == 0 and boundary == 0)
         bm.free()
         reports.append({
             "object": o.name,
             "watertight": watertight,
             "non_manifold_edges": non_manifold,
+            "boundary_edges": boundary,
+            "boundary_loops": boundary_loops,
+            "euler_ok": euler_ok,
+            "euler_characteristic": chi,
             "self_intersections": self_x,
             "zero_area_faces": zero_area,
             "thinnest_wall_mm": round(thin * 1000, 2) if thin is not None else None,

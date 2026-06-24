@@ -145,6 +145,10 @@ def _status(result: dict) -> str:
     # block so a no-op can never masquerade as a successful edit.
     if result.get("no_op_warning"):
         bind += "\n⚠ " + result["no_op_warning"]
+    # G105/G118/G134: the mirror of the no-op warning — an op that succeeded but degraded
+    # the geometry (new hole, non-manifold junk, broken Euler), caught at the op itself.
+    if result.get("topology_delta_warning"):
+        bind += "\n⚠ " + result["topology_delta_warning"]
     # Generalized postcondition-notes channel (SPEC-05 Improvement #4): any handler
     # can attach a `notes` list — e.g. an auto mode-switch the agent should know
     # happened. Surfaced ahead of the block like the bind/shape-key warnings.

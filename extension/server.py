@@ -162,8 +162,11 @@ NOOP_CHECK_TOOLS = {
     "nudge", "place", "aim_axis", "rest_on", "move_to", "rotate_to",
     "resize", "scale_group", "rotate_object", "apply_transform",
     "snap_to", "snap_to_grid", "set_origin", "match_dimension",
-    # geometry bakers
-    "boolean", "apply_modifiers", "noise_displace", "bend", "smooth_edges",
+    # geometry bakers. G101: smooth_edges is EXCLUDED — it adds a BEVEL modifier + sets
+    # shade-smooth flags and never touches base vertex positions, so the geometry
+    # signature is byte-identical by design; checking it cried "no-op" on every successful
+    # shade-smooth. Shading-only ops have no geometry no-op to detect.
+    "boolean", "apply_modifiers", "noise_displace", "bend",
     "round_corners", "remesh", "join_objects", "bake_shape_keys_to_basis",
     # sculpt strokes
     "sculpt_grab", "sculpt_inflate", "sculpt_draw", "sculpt_smooth",
@@ -198,6 +201,17 @@ PLACEMENT_TOOLS = {
 # emission is retired here — validate is now the single relational authority, with
 # intent-suppression the raw note never had.
 VALIDATE_AFTER = NOOP_CHECK_TOOLS | PLACEMENT_TOOLS
+
+# G105/G118/G134: ops that can change CONNECTIVITY (add/remove geometry, weld, cut, fill)
+# — the only ones where a topology degrade (new boundary loop, non-manifold edge, broken
+# Euler) is possible. Pure transforms and vert-moving deformers can't change topology, so
+# they're excluded to keep the before/after snapshot off the hot path.
+TOPO_CHECK_TOOLS = {
+    "extrude", "extrude_along_curve", "inset_faces", "poke_faces", "loop_cut",
+    "subdivide_selection", "grid_fill", "merge_by_distance", "delete_geometry",
+    "separate_selection", "bridge_handles", "boolean", "apply_modifiers", "remesh",
+    "join_objects", "round_corners", "bevel",
+}
 
 # SPEC-16 (feedback P1.4): the ambient `feel` delta only earns its keep on ops that
 # change TOPOLOGY (or create geometry) — for a pure transform (nudge/place/rotate/
@@ -275,6 +289,61 @@ def _geo_signature(obj):
             acc = (acc + hash((int(co.x * 1e5), int(co.y * 1e5), int(co.z * 1e5)))) \
                 & 0xFFFFFFFFFFFFFFFF
     return (vcount, fcount, acc, trs)
+
+
+def _topo_signature(obj):
+    """G105/G118/G134 — a cheap topology fingerprint captured before/after a geometry op
+    so the dispatch can warn the MOMENT an op DEGRADES the mesh (the mirror of the no-op
+    detector, which only catches an op that did NOTHING). Carries the boundary-loop count,
+    the true non-manifold edge count (0 or 3+ linked faces — NOT 1-face rims, G129), and
+    χ/Euler validity. O(V+E); skips the expensive self-intersection BVH (the floor still
+    catches that in the same response). None for a non-mesh / missing object."""
+    if obj is None or getattr(obj, "type", None) != 'MESH' or obj.data is None:
+        return None
+    import bmesh
+    owned = False
+    if obj.mode == 'EDIT':
+        bm = bmesh.from_edit_mesh(obj.data)
+    else:
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        owned = True
+    try:
+        from .common import boundary_loop_count, euler_consistent, mesh_components
+        V, E, F = len(bm.verts), len(bm.edges), len(bm.faces)
+        non_manifold = sum(1 for e in bm.edges if len(e.link_faces) not in (1, 2))
+        b = boundary_loop_count(bm)
+        euler_ok, chi = euler_consistent(V, E, F, b, mesh_components(bm))
+        return {"boundary_loops": b, "non_manifold": non_manifold,
+                "chi": chi, "euler_ok": euler_ok}
+    finally:
+        if owned:
+            bm.free()
+
+
+def _topology_delta_warning(before, after):
+    """Build the one-line 'this op degraded the geometry' warning from two _topo_signature
+    snapshots, or None when nothing got worse. Only DEGRADATIONS speak (a heal is silent —
+    exception-reporting, like the rest of the floor)."""
+    if not before or not after:
+        return None
+    bits = []
+    db = after["boundary_loops"] - before["boundary_loops"]
+    if db > 0:
+        bits.append(f"opened {db} new boundary loop(s) (was {before['boundary_loops']}, "
+                    f"now {after['boundary_loops']}) — a part that should stay closed may "
+                    f"have sprung a hole; if intended, validate op=expect to declare it")
+    dn = after["non_manifold"] - before["non_manifold"]
+    if dn > 0:
+        bits.append(f"created {dn} non-manifold edge(s) (now {after['non_manifold']}) — "
+                    f"3+-face junctions a boolean/weld left behind")
+    if before["euler_ok"] and not after["euler_ok"]:
+        bits.append(f"made the topology INCONSISTENT (χ={after['chi']}, "
+                    f"{after['boundary_loops']} boundary loop(s) — impossible for a clean "
+                    f"surface): the op likely did the opposite of its intent")
+    if not bits:
+        return None
+    return "topology degraded: " + "; ".join(bits)
 
 
 def _enter_edit_for_target(target_name):
@@ -383,11 +452,16 @@ def execute_command(command):
     # the target= edit-mode entry, so we read the right object) and compared post-op.
     noop_name = None
     geo_before = None
+    topo_before = None
     if tool in NOOP_CHECK_TOOLS:
         _gobj = _noop_obj(tool, params, target)
         if _gobj is not None:
             noop_name = _gobj.name
             geo_before = _geo_signature(_gobj)
+            # G105/G118/G134: snapshot topology too, so a degrade (new hole, non-manifold
+            # junk, broken Euler) is caught at the op, not one read later.
+            if tool in TOPO_CHECK_TOOLS:
+                topo_before = _topo_signature(_gobj)
 
     try:
         result = fn(params)
@@ -449,6 +523,17 @@ def execute_command(command):
                 "before and after — nothing moved. Check the selection captured what "
                 "you intended and the parameters are non-trivial (e.g. scale≠1, "
                 "amount≠0, a ring that actually has spread to scale).")
+
+    # G105/G118/G134: the mirror of the no-op detector — an op that SUCCEEDED but
+    # DEGRADED the geometry (sprang a hole, left non-manifold junk, broke the Euler
+    # invariant). Warns at the moment of the op, not on the next read's floor line.
+    if (topo_before is not None and noop_name and isinstance(result, dict)
+            and result.get("success")):
+        _tobj2 = bpy.data.objects.get(noop_name)
+        topo_after = _topo_signature(_tobj2) if _tobj2 is not None else None
+        tw = _topology_delta_warning(topo_before, topo_after)
+        if tw:
+            result["topology_delta_warning"] = tw
 
     # Log + push the undo step AFTER edit-mode tools have returned to OBJECT mode,
     # so each step is an object-mode checkpoint (undoable from object mode) and

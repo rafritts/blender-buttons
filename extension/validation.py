@@ -33,11 +33,17 @@ _EPS = 1e-4        # coplanar / below-floor (0.1 mm)
 _CLIP_FLOOR_MM = 0.3   # ignore sub-0.3mm grazes (matches auto_proximity_note)
 
 # Intent-free defect checks — there is NO suppression path for any of these.
+# `non_manifold` now means 3+/0-face edges ONLY (open 1-face rims are NOT here — G129);
+# `inconsistent_topology` is the χ-vs-boundary-loop invariant break (G118).
 _INTENT_FREE = ("z_fight", "below_floor", "degenerate", "inverted_normals",
-                "non_manifold", "self_intersection")
-# The one intent-laden check — suppressible only by a DECLARED intent.
+                "non_manifold", "self_intersection", "inconsistent_topology")
+# Intent-laden checks — suppressible only by a DECLARED intent (expect).
 _CLIPPING = "clipping"
-_ALL_CHECKS = _INTENT_FREE + (_CLIPPING,)
+# G129: an open boundary loop (plane, cup mouth, cloth) is legit geometry, not a defect.
+# Declarable via expect — which arms a SEAL tripwire (a declared-open part that later
+# closes is a finding). Undeclared boundaries are a quiet count, never a hard defect.
+_OPEN_BOUNDARY = "open_boundary"
+_ALL_CHECKS = _INTENT_FREE + (_CLIPPING, _OPEN_BOUNDARY)
 
 
 # ── scene-scoped declared-intent registry (module global, like collab._pending) ──
@@ -85,6 +91,15 @@ def _intent_for_pair(check, x, y):
     return None
 
 
+def _boundary_intent(objname):
+    """A declared OPEN-BOUNDARY intent covering objname (G129) — exact name or a
+    collection token. Single-object: stored with a==b==the part/collection."""
+    for e in _intents:
+        if e["check"] == _OPEN_BOUNDARY and _token_matches(e["a"], objname):
+            return e
+    return None
+
+
 def _prune_dead_intents():
     """Auto-GC declarations whose object (or collection) no longer exists, so deleting a
     declared part never leaves a permanent un-clearable VANISHED tripwire (feedback P1.5)."""
@@ -97,7 +112,12 @@ def _prune_dead_intents():
 
 def add_intent(a, b, reason, check=_CLIPPING, source="agent"):
     """Declare a clip/penetration INTENDED — a positive, falsifiable assertion carrying
-    its reason verbatim. Re-declaring a pair updates its reason. Returns the entry."""
+    its reason verbatim. Re-declaring a pair updates its reason. Returns the entry.
+
+    For check=open_boundary (G129) it's a SINGLE part/collection — b defaults to a — and
+    declaring it intended arms a SEAL tripwire (if the part later closes, that's a finding)."""
+    if check == _OPEN_BOUNDARY and not b:
+        b = a
     if not a or not b:
         return {"error": "expect needs both objects (a, b) of the intended pair"}
     if not (reason or "").strip():
@@ -249,7 +269,9 @@ def run_validate(touched_names=None, scene_wide=False, verbose=False):
         line = (f"validate: {len(excluded)} mesh(es) excluded (human override)"
                 if excluded else "")
         return {"off": False, "passed": True, "excluded": excluded,
-                "intent_free": [], "clipping": _empty_clip(), "line": line}
+                "intent_free": [], "clipping": _empty_clip(),
+                "open_boundary": {"declared": 0, "undeclared": [], "intended": 0, "sealed": []},
+                "line": line}
 
     intent_free = []
 
@@ -298,14 +320,58 @@ def run_validate(touched_names=None, scene_wide=False, verbose=False):
         if sx:
             intent_free.append({"check": "self_intersection",
                                 "message": f"{o.name} has {sx} self-intersection(s)"})
+        # G118: an impossible Euler characteristic (χ vs boundary-loop count) — the cheap,
+        # decisive tell of a hollow built inside-out / a boolean gone wrong. Always a defect.
+        euler_ok = r.get("euler_ok", True)
+        _bump("inconsistent_topology", not euler_ok)
+        if not euler_ok:
+            intent_free.append({"check": "inconsistent_topology",
+                                "message": (f"{o.name} has impossible topology "
+                                            f"(χ={r.get('euler_characteristic')}, "
+                                            f"{r.get('boundary_loops')} boundary loop(s)) — a "
+                                            f"hollow/boolean likely did the opposite of intent")})
 
     # clipping / penetration — intent-laden, DELTA-SCOPED to what this op touched.
     clip = _clipping_findings(introspect, scope, scope_names, live_names)
+    # open boundaries — G129: legit for planes/rims/cloth (quiet count), declarable, with
+    # a SEAL tripwire on declared-open parts.
+    ob = _open_boundary_findings(scope, reports)
 
-    passed = not intent_free and not clip["new"] and not clip["vanished"]
-    line = _render_line(intent_free, clip, excluded, verbose)
+    passed = (not intent_free and not clip["new"] and not clip["vanished"]
+              and not ob["sealed"])
+    line = _render_line(intent_free, clip, ob, excluded, verbose)
     return {"off": False, "passed": passed, "excluded": excluded,
-            "intent_free": intent_free, "clipping": clip, "line": line}
+            "intent_free": intent_free, "clipping": clip, "open_boundary": ob, "line": line}
+
+
+def _open_boundary_findings(scope, reports):
+    """G129 — open boundary loops are NOT defects (a tabletop plane, a cup mouth, cloth).
+    Report them as a quiet count, declarable via expect (check=open_boundary). A declared-
+    open part that has since CLOSED is a 'sealed' finding (the bidirectional tripwire — an
+    intended mouth must not silently seal)."""
+    undeclared, intended, sealed = [], 0, []
+    scope_names = {o.name for o in scope}
+    for o in scope:
+        b = reports.get(o.name, {}).get("boundary_loops", 0)
+        if b <= 0:
+            continue
+        decl = _boundary_intent(o.name)
+        if decl is not None:
+            decl["status"] = "holding"
+            intended += 1
+        else:
+            undeclared.append({"object": o.name, "loops": b})
+        _bump(_OPEN_BOUNDARY, decl is None)
+    # seal tripwire: a declared-open part this op touched that now has NO boundary.
+    for e in _intents:
+        if e["check"] != _OPEN_BOUNDARY:
+            continue
+        name = e["a"]
+        if name in scope_names and reports.get(name, {}).get("boundary_loops", None) == 0:
+            e["status"] = "vanished"
+            sealed.append({"object": name, "reason": e.get("reason", "")})
+    return {"declared": len([e for e in _intents if e["check"] == _OPEN_BOUNDARY]),
+            "undeclared": undeclared, "intended": intended, "sealed": sealed}
 
 
 def _empty_clip():
@@ -354,6 +420,24 @@ def _min_bbox_overlap_mm(a_name, b_name):
     return round(m * 1000, 1) if m > 0 else 0.0
 
 
+def _is_open_shell(name, cache):
+    """G124 — does this mesh have any open boundary edge (1 linked face)? If so its
+    inside/outside is ill-defined and BVH penetration depth against it is meaningless.
+    Cached per validate run (the same pair is tested from both directions)."""
+    if name in cache:
+        return cache[name]
+    from .common import eval_world_bmesh
+    obj = bpy.data.objects.get(name)
+    val = False
+    if obj is not None and obj.type == 'MESH':
+        bm = eval_world_bmesh(obj)
+        if bm is not None:
+            val = any(len(e.link_faces) == 1 for e in bm.edges)
+            bm.free()
+    cache[name] = val
+    return val
+
+
 def _clipping_findings(introspect, scope, scope_names, live_names):
     """Penetration findings, DELTA-SCOPED. check_contacts (robust bbox+gate) finds the
     candidate pairs touching this op's scope; each candidate's TRUE depth is recomputed
@@ -366,9 +450,18 @@ def _clipping_findings(introspect, scope, scope_names, live_names):
         for p in c.get("penetrating", []):
             candidates.add(frozenset((c["object"], p["other"])))
 
-    depths = {}
+    shell_cache = {}
+    depths, open_shell = {}, set()
     for key in candidates:
         a, b = tuple(key)
+        # G124: the signed inside/outside test that drives penetration DEPTH is undefined
+        # against a non-watertight shell (open boundary → ill-defined normals), so it
+        # returns garbage magnitudes (an 84mm "clip" on a 6mm sprinkle). When either party
+        # is an open shell, flag CONTACT without a fabricated number and point at clearance.
+        if _is_open_shell(a, shell_cache) or _is_open_shell(b, shell_cache):
+            depths[key] = None
+            open_shell.add(key)
+            continue
         d = _true_penetration_mm(a, b)
         if d >= _CLIP_FLOOR_MM:
             depths[key] = d                          # precise true depth
@@ -387,8 +480,12 @@ def _clipping_findings(introspect, scope, scope_names, live_names):
             e["status"] = "holding"
             intended_in_scope += 1
         else:
-            msg = f"{a}↔{b} {depth}mm" if depth is not None else \
-                f"{a}↔{b} (overlap — `feel op=clearance` to measure)"
+            if depth is not None:
+                msg = f"{a}↔{b} {depth}mm"
+            elif key in open_shell:
+                msg = f"{a}↔{b} (contact, depth N/A — open shell; `feel op=clearance` to measure)"
+            else:
+                msg = f"{a}↔{b} (overlap — `feel op=clearance` to measure)"
             new.append({"a": a, "b": b, "depth_mm": depth, "message": msg})
 
     # Bidirectional invariant — but ONLY for declared OBJECT pairs this op touched (in
@@ -412,7 +509,7 @@ def _clipping_findings(introspect, scope, scope_names, live_names):
             "new": new, "vanished": vanished, "intended_in_scope": intended_in_scope}
 
 
-def _render_line(intent_free, clip, excluded, verbose=False):
+def _render_line(intent_free, clip, ob, excluded, verbose=False):
     """Compact, report-by-exception status line. Clean ⇒ a short reassurance (so
     silence-because-clean is explicit, never absent). Clips collapse to a COUNT by
     default; only the NEW delta is listed. verbose lists everything (op=run)."""
@@ -440,6 +537,20 @@ def _render_line(intent_free, clip, excluded, verbose=False):
         cl.append(f"VANISHED {v['a']}↔{v['b']} (declared intended — confirm or clear)")
     if cl:
         segs.append("clipping " + " · ".join(cl))
+    # G129: open boundaries — a quiet count (NOT a defect; doesn't fail the floor), plus
+    # the loud SEAL tripwire on declared-open parts that have closed.
+    if ob:
+        for s in ob.get("sealed", [])[:cap]:
+            segs.append(f"SEALED {s['object']} (declared open — now CLOSED; confirm or clear)")
+        und = ob.get("undeclared", [])
+        if und:
+            shown = ", ".join(f"{u['object']}({u['loops']})" for u in und[:cap])
+            more = "" if verbose or len(und) <= cap else f" …(+{len(und) - cap})"
+            note = (f"open_boundary {len(und)}: {shown}{more} — intended for a plane/rim/"
+                    f"cloth? validate op=expect check=open_boundary to declare")
+            segs.append(note)
+        if ob.get("declared"):
+            segs.append(f"{ob['declared']} boundary intended")
     excl = f"  [{len(excluded)} excluded]" if excluded else ""
     if not segs:
         return f"validate: clean{excl}"
@@ -580,14 +691,17 @@ def validate_run(params):
 
 
 def validate_expect(params):
-    """op=expect / intend — declare a clip intended (a or b may name a COLLECTION)."""
+    """op=expect / intend — declare a clip intended (a or b may name a COLLECTION), OR an
+    open boundary intended (check=open_boundary, a single part/collection — G129)."""
+    check = (params.get("check") or _CLIPPING).strip()
     return add_intent(params.get("a", ""), params.get("b", ""),
-                      params.get("reason", ""), source="agent")
+                      params.get("reason", ""), check=check, source="agent")
 
 
 def validate_forget(params):
     """op=forget — retire a declaration (clears a stale tripwire)."""
-    return revoke_intent(params.get("a", ""), params.get("b", ""))
+    check = (params.get("check") or _CLIPPING).strip()
+    return revoke_intent(params.get("a", ""), params.get("b", ""), check=check)
 
 
 def validate_intended(params):
