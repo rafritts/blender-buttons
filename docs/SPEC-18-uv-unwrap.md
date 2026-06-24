@@ -1,9 +1,9 @@
 # SPEC-18 — UV Unwrap & Texture-Space Wiring
 
-_Status: **Designed 2026-06-24 — awaiting sign-off (not yet built).** Closes **gaps.md G152**
-(no UV-unwrap verb; `material op=pbr`/`textured` assumes box projection forever) and fills
-**Stage 6** of `docs/art_pipeline.md`, which `project-vision.md` lists as in-scope. One
-decision (§2.0, the verb home) needs the human's call before I cut code._
+_Status: **Designed 2026-06-24, verb home signed off — ready to build (not yet built).** Closes
+**gaps.md G152** (no UV-unwrap verb; `material op=pbr`/`textured` assumes box projection forever)
+and fills **Stage 6** of `docs/art_pipeline.md`, which `project-vision.md` lists as in-scope.
+The one open decision — the verb home (§2.0) — is resolved: a **dedicated `uv` verb**._
 
 Scope discipline: this exposes Blender's existing unwrappers and the UV-map material wiring
 as **mechanical setters + one deterministic check**. We do not build a UV editor, manual
@@ -61,28 +61,21 @@ UV is the second-most "aesthetic-feeling" domain after lighting, so THE ONE RULE
 
 ## 2. The verb surface
 
-### 2.0 DECISION NEEDED — verb home (new `uv` verb vs. spread across existing verbs)
+### 2.0 Verb home — DECIDED: a dedicated `uv` verb
 
-The gap floats either "a `uv` verb" or "`edit op=unwrap`". The family is small and cohesive
-(unwrap, seam, pack, check, + the material wiring). Two coherent shapes:
+The gap floated either "a `uv` verb" or "`edit op=unwrap`". **Resolved (signed off): a
+dedicated `uv` verb.** UV is a distinct coordinate space (the 2D map), and grouping
+`unwrap / mark_seam / clear_seam / pack / check / checker` under one verb is the most legible —
+one place the agent looks for "everything UV," with `feel`/`edit` left focused. The
+material-consumption knob (§4) still lives on `material`, since that's where shading is wired.
 
-- **Option A (recommended) — a dedicated `uv` verb.** UV is a distinct coordinate space (the
-  2D map), and grouping `unwrap / mark_seam / clear_seam / pack / check` under one verb is the
-  most legible — one place the agent looks for "everything UV." Cost: it's the 20th verb (the
-  SPEC-05 collapse prizes few verbs), and seam marking arguably belongs with the other edge
-  tags in `edit`. The material-consumption knob (§4) still lives on `material` regardless.
+The cost we accept: it's a new verb, against the SPEC-05 collapse's bias toward few. The
+counter is that a new coordinate space earns one, and the alternative (scattering unwrap across
+`edit`, the check across `feel`/`view`) hurts discoverability more than one extra verb hurts
+the collapse. Recorded for posterity: the rejected option was folding the ops into `edit`
+(`edit op=unwrap`/`mark_seam`/`pack`) + `feel op=uv` / `view op=check_uv`.
 
-- **Option B — fold into existing verbs.** `edit op=unwrap`, `edit op=mark_seam`,
-  `edit op=clear_seam`, `edit op=pack` (seams sit naturally beside `mark_sharp`/`crease`), and
-  the quality read as `feel op=uv` or `view op=check_uv` (beside the other deterministic
-  checks). No new verb. Cost: the UV family is scattered across three verbs; discoverability
-  drops ("where's unwrap?").
-
-**My recommendation: Option A.** A new coordinate space earns a verb; cohesion beats the
-verb-count purity here, and `feel`/`edit` stay focused. The rest of this spec is written for A,
-but every op maps 1:1 onto B if you prefer — say which and I'll adjust before building.
-
-### 2.1 The `uv` verb (Option A)
+### 2.1 The `uv` verb
 
 ```
 uv op=unwrap     target= method=smart|angle|conformal|cube|cylinder|sphere
@@ -238,7 +231,7 @@ Each phase is independently shippable and independently dogfoodable.
 
 ---
 
-## 9. Wiring checklist (per the architecture, for Option A)
+## 9. Wiring checklist (per the architecture)
 
 - **`server/uv.py`** (new) — flat helper fns (`unwrap`, `mark_seam`, `clear_seam`, `pack`,
   `check_uv`, `apply_checker`) that `call_blender(...)` + format the status line. Mirror
