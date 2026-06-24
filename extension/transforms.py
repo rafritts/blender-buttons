@@ -664,6 +664,22 @@ def seat_into(params):
     up_vec = _AXIS_VEC[axis_key]
     down = -up_vec
 
+    # G155: seat casts straight along ±axis on the assumption the cavity's floor faces
+    # that axis. If the target is TILTED off the seat axis (a hollow yawed-and-pitched
+    # for camera framing), its interior floor no longer faces +axis and the down-cast can
+    # latch a wall / wrong floor and drive the part through the bottom (coffee 49mm below
+    # z=0). A pure spin ABOUT the axis is fine — the floor still faces up — so only an
+    # off-axis tilt is unsafe. Refuse with a pointer to rest_on rather than seat wrong.
+    local_up = (target.matrix_world.to_3x3() @ up_vec).normalized()
+    tilt_deg = math.degrees(local_up.angle(up_vec, 0.0))
+    if tilt_deg > 8.0:
+        return {"error": (f"target '{target_name}' is tilted {tilt_deg:.1f}° off the "
+                          f"{axis_key} axis — seat casts straight down {axis_key} and would "
+                          f"latch the wrong interior floor on a tilted hollow (G155). Use "
+                          f"rest_on, or axis-align the target first (a pure spin about "
+                          f"{axis_key} is fine; this is an off-axis tilt).")}
+
+    tgt_top = tgt["bbox"][axis_idx + 3]
     rested = []
     for o in objs:
         if o.name == target_name:
@@ -671,6 +687,17 @@ def seat_into(params):
         src = _prepare(o, cap=500)
         if src is None:
             continue
+        # G159: if the source spawns INSIDE/BELOW the cavity (straddling the rim, lower
+        # half under z=0), the down-cast finds floor hits ABOVE some of its own verts and
+        # the min-clearance seats it further DOWN — through the bottom. Lift it fully clear
+        # of the target's bbox along +axis first so every cast is a clean top-down drop
+        # onto the real floor; the reported drop is the NET move from where it started.
+        z0 = o.location[axis_idx]
+        src_min = min((v[axis_idx] for v in src["verts"]), default=tgt_top)
+        if src_min <= tgt_top + 0.001:
+            o.location[axis_idx] += (tgt_top - src_min) + 0.01   # clear the mouth by 10mm
+            bpy.context.view_layer.update()
+            src = _prepare(o, cap=500)
         # Among the target surfaces directly below the source's verts, keep only FLOORS
         # (normal facing up along +axis). Vertical cavity walls and the outer rim's
         # vertical faces are excluded, so the part can sink past them onto the floor.
@@ -690,7 +717,8 @@ def seat_into(params):
                               f"cavity opening? (rest_on seats on an outer top surface.)")}
         drop = min_clear - offset
         o.location[axis_idx] -= drop
-        rested.append({"name": o.name, "dropped_mm": round(drop * 1000, 2)})
+        net = z0 - o.location[axis_idx]   # +down; nets out any G159 pre-lift
+        rested.append({"name": o.name, "dropped_mm": round(net * 1000, 2)})
     bpy.context.view_layer.update()
     out = {"success": True, "target": target_name, "axis": axis_key,
            "offset": offset, "seated": rested,

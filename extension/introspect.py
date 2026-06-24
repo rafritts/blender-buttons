@@ -296,13 +296,26 @@ def check_contacts(params):
 # ─────────────────────────── resting (P10) ───────────────────────────
 
 def _support_below(obj, prepared, zmin):
-    """Object whose top sits at obj's bottom with an xy overlap, or None (floor)."""
+    """Object whose top sits at obj's bottom with an xy overlap, or None (floor).
+
+    Skips any candidate fully CONTAINED within obj's bbox — a vessel's own contents
+    (coffee inside a mug). A part cannot rest on something it encloses, so without this
+    the contained object hijacks the support read and reports a phantom 'sunk Nmm'
+    against its top while the real external support (the table) is ignored (G165). The
+    container then correctly falls through to its true support below.
+    """
     o_bb = world_bbox(obj)
+    eps = 0.002
     best = None
     for name, p in prepared.items():
         if name == obj.name:
             continue
         b = p["bbox"]
+        contained = (b[0] >= o_bb[0] - eps and b[3] <= o_bb[3] + eps and
+                     b[1] >= o_bb[1] - eps and b[4] <= o_bb[4] + eps and
+                     b[2] >= o_bb[2] - eps and b[5] <= o_bb[5] + eps)
+        if contained:
+            continue
         xy_overlap = (o_bb[0] < b[3] and o_bb[3] > b[0] and o_bb[1] < b[4] and o_bb[4] > b[1])
         if not xy_overlap:
             continue

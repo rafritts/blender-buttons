@@ -48,19 +48,6 @@ remaining boundary loops — the relational version of join for two-part props.
 
 ---
 
-## G155 — `transform op=seat` into a tilted/rotated hollow shell can fire the wrong interior floor
-
-`seat` is supposed to lower a part into the highest interior floor under its footprint. On
-a coffee disc seated into a mug that had been yawed for camera framing, `seat` drove the
-liquid ~49mm — through the mug floor and below z=0 — while `rest_on` against the same target
-was sane. The agent cannot tell from the schema when seat vs rest_on is safe on rotated
-hollows. Candidate fix: `seat` honours the target's world orientation when casting for
-interior floors (or refuses with "target transform non-axis-aligned — use rest_on"), and/or
-`surface=interior|exterior` disambiguates the cavity read that G145 improved for axis-aligned
-cups.
-
----
-
 ## G157 — `select`/`component_mode` can leave edit-mode selection state out of sync with the agent's assumed mode
 
 Several `select op=by_axis` / `component_mode` calls returned status in OBJECT mode while
@@ -74,20 +61,6 @@ expected mode with an explicit error instead of silently switching.
 
 ---
 
-## G159 — `transform op=seat` mis-fires when the source starts overlapping/below the target (axis-aligned, not just rotated)
-
-Distinct trigger from [G155]: seating a torus into an axis-aligned plate well, the donut
-began straddling the plate (spawned at origin, lower half below z=0). `seat` drove it
-*down* 2.9mm — to rest below the table — instead of lifting it onto the well floor. The fix
-that worked for both the donut and (pre-emptively) the coffee was the same: `nudge` the
-source entirely clear above the cavity first, then `seat` (which then dropped a sane
-18.9mm / 67mm onto the real floor). So seat's interior-floor raycast is only trustworthy
-when the source already sits fully above the cavity mouth. Candidate fix: seat should lift
-the source clear of the target's bbox before casting (or detect initial interpenetration and
-auto-lift), so a part that spawns inside/below its destination doesn't seat *through* it.
-
----
-
 ## G161 — `add type=tube` (spline_tube) self-intersects at the ends on a clean low-curvature planar path; curve+bevel→convert is clean
 
 A C-shaped mug handle swept as `add type=tube` through 5–7 coplanar points on a smooth
@@ -98,43 +71,6 @@ bevel_depth=…` then `object op=convert` produced a clean watertight tube (0 se
 So spline_tube's end-cap/endpoint sampling looks buggy, not the geometry. Candidate fix:
 either route spline_tube through the same curve-bevel path internally, or have the guidance
 steer handle/cable work to curve+bevel and flag spline_tube as endpoint-fragile.
-
----
-
-## G163 — `transform op=scatter` yields a few corrupt instances (inverted normals, wild misplacement) needing manual cull
-
-Scattering 80 capsule sprinkles onto a curved icing crown left 2 instances with inverted
-normals (mirrored alignment frames → would render dark) and 2 placed 30–45mm into the
-surface (clip depth larger than the whole donut — almost certainly seated onto a wrong/inner
-face near the hole boundary). ~5% defect rate, each a hard `validate` defect with no
-suppression path, fixable only by deleting the offending instances by name. Candidate fix:
-scatter should reject negative-determinant (mirrored) placement frames and discard
-instances whose seat lands deeper than the prototype's own height, reporting the count it
-dropped rather than emitting broken geometry.
-
----
-
-## G165 — `feel op=resting` reports nonsense when an object contains another (vessel + liquid)
-
-`feel op=resting targets=Mug` returned "on Coffee, 0 contacts, sunk 62.8mm" — the mug rests
-on the *table*, but the read latched onto the Coffee disc sitting *inside* it and reported a
-62mm sink. `feel op=contacts` on the same pair was correct ("Mug connected to Table,
-Coffee"). So resting picks the nearest surface beneath the part without excluding geometry
-the part encloses. Candidate fix: resting should ignore targets fully contained within the
-queried object's footprint+height (or prefer the lowest external support), so a filled
-vessel still reads as resting on the table.
-
----
-
-## G167 — applying a BEVEL modifier near an NGON cap leaves zero-area degenerate faces
-
-Beveling a solid whose caps are NGONs (a cylinder plate with inset rings meeting an NGON
-floor) and then `modifier op=apply` emitted 96 zero-area faces — roughly one per segment — a
-hard `validate` defect with no suppression path. `edit op=merge` at ~0.3mm dissolved them
-cleanly, but nothing warns that apply will produce them, and an agent that doesn't re-run
-`validate` after the apply ships non-renderable geometry. Candidate fix: bevel-apply runs a
-degenerate-dissolve / merge-by-distance pass on the faces it touched (or reports the sliver
-count it left behind), so a rounded ceramic edge can't silently introduce a defect.
 
 ---
 

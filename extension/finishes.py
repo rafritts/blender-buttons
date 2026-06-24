@@ -1084,12 +1084,47 @@ def apply_modifiers(params):
     mod_names = [m.name for m in obj.modifiers]
     if not mod_names:
         return {"success": True, "applied": [], "object": obj.name}
+    had_bevel = any(m.type == 'BEVEL' for m in obj.modifiers)
     applied = []
     for mod_name in mod_names:
         if any(m.name == mod_name for m in obj.modifiers):
             bpy.ops.object.modifier_apply(modifier=mod_name)
             applied.append(mod_name)
-    return {"success": True, "applied": applied, "object": obj.name}
+    out = {"success": True, "applied": applied, "object": obj.name}
+    # G167: a BEVEL applied next to an NGON cap drops ~one zero-area sliver face per
+    # segment — a hard validate defect with no suppression path. Clean the slivers the
+    # apply just produced (merge-by-distance + dissolve-degenerate) and report the count,
+    # so a rounded ceramic edge can't silently ship non-renderable geometry.
+    if had_bevel:
+        removed = _dissolve_degenerate_faces(obj)
+        if removed:
+            out["degenerate_dissolved"] = removed
+    return out
+
+
+def _dissolve_degenerate_faces(obj, dist=3e-4):
+    """Merge coincident verts + dissolve degenerate edges/faces on obj's base mesh, used
+    after a BEVEL apply to clear zero-area sliver faces (G167). Returns the count of
+    zero-area faces removed (0 if the apply was clean, leaving the mesh untouched)."""
+    import bmesh
+    me = obj.data
+    if me is None:
+        return 0
+    before = sum(1 for p in me.polygons if p.area < 1e-9)
+    if before == 0:
+        return 0
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=dist)
+    try:
+        bmesh.ops.dissolve_degenerate(bm, dist=dist, edges=bm.edges[:])
+    except Exception:
+        pass
+    bm.to_mesh(me)
+    bm.free()
+    me.update()
+    after = sum(1 for p in me.polygons if p.area < 1e-9)
+    return max(0, before - after)
 
 
 def convert_to_mesh(params):

@@ -281,6 +281,9 @@ def scatter_on_surface(target: str, source: str = "", count: int = 100,
         skipped = result.get("skipped", result.get("skipped_in_avoid", 0))
         if skipped:
             main += f"\n  {skipped} instance(s) dropped — couldn't satisfy within/avoid"
+        if result.get("dropped_defective"):
+            main += (f"\n  {result['dropped_defective']} instance(s) dropped — sampled an "
+                     f"inner/occluded face (would bury or flip the copy)")
         # G151: confirm that per-source colour overrides carried through. Silence here
         # when multiple sources were given is the tell that the sources share a mesh with
         # NO per-object material — so the scatter will render one uniform colour.

@@ -194,6 +194,23 @@ def scatter_on_surface(params):
     if not triangles:
         return {"error": "Target has no usable surface area"}
 
+    # G163: a BVH over the FULL target surface (before any up_only gating) so we can reject
+    # samples that land on an INNER / occluded face — the source of the corrupt instances
+    # the donut dogfood hit: copies seated 30–45mm INTO the body on a hidden inner face near
+    # the hole, or aligned to an inward-pointing normal (renders dark). The test: cast
+    # outward along the sampled face normal — a point on the true outer surface escapes; a
+    # buried/back-facing one re-hits the target. Those are dropped (counted), never emitted.
+    from mathutils.bvhtree import BVHTree
+    _bv, _bf = [], []
+    for (_a, _b, _c, _n) in triangles:
+        base = len(_bv)
+        _bv.extend((_a, _b, _c))
+        _bf.append((base, base + 1, base + 2))
+    tgt_bvh = BVHTree.FromPolygons(_bv, _bf)
+
+    def _occluded(p, n):
+        return tgt_bvh.ray_cast(p + n * 1e-4, n)[0] is not None
+
     # G104: a normal-gate so "sprinkles on top only" doesn't mean scattering 2× the count
     # and hiding half underneath. up_only keeps faces whose normal sits within max_slope°
     # of +Z (so the icing's underside and inner-hole walls are excluded). A general
@@ -282,6 +299,7 @@ def scatter_on_surface(params):
 
     created = []
     skipped = 0
+    dropped_defective = 0  # G163: samples on an inner/occluded face, rejected not emitted
     colored = 0  # G151: instances that carried a per-object material override
     for i in range(count):
         ti = _area_weighted_face_sample(triangles, areas, total_area, rng)
@@ -303,6 +321,13 @@ def scatter_on_surface(params):
             if not placed:
                 skipped += 1
                 continue
+
+        # G163: drop samples on an inner/occluded face (would bury the instance or flip it
+        # to render dark). Resampling here would fight a genuinely bad region, so the
+        # instance is simply not emitted and the count is reported.
+        if _occluded(pos, normal):
+            dropped_defective += 1
+            continue
         _remember(pos)
 
         # G57: each instance picks a source for variety; all copies of a given source
@@ -371,6 +396,7 @@ def scatter_on_surface(params):
         "success": True,
         "scattered": len(created),
         "skipped": skipped,
+        "dropped_defective": dropped_defective or None,  # G163: inner/occluded-face samples
         "skipped_in_avoid": skipped,  # kept for back-compat with older callers
         "target": target_name,
         "source": source_name,

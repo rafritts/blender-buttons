@@ -366,6 +366,9 @@ def apply_modifiers(name: str = "") -> str:
         applied = result.get("applied", [])
         main = (f"Applied {len(applied)} modifier(s) on '{result['object']}': {applied}"
                 if applied else f"No modifiers on '{result['object']}'")
+        if result.get("degenerate_dissolved"):
+            main += (f"\n  cleaned {result['degenerate_dissolved']} zero-area sliver face(s) "
+                     f"the bevel left at an NGON cap")
     else:
         main = result.get("error", "failed")
     return main + _status(result)
