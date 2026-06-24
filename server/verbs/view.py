@@ -11,14 +11,15 @@ from server import viewport, introspect, scene
 from ._common import tag, unknown
 
 _OPS = ["shading", "angle", "overlays", "orbit", "rig", "zoom", "frame", "check_framing",
-        "check_focus", "check_visible", "camera_dof", "camera_lens", "active_camera"]
+        "check_focus", "check_visible", "check_exposure", "check_lighting", "camera_dof",
+        "camera_lens", "active_camera"]
 
 
 @mcp.tool(name="view")
 def view(
     op: Literal["shading", "angle", "overlays", "orbit", "rig", "zoom", "frame",
-                "check_framing", "check_focus", "check_visible", "camera_dof", "camera_lens",
-                "active_camera"],
+                "check_framing", "check_focus", "check_visible", "check_exposure",
+                "check_lighting", "camera_dof", "camera_lens", "active_camera"],
     # shading / angle
     mode: tag(str, "[shading] WIREFRAME|SOLID|MATERIAL|RENDERED") = "MATERIAL",
     angle: tag(str, "[angle] FRONT|BACK|TOP|… or persp/ortho") = "",
@@ -51,7 +52,8 @@ def view(
     focus_distance: tag(float, "[camera_dof] focus distance (m)") = None,
     aperture: tag(float, "[camera_dof] f-stop (lower = shallower)") = None,
     focus_object: tag(str, "[camera_dof/check_focus] object to focus on") = "",
-    resolve_for: tag(str, "[check_focus] object to solve the widest sharp-keeping aperture for") = "",
+    resolve_for: tag(str, "[check_focus] object to solve the sharp-keeping aperture for; "
+                          "[check_exposure] light to solve the ~0-stop energy for") = "",
     # camera_lens
     lens: tag(float, "[camera_lens] focal length mm (24 wide · 50 neutral · 85 portrait · 135 hero)") = None,
 ) -> str:
@@ -85,6 +87,12 @@ def view(
                   % of FRONT-FACING surface unoccluded. For a recessed part (liquid in a
                   vessel, a gem in a setting) whose whole-bbox occlusion reads ~100% even
                   though its visible face is the point. (targets, camera)
+      check_exposure — is there too much / too little light? (SPEC-17) A deterministic
+                  irradiance estimate per target: stops over/under, key:fill ratio, % in
+                  shadow — flags GROSS over/under-exposure (whether it LOOKS right is your
+                  call). resolve_for=<light> solves the ~0-stop energy. (targets, resolve_for)
+      check_lighting — the lighting roll-up: exposure + focus in one read, no render.
+                  (targets, camera)
       camera_dof — depth of field on the camera (focus_distance OR focus_object,
                   aperture f-stop, camera)
       camera_lens — retune the focal length of an existing camera (lens mm, camera) —
@@ -115,6 +123,10 @@ def view(
                                       focus_object, resolve_for)
     if o == "check_visible":
         return introspect.check_visible(targets, camera)
+    if o == "check_exposure":
+        return introspect.check_exposure(targets, resolve_for)
+    if o == "check_lighting":
+        return introspect.check_lighting(targets, camera)
     if o == "camera_dof":
         return scene.set_camera_dof(focus_distance, aperture, focus_object, camera)
     if o == "camera_lens":

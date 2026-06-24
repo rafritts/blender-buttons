@@ -167,6 +167,55 @@ def set_world_background(color: list = None, hex: str = "", strength: float = No
 
 
 @mcp.tool()
+def set_atmosphere(density: float = None, color: list = None, hex: str = "",
+                   absorption: float = None, anisotropy: float = None,
+                   clear: bool = False, label: str = "") -> str:
+    """
+    Fill the world with a scattering medium — haze, fog, mist, and the volumetric
+    light shaft (god-ray). A god-ray is NOT a separate feature: turn the air slightly
+    hazy here, then any bright shadow-casting spot or sun shafts through it for free.
+
+    density:    scattering coefficient. 0 = clear air. 0.01 = thin haze, 0.05 = misty,
+                0.1+ = thick fog. Required (unless clear=True).
+    color:      [r, g, b] tint of the lit air — warm [1,0.6,0.3] dusk, cool morning.
+    hex:        "#RRGGBB" sRGB tint (overrides color).
+    absorption: extra extinction that darkens/thickens it (smoke vs clean mist).
+                Omit for pure scatter.
+    anisotropy: -1..1 scatter direction. ~0.6 biases light forward → tighter, brighter
+                beams toward the lamp; 0 = even fog.
+    clear:      True removes the medium (clear air again).
+
+    Cycles renders this with no extra setup. Under Eevee it also turns on volumetric
+    shadows so the beam casts — the result reports which engine it configured for.
+
+    Examples:
+      set_atmosphere(density=0.02)                          # subtle haze + god-rays
+      set_atmosphere(density=0.08, color=[1,0.7,0.4], anisotropy=0.6)  # warm dusty shaft
+      set_atmosphere(clear=True)                            # back to clear air
+    """
+    params = {}
+    if density is not None:    params["density"] = density
+    if color is not None:      params["color"] = color
+    if hex:                    params["hex"] = hex
+    if absorption is not None: params["absorption"] = absorption
+    if anisotropy is not None: params["anisotropy"] = anisotropy
+    if clear:                  params["clear"] = True
+    result = call_blender("set_world_volume", params, label=label)
+    if result.get("success"):
+        if result.get("mode") == "cleared":
+            main = f"atmosphere cleared [{result['engine']}]"
+        else:
+            eev = f" eevee:{result['eevee']}" if result.get("eevee") else ""
+            absn = f" absorption={result['absorption']}" if result.get("absorption") else ""
+            main = (f"atmosphere [{result['engine']}]: density={result['density']}"
+                    f"{absn} anisotropy={result['anisotropy']}{eev}")
+        main += f" [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def search_hdris(query: str, limit: int = 10) -> str:
     """
     Search Poly Haven's CC0 HDRI library by keyword (lighting mood / place —

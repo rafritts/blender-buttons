@@ -207,30 +207,15 @@ art-pipeline Stage-10 "post-processing" intention. Mechanical setter; the *amoun
 
 ---
 
-## 4. Particles — atmospheric motes (dust, sparks, snow, embers)
+## 4. Particles — DEFERRED (out of scope)
 
-Greenfield (creation doesn't exist today). This is the **largest, most deferrable** chunk and
-could become its own spec — but the atmospheric subset is in scope because it's part of "effects."
-
-General primitive — a particle **emitter** seated relationally:
-
-```
-add op=particles name= on=<subject>
-  kind=            # motes | falling | rising  (dust | snow | sparks/embers)
-  count= size= lifetime=
-  gravity=         # 0 = floating dust; + = snow; − = rising embers
-  velocity=        # initial speed along emit normal / up
-  render_as=       # halo/point, or instance a named tiny object
-  emit_from=       # surface of <subject> or a volume
-```
-
-- `motes` = many tiny, ~zero gravity, long life, slow → dust in a god-ray (pairs beautifully with
-  §2; the shaft makes the motes read). `falling` = downward gravity → snow. `rising` = negative
-  gravity + emission + short life → sparks/embers.
-- Keep it one general emitter with recipes; do **not** add `add_snow()` / `add_sparks()` verbs.
-- **Out of scope:** full physics interaction (collisions, force-field choreography). Offer a
-  single optional `wind=` force later if a build needs drift. Simmed fire/smoke stays §2.2's
-  exclusion.
+Atmospheric particles (dust motes, snow, sparks/embers) are **deferred to their own future
+spec** and intentionally not built here. Creation is greenfield (today particles are read-only:
+`feel` sees them, `set_particle_visibility` hides them), the surface is large, and the
+atmosphere work in §2 carries the "effects" ask on its own — a god-ray shaft reads without motes.
+When a build actually needs floating dust/snow/embers, spec a single **general particle emitter**
+(seated relationally on a named subject; `kind=motes|falling|rising` driven by a gravity sign),
+not bespoke `add_snow()`/`add_sparks()` verbs. Simmed fire/smoke stays excluded (§2.2).
 
 ---
 
@@ -343,7 +328,8 @@ Ordered so each phase is independently shippable and earns its keep:
    (relational seating + procedural density graph), low risk.
 6. **`beam=true`** + **`three_point`** sugar (§2.4/§3.2). Low complexity, only after 1/4 land.
 7. **Light linking** (§3.4) + **`render op=post`** bloom/glare/vignette (§3.5). Moderate.
-8. **Particle emitter** (§4). Largest/greenfield; consider splitting to its own spec if it grows.
+
+(Particles, §4, are deferred to a future spec — not part of this build.)
 
 ---
 

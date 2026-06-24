@@ -282,6 +282,132 @@ def set_world_background(params):
     }
 
 
+def set_world_volume(params):
+    """Atmosphere: a scattering/absorbing medium filling the whole world — the G130
+    god-ray primitive. Writes the World Output's Volume socket (otherwise unused).
+    Once the air scatters, any bright shadow-casting SPOT/SUN throws a visible shaft
+    for free; lower densities read as haze/fog/mist.
+
+    density:     scattering coefficient. 0 = clear air. ~0.01 thin haze, ~0.05 misty,
+                 ~0.1+ thick fog. Required (unless clear=True).
+    color:       [r, g, b] tint of the scattered light (warm dusk / cold morning).
+    hex:         "#RRGGBB" sRGB tint, converted to scene-linear. Overrides color.
+    absorption:  extra extinction that darkens/thickens the medium (smoke vs mist).
+                 0 / omitted = pure scatter. Mixed in via an Add Shader.
+    anisotropy:  -1..1 scatter direction. + (~0.6) biases light forward → tighter,
+                 brighter beams toward the light; 0 = uniform fog.
+    clear:       True tears the medium out (restores an empty Volume socket).
+
+    Engine: Cycles renders volumes with no toggle. Eevee renders them only within its
+    volumetric clip range and needs volumetric shadows on for the beam to actually
+    cast — so for Eevee this enables those and reports what it touched.
+    """
+    scene = bpy.context.scene
+    world = scene.world or bpy.data.worlds.new("World")
+    scene.world = world
+    world.use_nodes = True
+    nt = world.node_tree
+
+    out = next((n for n in nt.nodes if n.type == 'OUTPUT_WORLD'), None)
+    if out is None:
+        out = nt.nodes.new('ShaderNodeOutputWorld')
+
+    # Stable names so repeat calls find-or-create the same nodes (idempotent).
+    SCATTER, ABSORB, ADD = "atmosphere_scatter", "atmosphere_absorb", "atmosphere_add"
+
+    def _drop(name):
+        n = nt.nodes.get(name)
+        if n is not None:
+            nt.nodes.remove(n)
+
+    if params.get("clear"):
+        for nm in (ADD, ABSORB, SCATTER):
+            _drop(nm)
+        for link in list(nt.links):
+            if link.to_node is out and link.to_socket.name == 'Volume':
+                nt.links.remove(link)
+        return {"success": True, "mode": "cleared", "engine": scene.render.engine}
+
+    density = params.get("density")
+    if density is None:
+        return {"error": "'density' is required (or pass clear=True). "
+                         "Try 0.01 haze, 0.05 mist, 0.1 fog."}
+    density = float(density)
+
+    color = params.get("color")
+    hex_str = params.get("hex")
+    if hex_str:
+        from .shading import hex_to_linear_rgba
+        try:
+            color = hex_to_linear_rgba(hex_str)[:3]
+        except ValueError as e:
+            return {"error": str(e)}
+    if color is not None and len(color) != 3:
+        return {"error": "'color' must be a 3-element RGB list"}
+    rgba = tuple(list(color) + [1.0]) if color is not None else None
+
+    from .shading import _set_input
+
+    def _find(name, ntype):
+        n = nt.nodes.get(name)
+        if n is None:
+            n = nt.nodes.new(ntype)
+            n.name = name
+        return n
+
+    scatter = _find(SCATTER, 'ShaderNodeVolumeScatter')
+    _set_input(scatter, 'Density', density)
+    if rgba is not None:
+        _set_input(scatter, 'Color', rgba)
+    anis = params.get("anisotropy")
+    if anis is not None:
+        _set_input(scatter, 'Anisotropy', max(-1.0, min(1.0, float(anis))))
+
+    absorption = params.get("absorption")
+    if absorption is not None and float(absorption) > 0:
+        absorb = _find(ABSORB, 'ShaderNodeVolumeAbsorption')
+        _set_input(absorb, 'Density', float(absorption))
+        if rgba is not None:
+            _set_input(absorb, 'Color', rgba)
+        add = _find(ADD, 'ShaderNodeAddShader')
+        nt.links.new(scatter.outputs['Volume'], add.inputs[0])
+        nt.links.new(absorb.outputs['Volume'], add.inputs[1])
+        nt.links.new(add.outputs['Shader'], out.inputs['Volume'])
+    else:
+        # Pure scatter: tear out any prior absorb/add and wire scatter straight in.
+        _drop(ADD)
+        _drop(ABSORB)
+        nt.links.new(scatter.outputs['Volume'], out.inputs['Volume'])
+
+    engine = scene.render.engine
+    eevee_applied = []
+    if engine.startswith('BLENDER_EEVEE'):
+        eevee = getattr(scene, "eevee", None)
+        if eevee is not None:
+            # Beams only cast with volumetric shadows; the medium is only visible
+            # inside the clip range. Enable shadows and ensure a sane sample floor.
+            if hasattr(eevee, "use_volumetric_shadows"):
+                eevee.use_volumetric_shadows = True
+                eevee_applied.append("volumetric_shadows=True")
+            if hasattr(eevee, "volumetric_samples") and eevee.volumetric_samples < 64:
+                eevee.volumetric_samples = 64
+                eevee_applied.append("volumetric_samples=64")
+            if hasattr(eevee, "volumetric_start") and eevee.volumetric_start > 0.5:
+                eevee.volumetric_start = 0.1
+                eevee_applied.append("volumetric_start=0.1")
+
+    return {
+        "success": True,
+        "mode": "set",
+        "density": density,
+        "absorption": float(absorption) if absorption else 0.0,
+        "anisotropy": round(scatter.inputs['Anisotropy'].default_value, 3),
+        "color": list(scatter.inputs['Color'].default_value)[:3],
+        "engine": engine,
+        "eevee": eevee_applied,
+    }
+
+
 def set_camera_dof(params):
     """Enable depth of field on the scene camera.
 
@@ -675,6 +801,7 @@ TOOLS = {
     "aim_at":               aim_at,
     "rig_around":           rig_around,
     "set_world_background": set_world_background,
+    "set_world_volume":     set_world_volume,
     "set_camera_dof":       set_camera_dof,
     "set_color_management": set_color_management,
     "set_render_quality":   set_render_quality,

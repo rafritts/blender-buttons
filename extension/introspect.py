@@ -800,12 +800,22 @@ def check_focus(params):
         overlap = max(0.0, hi - lo)
         span = max(far_t - near_t, 1e-9)
         frac = max(0.0, min(1.0, overlap / span)) if in_front else 0.0
+        # Other ways a frame goes soft, without reading the render (SPEC-17):
+        #  • effective resolution — a subject this small in frame reads soft however well-focused
+        #  • motion — flag whether this object is animated (smear risk; see scene 'motion_blur')
+        cov = camera_coverage(scene, cam, o)
+        rx, ry = int(scene.render.resolution_x), int(scene.render.resolution_y)
+        frame_px = [int(round(cov["frac_w"] * rx)), int(round(cov["frac_h"] * ry))]
+        animated = bool(o.animation_data and o.animation_data.action)
         targets.append({
             "object": o.name,
             "depth_mm": depth_mm,
             "near_m": round(near_t, 4), "far_m": round(far_t, 4),
             "in_focus": bool(sharp),
             "in_focus_pct": round(frac * 100, 1),
+            "frame_px": frame_px,
+            "undersized": max(frame_px) < 64,
+            "animated": animated,
         })
 
     result = {
@@ -819,6 +829,10 @@ def check_focus(params):
         "dof_far_m": None if df is None else round(df, 4),
         "dof_slab_mm": dof_slab,
         "hyperfocal_m": round(H, 4),
+        "motion_blur": {
+            "enabled": bool(getattr(scene.render, "use_motion_blur", False)),
+            "shutter": round(float(getattr(scene.render, "motion_blur_shutter", 0.0)), 3),
+        },
         "targets": targets,
     }
 
@@ -838,6 +852,220 @@ def check_focus(params):
                     break
             result["resolve_for"] = resolve_for
             result["resolved_aperture"] = chosen   # None = even f/32 can't hold it sharp
+    return result
+
+
+# ─────────────────────────── check_exposure (SPEC-17) ───────────────────────────
+
+# Nominal "well-exposed" irradiance anchor (relative W/m²). NOT a calibrated photometric
+# value — a reference point so stops-over/under are comparable. The verdict bands around it
+# are deliberately WIDE: this flags GROSS over/under-exposure, never fine aesthetic taste.
+_EXPOSURE_REF = 5.0
+_BLOWN_STOPS = 4.0      # > +4 stops over nominal (≈16×) → likely blown
+_CRUSH_STOPS = -4.0     # < −4 stops under nominal (≈1/16×) → likely crushed
+
+
+def _scene_lights(scene):
+    return [o for o in scene.objects if o.type == 'LIGHT']
+
+
+def _light_irradiance(light_obj, point):
+    """Estimated direct irradiance (relative W/m²) a light delivers to a world point —
+    ignoring the surface normal (treats the point as facing the light, an upper bound) and
+    any occlusion (shadow is reported separately). Returns (irradiance, in_cone)."""
+    ld = light_obj.data
+    energy = float(getattr(ld, "energy", 0.0))
+    lt = ld.type
+    lpos = light_obj.matrix_world.translation
+    to_point = point - lpos
+    dist = to_point.length
+
+    if lt == 'SUN':
+        # A sun's 'energy' IS irradiance (W/m²), distance-independent.
+        return energy, True
+    if dist < 1e-6:
+        return 0.0, True
+
+    # Point-source inverse-square falloff: P / (4π d²). Spot/area share this model
+    # (area-light directionality is an explicit unmodeled limit).
+    e = energy / (4.0 * math.pi * dist * dist)
+
+    in_cone = True
+    if lt == 'SPOT':
+        forward = (light_obj.matrix_world.to_3x3() @ mathutils.Vector((0, 0, -1))).normalized()
+        cos_ang = max(-1.0, min(1.0, forward.dot(to_point.normalized())))
+        ang = math.acos(cos_ang)
+        half = float(getattr(ld, "spot_size", math.pi)) * 0.5
+        if ang > half:
+            return 0.0, False
+        blend = float(getattr(ld, "spot_blend", 0.0))
+        inner = half * (1.0 - blend)
+        if ang > inner and half > inner:
+            e *= max(0.0, 1.0 - (ang - inner) / (half - inner))
+    return e, in_cone
+
+
+def _shadow_fraction(scene, depsgraph, light_obj, obj, cap=80):
+    """Fraction of sampled points on obj that are blocked from the light by OTHER objects —
+    how much of the subject the light fails to reach."""
+    bm = eval_world_bmesh(obj)
+    if bm is None or not bm.verts:
+        if bm:
+            bm.free()
+        return 0.0
+    lt = light_obj.data.type
+    lpos = light_obj.matrix_world.translation
+    sun_to = None
+    if lt == 'SUN':
+        # parallel rays arrive from the direction opposite the sun's forward (-Z).
+        sun_to = -(light_obj.matrix_world.to_3x3() @ mathutils.Vector((0, 0, -1))).normalized()
+    n = len(bm.verts)
+    step = max(1, n // cap)
+    total = blocked = 0
+    for i in range(0, n, step):
+        w = bm.verts[i].co
+        if sun_to is not None:
+            d = sun_to
+            dist = 1e4
+        else:
+            d = lpos - w
+            dist = d.length
+            if dist < 1e-6:
+                continue
+            d = d.normalized()
+        total += 1
+        hit, loc, nrm, idx, hitobj, mat = scene.ray_cast(
+            depsgraph, w + d * 1e-4, d, distance=dist - 2e-4)
+        if hit and hitobj is not None and hitobj.name != obj.name:
+            blocked += 1
+    bm.free()
+    return blocked / total if total else 0.0
+
+
+def _world_ambient(scene):
+    """Ambient irradiance from the world background (relative W/m²): π·strength·luminance.
+    An HDRI/linked color can't be cheaply averaged, so it's proxied at mid-luminance 1.0."""
+    world = scene.world
+    if world is None:
+        return 0.0
+    if not world.use_nodes:
+        col = getattr(world, "color", (0.0, 0.0, 0.0))
+        lum = 0.2126 * col[0] + 0.7152 * col[1] + 0.0722 * col[2]
+        return math.pi * lum
+    bg = next((n for n in world.node_tree.nodes if n.type == 'BACKGROUND'), None)
+    if bg is None:
+        return 0.0
+    strength = float(bg.inputs['Strength'].default_value)
+    if bg.inputs['Color'].is_linked:
+        lum = 1.0
+    else:
+        col = bg.inputs['Color'].default_value
+        lum = 0.2126 * col[0] + 0.7152 * col[1] + 0.0722 * col[2]
+    return math.pi * strength * lum
+
+
+def check_exposure(params):
+    """SPEC-17 — VALIDATE the lighting LEVEL deterministically, without reading the render
+    back. Estimates the direct irradiance each light delivers to every target, the key:fill
+    ratio, and how much of the subject sits in shadow. Flags GROSS over/under-exposure;
+    whether the result actually LOOKS right is the human's call.
+
+    ESTIMATE, with stated limits: direct light only (no indirect/GI bounce), no surface
+    albedo, no area-light directionality, and the view-transform rolloff (AgX/Filmic) is NOT
+    applied. It reliably catches a light 100× too strong, a subject lit only by a faint
+    ambient floor, a runaway key:fill, or a subject in shadow — not whether a given highlight
+    is pleasingly clipped.
+
+    targets:      objects to test (empty = every visible mesh).
+    resolve_for:  light name — also solve the energy that brings the first target to ~0 stops.
+    """
+    scene = bpy.context.scene
+    if params.get("targets"):
+        report_objs, err = _report_targets(params)
+        if err:
+            return {"error": err}
+    else:
+        report_objs = scene_mesh_objects()
+    if not report_objs:
+        return {"error": "no target meshes to check"}
+
+    lights = _scene_lights(scene)
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    ambient = _world_ambient(scene)
+    vs = scene.view_settings
+    exposure_stops = float(getattr(vs, "exposure", 0.0))
+    view_xf = getattr(vs, "view_transform", "")
+
+    targets = []
+    for o in report_objs:
+        center = mathutils.Vector(world_center(o))
+        contribs = []
+        for L in lights:
+            e, in_cone = _light_irradiance(L, center)
+            if e <= 0.0:
+                contribs.append({"light": L.name, "type": L.data.type, "irradiance": 0.0,
+                                 "in_cone": in_cone, "shadow_pct": None, "_eff": 0.0})
+                continue
+            shadow = _shadow_fraction(scene, depsgraph, L, o)
+            contribs.append({"light": L.name, "type": L.data.type, "irradiance": round(e, 4),
+                             "in_cone": in_cone, "shadow_pct": round(shadow * 100, 1),
+                             "_eff": e * (1.0 - shadow)})
+        eff = [c["_eff"] for c in contribs]
+        total = ambient + sum(eff)
+        eff_sorted = sorted(eff, reverse=True)
+        ratio = (round(eff_sorted[0] / eff_sorted[1], 1)
+                 if len(eff_sorted) >= 2 and eff_sorted[1] > 1e-9 else None)
+        stops = math.log2(total / _EXPOSURE_REF) + exposure_stops if total > 1e-9 else -99.0
+        key = max(contribs, key=lambda c: c["_eff"], default=None)
+        key_shadow = key["shadow_pct"] if key and key["_eff"] > 0 else None
+        for c in contribs:
+            c.pop("_eff", None)
+        targets.append({
+            "object": o.name,
+            "irradiance": round(total, 4),
+            "stops": round(stops, 2),
+            "likely_blown": stops > _BLOWN_STOPS,
+            "likely_crushed": stops < _CRUSH_STOPS,
+            "key_fill_ratio": ratio,
+            "key_shadow_pct": key_shadow,
+            "lit_by": sorted(contribs, key=lambda c: c["irradiance"], reverse=True),
+        })
+
+    result = {
+        "success": True,
+        "view_transform": view_xf,
+        "exposure": round(exposure_stops, 3),
+        "ambient": round(ambient, 4),
+        "ref_irradiance": _EXPOSURE_REF,
+        "lights": [{"name": L.name, "type": L.data.type,
+                    "energy": round(float(getattr(L.data, "energy", 0.0)), 2)} for L in lights],
+        "targets": targets,
+        "note": ("direct-light estimate — no GI bounce, no albedo, no area directionality, "
+                 "view-transform rolloff not applied; flags gross over/under + ratio + shadow"),
+    }
+
+    resolve_for = params.get("resolve_for")
+    if resolve_for:
+        L = bpy.data.objects.get(resolve_for)
+        if L is None or L.type != 'LIGHT':
+            result["resolve_error"] = f"resolve_for light '{resolve_for}' not found"
+        else:
+            o = report_objs[0]
+            center = mathutils.Vector(world_center(o))
+            e, _ = _light_irradiance(L, center)
+            e_eff = e * (1.0 - _shadow_fraction(scene, depsgraph, L, o)) if e > 0 else 0.0
+            total = result["targets"][0]["irradiance"]
+            target_total = _EXPOSURE_REF * (2.0 ** (-exposure_stops))
+            e_other = total - e_eff
+            e_needed = target_total - e_other
+            old_energy = float(getattr(L.data, "energy", 0.0))
+            result["resolve_for"] = resolve_for
+            if e_needed <= 0:
+                result["resolved_energy"] = None   # other lights already exceed the target
+            elif e_eff > 1e-9:
+                result["resolved_energy"] = round(old_energy * (e_needed / e_eff), 1)
+            else:
+                result["resolved_energy"] = None   # this light reaches nothing (out of cone / shadowed)
     return result
 
 
@@ -1012,6 +1240,7 @@ TOOLS = {
     "check_framing":  check_framing,
     "check_focus":    check_focus,
     "check_visible":  check_visible,
+    "check_exposure": check_exposure,
     "trace_profile":  trace_profile,
     "diff_since":     diff_since,
 }

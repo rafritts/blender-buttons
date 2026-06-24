@@ -227,9 +227,18 @@ def check_focus(targets: str = "", camera: str = "", aperture: float = None,
         f"  in-focus zone: {result['dof_near_m']}m → {far_s}  (slab {slab_s}, "
         f"hyperfocal {result['hyperfocal_m']}m)",
     ]
+    mb = result.get("motion_blur", {})
+    if mb.get("enabled"):
+        lines.append(f"  ⚠ motion blur ON (shutter {mb['shutter']}) — animated subjects will smear")
     for t in result["targets"]:
         verdict = "SHARP" if t["in_focus"] else f"BLURRED ({t['in_focus_pct']}% of its depth in focus)"
-        lines.append(f"  {t['object']}: depth {t['depth_mm']}mm at {t['near_m']}–{t['far_m']}m → {verdict}")
+        extra = []
+        if t.get("undersized"):
+            extra.append(f"tiny in frame ({max(t['frame_px'])}px — reads soft)")
+        if t.get("animated") and mb.get("enabled"):
+            extra.append("animated → smear")
+        extra_s = ("  ⚠ " + "; ".join(extra)) if extra else ""
+        lines.append(f"  {t['object']}: depth {t['depth_mm']}mm at {t['near_m']}–{t['far_m']}m → {verdict}{extra_s}")
     if result.get("resolve_error"):
         lines.append(f"  resolve: {result['resolve_error']}")
     elif "resolved_aperture" in result:
@@ -238,6 +247,76 @@ def check_focus(targets: str = "", camera: str = "", aperture: float = None,
                      + (f"f/{ra} (or narrower)" if ra is not None
                         else "no aperture up to f/32 holds its whole depth — move it / shrink its depth / refocus"))
     return "\n".join(lines) + _status(result)
+
+
+@mcp.tool()
+def check_exposure(targets: str = "", resolve_for: str = "") -> str:
+    """
+    VALIDATE the lighting LEVEL without reading the render back (SPEC-17) — the
+    deterministic "is there too much / too little light?" check. Estimates the direct
+    irradiance each light delivers to every target, the key:fill ratio, and how much of
+    the subject sits in shadow, then flags GROSS over/under-exposure.
+
+    It is an ESTIMATE with honest limits: direct light only (no GI bounce), no surface
+    albedo, no area-light directionality, view-transform rolloff not applied. It catches a
+    light 100× too strong, a subject lit only by ambient, a runaway key:fill, or a subject
+    in shadow — it does NOT tell you whether the look is good (that judgment is yours).
+
+    targets:     objects to test (empty = every visible mesh).
+    resolve_for: light name — also solve the energy that brings the first target to ~0 stops
+                 ("how bright should the key be?") instead of dead-reckoning it.
+    """
+    params = {"targets": _targets(targets)} if targets else {}
+    if resolve_for:
+        params["resolve_for"] = resolve_for
+    result = call_blender("check_exposure", params)
+    if not result.get("success"):
+        return result.get("error", "failed")
+    lines = [f"exposure [{result['view_transform']} exp{result['exposure']:+g}]  "
+             f"ambient {result['ambient']}  ({len(result['lights'])} light(s))"]
+    for t in result["targets"]:
+        flags = []
+        if t["likely_blown"]:   flags.append("⚠ likely BLOWN")
+        if t["likely_crushed"]: flags.append("⚠ likely CRUSHED (too dark)")
+        ratio = t["key_fill_ratio"]
+        ratio_s = f"key:fill {ratio}:1" if ratio is not None else "single key"
+        shadow = t["key_shadow_pct"]
+        shadow_s = f", {shadow}% in shadow" if shadow else ""
+        flag_s = ("  " + ", ".join(flags)) if flags else "  ok"
+        lines.append(f"  {t['object']}: {t['stops']:+g} stops, {ratio_s}{shadow_s}{flag_s}")
+        lit = [c for c in t["lit_by"] if c["irradiance"] > 0][:3]
+        if lit:
+            parts = [f"{c['light']} {c['irradiance']}" + ("" if c["in_cone"] else " (out of cone)")
+                     for c in lit]
+            lines.append(f"      lit by: {', '.join(parts)}")
+        dark = [c["light"] for c in t["lit_by"] if c["irradiance"] == 0]
+        if dark:
+            lines.append(f"      not reaching: {', '.join(dark)}")
+    if result.get("resolve_error"):
+        lines.append(f"  resolve: {result['resolve_error']}")
+    elif "resolved_energy" in result:
+        re_ = result["resolved_energy"]
+        lines.append(f"  to put the subject at ~0 stops, set {result['resolve_for']} energy to: "
+                     + (f"{re_}" if re_ is not None else
+                        "n/a — other lights already exceed the target, or this light reaches nothing"))
+    lines.append(f"  ({result['note']})")
+    return "\n".join(lines) + _status(result)
+
+
+@mcp.tool()
+def check_lighting(targets: str = "", camera: str = "") -> str:
+    """
+    The lighting ROLL-UP (SPEC-17): exposure + focus for the framed subjects in one read,
+    breadth-first like feel op=all — no render. The standing "is the presentation going to
+    be wrong?" check; the per-axis ops (check_exposure, check_focus) drill in. Remember the
+    verdicts flag what is broken — whether it LOOKS right is always your call.
+    """
+    exp = check_exposure(targets)
+    # Both halves append the shared status block; keep only the one on the focus half.
+    marker = "\n── blender status ──"
+    if marker in exp:
+        exp = exp[:exp.index(marker)].rstrip()
+    return exp + "\n" + check_focus(targets, camera)
 
 
 @mcp.tool()

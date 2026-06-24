@@ -11,12 +11,12 @@ from server._core import mcp
 from server import queries, scene as _scene, designs
 from ._common import tag, unknown
 
-_OPS = ["tree", "world", "new"]
+_OPS = ["tree", "world", "atmosphere", "new"]
 
 
 @mcp.tool(name="scene")
 def scene(
-    op: Literal["tree", "world", "new"],
+    op: Literal["tree", "world", "atmosphere", "new"],
     # tree
     filter: tag(str, "[tree] name-substring filter") = "",
     type: tag(str, "[tree] type filter, e.g. MESH") = "",
@@ -29,6 +29,11 @@ def scene(
     strength: tag(float, "[world] background light strength") = None,
     hdri: tag(str, "[world] HDRI id or path (image-based lighting)") = "",
     resolution: tag(str, "[world] HDRI fetch resolution (1k|2k|4k|8k)") = "2k",
+    # atmosphere
+    density: tag(float, "[atmosphere] scattering coeff: 0.01 haze, 0.05 mist, 0.1 fog") = None,
+    absorption: tag(float, "[atmosphere] extra extinction (smoke vs clean mist); omit for pure scatter") = None,
+    anisotropy: tag(float, "[atmosphere] -1..1 scatter dir; ~0.6 = tighter beams toward the light") = None,
+    clear: tag(bool, "[atmosphere] True = remove the medium (clear air)") = False,
     # new
     empty: tag(bool, "[new] True = a truly empty scene") = False,
     label: str = "",
@@ -40,6 +45,10 @@ def scene(
                parts_only=True for just the real renderable parts on a busy rig)
       world  — set the world background    (color|hex + strength, OR hdri id/path +
                resolution)  — image-based lighting
+      atmosphere — fill the air with a scattering medium: haze/fog/mist AND the
+               volumetric god-ray (density, color|hex, absorption, anisotropy;
+               clear=True to remove). A bright shadow-casting spot/sun then shafts
+               through it for free.
       new    — start a fresh scene         (empty=True for a truly empty one)
 
     (Render/output/color settings are the `render` verb; render quality lives there
@@ -50,6 +59,8 @@ def scene(
         return queries.get_scene_tree(filter, type, max_depth, summarize, parts_only)
     if o == "world":
         return _scene.set_world_background(color, hex, strength, hdri, resolution, label)
+    if o == "atmosphere":
+        return _scene.set_atmosphere(density, color, hex, absorption, anisotropy, clear, label)
     if o == "new":
         return designs.new_scene(empty)
     return unknown("scene", "op", op, _OPS)
