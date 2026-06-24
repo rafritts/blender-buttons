@@ -1,5 +1,5 @@
 import json
-from server._core import mcp, call_blender, _status, _targets
+from server._core import mcp, call_blender, _status, _targets, render_dual
 
 
 def _minted_line(result, how_hint):
@@ -122,11 +122,16 @@ def get_mesh_profile(axis: str = "Z", min: float = None, max: float = None,
     result = call_blender("get_mesh_profile", params)
     if not result.get("success"):
         return result.get("error", "failed")
-    ax = result["axis"]
+    return render_dual(result, _fmt_profile)
+
+
+def _fmt_profile(core: dict) -> str:
+    """Format one mesh's profile block (full per-ring dump or aggregated bands)."""
+    ax = core["axis"]
     other = [n for n in ['X', 'Y', 'Z'] if n != ax]
 
-    if result.get("mode") == "full":
-        profile = result["profile"]
+    if core.get("mode") == "full":
+        profile = core["profile"]
         lines = [f"{'':>8}  " + "  ".join(f"{n:>22}" for n in other)]
         for r in profile:
             cols = []
@@ -136,24 +141,24 @@ def get_mesh_profile(axis: str = "Z", min: float = None, max: float = None,
                 cols.append(f"{lo:+.4f}→{hi:+.4f} ({w:.4f})")
             lines.append(f"{ax}={r[ax]:+.4f}  " + "  ".join(cols))
         shown = len(profile)
-        total = result.get("rings_total", shown)
+        total = core.get("rings_total", shown)
         head = f"{shown} rings along {ax}"
-        if result.get("windowed"):
-            w = result.get("window", [None, None])
+        if core.get("windowed"):
+            w = core.get("window", [None, None])
             head += f" in window [{w[0]}, {w[1]}]"
-        if result.get("resampled"):
+        if core.get("resampled"):
             head += f" (resampled from {total} — even spacing, first/last kept)"
-        return f"{head}:\n" + "\n".join(lines) + _status(result)
+        return f"{head}:\n" + "\n".join(lines)
 
     # aggregated bands (default)
-    profile = result["profile"]
-    ext = result["extent"]
-    head = (f"{result['bands']} bands along {ax}  "
-            f"(band ≈ {result['band_width']}m, extent [{ext[0]}, {ext[1]}])")
-    if result.get("windowed"):
-        w = result.get("window", [None, None])
+    profile = core["profile"]
+    ext = core["extent"]
+    head = (f"{core['bands']} bands along {ax}  "
+            f"(band ≈ {core['band_width']}m, extent [{ext[0]}, {ext[1]}])")
+    if core.get("windowed"):
+        w = core.get("window", [None, None])
         head += f"  window [{w[0]}, {w[1]}]"
-    nb, wb = result["narrowest"], result["widest"]
+    nb, wb = core["narrowest"], core["widest"]
     lines = [
         f"  ← narrowest: {ax}={nb[ax]:+.4f}  girth {nb['girth']}m   (the pinch)",
         f"  → widest:    {ax}={wb[ax]:+.4f}  girth {wb['girth']}m",
@@ -162,7 +167,7 @@ def get_mesh_profile(axis: str = "Z", min: float = None, max: float = None,
     for b in profile:
         ws = "  ".join(f"{b[f'{n}_width']:>7.4f}" for n in other)
         lines.append(f"  {b[ax]:+.4f}  {ws}   {b['girth']:>7.4f}  {b['n']:>4}")
-    return f"{head}:\n" + "\n".join(lines) + _status(result)
+    return f"{head}:\n" + "\n".join(lines)
 
 
 @mcp.tool()
@@ -185,12 +190,17 @@ def get_silhouette(axis: str = "X", res: int = 32, selection: bool = False,
                            "target": target or None})
     if not result.get("success"):
         return result.get("error", "failed")
-    ur, vr = result["u_range"], result["v_range"]
-    head = (f"silhouette along {result['axis']} — {result['u_label']}(→)×{result['v_label']}(↑) "
-            f"plane, {result['cols']}×{result['rows']} cells @ {result['cell_m']}m\n"
-            f"  {result['u_label']} [{ur[0]}, {ur[1]}]   {result['v_label']} [{vr[0]}, {vr[1]}]   "
-            f"{result['filled_cells']} filled")
-    return head + "\n" + "\n".join("  " + row for row in result["grid"])
+    return render_dual(result, _fmt_silhouette)
+
+
+def _fmt_silhouette(core: dict) -> str:
+    """Format one mesh's silhouette block (header + '#'/'.' occupancy map)."""
+    ur, vr = core["u_range"], core["v_range"]
+    head = (f"silhouette along {core['axis']} — {core['u_label']}(→)×{core['v_label']}(↑) "
+            f"plane, {core['cols']}×{core['rows']} cells @ {core['cell_m']}m\n"
+            f"  {core['u_label']} [{ur[0]}, {ur[1]}]   {core['v_label']} [{vr[0]}, {vr[1]}]   "
+            f"{core['filled_cells']} filled")
+    return head + "\n" + "\n".join("  " + row for row in core["grid"])
 
 
 @mcp.tool()
@@ -216,18 +226,23 @@ def get_section(axis: str = "Z", sections: int = 12,
     result = call_blender("get_section", params)
     if not result.get("success"):
         return result.get("error", "failed")
-    ax = result["axis"]
-    ext = result["extent"]
-    nb, wb = result["narrowest"], result["widest"]
-    head = (f"{result['sections']} cross-sections along {ax}  (extent [{ext[0]}, {ext[1]}])")
-    if result.get("windowed"):
+    return render_dual(result, _fmt_section)
+
+
+def _fmt_section(core: dict) -> str:
+    """Format one mesh's cross-section block (perimeter + area per slice)."""
+    ax = core["axis"]
+    ext = core["extent"]
+    nb, wb = core["narrowest"], core["widest"]
+    head = (f"{core['sections']} cross-sections along {ax}  (extent [{ext[0]}, {ext[1]}])")
+    if core.get("windowed"):
         head += "  (windowed)"
     lines = [
         f"  ← narrowest: {ax}={nb[ax]:+.4f}  perim {nb['perimeter_cm']}cm  area {nb['area_cm2']}cm²",
         f"  → widest:    {ax}={wb[ax]:+.4f}  perim {wb['perimeter_cm']}cm  area {wb['area_cm2']}cm²",
         f"  {ax:>8}   perim_cm   area_cm²   loops",
     ]
-    for s in result["profile"]:
+    for s in core["profile"]:
         flag = "  ⚠ multi-loop" if s["loops"] > 1 else ""
         lines.append(f"  {s[ax]:+.4f}   {s['perimeter_cm']:>8.2f}   {s['area_cm2']:>8.2f}   "
                      f"{s['loops']:>5}{flag}")

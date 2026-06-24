@@ -6,7 +6,7 @@ the LLM can pass straight into a select / cut / extrude verb — never a raw ver
 dump. This is the structural sense `describe` does not provide.
 """
 
-from server._core import mcp, call_blender, _status
+from server._core import mcp, call_blender, render_dual
 
 
 def _fmt_method(name: str, data: dict) -> list:
@@ -176,10 +176,19 @@ def _fmt_method(name: str, data: dict) -> list:
     return lines
 
 
+def _fmt_topology_core(core: dict) -> str:
+    """Format one base's topology block (counts + per-method lines). The body shared by
+    the cage and evaluated halves of the dual report."""
+    c = core["counts"]
+    lines = [f"  {c['verts']} verts / {c['edges']} edges / {c['faces']} faces"]
+    for name, data in core["topology"].items():
+        lines.extend(_fmt_method(name, data))
+    return "\n".join(lines)
+
+
 @mcp.tool()
 def get_topology(target: str = "", method: str = "", lod: str = "low",
-                 base: str = "cage", seed: str = "",
-                 radius: float = 0.0, top_n: int = 0) -> str:
+                 seed: str = "", radius: float = 0.0, top_n: int = 0) -> str:
     """
     Feel a mesh's STRUCTURE — the sense `describe` does not give. Returns named,
     grabbable landmarks (openings, branches, poles, symmetry, curvature, hard
@@ -193,9 +202,12 @@ def get_topology(target: str = "", method: str = "", lod: str = "low",
             v2 (needs scipy, not yet built): geodesic, skeleton, segments.
     lod:  low (summary landmarks) | medium | high (adds ordered boundary paths,
           located poles/curvature). Scales how much is SAID, not which mesh.
-    base: cage (base control mesh — default, the right thing for topology) |
-          evaluated (modifier/particle result). On a subsurfed mesh these differ.
     seed: a handle for seeded methods (v2 geodesic/segments). Unused in v1.
+
+    Reads the EVALUATED mesh (what renders). When a modifier makes the cage differ —
+    SOLIDIFY shells it closed, MIRROR doubles it, SUBSURF rounds + shrinks it — BOTH
+    the evaluated and the cage structure are reported side by side, with the modifier
+    stack named, so the divergence is never silent.
 
     Methods, briefly:
       components — separate shells (fused vs not)
@@ -230,18 +242,13 @@ def get_topology(target: str = "", method: str = "", lod: str = "low",
     methods = [m.strip() for m in method.split(",") if m.strip()] if method else None
     result = call_blender("get_topology", {
         "target": target or None, "method": methods,
-        "lod": lod, "base": base, "seed": seed or None,
+        "lod": lod, "seed": seed or None,
         "radius": radius or None, "top_n": top_n or None,
     })
     if not result.get("success"):
         return result.get("error", "failed")
-    c = result["counts"]
-    head = (f"{result['object']} [base={result['base']}, lod={result['lod']}] — "
-            f"{c['verts']} verts / {c['edges']} edges / {c['faces']} faces")
-    lines = [head]
-    for name, data in result["topology"].items():
-        lines.extend(_fmt_method(name, data))
-    return "\n".join(lines) + _status(result)
+    head = f"{result['object']} [lod={result['lod']}]"
+    return head + "\n" + render_dual(result, _fmt_topology_core)
 
 
 def region_baseline(name: str = "", base: str = "cage") -> str:

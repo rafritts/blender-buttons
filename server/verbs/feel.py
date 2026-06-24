@@ -44,7 +44,6 @@ def feel(
                      "(facing = signed up/front/left/right frame; relief = salient feature "
                      "discovery: where are the bumps/dents)") = "",
     lod: tag(str, "[topology] low|medium|high output verbosity") = "low",
-    base: tag(str, "[topology] cage | evaluated mesh to read") = "cage",
     seed: tag(str, "[topology] handle for seeded methods (v2)") = "",
     radius: tag(float, "[topology method=relief] feature scale in m (default ~4% of the mesh diagonal)") = 0.0,
     top_n: tag(int, "[topology method=relief] cap on features returned (0 = default by lod)") = 0,
@@ -154,7 +153,10 @@ def feel(
                                 to confirm "it got 2cm bigger". (needs a selection)
                    features   — hard dihedral edges in chains (not in bundle)
                    thickness  — local wall/part diameter      (not in bundle)
-                 lod=low|medium|high; base=cage|evaluated. (target, method, lod, base)
+                 lod=low|medium|high. Reads the EVALUATED mesh (what renders); when a
+                 modifier makes the cage differ (SOLIDIFY/MIRROR/SUBSURF/BOOLEAN), reports
+                 BOTH cage and evaluated side by side + names the modifier stack, so the
+                 split is never silent. (target, method, lod)
       profile  — cross-section width sweep along an axis: by default AGGREGATED into
                  bands with the narrowest/widest flagged; full=True dumps every ring
                  (axis, min, max, bands, full)
@@ -202,7 +204,7 @@ def feel(
                  without a viewport (G48).                           (steps)
       baseline — snapshot the live selection's form (span/projection/curvature/
                  symmetry/centroid) + its verts as a NAMED baseline (this session).
-                 The 'before' of a local edit.                       (name, base)
+                 The 'before' of a local edit.                       (name)
       diff     — signed change per metric over a baseline's SAME verts after an edit —
                  a local, temporal check a global bbox/symmetry read can't give. 'It
                  grew 2cm and stayed symmetric' in one read (G45).    (name)
@@ -275,11 +277,11 @@ def feel(
     """
     o = op.lower().strip()
     if o == "all":
-        return _feel_all(target, lod, base, exclude)
+        return _feel_all(target, lod, exclude)
     if o == "stats":
         return _feel_stats()
     if o == "topology":
-        return topology.get_topology(target, method, lod, base, seed, radius, top_n)
+        return topology.get_topology(target, method, lod, seed, radius, top_n)
     if o == "profile":
         return queries.get_mesh_profile(axis, min, max, max_rings, bands, full, target)
     if o == "silhouette":
@@ -319,7 +321,7 @@ def feel(
     if o == "verify":
         return editmode.verify_selection(steps)
     if o == "baseline":
-        return topology.region_baseline(name, base)
+        return topology.region_baseline(name)
     if o == "diff":
         return topology.region_diff(name)
     if o == "place":
@@ -359,7 +361,7 @@ def feel(
     return unknown("feel", "op", op, _OPS)
 
 
-def _feel_all(target, lod, base, exclude):
+def _feel_all(target, lod, exclude):
     """SPEC-16 — the deliberate perceptual sweep. Runs the whole-mesh bundle; the agent
     trims with exclude=. Each read is guarded so one failure never sinks the sweep, and
     the exclusions are recorded so the op=all defaults can be tuned from data, not taste.
@@ -369,7 +371,7 @@ def _feel_all(target, lod, base, exclude):
     runners = {
         "topology": lambda: topology.get_topology(
             target, "components,genus,boundaries,sections,poles,symmetry,frame,facing,curvature",
-            lod, base, "", 0, 0),
+            lod, "", 0, 0),
         "profile": lambda: queries.get_mesh_profile("Z", None, None, 200, 0, False, target),
         "section": lambda: queries.get_section("Z", 12, None, None, target),
         "silhouette": lambda: queries.get_silhouette("Z", 32, False, target),

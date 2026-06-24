@@ -240,6 +240,42 @@ def _status(result: dict) -> str:
     return bind + "\n".join(lines)
 
 
+def fmt_modifiers(mods: list) -> str:
+    """One-line modifier-stack summary for a feel read (type 'name', in stack order) —
+    the at-a-glance WHY behind a cage/evaluated divergence on an unfamiliar object."""
+    if not mods:
+        return ""
+    parts = []
+    for m in mods:
+        off = "" if m.get("show_viewport", True) else " (viewport-off)"
+        parts.append(f"{m['type']} '{m['name']}'{off}")
+    return "modifiers: " + " · ".join(parts)
+
+
+def render_dual(result: dict, core_fmt) -> str:
+    """Render a feel read that carries a cage block and (when a modifier changes the
+    geometry) an evaluated block. `core_fmt(core)` formats one block's body. The
+    EVALUATED mesh — what actually renders — leads; the CAGE follows. With no
+    geometry-changing modifier the two are identical, so a single block is shown.
+    The modifier stack is always surfaced when present, even with one block."""
+    cage = result.get("cage", {})
+    ev = result.get("evaluated")
+    modline = fmt_modifiers(result.get("modifiers") or [])
+    if ev is None:
+        body = core_fmt(cage)
+        if modline:                       # modifiers present but don't alter geometry
+            body = modline + "  [cage = evaluated]\n" + body
+        return body + _status(result)
+    lines = []
+    if modline:
+        lines.append(modline)
+    lines.append("━━ EVALUATED — what renders, modifiers applied ━━")
+    lines.append(core_fmt(ev))
+    lines.append("━━ CAGE — the editable base mesh, pre-modifier ━━")
+    lines.append(core_fmt(cage))
+    return "\n".join(lines) + _status(result)
+
+
 def _add_result(ptype: str, result: dict) -> str:
     if result.get("success"):
         dims = result.get("dimensions")

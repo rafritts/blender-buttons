@@ -60,6 +60,21 @@ def eval_world_center(obj):
     return ((xmin + xmax) * 0.5, (ymin + ymax) * 0.5, (zmin + zmax) * 0.5)
 
 
+def modifier_stack(obj):
+    """The object's modifier stack as plain dicts (type / name / viewport-enabled), in
+    stack order. Surfaced by every feel read so an agent touching an unseen object sees
+    WHY the cage and the evaluated mesh diverge ('ah — there's a SOLIDIFY')."""
+    return [{"name": m.name, "type": m.type, "show_viewport": bool(m.show_viewport)}
+            for m in obj.modifiers]
+
+
+def evaluated_differs(obj):
+    """True when obj's evaluated mesh can differ from its cage — i.e. at least one
+    viewport-enabled modifier is live. The gate for feel's dual cage/evaluated report:
+    no enabled modifier ⇒ cage IS the evaluated mesh, so one block suffices."""
+    return any(m.show_viewport for m in obj.modifiers)
+
+
 def nearby_objects(world_pos, exclude_names=(), max_count=3):
     """Return up to max_count nearest mesh objects to world_pos, sorted by distance."""
     px, py, pz = world_pos

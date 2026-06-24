@@ -336,12 +336,44 @@ def get_object_info(params):
 _PROFILE_MAX_RINGS = 200
 
 
+def _dual_read(obj, core, params):
+    """Run a world-space mesh read (profile/section/silhouette) over the CAGE and —
+    when a modifier makes the evaluated mesh differ — over the EVALUATED mesh too,
+    returning {cage, evaluated, modifiers}. feel always reports what renders; the cage
+    alone silently understated size and mis-read SOLIDIFY/MIRROR/BOOLEAN topology.
+    `core(bm, params)` reads one world-space bmesh; this owns and frees both bmeshes."""
+    from . import topology
+    from .common import modifier_stack, evaluated_differs
+    cage_bm = topology._topology_bmesh(obj, "cage")
+    try:
+        cage = core(cage_bm, params)
+    finally:
+        cage_bm.free()
+    if not cage.get("success"):
+        return cage          # a window/empty error applies to both bases — surface it
+    ev = None
+    if evaluated_differs(obj):
+        ev_bm = topology._topology_bmesh(obj, "evaluated")
+        try:
+            ev = core(ev_bm, params)
+        finally:
+            ev_bm.free()
+        if not ev.get("success"):
+            ev = None
+    return {"success": True, "object": obj.name,
+            "modifiers": modifier_stack(obj), "cage": cage, "evaluated": ev}
+
+
 def get_mesh_profile(params):
-    import bmesh
     tgt = params.get("target")
     obj = bpy.data.objects.get(tgt) if tgt else bpy.context.active_object
     if obj is None or obj.type != 'MESH':
         return {"error": f"Object '{tgt}' not found" if tgt else "No active mesh object"}
+    return _dual_read(obj, _profile_core, params)
+
+
+def _profile_core(bm, params):
+    """Profile sweep over one world-space bmesh (the wrapper owns/frees bm)."""
     axis = params.get("axis", "Z").upper()
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
     other = [(i, n) for i, n in enumerate(['X', 'Y', 'Z']) if i != axis_idx]
@@ -359,25 +391,15 @@ def get_mesh_profile(params):
     mr = params.get("max_rings", _PROFILE_MAX_RINGS)
     max_rings = int(mr) if mr else 0  # 0 / None → uncapped
 
-    was_edit = obj.mode == 'EDIT'
-    if was_edit:
-        bm = bmesh.from_edit_mesh(obj.data)
-    else:
-        bm = bmesh.new()
-        bm.from_mesh(obj.data)
-
     # One pass: collect (pos-on-axis, [coords on the two other axes]) for every
-    # vert inside the optional window.
+    # vert inside the optional window. bm is already in world space.
     samples = []
     for v in bm.verts:
-        wco = obj.matrix_world @ v.co
+        wco = v.co
         pos = wco[axis_idx]
         if (win_min is not None and pos < win_min) or (win_max is not None and pos > win_max):
             continue
         samples.append((pos, [wco[i] for i, _ in other]))
-
-    if not was_edit:
-        bm.free()
 
     if not samples:
         win = f" in {axis} window [{win_min}, {win_max}]" if (win_min is not None or win_max is not None) else ""
@@ -478,11 +500,15 @@ def get_silhouette(params):
                Z-height plane). The silhouette is the other two axes.
     res:       grid resolution on the wider plane axis (default 32, 4..120).
     selection: True = only the live selection's verts (default whole mesh)."""
-    import bmesh
     tgt = params.get("target")
     obj = bpy.data.objects.get(tgt) if tgt else bpy.context.active_object
     if obj is None or obj.type != 'MESH':
         return {"error": f"Object '{tgt}' not found" if tgt else "No active mesh object"}
+    return _dual_read(obj, _silhouette_core, params)
+
+
+def _silhouette_core(bm, params):
+    """Silhouette raster over one world-space bmesh (the wrapper owns/frees bm)."""
     axis = params.get("axis", "X").upper()
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 0)
     others = [(i, n) for i, n in enumerate(['X', 'Y', 'Z']) if i != axis_idx]
@@ -490,14 +516,8 @@ def get_silhouette(params):
     res = max(4, min(120, int(params.get("res") or 32)))
     sel_only = bool(params.get("selection", False))
 
-    if sel_only and obj.mode == 'EDIT':
-        obj.update_from_editmode()
-    bm = bmesh.new()
-    bm.from_mesh(obj.data)
-    bm.transform(obj.matrix_world)
     pts = [(v.co[ui], v.co[vi]) for v in bm.verts if (v.select if sel_only else True)]
     if not pts:
-        bm.free()
         return {"error": "no verts" + (" selected" if sel_only else "")}
 
     umin = min(p[0] for p in pts)
@@ -536,7 +556,6 @@ def get_silhouette(params):
             mark(ua + (ub - ua) * f, wa + (wb - wa) * f)
     for u, w in pts:  # stray edgeless verts
         mark(u, w)
-    bm.free()
     filled = sum(c for row in grid for c in row)
     # rows emitted high-v first so the text map reads top-down like the viewport.
     return {"success": True, "axis": axis, "u_label": others[0][1], "v_label": others[1][1],
@@ -599,11 +618,16 @@ def get_section(params):
     axis:     slice axis (X|Y|Z, default Z).
     sections: number of evenly spaced slices (default 12).
     min, max: optional world-space window on the axis."""
-    import bmesh
     tgt = params.get("target")
     obj = bpy.data.objects.get(tgt) if tgt else bpy.context.active_object
     if obj is None or obj.type != 'MESH':
         return {"error": f"Object '{tgt}' not found" if tgt else "No active mesh object"}
+    return _dual_read(obj, _section_core, params)
+
+
+def _section_core(src, params):
+    """Cross-section sweep over one world-space bmesh (the wrapper owns/frees src)."""
+    import bmesh
     axis = params.get("axis", "Z").upper()
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
     n = max(1, int(params.get("sections") or 12))
@@ -612,17 +636,12 @@ def get_section(params):
     win_min = float(win_min) if win_min is not None else None
     win_max = float(win_max) if win_max is not None else None
 
-    src = bmesh.new()
-    src.from_mesh(obj.data)
-    src.transform(obj.matrix_world)
     axis_vals = [v.co[axis_idx] for v in src.verts]
     if not axis_vals:
-        src.free()
         return {"error": "mesh has no geometry"}
     lo = win_min if win_min is not None else min(axis_vals)
     hi = win_max if win_max is not None else max(axis_vals)
     if hi - lo <= 1e-9:
-        src.free()
         return {"error": "no extent on this axis to section"}
 
     # Sample inside the span (avoid the exact end caps, which bisect to nothing).
@@ -649,7 +668,6 @@ def get_section(params):
         sections.append({axis: round(pos, 4), "perimeter_cm": round(perim * 100, 2),
                          "area_cm2": round(area * 10000, 2), "loops": nloops,
                          "cut_edges": len(cut_edges)})
-    src.free()
     if not sections:
         return {"error": "no closed cross-sections found in the window"}
     widest = max(sections, key=lambda s: s["perimeter_cm"])

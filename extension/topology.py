@@ -1202,10 +1202,27 @@ def get_topology(params):
     if isinstance(methods, str):
         methods = [methods]
     lod = (params.get("lod") or "low").lower()
-    base = (params.get("base") or "cage").lower()
-    if base not in ("cage", "evaluated"):
-        return {"error": f"base must be 'cage' or 'evaluated', got '{base}'"}
 
+    # The cage/evaluated distinction is no longer a knob the caller picks — feel ALWAYS
+    # reads the evaluated mesh (what renders) and, when a modifier makes the cage differ,
+    # reports BOTH side by side plus the modifier list. The cage alone silently mis-read
+    # a SOLIDIFY'd shell as an open surface and a subsurf'd form as blocky/undersized.
+    from .common import modifier_stack, evaluated_differs
+    cage = _topology_report(obj, "cage", methods, lod)
+    return {
+        "success": True,
+        "object": obj.name,
+        "lod": lod,
+        "modifiers": modifier_stack(obj),
+        "cage": cage,
+        "evaluated": _topology_report(obj, "evaluated", methods, lod)
+                     if evaluated_differs(obj) else None,
+    }
+
+
+def _topology_report(obj, base, methods, lod):
+    """Run the requested topology methods over one base (cage|evaluated) and return
+    {counts, topology}. The shared core behind the dual cage/evaluated report."""
     bm = _topology_bmesh(obj, base)
     try:
         bbox = _bbox(bm)
@@ -1223,18 +1240,13 @@ def get_topology(params):
                 v2 = ", ".join(sorted(_V2_METHODS))
                 report[m] = {"error": f"unknown method '{m}'. valid: {valid} "
                                       f"(v2, needs scipy: {v2})"}
-        result = {
-            "success": True,
-            "object": obj.name,
-            "base": base,
-            "lod": lod,
+        return {
             "counts": {"verts": len(bm.verts), "edges": len(bm.edges),
                        "faces": len(bm.faces)},
             "topology": report,
         }
     finally:
         bm.free()
-    return result
 
 
 # ── G45: before/after region diff ─────────────────────────────────────────────
