@@ -16,7 +16,7 @@ _OPS = ["all", "topology", "profile", "silhouette", "section", "rings", "distanc
         "aligned", "linked", "symmetry", "mesh", "overlaps", "validate", "audit", "contacts",
         "clearance", "resting", "aim", "place", "radial", "anchor", "verify", "baseline", "diff",
         "handle", "handles", "accept", "forget", "assembly", "map", "relate", "curve", "fit",
-        "stats"]
+        "coverage", "stats"]
 
 # SPEC-16: the perceptual bundle a bare `feel` / `feel op=all` runs — the whole-mesh
 # reads that need only a target (no live selection, no second object). The agent opts
@@ -30,7 +30,8 @@ def feel(
                 "gap", "aligned", "linked", "symmetry", "mesh", "overlaps", "validate",
                 "audit", "contacts", "clearance", "resting", "aim", "place", "radial",
                 "anchor", "verify", "baseline", "diff", "handle", "handles", "accept",
-                "forget", "assembly", "map", "relate", "curve", "fit", "stats"] = "all",
+                "forget", "assembly", "map", "relate", "curve", "fit", "coverage",
+                "stats"] = "all",
     exclude: tag(str, "[all] comma list of bundle reads to SKIP "
                       "(e.g. silhouette,section) — opt out, don't opt in") = "",
     target: tag(str, "[topology/profile/silhouette/section/rings/symmetry/mesh] mesh "
@@ -264,6 +265,13 @@ def feel(
                  re-sweep. Reads the edit-mode selection (whole mesh if none, warned).
                  Read-only (mints only on as_handle/as_curve).
                  (target, model, axis, tol, per_component, bands, as_handle, as_curve, lod)
+      coverage — MODEL-FREE continuity/coverage read (G100) for a selection that ISN'T a
+                 swept tube — a flat sheet, a doubly-curved patch, a branching region, where
+                 feel op=fit's generative models are the wrong frame. Reports how many
+                 DISJOINT pieces the selection is and a 2D occupancy grid over the patch's
+                 OWN plane: coverage %, count of INTERIOR holes (the surface skips that
+                 spot), and a small ASCII map — without asserting any model first. The
+                 sibling of fit's swept_tube gap read, for non-tubular regions. (target)
     """
     o = op.lower().strip()
     if o == "all":
@@ -346,6 +354,8 @@ def feel(
         fit_axis = "auto" if axis == "Z" else axis
         return fit.fit_region(target, model, fit_axis, tol, per_component, bands,
                               as_handle, as_curve, lod)
+    if o == "coverage":
+        return fit.coverage_region(target)
     return unknown("feel", "op", op, _OPS)
 
 

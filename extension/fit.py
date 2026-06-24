@@ -574,6 +574,93 @@ def fit_region(params):
     return strip(f)
 
 
+def coverage_region(params):
+    """G100 (residual) — a MODEL-FREE continuity/coverage read for a selection that ISN'T a
+    swept tube: flat sheets, doubly-curved patches, branching regions, where asserting a
+    generative model (feel op=fit) is the wrong frame. Reports:
+      • how many DISJOINT pieces the selection is (and where each sits),
+      • a 2D occupancy grid over the patch's OWN least-squares plane (u,v) — coverage %, the
+        count of INTERIOR empty cells (the surface skips this spot), and a small ASCII map.
+    No model is fit first; the plane is only the natural 2D layout of a patch.
+
+    target: mesh (empty=active). na/nb: grid resolution (default 12). Reads the live edit
+    selection, else the whole mesh."""
+    import numpy as np
+    target = params.get("target")
+    obj = bpy.data.objects.get(target) if target else bpy.context.active_object
+    if obj is None or obj.type != 'MESH':
+        return {"error": "no mesh (give target= or make a mesh active)"}
+    na = max(4, min(int(params.get("na", 12)), 40))
+    nb = max(4, min(int(params.get("nb", 12)), 40))
+    mat = obj.matrix_world
+
+    warnings = []
+    if obj.mode == 'EDIT':
+        import bmesh
+        bm = bmesh.from_edit_mesh(obj.data)
+        bm.verts.ensure_lookup_table()
+        sel = [v for v in bm.verts if v.select] or list(bm.verts)
+        if len(sel) == len(bm.verts):
+            warnings.append("no selection — reading the WHOLE mesh")
+        P = np.array([list(mat @ v.co) for v in sel], dtype=float)
+        vidx = [v.index for v in sel]
+        vset = set(vidx)
+        edge_pairs = [(e.verts[0].index, e.verts[1].index) for e in bm.edges
+                      if e.verts[0].index in vset and e.verts[1].index in vset]
+    else:
+        me = obj.data
+        P = np.array([list(mat @ v.co) for v in me.vertices], dtype=float)
+        vidx = list(range(len(me.vertices)))
+        edge_pairs = [(e.vertices[0], e.vertices[1]) for e in me.edges]
+        warnings.append("object mode — reading the WHOLE mesh (select a region in edit mode to scope)")
+
+    if len(P) < 4:
+        return {"error": f"need ≥4 verts, have {len(P)}"}
+
+    # disjoint pieces
+    comp = _components(np, vidx, edge_pairs)
+    n_comp = len(set(comp.tolist()))
+
+    # project onto the selection's own least-squares plane → (u, v)
+    c = P.mean(0)
+    cov = np.cov((P - c).T)
+    w, V = np.linalg.eigh(cov)
+    e1, e2 = V[:, 2], V[:, 1]      # two largest-variance directions
+    u = (P - c) @ e1
+    v = (P - c) @ e2
+    u01 = _unit01(np, u)
+    v01 = _unit01(np, v)
+    iu = np.clip((u01 * na).astype(int), 0, na - 1)
+    iv = np.clip((v01 * nb).astype(int), 0, nb - 1)
+    occ = np.zeros((na, nb), dtype=bool)
+    occ[iu, iv] = True
+
+    # interior empties: empty cells whose row AND column fall within the occupied span
+    rows_used = [a for a in range(na) if occ[a, :].any()]
+    cols_used = [b for b in range(nb) if occ[:, b].any()]
+    interior = 0
+    if rows_used and cols_used:
+        r0, r1 = min(rows_used), max(rows_used)
+        c0, c1 = min(cols_used), max(cols_used)
+        for a in range(r0, r1 + 1):
+            for b in range(c0, c1 + 1):
+                if not occ[a, b]:
+                    interior += 1
+    filled = int(occ.sum())
+    span_cells = (len(rows_used) and len(cols_used)) and \
+        (max(rows_used) - min(rows_used) + 1) * (max(cols_used) - min(cols_used) + 1) or filled
+    coverage_pct = round(100.0 * filled / span_cells, 1) if span_cells else 100.0
+
+    # compact ASCII map (rows = u, top→bottom)
+    grid_map = ["".join("#" if occ[a, b] else "." for b in range(nb)) for a in range(na)]
+
+    return {"success": True, "object": obj.name, "verts": len(P),
+            "pieces": n_comp, "grid": [na, nb], "coverage_pct": coverage_pct,
+            "interior_holes": interior, "filled_cells": filled,
+            "map": grid_map, "warnings": warnings}
+
+
 TOOLS = {
     "fit": fit_region,
+    "coverage": coverage_region,
 }

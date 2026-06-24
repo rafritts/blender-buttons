@@ -90,3 +90,20 @@ def fit_region(target, model, axis, tol, per_component, bands, as_handle, as_cur
     for w in result.get("warnings", []):
         body += f"\n⚠ {w}"
     return body
+
+
+def coverage_region(target, na=12, nb=12):
+    """G100 — model-free continuity/coverage read for a NON-tubular selection (sheet, patch,
+    branching region). Reports disjoint piece count + a 2D occupancy grid over the patch's
+    own plane: coverage %, interior holes, and an ASCII map. No model asserted first."""
+    result = call_blender("coverage", {"target": target, "na": na, "nb": nb})
+    if not result.get("success"):
+        return result.get("error", "failed")
+    head = (f"coverage of '{result['object']}' ({result['verts']} verts): "
+            f"{result['pieces']} disjoint piece(s), {result['coverage_pct']}% of the patch "
+            f"span filled, {result['interior_holes']} interior hole-cell(s) "
+            f"[{result['grid'][0]}×{result['grid'][1]} grid]")
+    body = head + "\n" + "\n".join("  " + row for row in result.get("map", []))
+    for w in result.get("warnings", []):
+        body += f"\n⚠ {w}"
+    return body
