@@ -506,3 +506,34 @@ def apply_scale(obj):
     Required for bevel and other width-based modifiers to behave uniformly."""
     activate(obj)
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+
+
+def scale_unit_note(obj, local_value, what="thickness"):
+    """G132: a local-unit modelling param (SOLIDIFY thickness, bevel width, inset depth)
+    is silently rescaled by the object's UNAPPLIED scale — so thickness=0.004 on a 1.85×
+    object yields a ~7.4mm world wall, and a 2mm bevel pulls 6mm, with no feedback. This
+    is the single root cause behind 'the wall came out ~2× / the bevel ate the cavity'.
+
+    Returns (effective_world_value_or_[lo,hi], note) so a caller can report the TRUE world
+    magnitude (provenance: param × object scale — legitimate arithmetic on ground truth)
+    and warn. Returns (None, None) when scale ≈ 1 (the param maps 1:1 — nothing to say)."""
+    try:
+        sx, sy, sz = abs(obj.scale.x), abs(obj.scale.y), abs(obj.scale.z)
+    except Exception:
+        return None, None
+    smin, smax = min(sx, sy, sz), max(sx, sy, sz)
+    if abs(smin - 1.0) < 0.02 and abs(smax - 1.0) < 0.02:
+        return None, None
+    lv = float(local_value)
+    if abs(smax - smin) < 1e-4:  # uniform but ≠ 1
+        eff = lv * smax
+        note = (f"⚠ object scale {smax:.3g}× is UNAPPLIED — {what}={lv:g} is in LOCAL units, "
+                f"so the world {what} is ~{eff:.4g}m, not {lv:g}m. Run object op=apply_transform "
+                f"(scale) first for the {what} to map to metres.")
+        return round(eff, 6), note
+    lo, hi = lv * smin, lv * smax
+    note = (f"⚠ object scale is non-uniform & UNAPPLIED ({sx:.3g},{sy:.3g},{sz:.3g}) — "
+            f"{what}={lv:g} produces a world {what} from ~{lo:.4g}m to ~{hi:.4g}m depending on "
+            f"direction (this is why a wall comes out uneven/thicker than asked). Run "
+            f"object op=apply_transform (scale) first.")
+    return [round(lo, 6), round(hi, 6)], note

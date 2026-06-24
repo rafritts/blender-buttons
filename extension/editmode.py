@@ -170,7 +170,19 @@ def bevel(params):
     else:
         offset = factor
     bpy.ops.mesh.bevel(offset=offset, segments=segments, affect=affect)
-    return {"success": True, "offset_world": round(offset, 5)}
+    # G132: bevel offset is applied in the object's LOCAL space, so an unapplied object
+    # scale silently magnifies it — a 2mm width pulls 6mm on a 3× object, pinching a thin
+    # wall far more than its named width. Report the TRUE world offset and warn.
+    result = {"success": True, "offset_local": round(offset, 5)}
+    if obj is not None:
+        from .common import scale_unit_note
+        eff, note = scale_unit_note(obj, offset, what="bevel width")
+        if note:
+            result["offset_world"] = eff
+            result.setdefault("notes", []).append(note)
+        else:
+            result["offset_world"] = round(offset, 5)
+    return result
 
 
 def extrude(params):
@@ -1882,6 +1894,112 @@ def select_in_sphere(params):
             "action": action}
 
 
+def select_by_radius(params):
+    """Select verts in a radial BAND around a point or an axis line (G132/G122).
+
+    The cylindrical/banded sibling of select_in_sphere. Two things it adds:
+      • an INNER radius — so this is a band (a hollow tube/shell), not a solid ball:
+        'the wall between r=0.030 and r=0.036' is one call, which retires the
+        in-place wall-thinning cutter-cylinder hack and the concentric-loop dance.
+      • a CYLINDER shape — perpendicular distance from an AXIS LINE, not a point, so
+        a full-height vessel wall selects regardless of Z.
+
+    center / center_object / center_selection: where to measure from (world). Exactly
+        one resolves the center point; for CYLINDER the axis passes through it.
+          center=[x,y,z]            an explicit world point (also how handle= arrives)
+          center_object='Mug'       that object's bbox centre
+          center_selection=True     the current selection's bbox centre (no handle to
+                                    mint first — solves G122's chicken-and-egg)
+    shape:  CYLINDER (dist from the axis line) | SPHERE (dist from the point). Default CYLINDER.
+    axis:   X|Y|Z cylinder axis (ignored for SPHERE). Default Z.
+    radius_inner / radius_outer: the band. select iff radius_inner <= dist <= radius_outer.
+        radius_inner=0 = a solid disk/ball (then it's select_in_sphere with a free axis).
+    action / extend: as the other selectors (SELECT|ADD|DESELECT|INTERSECT).
+    """
+    import bmesh
+    from mathutils import Vector
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    shape = (params.get("shape") or "CYLINDER").upper()
+    if shape not in ("CYLINDER", "SPHERE"):
+        return {"error": "shape must be CYLINDER or SPHERE"}
+    axis = (params.get("axis") or "Z").upper()
+    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
+    r_in = float(params.get("radius_inner", 0.0) or 0.0)
+    r_out = params.get("radius_outer", params.get("radius"))
+    if r_out is None:
+        return {"error": "radius_outer (the band's outer radius, m) is required"}
+    r_out = float(r_out)
+    if r_out <= 0:
+        return {"error": "radius_outer must be > 0"}
+    if r_in < 0 or r_in >= r_out:
+        return {"error": f"radius_inner ({r_in}) must be >= 0 and < radius_outer ({r_out})"}
+    action = (params.get("action") or "SELECT").upper()
+    if bool(params.get("extend", False)) and action == "SELECT":
+        action = "ADD"
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    mw = obj.matrix_world
+
+    center = params.get("center")
+    if center is None and params.get("center_selection"):
+        sel = [mw @ v.co for v in bm.verts if v.select]
+        if not sel:
+            return {"error": "center_selection=True but nothing is selected to centre on"}
+        center = [(min(p[i] for p in sel) + max(p[i] for p in sel)) / 2 for i in range(3)]
+    if center is None and params.get("center_object"):
+        co = bpy.data.objects.get(params["center_object"])
+        if co is None:
+            return {"error": f"center_object '{params['center_object']}' not found"}
+        bb = [co.matrix_world @ Vector(c) for c in co.bound_box]
+        center = [(min(p[i] for p in bb) + max(p[i] for p in bb)) / 2 for i in range(3)]
+    if center is None:
+        # Default: the edited object's OWN axis (its bbox centre) — the common
+        # "thin this vessel's wall" case needs only the radii, no centre spec.
+        bb = [mw @ Vector(c) for c in obj.bound_box]
+        center = [(min(p[i] for p in bb) + max(p[i] for p in bb)) / 2 for i in range(3)]
+    if not (isinstance(center, (list, tuple)) and len(center) == 3):
+        return {"error": "need a centre: center=[x,y,z], center_object=, "
+                         "center_selection=True, or handle="}
+    cx, cy, cz = float(center[0]), float(center[1]), float(center[2])
+
+    r_in2, r_out2 = r_in * r_in, r_out * r_out
+    count = 0
+    for v in bm.verts:
+        wv = mw @ v.co
+        if shape == "SPHERE":
+            d2 = (wv.x - cx) ** 2 + (wv.y - cy) ** 2 + (wv.z - cz) ** 2
+        else:
+            dv = [wv.x - cx, wv.y - cy, wv.z - cz]
+            dv[axis_idx] = 0.0
+            d2 = dv[0] ** 2 + dv[1] ** 2 + dv[2] ** 2
+        inside = r_in2 <= d2 <= r_out2
+        if action == "DESELECT":
+            if inside:
+                v.select = False
+                count += 1
+        elif action == "ADD":
+            if inside:
+                v.select = True
+                count += 1
+        elif action == "INTERSECT":
+            if not inside:
+                v.select = False
+            elif v.select:
+                count += 1
+        else:
+            v.select = inside
+            if inside:
+                count += 1
+    _flush_vert_selection(bm)
+    bmesh.update_edit_mesh(obj.data)
+    return {"success": True, "selected": count, "shape": shape,
+            "axis": (axis if shape == "CYLINDER" else None),
+            "radius_inner": round(r_in, 5), "radius_outer": round(r_out, 5),
+            "center": [round(cx, 5), round(cy, 5), round(cz, 5)], "action": action}
+
+
 def select_boundary(params):
     """Select the OPEN-BOUNDARY edges of a mesh — the edges of a hole/rim (X3B).
 
@@ -2327,6 +2445,7 @@ TOOLS = {
     "set_edge_crease":    set_edge_crease,
     "merge_by_distance":  merge_by_distance,
     "select_in_sphere":   select_in_sphere,
+    "select_by_radius":   select_by_radius,
     "split_by_part":      split_by_part,
     "assign_weight":      assign_weight,
     "select_boundary":    select_boundary,

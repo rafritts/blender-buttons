@@ -11,15 +11,15 @@ from server import editmode, objects, rings, queries, handles
 from ._common import tag, unknown
 
 _OPS = ["all", "none", "object", "by_axis", "between", "group", "material", "boundary", "limb",
-        "grow", "shrink", "flood", "random", "in_sphere", "ring", "rings", "component_mode",
-        "current"]
+        "grow", "shrink", "flood", "random", "in_sphere", "by_radius", "ring", "rings",
+        "component_mode", "current"]
 
 
 @mcp.tool(name="select")
 def select(
     op: Literal["all", "none", "object", "by_axis", "between", "group", "material", "boundary",
-                "limb", "grow", "shrink", "flood", "random", "in_sphere", "ring", "rings",
-                "component_mode", "current"],
+                "limb", "grow", "shrink", "flood", "random", "in_sphere", "by_radius", "ring",
+                "rings", "component_mode", "current"],
     # object selection
     name: tag(str, "[object] object name to select; [group] vertex-group name substring; [material] material-name substring (case-insensitive, unions all matches; empty = LIST every vgroup/material slot)") = "",
     # generic
@@ -47,8 +47,15 @@ def select(
     seed: tag(int, "[random] random seed") = 0,
     # in_sphere
     radius: tag(float, "[in_sphere] sphere radius (m)") = 0.0,
-    handle: tag(str, "[in_sphere] center the sphere on a named handle's live point "
+    handle: tag(str, "[in_sphere/by_radius] center on a named handle's live point "
                      "(recomputed)") = "",
+    # by_radius
+    shape: tag(str, "[by_radius] CYLINDER (distance from the axis line) | SPHERE (distance from the point)") = "CYLINDER",
+    radius_inner: tag(float, "[by_radius] band inner radius (m); 0 = a solid disk/ball") = 0.0,
+    radius_outer: tag(float, "[by_radius] band outer radius (m)") = 0.0,
+    center: tag(list, "[by_radius] explicit [x,y,z] world centre to measure from") = None,
+    center_object: tag(str, "[by_radius] centre on this object's bbox centre") = "",
+    center_selection: tag(bool, "[by_radius] centre on the CURRENT selection's bbox centre (no handle to mint first)") = False,
     # ring / rings
     index: tag(int, "[ring] ring index along axis") = 0,
     indices: tag(list, "[rings] list of ring indices") = None,
@@ -91,6 +98,13 @@ def select(
       random      — a random fraction              (fraction, seed)
       in_sphere   — verts inside a sphere   (handle=<name>, radius, action, extend)
                     — extend=True unions onto the current selection.
+      by_radius   — verts in a radial BAND around a point or axis line
+                    (shape=CYLINDER|SPHERE, axis, radius_inner, radius_outer,
+                    center=[x,y,z] | center_object= | center_selection=True |
+                    handle=). The inner radius makes it a band (hollow tube/shell),
+                    not a ball: select an inner vessel wall (center_selection=True,
+                    CYLINDER, radius_inner..radius_outer) then scale_vertices toward
+                    the axis to thin the wall in place — no cutter-cylinder CSG.
       ring        — one edge ring          (axis, index, action, target)
       rings       — several edge rings     (axis, indices=[...], action, target)
       component_mode — set vert/edge/face mode    (mode=VERT|EDGE|FACE)
@@ -132,6 +146,18 @@ def select(
             return err
         note = drift or ""
         return note + editmode.select_in_sphere(pt[0], pt[1], pt[2], radius, action, extend, target)
+    if o == "by_radius":
+        ctr = center
+        note = ""
+        if ctr is None and handle:
+            pt, err, drift = handles.resolve_point(handle)
+            if err:
+                return err
+            ctr = [pt[0], pt[1], pt[2]]
+            note = drift or ""
+        return note + editmode.select_by_radius(
+            shape, axis, radius_inner, radius_outer, ctr, center_object,
+            center_selection, action, extend, target)
     if o == "ring":
         return rings.select_ring(axis, index, action, target)
     if o == "rings":

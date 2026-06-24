@@ -970,6 +970,39 @@ def select_in_sphere(center_x: float, center_y: float, center_z: float, radius: 
     return main + _status(result)
 
 
+def select_by_radius(shape: str = "CYLINDER", axis: str = "Z", radius_inner: float = 0.0,
+                     radius_outer: float = 0.0, center: list = None, center_object: str = "",
+                     center_selection: bool = False, action: str = "SELECT",
+                     extend: bool = False, target: str = "") -> str:
+    """Select verts in a radial BAND around a point or an axis (G132/G122).
+
+    shape: CYLINDER (perpendicular distance from the axis line) | SPHERE (distance
+           from the point). axis: X|Y|Z for CYLINDER.
+    radius_inner/radius_outer: the band, metres. inner=0 = a solid disk/ball.
+    center: explicit [x,y,z] world point; or center_object=<name> (its bbox centre);
+            or center_selection=True (the current selection's bbox centre).
+    The inner-radius band makes 'the wall between r=0.030 and r=0.036' one call —
+    select the inner shell, then scale_vertices toward the axis to thin a wall in place."""
+    p = {"shape": shape, "axis": axis, "radius_inner": radius_inner,
+         "radius_outer": radius_outer, "action": action, "extend": extend, "target": target}
+    if center is not None:
+        p["center"] = list(center)
+    if center_object:
+        p["center_object"] = center_object
+    if center_selection:
+        p["center_selection"] = True
+    result = call_blender("select_by_radius", p)
+    if result.get("success"):
+        band = (f"r∈[{result['radius_inner']},{result['radius_outer']}]m"
+                if result['radius_inner'] else f"r≤{result['radius_outer']}m")
+        sh = result["shape"].lower() + (f" axis={result['axis']}" if result.get("axis") else "")
+        main = (f"{result['action']} {result['selected']} verts ({sh}) {band} "
+                f"about {result['center']}")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 def relax_selection(iterations: int = 5, factor: float = 0.5, reproject: bool = True,
                     label: str = "", target: str = "") -> str:
     """G49 — RELAX the selected verts: even out their spacing over the existing form

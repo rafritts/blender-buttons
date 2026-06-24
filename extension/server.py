@@ -115,7 +115,7 @@ EDIT_MODE_TOOLS = {
     "select_by_axis", "select_between", "grow_selection", "move_vertices",
     "scale_vertices", "delete_geometry", "separate_selection", "jitter_vertices",
     "random_select", "proportional_move", "inflate_selection", "mark_sharp",
-    "set_edge_crease", "merge_by_distance", "select_in_sphere", "split_by_part",
+    "set_edge_crease", "merge_by_distance", "select_in_sphere", "select_by_radius", "split_by_part",
     "get_rings", "select_ring", "select_rings", "scale_rings", "taper_end", "taper_section",
     "shape_profile", "flute", "field",
     "assign_weight", "select_boundary", "select_limb", "flood_to_crease",

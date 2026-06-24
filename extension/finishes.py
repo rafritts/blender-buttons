@@ -513,9 +513,25 @@ def add_modifier(params):
                 if rest_source == "BIND" else
                 f"CORRECTIVE_SMOOTH added (rest_source=ORCO — smooths toward the base mesh).")
         return {"success": True, "modifier": mod.name, "note": note}
+    out = {"success": True, "modifier": mod.name, "status_focus": obj.name}
+    if mod_type == "SOLIDIFY":
+        # Let thickness/offset be set at add time (so `add type=SOLIDIFY thickness=` works
+        # in one call), and report the effective WORLD wall thickness + warn on unapplied
+        # scale — the silent-2× wall that bit G132.
+        thickness = params.get("thickness")
+        if thickness is not None and hasattr(mod, "thickness"):
+            mod.thickness = float(thickness)
+        offset = params.get("offset")
+        if offset is not None and hasattr(mod, "offset"):
+            mod.offset = float(offset)
+        from .common import scale_unit_note
+        eff, note = scale_unit_note(obj, mod.thickness, what="wall thickness")
+        if note:
+            out["world_thickness"] = eff
+            out.setdefault("notes", []).append(note)
     # status_focus so the status block reports the HOST object's bounds (G89) even when
     # the modifier was added to a named, non-active object.
-    return {"success": True, "modifier": mod.name, "status_focus": obj.name}
+    return out
 
 
 def bind_mesh_deform(params):
@@ -830,7 +846,7 @@ def modify_modifier(params):
             setattr(mod, attr, val)
         applied.append(f"{key}={val}")
 
-    return {
+    out = {
         "success": True,
         "target": target,
         "modifier": mod.name,
@@ -838,6 +854,16 @@ def modify_modifier(params):
         "applied": applied,
         "skipped": skipped,
     }
+    # G132: SOLIDIFY thickness is in LOCAL units, so an unapplied object scale yields a
+    # world wall thicker than the named thickness, silently. Report the effective world
+    # thickness + warn whenever the thickness was just set on a scaled object.
+    if mod.type == 'SOLIDIFY' and "thickness" in params:
+        from .common import scale_unit_note
+        eff, note = scale_unit_note(obj, mod.thickness, what="wall thickness")
+        if note:
+            out["world_thickness"] = eff
+            out.setdefault("notes", []).append(note)
+    return out
 
 
 def remove_modifier(params):
