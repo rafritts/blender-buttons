@@ -240,6 +240,14 @@ def _status(result: dict) -> str:
     return bind + "\n".join(lines)
 
 
+def fmt_provenance(result: dict) -> str:
+    """Trailing provenance line for a spatial read — which mesh the number was measured on
+    (+ any live modifiers). Appended by every measure/relate formatter so a returned
+    distance / gap / clearance / contact is never silent about its underlying geometry."""
+    p = result.get("provenance")
+    return f"\n  ↳ measured on {p}" if p else ""
+
+
 def fmt_modifiers(mods: list) -> str:
     """One-line modifier-stack summary for a feel read (type 'name', in stack order) —
     the at-a-glance WHY behind a cage/evaluated divergence on an unfamiliar object."""

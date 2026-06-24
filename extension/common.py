@@ -75,6 +75,25 @@ def evaluated_differs(obj):
     return any(m.show_viewport for m in obj.modifiers)
 
 
+def measurement_provenance(objs, basis="evaluated"):
+    """A provenance tag for a spatial read: which mesh was measured + any live modifiers
+    on the objects involved. Every distance / gap / clearance / contact number carries
+    this so the caller can NEVER receive a spatial value whose underlying mesh it can't
+    name. `basis` is 'evaluated' (what renders — the default for every collision/measure
+    read) or 'cage' (the editable base, e.g. an anchor on a vertex selection)."""
+    tag = f"{basis} geometry"
+    mods = []
+    for o in objs:
+        if o is None:
+            continue
+        live = [m for m in o.modifiers if m.show_viewport]
+        if live:
+            mods.append(f"{o.name}: " + ", ".join(f"{m.type} '{m.name}'" for m in live))
+    if mods:
+        tag += " — modifiers live (" + " · ".join(mods) + ")"
+    return tag
+
+
 def nearby_objects(world_pos, exclude_names=(), max_count=3):
     """Return up to max_count nearest mesh objects to world_pos, sorted by distance."""
     px, py, pz = world_pos

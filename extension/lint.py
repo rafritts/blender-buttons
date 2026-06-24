@@ -15,6 +15,7 @@ import mathutils
 from .common import (
     camera_coverage,
     eval_world_bmesh,
+    measurement_provenance,
     object_bvh,
     resolve_targets,
     scene_mesh_objects,
@@ -106,7 +107,8 @@ def find_coplanar_overlaps(params):
         objs = scene_mesh_objects()
     pairs = _coplanar_pairs(objs, eps)
     return {"success": True, "epsilon": eps, "count": len(pairs), "overlaps": pairs,
-            "checked": [o.name for o in objs]}
+            "checked": [o.name for o in objs],
+            "provenance": measurement_provenance(objs)}
 
 
 # ─────────────────────────── validate (P5) ───────────────────────────

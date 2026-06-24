@@ -6,7 +6,7 @@ instead of burning Cycles renders and image tokens on a question with an exact
 geometric answer.
 """
 
-from server._core import mcp, call_blender, _status, _targets
+from server._core import mcp, call_blender, _status, _targets, fmt_provenance
 
 
 @mcp.tool()
@@ -26,12 +26,13 @@ def find_coplanar_overlaps(targets: str = "", epsilon: float = 0.0001) -> str:
         return result.get("error", "failed")
     overlaps = result["overlaps"]
     if not overlaps:
-        return f"PASS — no coplanar overlaps among {len(result['checked'])} object(s)" + _status(result)
+        return (f"PASS — no coplanar overlaps among {len(result['checked'])} object(s)"
+                + fmt_provenance(result) + _status(result))
     lines = [f"{len(overlaps)} coplanar overlap(s) — z-fight risk:"]
     for o in overlaps:
         lines.append(f"  ⚠ '{o['a']}' ↔ '{o['b']}' at {o['axis']}={o['coord']} "
                      f"(overlap {o['overlap_mm'][0]}×{o['overlap_mm'][1]}mm)")
-    return "\n".join(lines) + _status(result)
+    return "\n".join(lines) + fmt_provenance(result) + _status(result)
 
 
 @mcp.tool()

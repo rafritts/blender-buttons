@@ -5,7 +5,7 @@ question the agent's vision can pose but not measure — and that would otherwis
 cost a test render or a guess-and-screenshot loop.
 """
 
-from server._core import mcp, call_blender, _status, _targets
+from server._core import mcp, call_blender, _status, _targets, fmt_provenance
 
 
 @mcp.tool()
@@ -38,7 +38,7 @@ def check_contacts(targets: str = "") -> str:
             lines.append(f"  {c['object']}: penetrating '{c['other']}' by {c['depth_mm']}mm")
         else:
             lines.append(f"  {c['object']}: floating — nearest '{c['other']}', gap {c['gap_mm']}mm")
-    return "\n".join(lines) + _status(result)
+    return "\n".join(lines) + fmt_provenance(result) + _status(result)
 
 
 @mcp.tool()
@@ -89,7 +89,7 @@ def check_clearance(shell: str, surface: str, threshold: float = None, samples: 
         lines.append(f"  {verdict} — clears by ≥{result['threshold_mm']}mm everywhere"
                      if result["clears"] else
                      f"  {verdict} — does NOT clear by ≥{result['threshold_mm']}mm everywhere")
-    return "\n".join(lines) + _status(result)
+    return "\n".join(lines) + fmt_provenance(result) + _status(result)
 
 
 @mcp.tool()
@@ -118,7 +118,7 @@ def check_resting(targets: str = "") -> str:
         if r.get("note"):
             line += f"\n    ↳ {r['note']}"
         lines.append(line)
-    return "\n".join(lines) + _status(result)
+    return "\n".join(lines) + fmt_provenance(result) + _status(result)
 
 
 @mcp.tool()

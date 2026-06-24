@@ -4,8 +4,8 @@ import math
 
 import bpy
 
-from .common import (eval_world_bmesh, material_summary, region_words,
-                     world_bbox, world_center)
+from .common import (eval_world_bmesh, material_summary, measurement_provenance,
+                     region_words, world_bbox, world_center)
 
 
 def _base_mesh_world_center(obj):
@@ -234,7 +234,8 @@ def distance_between(params):
     if axis in ("X", "Y", "Z"):
         dist = abs({"X": dx, "Y": dy, "Z": dz}[axis])
         return {"success": True, "a": a_name, "b": b_name, "axis": axis,
-                "distance": round(dist, 5), "measured": "centre-to-centre"}
+                "distance": round(dist, 5), "measured": "centre-to-centre",
+                "provenance": measurement_provenance([a, b])}
 
     # ANY → genuine nearest-surface distance (BVH), with the point pair so the operator
     # can check it against the bounds the status block reports.
@@ -249,11 +250,13 @@ def distance_between(params):
             dist, pt_a, pt_b = d2, a2, b2
         return {"success": True, "a": a_name, "b": b_name, "axis": "ANY",
                 "distance": round(dist, 5), "measured": "nearest surface (BVH)",
-                "between": [[round(c, 4) for c in pt_a], [round(c, 4) for c in pt_b]]}
+                "between": [[round(c, 4) for c in pt_a], [round(c, 4) for c in pt_b]],
+                "provenance": measurement_provenance([a, b])}
     # Either object has no usable mesh geometry (e.g. an empty) — fall back to centroid.
     dist = math.sqrt(dx * dx + dy * dy + dz * dz)
     return {"success": True, "a": a_name, "b": b_name, "axis": "ANY",
-            "distance": round(dist, 5), "measured": "centre-to-centre (no mesh geometry)"}
+            "distance": round(dist, 5), "measured": "centre-to-centre (no mesh geometry)",
+            "provenance": measurement_provenance([a, b])}
 
 
 def gap_between(params):
@@ -275,7 +278,8 @@ def gap_between(params):
     touching_axes = [n for n, g in zip("XYZ", (gx, gy, gz)) if abs(g) < 1e-4]
     return {"success": True, "a": a_name, "b": b_name,
             "gap_x": round(gx, 5), "gap_y": round(gy, 5), "gap_z": round(gz, 5),
-            "touching_on_axes": touching_axes}
+            "touching_on_axes": touching_axes,
+            "provenance": measurement_provenance([a, b])}
 
 
 def is_aligned(params):
@@ -308,7 +312,8 @@ def is_aligned(params):
         return {"error": f"Invalid side '{side}'. Use {list(sides.keys())}"}
     va, vb = sides[side]
     return {"success": True, "a": a_name, "b": b_name, "side": side,
-            "aligned": abs(va - vb) < tolerance, "difference": round(va - vb, 5)}
+            "aligned": abs(va - vb) < tolerance, "difference": round(va - vb, 5),
+            "provenance": measurement_provenance([a, b])}
 
 
 def _mesh_symmetry(obj, axis_idx, axis, plane, tol):
@@ -763,6 +768,7 @@ def selection_anchor(params):
         "region": region_words(bbox, snap_w),
         "vert_count": len(sel),
         "selection_source": source,
+        "provenance": measurement_provenance([obj], basis="cage"),
     })
 
 

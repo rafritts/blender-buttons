@@ -21,6 +21,7 @@ from . import state
 from .common import (
     camera_coverage,
     eval_world_bmesh,
+    measurement_provenance,
     region_words as _region_words,
     resolve_targets,
     scene_mesh_objects,
@@ -32,19 +33,81 @@ _AXES = "XYZ"
 _TOUCH = 0.0005  # 0.5 mm — below this two surfaces are "touching", not floating
 
 
+# A deliberately off-axis unit ray for inside-by-parity tests. Axis-aligned rays graze
+# the coplanar faces of boxes/quads and miscount; this direction hits cleanly.
+_PARITY_DIR = mathutils.Vector((0.5612, 0.3791, 0.7363)).normalized()
+
+
 def _prepare(obj, cap=250):
-    """World-space BVH + downsampled world vertices + bbox for one object."""
+    """World-space BVH + bbox + sample points for one object. Two sample sets:
+      verts   — vertex-only downsample, for nearest-surface gap/distance reads.
+      samples — verts PLUS face centroids, for the signed inside test: a matched-footprint
+                interpenetration (chain link, sunk marker, two boxes sharing a wall) lives
+                at FACE CENTERS, where every vertex sits on the shared wall and is sign-
+                ambiguous — so a vert-only test misses it.
+    `closed` records whether the mesh is watertight (every edge has two faces), which
+    decides the inside test: robust ray-parity for a closed solid, the nearest-face
+    normal for an open shell (where 'inside' is only locally defined)."""
     bm = eval_world_bmesh(obj)
     if bm is None or not bm.verts:
         if bm:
             bm.free()
         return None
     bvh = BVHTree.FromBMesh(bm)
-    n = len(bm.verts)
-    step = max(1, n // cap)
-    sample = [bm.verts[i].co.copy() for i in range(0, n, step)]
+    closed = bool(bm.edges) and all(len(e.link_faces) == 2 for e in bm.edges)
+    verts = [v.co.copy() for v in bm.verts]
+    faces = [f.calc_center_median() for f in bm.faces]
+    vstep = max(1, len(verts) // cap)
+    vsample = verts[::vstep]
+    allpts = verts + faces
+    astep = max(1, len(allpts) // cap)
+    sample = allpts[::astep]
     bm.free()
-    return {"name": obj.name, "bvh": bvh, "verts": sample, "bbox": world_bbox(obj)}
+    return {"name": obj.name, "bvh": bvh, "verts": vsample, "samples": sample,
+            "bbox": world_bbox(obj), "closed": closed}
+
+
+def _bbox_contains(point, bbox, pad):
+    """Is point within bbox (expanded by pad)? A point OUTSIDE a mesh's bbox is provably
+    OUTSIDE its solid — the cheap, exact gate that kills the long-range false 'inside'
+    behind the old fictional penetration depths (a part's far interior point reading as
+    buried tens of mm inside a distant neighbour)."""
+    return (bbox[0] - pad <= point.x <= bbox[3] + pad and
+            bbox[1] - pad <= point.y <= bbox[4] + pad and
+            bbox[2] - pad <= point.z <= bbox[5] + pad)
+
+
+def _inside_parity(bvh, point):
+    """Robust inside test for a CLOSED mesh: count surface crossings along a fixed ray
+    from `point`; odd ⇒ inside. Re-casts just past each hit until the ray exits. Stable
+    where the single nearest-face normal fails — far points and non-convex shells."""
+    origin = point.copy()
+    eps = 1e-6
+    crossings = 0
+    for _ in range(64):                      # backstop: no real mesh crosses a ray 64×
+        hit = bvh.ray_cast(origin, _PARITY_DIR)
+        if hit[0] is None:
+            break
+        crossings += 1
+        origin = hit[0] + _PARITY_DIR * eps
+    return (crossings % 2) == 1
+
+
+def _signed_distance(point, dst):
+    """Signed nearest-surface distance from `point` to dst's mesh: + outside, − inside.
+    The ONE primitive both check_clearance and the penetration read are built on, so the
+    two can never disagree on clears-vs-penetrates. In-bbox gate first (provably outside),
+    then ray-parity for a closed solid / nearest-face normal for an open shell."""
+    loc, normal, idx, dist = dst["bvh"].find_nearest(point)
+    if loc is None:
+        return None
+    if not _bbox_contains(point, dst["bbox"], _TOUCH):
+        return dist                          # outside the bbox ⇒ outside the solid
+    if dst["closed"]:
+        inside = _inside_parity(dst["bvh"], point)
+    else:
+        inside = (point - loc).dot(normal) < 0.0
+    return -dist if inside else dist
 
 
 def _bbox_separation(a, b):
@@ -89,31 +152,23 @@ def _bbox_overlaps(a, b):
 
 
 def _penetration_depth(src, dst):
-    """How far src crosses INSIDE dst's solid, in metres (0 = no crossing). For each of
-    src's sampled verts we test a point pulled 25% toward src's centroid — a point just
-    INSIDE src's own surface — against dst, signed by dst's nearest-face outward normal.
-    Pulling inward is what makes this robust to MATCHED FOOTPRINTS: a sunk marker / chain
-    link whose raw verts land exactly on the other's shared plane (G32) is sign-ambiguous
-    vert-by-vert, but a point pulled inside src is unambiguously inside-or-outside dst. A
-    part merely SEATED in a recess (a donut in a well) has its interior in the open cavity,
-    OUTSIDE dst's solid, so it reads 0 (G107). Used only as a gate ON TOP of bbox overlap,
-    so it can only REMOVE a false penetration, never invent or lose one."""
-    verts = src["verts"]
-    if not verts:
-        return 0.0
-    c = mathutils.Vector((0.0, 0.0, 0.0))
-    for v in verts:
-        c += v
-    c /= len(verts)
+    """How far src crosses INSIDE dst's solid, in metres (0 = no crossing). The deepest of
+    src's SURFACE samples (verts + face centroids) that lies inside dst, measured by the
+    shared signed-distance primitive — so it reconciles with check_clearance by
+    construction (same test), and a SEATED part (donut in a well — interior in the open
+    cavity, OUTSIDE dst's solid) reads 0 (G107). Capped at the thinnest axis of the bbox
+    overlap, the hard physical ceiling on how deep the shared volume can be — this is what
+    kills the fictional 'penetrating 80mm' on an 8mm part."""
     worst = 0.0
-    for v in verts:
-        p = v + (c - v) * 0.25          # a point just inside src's surface
-        loc, normal, idx, dist = dst["bvh"].find_nearest(p)
-        if loc is None or normal is None:
-            continue
-        if (p - loc).dot(normal) < 0.0 and dist > worst:
-            worst = dist
-    return worst
+    for p in src["samples"]:
+        sd = _signed_distance(p, dst)
+        if sd is not None and sd < 0.0 and -sd > worst:
+            worst = -sd
+    if worst <= 0.0:
+        return 0.0
+    ox, oy, oz = _bbox_overlaps(src["bbox"], dst["bbox"])
+    cap = min(ox, oy, oz)
+    return min(worst, cap) if cap > 0 else worst
 
 
 def auto_proximity_note(obj_name):
@@ -234,7 +289,8 @@ def check_contacts(params):
             seg.append(f"nearest {nearest['name']} floating {round(near_gap * 1000, 1)}mm")
         rel["summary"] = " · ".join(seg)
         results.append(rel)
-    return {"success": True, "contacts": results}
+    return {"success": True, "contacts": results,
+            "provenance": measurement_provenance(report_objs)}
 
 
 # ─────────────────────────── resting (P10) ───────────────────────────
@@ -351,7 +407,8 @@ def check_resting(params):
                 f"(z={round(support_z, 4)}m); its rim/bbox-top is {round(rim_above * 1000, 1)}mm "
                 f"higher (z={round(bbox_top_z, 4)}m) and is not load-bearing here")
         results.append(result)
-    return {"success": True, "resting": results}
+    return {"success": True, "resting": results,
+            "provenance": measurement_provenance(report_objs)}
 
 
 # ─────────────────────────── clearance (G98) ───────────────────────────
@@ -390,38 +447,28 @@ def check_clearance(params):
     if shell_name == surface_name:
         return {"error": "'shell' and 'surface' must be different objects"}
 
-    # Full-resolution surface BVH (accuracy: the signed field is only as good as the
-    # surface it samples against); the nearest-face normal gives the inside/outside sign.
-    surf_bm = eval_world_bmesh(surface)
-    if surf_bm is None or not surf_bm.verts:
-        if surf_bm:
-            surf_bm.free()
+    # The surface is the `dst` solid (full-res BVH + bbox + closedness); the shell is
+    # sampled (verts + face centroids) and each sample signed against it via the SHARED
+    # _signed_distance primitive — the same one check_contacts uses, so a clearance read
+    # and a contacts read can never disagree on clears-vs-penetrates.
+    surf = _prepare(surface)
+    if surf is None:
         return {"error": f"surface '{surface_name}' has no mesh geometry"}
-    surf_bvh = BVHTree.FromBMesh(surf_bm)
-    surf_bm.free()
-
-    shell_bm = eval_world_bmesh(shell)
-    if shell_bm is None or not shell_bm.verts:
-        if shell_bm:
-            shell_bm.free()
-        return {"error": f"shell '{shell_name}' has no mesh geometry"}
-    n = len(shell_bm.verts)
     cap = max(1, int(params.get("samples", 2000)))
-    step = max(1, n // cap)
-    samples = [shell_bm.verts[i].co.copy() for i in range(0, n, step)]
-    shell_bm.free()
+    shell_p = _prepare(shell, cap=cap)
+    if shell_p is None:
+        return {"error": f"shell '{shell_name}' has no mesh geometry"}
 
-    outside = []          # signed distances (m) for shell verts OUTSIDE the surface
-    inside = []           # (depth_mm, [x,y,z]) for shell verts INSIDE the surface
-    for p in samples:
-        loc, normal, idx, dist = surf_bvh.find_nearest(p)
-        if loc is None:
+    outside = []          # signed distances (m) for shell samples OUTSIDE the surface
+    inside = []           # (depth_mm, [x,y,z]) for shell samples INSIDE the surface
+    for p in shell_p["samples"]:
+        sd = _signed_distance(p, surf)
+        if sd is None:
             continue
-        signed = dist if (p - loc).dot(normal) >= 0 else -dist
-        if signed >= 0:
-            outside.append(signed)
+        if sd >= 0:
+            outside.append(sd)
         else:
-            inside.append((round(-signed * 1000, 2), [round(c, 4) for c in p]))
+            inside.append((round(-sd * 1000, 2), [round(c, 4) for c in p]))
 
     total = len(outside) + len(inside)
     if total == 0:
@@ -442,6 +489,7 @@ def check_clearance(params):
         "mean_clearance_mm": mean_clear_mm,
         "penetrations": len(inside),
         "worst_penetrations": worst,
+        "provenance": measurement_provenance([shell, surface]),
     }
     if threshold is not None:
         thr = float(threshold)

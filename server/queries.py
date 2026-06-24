@@ -1,5 +1,5 @@
 import json
-from server._core import mcp, call_blender, _status, _targets, render_dual
+from server._core import mcp, call_blender, _status, _targets, render_dual, fmt_provenance
 
 
 def _minted_line(result, how_hint):
@@ -367,7 +367,8 @@ def distance_between(a: str, b: str, axis: str = "ANY") -> str:
         btw = result.get("between")
         if btw:
             tail += f"  between {btw[0]}↔{btw[1]}"
-        return f"{a} ↔ {b} ({result['axis']}): {result['distance']} m{tail}" + _status(result)
+        return (f"{a} ↔ {b} ({result['axis']}): {result['distance']} m{tail}"
+                + fmt_provenance(result) + _status(result))
     return result.get("error", "failed")
 
 
@@ -384,7 +385,7 @@ def gap_between(a: str, b: str) -> str:
     touching_str = f" — touching on {touching}" if touching else ""
     main = (f"gap {a} ↔ {b}: x={result['gap_x']}  y={result['gap_y']}  z={result['gap_z']}"
             f"{touching_str}")
-    return main + _status(result)
+    return main + fmt_provenance(result) + _status(result)
 
 
 @mcp.tool()
@@ -460,7 +461,8 @@ def is_aligned(a: str, b: str, side: str = "TOP", tolerance: float = 0.001) -> s
     if not result.get("success"):
         return result.get("error", "failed")
     verdict = "ALIGNED" if result["aligned"] else "NOT aligned"
-    return f"{a} vs {b} on {side}: {verdict} (diff={result['difference']})" + _status(result)
+    return (f"{a} vs {b} on {side}: {verdict} (diff={result['difference']})"
+            + fmt_provenance(result) + _status(result))
 
 
 def aim_surface(target: str = "", face: str = "-Y", u: float = 0.5, v: float = 0.5,
@@ -518,7 +520,8 @@ def selection_anchor(target: str = "", as_handle: str = "") -> str:
             else "\n  → sculpt at=selection uses this point (radius defaults to the footprint)")
     return (f"selection anchor @ {result['region']} ({result['vert_count']} verts{src_note}): "
             f"point=[{p[0]}, {p[1]}, {p[2]}]  normal=[{n[0]}, {n[1]}, {n[2]}]  "
-            f"radius~{result.get('radius')}m (from extent {result.get('extent')})" + tail)
+            f"radius~{result.get('radius')}m (from extent {result.get('extent')})"
+            + tail + fmt_provenance(result))
 
 
 def radial_landmark(anchor: str = "", angle: float = 0.0, radius: float = 0.0,
