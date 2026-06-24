@@ -1,7 +1,7 @@
 import os
 import re
 
-from server._core import mcp, call_blender, _status
+from server._core import mcp, call_blender, _status, _targets
 from server import polyhaven
 
 
@@ -118,7 +118,7 @@ def set_pbr_material(target: str, folder: str, size: str = "", scale: float = 1.
                      displacement: float = 0.0, base_color: list = None,
                      tint: list = None, metallic: float = None, roughness: float = None,
                      material_name: str = "", slot: int = None, use_alpha: bool = False,
-                     label: str = "") -> str:
+                     physical_size: float = 0.0, label: str = "") -> str:
     """
     Build a PBR material from a LOCAL texture-set folder and apply it — vendor-neutral
     (Poliigon, Megascans, ambientCG, or any folder of maps). Maps are auto-detected by
@@ -130,7 +130,11 @@ def set_pbr_material(target: str, folder: str, size: str = "", scale: float = 1.
                 picks one (default: the largest present). For a Poliigon asset point at
                 the asset dir, e.g. ~/.../Poliigon_StoneQuartzite_8060.
     size:       resolution subfolder/token to pick (e.g. "4K"). Default: largest present.
-    scale:      texture tiling scale (BOX projection — no UV unwrap needed).
+    scale:      unitless texture tiling scale (BOX projection — no UV unwrap needed).
+    physical_size: G141 — real-world metres one texture tile should cover. When set, the
+                box-projection scale is DERIVED from the object's measured world size so
+                grain reads at a true physical scale (a number you'd otherwise dead-reckon
+                across render→judge rounds); `scale` is ignored.
     displacement: bump-displacement strength from the height map. 0 (default) = off,
                 normal-map detail only (what Poliigon does by default).
     base_color/tint/metallic/roughness: same overrides as `textured` — replace/tint the
@@ -153,7 +157,9 @@ def set_pbr_material(target: str, folder: str, size: str = "", scale: float = 1.
                 f"(classified: {sorted(maps) or 'nothing'}). Pass base_color= to override.")
 
     asset = os.path.basename(folder.rstrip("/\\")) or folder
-    params = {"target": target, "maps": maps, "scale": scale,
+    # G138: route target through the shared parser so a comma list / group name
+    # expands like every other verb — "Mug,Handle" → both shaded with ONE material.
+    params = {"target": _targets(target), "maps": maps, "scale": scale,
               "resolution": chosen_size or "", "asset_id": asset,
               "displacement": displacement}
     if base_color is not None: params["base_color"] = base_color
@@ -163,8 +169,12 @@ def set_pbr_material(target: str, folder: str, size: str = "", scale: float = 1.
     if material_name:          params["material_name"] = material_name
     if slot is not None:       params["slot"] = slot
     if use_alpha:              params["use_alpha"] = True
+    if physical_size > 0:      params["physical_size"] = physical_size
 
-    result = call_blender("set_textured_material", params, label=label)
+    # G139: loading + decoding a full PBR set (4K/8K maps) is disk-bound and routinely
+    # exceeds the 30s default; give it a longer ceiling so a slow load doesn't read as a
+    # dead instance.
+    result = call_blender("set_textured_material", params, label=label, timeout=180)
     if result.get("success"):
         size_str = f"@{chosen_size}" if chosen_size else ""
         main = (f"pbr '{result['target']}' from {asset}{size_str} "
@@ -180,7 +190,8 @@ def set_textured_material(target: str, asset_id: str, scale: float = 1.0,
                           resolution: str = "1k", base_color: list = None,
                           tint: list = None, metallic: float = None,
                           roughness: float = None, material_name: str = "",
-                          slot: int = None, use_alpha: bool = False, label: str = "") -> str:
+                          slot: int = None, use_alpha: bool = False,
+                          physical_size: float = 0.0, label: str = "") -> str:
     """
     Apply a real photo-scanned PBR material from Poly Haven (CC0) to an object or
     group. Downloads + caches the diffuse/normal/roughness/metal maps server-side,
@@ -188,7 +199,10 @@ def set_textured_material(target: str, asset_id: str, scale: float = 1.0,
 
     target:     object OR group name.
     asset_id:   Poly Haven texture id (from search_textures), e.g. "brick_wall_02".
-    scale:      texture tiling scale (higher = smaller, more-repeated texels).
+    scale:      texture tiling scale (higher = smaller, more-repeated texels). Unitless.
+    physical_size: G141 — real-world metres one texture tile should cover; derives the
+                box-projection scale from the object's measured world size so grain reads
+                at a true physical scale. When set, `scale` is ignored.
     resolution: "1k" (default), "2k", "4k", "8k". Higher = sharper but slower/heavier.
     base_color: optional [r,g,b] scene-linear override — REPLACES the scan's
                 diffuse so its roughness/normal/metal surface detail carries
@@ -212,7 +226,9 @@ def set_textured_material(target: str, asset_id: str, scale: float = 1.0,
         maps = polyhaven.ensure_texture_maps(asset_id, resolution)
     except polyhaven.PolyHavenError as e:
         return f"could not fetch texture '{asset_id}': {e}. Object material unchanged."
-    params = {"target": target, "maps": maps, "scale": scale,
+    # G138: route target through the shared parser so a comma list / group name
+    # expands like every other verb — "Mug,Handle" → both shaded with ONE material.
+    params = {"target": _targets(target), "maps": maps, "scale": scale,
               "resolution": resolution, "asset_id": asset_id}
     if base_color is not None:
         params["base_color"] = base_color
@@ -228,7 +244,12 @@ def set_textured_material(target: str, asset_id: str, scale: float = 1.0,
         params["slot"] = slot
     if use_alpha:
         params["use_alpha"] = True
-    result = call_blender("set_textured_material", params, label=label)
+    if physical_size > 0:
+        params["physical_size"] = physical_size
+    # G139: loading + decoding a full PBR set (4K/8K maps) is disk-bound and routinely
+    # exceeds the 30s default; give it a longer ceiling so a slow load doesn't read as a
+    # dead instance.
+    result = call_blender("set_textured_material", params, label=label, timeout=180)
     if result.get("success"):
         main = (f"textured '{result['target']}' with {asset_id}@{resolution} "
                 f"(maps: {result['maps_wired']}) → {result['assigned_to']} "

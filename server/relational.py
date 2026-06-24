@@ -206,7 +206,9 @@ def scatter_on_surface(target: str, source: str = "", count: int = 100,
                        avoid_margin: float = 0.0, sources: str = "",
                        within: str = "", within_margin: float = 0.0,
                        density: float = 0.0, up_only: bool = False,
-                       max_slope: float = 45.0, label: str = "") -> str:
+                       max_slope: float = 45.0, seat: bool = False,
+                       offset: float = 0.0, min_distance: float = 0.0,
+                       jitter_tilt: float = 0.0, label: str = "") -> str:
     """
     Scatter copies of one or more sources across `target`'s surface — the
     donut-tutorial sprinkles step, aimable (G57).
@@ -235,6 +237,17 @@ def scatter_on_surface(target: str, source: str = "", count: int = 100,
     avoid: object/collection name(s) to keep CLEAR — set-dressing around a hero asset
            without instances landing inside its footprint. Rejected and resampled.
     avoid_margin: meters to expand the avoid footprint by (default 0).
+    seat: G136 — lift each copy along the surface normal so its LOWEST point rests ON the
+          surface instead of burying its origin (the source's own extent sets the lift —
+          no thickness guess). The fix for flat parts (sprinkles, pebbles, leaves) that
+          otherwise sink half-under. Default False.
+    offset: G136 — explicit signed distance (m) along the surface normal, added on top of
+            any seat lift (+ proud, − sunk). Default 0.
+    min_distance: G137 — Poisson-disk spacing: no two instances closer than this (m).
+            Crowding candidates are resampled then dropped (in `skipped`) — the ceiling on
+            believable dense scatter without coplanar z-fighting.
+    jitter_tilt: G137 — max random tilt (deg) off the normal so near-coplanar flats CROSS
+            at an angle instead of z-fighting. Default 0.
 
     Instances of each source share its mesh data — cheap memory-wise. Target's
     modifiers are evaluated, so sprinkles land on the visible (post-subsurf) surface.
@@ -249,6 +262,8 @@ def scatter_on_surface(target: str, source: str = "", count: int = 100,
         "sources": sources or None, "within": within or None,
         "within_margin": within_margin, "density": density,
         "up_only": up_only, "max_slope": max_slope,
+        "seat": seat, "offset": offset, "min_distance": min_distance,
+        "jitter_tilt": jitter_tilt,
     }, label=label)
     if result.get("success"):
         srcs = result.get("sources") or [result.get("source")]

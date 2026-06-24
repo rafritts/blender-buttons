@@ -141,7 +141,10 @@ def set_world_background(color: list = None, hex: str = "", strength: float = No
                 params["hdri"] = polyhaven.ensure_hdri(hdri, resolution)
             except polyhaven.PolyHavenError as e:
                 return f"could not fetch HDRI '{hdri}': {e}. World unchanged."
-    result = call_blender("set_world_background", params, label=label)
+    # G139: an HDRI/EXR load is disk- and decode-bound and can blow past the 30s default,
+    # so give world ops a longer ceiling when an image is involved.
+    timeout = 180 if hdri else 30
+    result = call_blender("set_world_background", params, label=label, timeout=timeout)
     if result.get("success"):
         if result["mode"] == "hdri":
             main = f"world: hdri={result['hdri']} strength={result['strength']}"

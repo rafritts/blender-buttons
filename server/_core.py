@@ -1,5 +1,6 @@
 import socket
 import json
+import threading
 from mcp.server.fastmcp import FastMCP
 
 from server._instructions import INSTRUCTIONS
@@ -16,6 +17,10 @@ PORT_MAX = 8785             # exclusive — mirror of extension/state.py
 PORT_RANGE = range(PORT_MIN, PORT_MAX)
 
 _attached_port = None       # the Blender this session drives (None = unresolved)
+# Serializes attachment resolution so concurrent (batched) tool calls can't race on
+# `_attached_port` — one clears it while another reads it (G139). The Blender side
+# already serializes the WORK on its main-thread queue; this only guards the pointer.
+_resolve_lock = threading.RLock()
 
 # `instructions` is returned at MCP initialize; the spec lets the client inject it
 # into the model's system prompt. It bootstraps baseline knowledge of this server
@@ -71,15 +76,20 @@ def _resolve_target():
     """Decide which port this session's tool call should hit.
 
     Returns (port, None) on success, or (None, error_dict) when the agent must
-    choose. Policy: a live attachment wins; a dead one is cleared and re-resolved;
+    choose. Policy: a live attachment wins and is TRUSTED WITHOUT a preflight ping;
     exactly one live instance auto-attaches silently (the common case); zero or 2+
     raise an actionable error. So the 'which Blender?' gate fires at most once per
-    session, only when there's a genuine ambiguity."""
-    global _attached_port
+    session, only when there's a genuine ambiguity.
+
+    G139: the attachment is NOT re-pinged here. A busy instance (mid 4K-texture-load,
+    HDRI swap, heavy bind) can't answer a 0.4s liveness probe, and the old re-ping
+    read that silence as 'the instance died' — cleared the attachment, re-discovered
+    (every probe timing out under the same load), and returned 'No Blender instance is
+    reachable' for an instance that was alive the whole time. Instead we trust the
+    attachment and let the real call connect; if the instance is genuinely GONE the
+    connect is refused instantly and call_blender clears + re-resolves + retries once."""
     if _attached_port is not None:
-        if _ping(_attached_port):
-            return _attached_port, None
-        _attached_port = None       # it went away — fall through and re-resolve
+        return _attached_port, None
     live = discover_instances()
     if not live:
         return None, {"error": (
@@ -87,7 +97,7 @@ def _resolve_target():
             "extension enabled (it auto-starts its command server), or use "
             "`connect op=launch` to open one.")}
     if len(live) == 1:
-        _attached_port = live[0]["port"]
+        set_attached(live[0]["port"])
         return _attached_port, None
     lines = "\n".join(_describe(i) for i in live)
     return None, {"error": (
@@ -101,35 +111,70 @@ def _resolve_target():
 EXPOSE_FLAT_TOOLS = False
 
 
+def _unreachable_error(port, exc) -> dict:
+    return {"error": (
+        f"Cannot reach Blender extension on {ADDON_HOST}:{port} ({type(exc).__name__}). "
+        "The instance may have closed — run `connect op=list` to see what's live, "
+        "or `connect op=launch` to open one."
+    )}
+
+
+def _send_recv(port: int, payload: str, timeout: float):
+    """Connect, send, and read one newline-framed reply. Splits CONNECT from SEND so the
+    caller can tell 'never sent' (safe to retry) from 'sent, awaiting reply' (must not be
+    retried — the op may be running). Raises the connect error before any byte is sent."""
+    sock = socket.create_connection((ADDON_HOST, port), timeout=timeout)  # connect phase
+    with sock:
+        sock.settimeout(timeout)  # cap each recv too, so long renders aren't cut at 30s
+        sock.sendall(payload.encode())  # ── from here on the op is in flight ──
+        data = b""
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+            if b"\n" in data:
+                break
+    return json.loads(data.decode().strip())
+
+
 def call_blender(tool: str, params: dict = None, label: str = "", timeout: float = 30,
                  port: int = None) -> dict:
     # Resolve which instance to drive (auto-attach / ask-which / open-one) unless the
     # caller pinned a port explicitly. A resolution error short-circuits the call.
-    if port is None:
-        port, err = _resolve_target()
+    explicit_port = port is not None
+    if not explicit_port:
+        with _resolve_lock:
+            port, err = _resolve_target()
         if err:
             return err
     payload = json.dumps({"tool": tool, "params": params or {}, "label": label,
                           "timeout": timeout}) + "\n"
     try:
-        with socket.create_connection((ADDON_HOST, port), timeout=timeout) as sock:
-            sock.settimeout(timeout)  # cap each recv too, so long renders aren't cut at 30s
-            sock.sendall(payload.encode())
-            data = b""
-            while True:
-                chunk = sock.recv(4096)
-                if not chunk:
-                    break
-                data += chunk
-                if b"\n" in data:
-                    break
-    except (ConnectionRefusedError, socket.timeout, OSError) as e:
-        return {"error": (
-            f"Cannot reach Blender extension on {ADDON_HOST}:{port} ({type(e).__name__}). "
-            "The instance may have closed — run `connect op=list` to see what's live, "
-            "or `connect op=launch` to open one."
-        )}
-    return json.loads(data.decode().strip())
+        return _send_recv(port, payload, timeout)
+    except ConnectionRefusedError as e:
+        # The connection was REFUSED — nothing was sent, so this is safe to retry. G139:
+        # an auto-resolved attachment may simply be stale (the instance closed, or a fresh
+        # one took a different port). Drop it, re-resolve, and retry the connect ONCE; a
+        # genuinely dead-and-not-replaced instance then returns the actionable error. A
+        # caller-pinned port is never silently re-routed.
+        if explicit_port:
+            return _unreachable_error(port, e)
+        with _resolve_lock:
+            set_attached(None)
+            port, err = _resolve_target()
+        if err:
+            return err
+        try:
+            return _send_recv(port, payload, timeout)
+        except (ConnectionRefusedError, socket.timeout, OSError) as e2:
+            return _unreachable_error(port, e2)
+    except (socket.timeout, OSError) as e:
+        # Connected (or mid-stream) then timed out / dropped. The op may already be
+        # running on Blender's main thread, so we DON'T retry (that would stack a second
+        # op). The extension itself returns an honest in-band timeout JSON when an op
+        # overruns its own ceiling; this path is the transport giving up first.
+        return _unreachable_error(port, e)
 
 
 def _status(result: dict) -> str:

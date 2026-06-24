@@ -25,7 +25,11 @@ def set_textured_material(params):
     displacement: optional >0 — wire the height map through a Displacement node at
                 this strength (BUMP method). 0/omitted = no displacement (matches a
                 normal-map-only setup).
-    scale:      texture tiling scale (Mapping node), default 1.0.
+    scale:      texture tiling scale (Mapping node), default 1.0. Unitless.
+    physical_size: G141 — real-world metres one texture tile should cover. When given,
+                the Mapping scale is DERIVED per-axis from the object's world scale
+                (world_scale / physical_size), so the grain reads at a true physical size
+                regardless of the part's dimensions, and `scale` is ignored.
     base_color: optional [r,g,b(,a)] — REPLACES the diffuse map (no diffuse node
                 is created): the scan contributes roughness/normal/metal surface
                 detail while the color is yours (e.g. gold trim from a gray scan).
@@ -46,6 +50,9 @@ def set_textured_material(params):
     if not maps:
         return {"error": "no texture maps supplied"}
     scale = float(params.get("scale", 1.0))
+    # G141: physical_size (meters per texture tile) makes the box-projection scale a
+    # DERIVED real-world quantity instead of a unitless guess — see the mapping block.
+    physical_size = float(params.get("physical_size", 0.0) or 0.0)
     resolution = params.get("resolution", "1k")
     asset_id = params.get("asset_id", "")
     base_color = params.get("base_color")
@@ -64,7 +71,10 @@ def set_textured_material(params):
     if blocked:
         return {"error": blocked}
 
-    mat_name = params.get("material_name") or f"{target}_tex"
+    # G138: target may arrive as a list (multi-object shade with one material) —
+    # derive a clean string label for the default material name.
+    tgt_label = target if isinstance(target, str) else (target[0] if target else "material")
+    mat_name = params.get("material_name") or f"{tgt_label}_tex"
     mat = bpy.data.materials.get(mat_name) or bpy.data.materials.new(mat_name)
     mat.use_nodes = True
     nt = mat.node_tree
@@ -77,7 +87,17 @@ def set_textured_material(params):
     # Box projection driven by object coordinates — no UV unwrap needed.
     texco = nt.nodes.new('ShaderNodeTexCoord'); texco.location = (-700, 0)
     mapping = nt.nodes.new('ShaderNodeMapping'); mapping.location = (-500, 0)
-    mapping.inputs['Scale'].default_value = (scale, scale, scale)
+    # G141: 'Object' coordinates are the mesh's LOCAL coords, so a texture feature's WORLD
+    # size = its local size × the object's world scale. To make one tile span exactly
+    # `physical_size` METRES in world space, the Mapping scale per axis is therefore
+    # world_scale / physical_size — a value DERIVED from the part's measured transform,
+    # not a unitless guess. Falls back to the raw `scale` when physical_size isn't given.
+    if physical_size > 0.0:
+        ws = meshes[0].matrix_world.to_scale()
+        map_scale = tuple(abs(c) / physical_size for c in ws)
+    else:
+        map_scale = (scale, scale, scale)
+    mapping.inputs['Scale'].default_value = map_scale
     nt.links.new(texco.outputs['Object'], mapping.inputs['Vector'])
 
     def image_node(path, colorspace, y):
@@ -199,6 +219,9 @@ def set_textured_material(params):
         wired.append(f"displacement={float(disp_amt)}")
 
     store = {"asset_id": asset_id, "resolution": resolution, "scale": scale}
+    if physical_size > 0.0:
+        store["physical_size"] = physical_size
+        store["scale"] = [round(c, 5) for c in map_scale]
     if base_color is not None:
         store["base_color"] = [float(x) for x in base_color]
     if metallic is not None:
@@ -230,6 +253,9 @@ def set_textured_material(params):
         "assigned_to": [o.name for o in meshes],
         "maps_wired": wired,
     }
+    if physical_size > 0.0:
+        out["physical_size"] = physical_size
+        out["map_scale"] = [round(c, 5) for c in map_scale]
     if alpha_skipped:
         out["alpha_skipped"] = True
         out.setdefault("notes", []).append(

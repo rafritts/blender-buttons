@@ -63,7 +63,7 @@ def transform(
     target: tag(str, "[snap/match_dim] object to snap/measure against; [rest_on] surface to rest on; [seat] cavity to seat into; [scatter] the SURFACE to scatter onto") = "",
     side: tag(str, "[snap] target side, e.g. Z_MAX") = "Z_MAX",
     source_side: tag(str, "[snap] moved-object side (AUTO infers)") = "AUTO",
-    offset: tag(float, "[snap] gap along the snap axis (m); [rest_on/seat] clearance after contact (m)") = 0.0,
+    offset: tag(float, "[snap] gap along the snap axis (m); [rest_on/seat] clearance after contact (m); [scatter] signed distance (m) along the surface normal, on top of any seat (+ proud, − sunk)") = 0.0,
     # snap_grid
     size: tag(float, "[snap_grid] grid size (m)") = 0.1,
     axes: tag(str, "[snap_grid] axes to snap, e.g. XYZ") = "XYZ",
@@ -104,6 +104,9 @@ def transform(
     within_margin: tag(float, "[scatter] within-mask margin (m)") = 0.0,
     avoid: tag(str, "[scatter] object/region to avoid") = "",
     avoid_margin: tag(float, "[scatter] avoidance margin (m)") = 0.0,
+    seat: tag(bool, "[scatter] seat copies PROUD — lift each so its lowest point rests on the surface (no burying the origin)") = False,
+    min_distance: tag(float, "[scatter] Poisson-disk spacing (m) — no two instances closer than this (anti dense z-fight)") = 0.0,
+    jitter_tilt: tag(float, "[scatter] max random tilt (deg) off the normal so coplanar flats cross instead of z-fighting") = 0.0,
     # move_verts / scale_verts (edit-mode component transforms)
     x: tag(float, "[move_verts] explicit X amount (m)") = 0.0,
     y: tag(float, "[move_verts] explicit Y amount (m)") = 0.0,
@@ -160,7 +163,8 @@ def transform(
       array_radial — N copies in a ring (prototype, count, center_object, axis,
                    start_angle, end_angle, radius, align_to_tangent)
       scatter  — scatter copies on a surface (target, source/sources, count OR density,
-                 within=region mask, avoid, scale_min/max, …)
+                 within=region mask, avoid, scale_min/max, seat, offset, min_distance,
+                 jitter_tilt, …)
       move_verts — move selected verts (edit) (out/up/.. or x/y/z, target)
       scale_verts— scale selected verts (edit) (sx/sy/sz, in_plane, vert_pivot, target)
       snap_loop  — seat the SELECTED boundary loop onto a target opening (handle):
@@ -279,6 +283,7 @@ def transform(
                                              parent_to_target, seed, name_prefix,
                                              avoid, avoid_margin, sources, within,
                                              within_margin, density, up_only, max_slope,
+                                             seat, offset, min_distance, jitter_tilt,
                                              label)
     if o == "move_verts":
         return editmode.move_vertices(out, inward, up, down, left, right, forward,

@@ -226,29 +226,46 @@ _PURE_TRANSFORMS = {
 FEEL_DELTA_AFTER = VALIDATE_AFTER - _PURE_TRANSFORMS
 
 
-def _noop_obj(tool, params, edit_target):
-    """The object a no-op-checked op should change. EDIT_MODE_TOOLS already resolved it
-    into `edit_target` (popped from params). Object-level ops name the moved object in
-    `targets` (preferred — `target` is a reference for snap/rest/boolean), or `name`/
-    `mesh`/`names`, or (bakers) `target`. A list / comma string → its first entry
-    (best-effort on multi-target: if the whole op no-op'd, the first one is unchanged
-    too). Falls back to the active object — which most ops leave as their changed
-    object (activate()) — for sculpt and in-session edits."""
+def _noop_objs(tool, params, edit_target):
+    """The object(s) a no-op-checked op should change — returned as a LIST so a GROUP
+    transform is checked against the members it actually moved, not the viewport-active
+    object (G140: a group nudge moves the members, none of which is the active object, so
+    the old single-active check cried "no-op" on every successful group move).
+
+    EDIT_MODE_TOOLS already resolved their object into `edit_target` (popped from params).
+    Object-level ops name the moved object(s) in `targets` (preferred — `target` is a
+    reference for snap/rest/boolean), or `name`/`mesh`/`names`, or (bakers) `target`. A
+    name can address an OBJECT or a GROUP/collection; a group expands to its mesh members.
+    Falls back to the active object — which most ops leave as their changed object — for
+    sculpt and in-session edits."""
     if edit_target:
-        name = edit_target
+        cand = edit_target
     else:
         cand = params.get("targets")
         if not cand and tool in _NOOP_TARGET_KEY:
             cand = params.get("target")
         if not cand:
             cand = params.get("name") or params.get("mesh") or params.get("names")
-        if isinstance(cand, (list, tuple)):
-            cand = cand[0] if cand else ""
-        if isinstance(cand, str) and "," in cand:
-            cand = cand.split(",")[0].strip()
-        name = cand
-    obj = bpy.data.objects.get(name) if isinstance(name, str) and name else None
-    return obj or bpy.context.active_object
+    # Normalise to a flat list of candidate names (str, "a,b" comma string, or list).
+    names = []
+    for item in (cand if isinstance(cand, (list, tuple)) else [cand]):
+        if isinstance(item, str):
+            names.extend(n.strip() for n in item.split(",") if n.strip())
+    objs = []
+    seen = set()
+    for name in names:
+        obj = bpy.data.objects.get(name)
+        coll = bpy.data.collections.get(name)
+        members = ([obj] if obj is not None else []) + \
+                  (list(coll.all_objects) if coll is not None else [])
+        for o in members:
+            if o.name not in seen:
+                seen.add(o.name)
+                objs.append(o)
+    if not objs:
+        active = bpy.context.active_object
+        return [active] if active is not None else []
+    return objs
 
 
 def _geo_signature(obj):
@@ -450,18 +467,21 @@ def execute_command(command):
     # geometry op that reports success while changing nothing LAUNDERS the mistake —
     # the corrosive failure for a trust-the-status-block system. Captured here (after
     # the target= edit-mode entry, so we read the right object) and compared post-op.
-    noop_name = None
+    noop_names = []
     geo_before = None
     topo_before = None
     if tool in NOOP_CHECK_TOOLS:
-        _gobj = _noop_obj(tool, params, target)
-        if _gobj is not None:
-            noop_name = _gobj.name
-            geo_before = _geo_signature(_gobj)
+        _gobjs = _noop_objs(tool, params, target)
+        if _gobjs:
+            # G140: signature the WHOLE acted-on set (group members included), keyed by
+            # name, so a group move that changed any member is not a no-op.
+            noop_names = [o.name for o in _gobjs]
+            geo_before = {o.name: _geo_signature(o) for o in _gobjs}
             # G105/G118/G134: snapshot topology too, so a degrade (new hole, non-manifold
-            # junk, broken Euler) is caught at the op, not one read later.
+            # junk, broken Euler) is caught at the op, not one read later. Topology edits
+            # act on a single mesh, so the first acted-on object is the right subject.
             if tool in TOPO_CHECK_TOOLS:
-                topo_before = _topo_signature(_gobj)
+                topo_before = _topo_signature(_gobjs[0])
 
     try:
         result = fn(params)
@@ -512,11 +532,18 @@ def execute_command(command):
     # G56: compare the post-op signature. Identical geometry under a reported success
     # means the op was a no-op — surface it rather than let the success launder it. The
     # warning rides the same channel as the bind/shape-key warnings (see _core._status).
-    if (geo_before is not None and noop_name and isinstance(result, dict)
+    if (geo_before and noop_names and isinstance(result, dict)
             and result.get("success")):
-        _gobj2 = bpy.data.objects.get(noop_name)
-        geo_after = _geo_signature(_gobj2) if _gobj2 is not None else None
-        if geo_after is not None and geo_after == geo_before:
+        # G140: a no-op only if EVERY acted-on object is byte-identical. If any member
+        # of a group moved, the op did something — no warning.
+        changed = False
+        for nm, sig_before in geo_before.items():
+            _gobj2 = bpy.data.objects.get(nm)
+            sig_after = _geo_signature(_gobj2) if _gobj2 is not None else None
+            if sig_after is None or sig_after != sig_before:
+                changed = True
+                break
+        if not changed:
             result["no_op"] = True
             result["no_op_warning"] = (
                 "no-op: this op reported success but the geometry is byte-identical "
@@ -527,9 +554,9 @@ def execute_command(command):
     # G105/G118/G134: the mirror of the no-op detector — an op that SUCCEEDED but
     # DEGRADED the geometry (sprang a hole, left non-manifold junk, broke the Euler
     # invariant). Warns at the moment of the op, not on the next read's floor line.
-    if (topo_before is not None and noop_name and isinstance(result, dict)
+    if (topo_before is not None and noop_names and isinstance(result, dict)
             and result.get("success")):
-        _tobj2 = bpy.data.objects.get(noop_name)
+        _tobj2 = bpy.data.objects.get(noop_names[0])
         topo_after = _topo_signature(_tobj2) if _tobj2 is not None else None
         tw = _topology_delta_warning(topo_before, topo_after)
         if tw:

@@ -42,7 +42,10 @@ def material(
     gradient_bottom: tag(list, "[toon] gradient bottom [r,g,b]") = None,
     # textured (Poly Haven) + pbr (local folder)
     asset_id: tag(str, "[textured] Poly Haven texture id") = "",
-    scale: tag(float, "[textured/pbr] UV/texture scale") = 1.0,
+    scale: tag(float, "[textured/pbr] unitless UV/texture scale (ignored if physical_size set)") = 1.0,
+    physical_size: tag(float, "[textured/pbr] real-world metres ONE texture tile should cover — "
+                              "derives the box-projection scale from the object's measured size "
+                              "so grain reads at a true physical scale (G141)") = 0.0,
     resolution: tag(str, "[textured] 1k|2k|4k") = "1k",
     tint: tag(list, "[textured/pbr] tint [r,g,b]") = None,
     folder: tag(str, "[pbr] local texture-set folder (Poliigon/Megascans/etc.) — maps auto-detected by filename") = "",
@@ -96,11 +99,13 @@ def material(
     if o == "textured":
         return textures.set_textured_material(target, asset_id, scale, resolution,
                                               base_color, tint, metallic, roughness,
-                                              material_name, slot, use_alpha, label)
+                                              material_name, slot, use_alpha,
+                                              physical_size, label)
     if o == "pbr":
         return textures.set_pbr_material(target, folder, size, scale, displacement,
                                          base_color, tint, metallic, roughness,
-                                         material_name, slot, use_alpha, label)
+                                         material_name, slot, use_alpha,
+                                         physical_size, label)
     if o == "outline":
         return shaders.add_outline(target, thickness, color, label)
     if o == "remove_outline":

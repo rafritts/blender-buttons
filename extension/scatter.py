@@ -73,6 +73,17 @@ def scatter_on_surface(params):
     scale_min, scale_max: per-instance scale multiplier range. Default 0.8, 1.2.
     align_normal:  if true, each copy's +Z is rotated to point along the target's
                    surface normal at its position. Default true.
+    seat:          G136 — lift each copy along the normal so its LOWEST point rests ON
+                   the surface instead of burying its origin (the source's own extent
+                   sets the lift; no thickness guess). The move for sprinkles/pebbles/
+                   leaves that should sit proud. Default false.
+    offset:        G136 — explicit signed distance (m) along the surface normal, added on
+                   top of any seat lift (+ = proud, − = sunk). Default 0.
+    min_distance:  G137 — Poisson-disk spacing: no two instances closer than this (m).
+                   Candidates that crowd an already-placed instance are resampled, then
+                   dropped (counted in `skipped`) — the believable-density ceiling.
+    jitter_tilt:   G137 — max random tilt (deg) off the surface normal, so near-coplanar
+                   flat instances CROSS at an angle instead of z-fighting. Default 0.
     up_only:       G104 — only scatter onto UP-FACING faces (normal within max_slope° of
                    +Z), so sprinkles land on top, not on the underside or inner walls.
     max_slope:     cone half-angle in degrees for up_only/normal_dir. Default 45.
@@ -129,6 +140,18 @@ def scatter_on_surface(params):
     seed = int(params.get("seed", 0))
     parent_to_target = bool(params.get("parent_to_target", True))
     name_prefix = params.get("name_prefix") or f"{source_name}_inst"
+    # G136: seat instances PROUD instead of burying their origin in the surface.
+    #   seat   — lift each copy so its LOWEST point rests on the surface (no thickness
+    #            guess needed: derived from the source mesh's own extent).
+    #   offset — explicit signed nudge along the surface normal, on top of any seat.
+    seat = bool(params.get("seat", False))
+    offset = float(params.get("offset", 0.0) or 0.0)
+    # G137: spacing + anti-z-fight controls for dense scatters.
+    #   min_distance — Poisson-disk rejection: no two instances closer than this (m).
+    #   jitter_tilt  — random tilt off the normal (deg) so coplanar flats CROSS at an
+    #                  angle (a declarable clip) instead of z-fighting as coplanar faces.
+    min_distance = float(params.get("min_distance", 0.0) or 0.0)
+    jitter_tilt = float(params.get("jitter_tilt", 0.0) or 0.0)
 
     # G57: a region MASK (`within`, keep inside) and an exclusion zone (`avoid`, keep
     # out) — both world XY footprints, expanded by their margins.
@@ -212,8 +235,34 @@ def scatter_on_surface(params):
         return {"error": f"count={count} exceeds 5000 cap (lots of objects = slow "
                          f"viewport){extra}"}
 
+    # G137: Poisson-disk spacing via a coarse spatial hash — a candidate is rejected if
+    # any already-placed instance sits within `min_distance`. The grid keeps the
+    # neighbour test ~O(1) so even a few-thousand-instance scatter stays fast.
+    use_min_dist = min_distance > 0.0
+    cell = min_distance if use_min_dist else 1.0
+    md2 = min_distance * min_distance
+    grid = {}
+
+    def _too_close(p):
+        if not use_min_dist:
+            return False
+        cx, cy, cz = int(p.x // cell), int(p.y // cell), int(p.z // cell)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for dz in (-1, 0, 1):
+                    for q in grid.get((cx + dx, cy + dy, cz + dz), ()):
+                        if (p - q).length_squared < md2:
+                            return True
+        return False
+
+    def _remember(p):
+        if use_min_dist:
+            grid.setdefault((int(p.x // cell), int(p.y // cell), int(p.z // cell)),
+                            []).append(p.copy())
+
     def _accept(p):
-        # Inside the `within` mask (if any) AND outside the `avoid` zone (if any).
+        # Inside the `within` mask (if any), outside the `avoid` zone (if any), and not
+        # crowding an already-placed instance (min_distance).
         if within_rect is not None:
             wx0, wy0, wx1, wy1 = within_rect
             if not (wx0 <= p.x <= wx1 and wy0 <= p.y <= wy1):
@@ -222,12 +271,15 @@ def scatter_on_surface(params):
             ax0, ay0, ax1, ay1 = avoid_rect
             if ax0 <= p.x <= ax1 and ay0 <= p.y <= ay1:
                 return False
+        if _too_close(p):
+            return False
         return True
 
-    need_reject = within_rect is not None or avoid_rect is not None
+    need_reject = within_rect is not None or avoid_rect is not None or use_min_dist
     multi_source = len(source_objs) > 1
+    # G136: cache each source's vertex coords once so seat can derive its lowest extent.
+    src_coords = {o.name: [v.co.copy() for v in o.data.vertices] for o in source_objs}
 
-    z_axis = mathutils.Vector((0, 0, 1))
     created = []
     skipped = 0
     for i in range(count):
@@ -235,8 +287,9 @@ def scatter_on_surface(params):
         v0, v1, v2, normal = triangles[ti]
         pos = _random_point_in_triangle(v0, v1, v2, rng)
 
-        # Reject-sample to satisfy within/avoid (cap tries so a target that's mostly
-        # masked out can't spin forever — just drop the instance).
+        # Reject-sample to satisfy within/avoid/min_distance (cap tries so a target that's
+        # mostly masked out — or a min_distance too dense to fit — can't spin forever;
+        # the instance is just dropped, which is the right spacing ceiling for G137).
         if need_reject and not _accept(pos):
             placed = False
             for _ in range(30):
@@ -249,26 +302,48 @@ def scatter_on_surface(params):
             if not placed:
                 skipped += 1
                 continue
+        _remember(pos)
 
         # G57: each instance picks a source for variety; all copies of a given source
         # still share its one mesh datablock.
-        src_mesh = (source_objs[rng.randrange(len(source_objs))].data
-                    if multi_source else source_objs[0].data)
+        chosen_src = (source_objs[rng.randrange(len(source_objs))]
+                      if multi_source else source_objs[0])
+        src_mesh = chosen_src.data
         s = rng.uniform(scale_min, scale_max)
         inst = bpy.data.objects.new(name=f"{name_prefix}_{i:04d}", object_data=src_mesh)
         bpy.context.scene.collection.objects.link(inst)
-        inst.location = pos
         inst.scale = (s, s, s)
 
+        # Orientation: align to the surface normal, optional spin around it, optional
+        # anti-z-fight tilt off it. Build one quaternion so the pieces compose cleanly.
         if align_normal:
-            inst.rotation_euler = normal.to_track_quat('Z', 'Y').to_euler()
+            q = normal.to_track_quat('Z', 'Y')
             if rotate_z:
-                # Compose: align-to-normal first, then random spin around local Z.
-                q_align = normal.to_track_quat('Z', 'Y')
-                q_spin = mathutils.Quaternion(normal, rng.uniform(0.0, 2 * math.pi))
-                inst.rotation_euler = (q_spin @ q_align).to_euler()
+                q = mathutils.Quaternion(normal, rng.uniform(0.0, 2 * math.pi)) @ q
         elif rotate_z:
-            inst.rotation_euler = (0.0, 0.0, rng.uniform(0.0, 2 * math.pi))
+            q = mathutils.Euler((0.0, 0.0, rng.uniform(0.0, 2 * math.pi))).to_quaternion()
+        else:
+            q = mathutils.Quaternion()
+        if jitter_tilt > 0.0:
+            # G137: tilt by a random angle about a random axis PERPENDICULAR to the
+            # normal, so near-coplanar flat instances cross instead of z-fighting.
+            ref = mathutils.Vector((0, 0, 1)) if abs(normal.z) < 0.9 \
+                else mathutils.Vector((1, 0, 0))
+            perp = normal.cross(ref).normalized()
+            perp = mathutils.Quaternion(normal, rng.uniform(0.0, 2 * math.pi)) @ perp
+            q = mathutils.Quaternion(perp, rng.uniform(0.0, math.radians(jitter_tilt))) @ q
+        inst.rotation_euler = q.to_euler()
+
+        # G136: seat/offset along the surface normal so a flat part sits PROUD instead of
+        # sinking its origin half-under. seat lifts the instance's lowest point (its
+        # min extent along the normal, derived from the source's own geometry — no
+        # thickness guess) onto the surface; offset is an explicit nudge on top.
+        lift = offset
+        if seat:
+            d = q.inverted() @ normal  # the normal in the instance's LOCAL frame
+            min_proj = min((c.dot(d) for c in src_coords[chosen_src.name]), default=0.0)
+            lift += -s * min_proj
+        inst.location = pos + lift * normal if lift else pos
 
         if parent_to_target:
             inst.parent = target
@@ -289,6 +364,10 @@ def scatter_on_surface(params):
         "source_meshes": sorted({o.data.name for o in source_objs}),
         "count_placed": count,
         "density": density if density_used else None,
+        "seat": seat,
+        "offset": offset if offset else None,
+        "min_distance": min_distance if use_min_dist else None,
+        "jitter_tilt": jitter_tilt if jitter_tilt else None,
         "within": params.get("within") or None,
         "total_area_m2": round(total_area, 4),
         "first_few": created[:5],

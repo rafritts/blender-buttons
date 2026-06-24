@@ -35,6 +35,7 @@ SUITES = [
     "e2e_g126_pbr_alpha.py",
     "e2e_g131_visibility.py",
     "e2e_g100_coverage.py",
+    "e2e_g136_g141_gapfixes.py",
 ]
 
 
