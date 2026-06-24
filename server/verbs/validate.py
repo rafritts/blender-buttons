@@ -39,6 +39,10 @@ def validate(
                     "(default, a penetration pair) or 'open_boundary' (G129 — declare a "
                     "single part/collection a INTENTIONALLY open: a tabletop plane, a cup "
                     "mouth, cloth; arms a seal-tripwire if it later closes)") = "clipping",
+    max_depth: tag(float, "[expect/intend] DEPTH ENVELOPE (mm) for a clipping declaration — "
+                          "bless the overlap only up to this depth; a deeper clip is STILL a "
+                          "finding (so 'coffee↔mug intended' can't also hide an 11mm base "
+                          "poke-through). 0/unset = no envelope (bless any depth).") = 0.0,
     targets: tag(str, "[run] object(s) to sweep ('' = whole scene)") = "",
     verbose: tag(bool, "[run] list EVERY finding instead of capping the line") = False,
 ) -> str:
@@ -79,7 +83,8 @@ def validate(
         return _format_run(r)
 
     if o in ("expect", "intend"):
-        r = call_blender("validate_expect", {"a": a, "b": b, "reason": reason, "check": check})
+        r = call_blender("validate_expect", {"a": a, "b": b, "reason": reason, "check": check,
+                                             "max_depth": max_depth})
         if r.get("error"):
             return r["error"]
         e = r["intent"]

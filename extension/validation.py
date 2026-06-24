@@ -103,14 +103,18 @@ def _boundary_intent(objname):
 def _prune_dead_intents():
     """Auto-GC declarations whose object (or collection) no longer exists, so deleting a
     declared part never leaves a permanent un-clearable VANISHED tripwire (feedback P1.5)."""
+    changed = False
     for e in list(_intents):
         for tok in (e["a"], e["b"]):
             if bpy.data.objects.get(tok) is None and bpy.data.collections.get(tok) is None:
                 _intents.remove(e)
+                changed = True
                 break
+    if changed:
+        _persist_intents()
 
 
-def add_intent(a, b, reason, check=_CLIPPING, source="agent"):
+def add_intent(a, b, reason, check=_CLIPPING, source="agent", max_depth=None):
     """Declare a clip/penetration INTENDED — a positive, falsifiable assertion carrying
     its reason verbatim. Re-declaring a pair updates its reason. Returns the entry.
 
@@ -131,7 +135,18 @@ def add_intent(a, b, reason, check=_CLIPPING, source="agent"):
     else:
         e["reason"] = reason.strip()
         e["source"] = source
+    # G119: a clipping declaration may carry a DEPTH ENVELOPE — it blesses the overlap only
+    # up to max_depth (mm); anything deeper is still a finding, so a broad 'coffee↔mug
+    # intended' can't also hide an 11mm base poke-through. Record the depth AT DECLARATION
+    # too, so a later 'this pair is now Nx deeper than when you blessed it' tripwire can fire.
+    if check == _CLIPPING:
+        e["max_depth"] = max_depth
+        try:
+            e["depth_at_decl"] = _true_penetration_mm(a, b)
+        except Exception:
+            e["depth_at_decl"] = None
     record_intend(check)
+    _persist_intents()
     _tag_redraw()
     return {"success": True, "intent": dict(e)}
 
@@ -143,6 +158,7 @@ def revoke_intent(a, b, check=_CLIPPING):
     if e is None:
         return {"error": f"no declared {check} intent for {a}↔{b}"}
     _intents.remove(e)
+    _persist_intents()
     _tag_redraw()
     return {"success": True, "revoked": {"check": check, "a": a, "b": b}}
 
@@ -152,12 +168,33 @@ def list_intents():
     return [dict(e) for e in _intents]
 
 
+def _persist_intents():
+    """G125: write the declared-intent registry INTO the .blend (a scene custom prop) so a
+    re-open doesn't drop every declaration and resurrect the noise wall it suppressed."""
+    try:
+        sc = bpy.context.scene
+        if sc is not None:
+            sc["bb_intents"] = json.dumps(_intents)
+    except Exception:
+        pass
+
+
 def clear_intents():
-    """Scene load wiped the world the assertions described — drop them (called from
-    state.reset_history_state)."""
+    """Called on scene load (state.reset_history_state). The declarations describe a scene,
+    so RE-GROUND from the loaded .blend's own stored registry (G125 — survive a reopen)
+    rather than always dropping them; a fresh/empty scene just starts clean."""
     global _drift
-    _intents.clear()
     _drift = 0.0
+    _intents.clear()
+    try:
+        sc = bpy.context.scene
+        raw = sc.get("bb_intents") if sc is not None else None
+        if raw:
+            data = json.loads(raw)
+            if isinstance(data, list):
+                _intents.extend(data)
+    except Exception:
+        pass
 
 
 # ── epistemic-drift re-grounding checkpoint (SPEC-16, feedback P1.6) ──────────
@@ -338,7 +375,7 @@ def run_validate(touched_names=None, scene_wide=False, verbose=False):
     ob = _open_boundary_findings(scope, reports)
 
     passed = (not intent_free and not clip["new"] and not clip["vanished"]
-              and not ob["sealed"])
+              and not clip.get("deeper") and not ob["sealed"])
     line = _render_line(intent_free, clip, ob, excluded, verbose)
     return {"off": False, "passed": passed, "excluded": excluded,
             "intent_free": intent_free, "clipping": clip, "open_boundary": ob, "line": line}
@@ -376,7 +413,7 @@ def _open_boundary_findings(scope, reports):
 
 def _empty_clip():
     return {"declared": len([e for e in _intents if e["check"] == _CLIPPING]),
-            "new": [], "vanished": [], "intended_in_scope": 0}
+            "new": [], "vanished": [], "deeper": [], "intended_in_scope": 0}
 
 
 def _true_penetration_mm(a_name, b_name):
@@ -472,13 +509,25 @@ def _clipping_findings(introspect, scope, scope_names, live_names):
             depths[key] = None
         # else: a sub-graze the proxy used to over-report — correctly dropped.
 
-    intended_in_scope, new = 0, []
+    intended_in_scope, new, deeper = 0, [], []
     for key, depth in depths.items():
         a, b = tuple(key)
         e = _intent_for_pair(_CLIPPING, a, b)
         if e is not None:
+            # G119: a depth envelope means the declaration only covers up to max_depth — a
+            # deeper clip is STILL a finding (an ignore-by-the-back-door otherwise).
+            max_d = e.get("max_depth")
+            if max_d is not None and depth is not None and depth > max_d + _CLIP_FLOOR_MM:
+                new.append({"a": a, "b": b, "depth_mm": depth,
+                            "message": f"{a}↔{b} {depth}mm EXCEEDS declared max {max_d}mm "
+                                       f"(deeper than intended — fix or raise max_depth)"})
+                continue
             e["status"] = "holding"
             intended_in_scope += 1
+            # change tripwire: blessed once, but it's now markedly deeper than at declaration.
+            d0 = e.get("depth_at_decl")
+            if depth is not None and d0 and depth > 2 * d0 + 0.5:
+                deeper.append({"a": a, "b": b, "now": depth, "then": d0})
         else:
             if depth is not None:
                 msg = f"{a}↔{b} {depth}mm"
@@ -504,9 +553,25 @@ def _clipping_findings(introspect, scope, scope_names, live_names):
             e["status"] = "vanished"
             vanished.append({"a": a, "b": b, "reason": e["reason"]})
 
+    # G125: when many NEW clips all hit ONE surface, it's almost always a settled scatter
+    # (N instances resting on one substrate). Offer the collection-level declaration that
+    # collapses the whole class, instead of leaving the agent to declare them one by one.
+    hint = None
+    if len(new) >= 6:
+        counts = {}
+        for n in new:
+            counts[n["a"]] = counts.get(n["a"], 0) + 1
+            counts[n["b"]] = counts.get(n["b"], 0) + 1
+        common, c = max(counts.items(), key=lambda kv: kv[1])
+        if c >= 6:
+            hint = (f"{c} of these clips involve '{common}' — if it's a settled scatter, "
+                    f"group the instances and validate op=expect <collection>↔{common} "
+                    f"(or *↔{common}) to declare the whole class at once")
+
     _bump(_CLIPPING, len(new) > 0)
     return {"declared": len([e for e in _intents if e["check"] == _CLIPPING]),
-            "new": new, "vanished": vanished, "intended_in_scope": intended_in_scope}
+            "new": new, "vanished": vanished, "deeper": deeper,
+            "intended_in_scope": intended_in_scope, "hint": hint}
 
 
 def _render_line(intent_free, clip, ob, excluded, verbose=False):
@@ -535,8 +600,13 @@ def _render_line(intent_free, clip, ob, excluded, verbose=False):
         cl.append(f"{len(clip['new'])} new: {shown}{more}")
     for v in clip["vanished"][:cap]:
         cl.append(f"VANISHED {v['a']}↔{v['b']} (declared intended — confirm or clear)")
+    for d in clip.get("deeper", [])[:cap]:
+        cl.append(f"DEEPER {d['a']}↔{d['b']} {d['now']}mm now vs {d['then']}mm at declaration "
+                  f"(intended pair changed — re-confirm)")
     if cl:
         segs.append("clipping " + " · ".join(cl))
+    if clip.get("hint"):
+        segs.append("↳ " + clip["hint"])
     # G129: open boundaries — a quiet count (NOT a defect; doesn't fail the floor), plus
     # the loud SEAL tripwire on declared-open parts that have closed.
     if ob:
@@ -694,8 +764,10 @@ def validate_expect(params):
     """op=expect / intend — declare a clip intended (a or b may name a COLLECTION), OR an
     open boundary intended (check=open_boundary, a single part/collection — G129)."""
     check = (params.get("check") or _CLIPPING).strip()
+    md = params.get("max_depth")
     return add_intent(params.get("a", ""), params.get("b", ""),
-                      params.get("reason", ""), check=check, source="agent")
+                      params.get("reason", ""), check=check, source="agent",
+                      max_depth=(float(md) if md not in (None, "", 0) else None))
 
 
 def validate_forget(params):

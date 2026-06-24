@@ -554,11 +554,19 @@ def execute_command(command):
         try:
             focus = _status_focus(result)
             touched = [focus] if focus else None
-            result["validate"] = validation.run_validate(touched)
+            vres = validation.run_validate(touched)
+            # G133: echo the CALL that produced this auto-fired read as a one-line suffix —
+            # the floor fires these dozens of times a build, so each doubles as a worked
+            # example of the verb to reach for (and cues WHICH read, e.g. clearance vs
+            # contacts, when a deeper look is wanted). Suffix, not a new line: ~zero cost.
+            if isinstance(vres, dict) and vres.get("line"):
+                tgt = focus or "(scene)"
+                vres["line"] += f"   ⟵ validate op=run targets={tgt}"
+            result["validate"] = vres
             if focus and tool in FEEL_DELTA_AFTER:
                 fd = validation.feel_delta(focus)
                 if fd:
-                    result["feel_delta"] = fd
+                    result["feel_delta"] = fd + f"   ⟵ feel op=all target={focus}"
             # SPEC-16 P1.6: accrue epistemic drift; periodically surface a whole-scene
             # re-ground recap so a stale mental model re-anchors on a long build.
             recap = validation.accrue_drift(tool)
