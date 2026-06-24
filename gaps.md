@@ -152,19 +152,6 @@ count it left behind), so a rounded ceramic edge can't silently introduce a defe
 
 ---
 
-## G169 — `transform op=scatter` can't lay instances tangent/flat; the upright-peg failure must be dodged by pre-rotating the prototype
-
-scatter offers `align_normal` (aligns the instance's +Z to the surface normal) but no way to
-lay a prototype's LONG axis *along* the surface — so a capsule/cylinder scattered with
-align_normal stands upright like a peg (the exact failure the donut spec dedicates a bullet
-to). The only path is to author the prototype rotated 90° and `apply` it so its local Z
-becomes the thin cross-axis, *then* scatter — a non-obvious bake the server could absorb.
-Candidate fix: a scatter `lay_axis`/`align=tangent` option that orients a chosen local axis
-ALONG the surface (with `rotate_z`/`jitter_tilt` still varying the in-plane spin), so
-sprinkles / rice / fallen debris lie flat without hand-rotating and applying the prototype.
-
----
-
 ## G171 — no min-bend-radius / curvature read for a baked mesh tube (the `feel op=curve` bend check is curve-datablock only)
 
 After building a handle as a tube and converting to mesh (the clean route from [G161]),
@@ -188,3 +175,20 @@ contact. Within the donut spec's stated tolerance, but it means the acceptance c
 Candidate fix: seat each instance against the surface under its *actual* footprint (not the
 prototype's nominal lowest vert), so seating tracks local curvature; and/or have scatter
 report the worst-case seat error so the loose ones are visible without polling each instance.
+
+---
+
+## G174 — generative sweeps (extrude/tube/curve) still demand absolute points; no relational vector-path language → see [docs/GAP-174-Extrude.md](docs/GAP-174-Extrude.md)
+
+Free / generative extrudes (a handle, spout, horn, stem, wick — anything sweeping through
+empty space) have no surface to address against, so `add type=tube|helix|curve` /
+`edit op=extrude_along_curve` take **absolute `points=[[x,y,z],…]`** and force the agent to
+*divine* coordinates — the one operation with no grounded, intent-space alternative (grounded
+extrudes via `extrude until_contact`/`down=` are fine). This is the **root** that [G161]
+(spline_tube self-intersects on a typed path) and [G171] (no bend read on a baked tube) are
+symptoms of, and it is the caller [G153]'s weld kernel lacks. NOT net-new: `edit op=field`
+already speaks vectors in a measured `tangent_normal` frame via `expr_x/y/z`; this gap is the
+*uniform application* of that existing language to the sweep family — a path grown from a
+handle as vectors in its measured `(n,u,v)` basis, optionally a function `f(t)`, with an
+optional `to=<anchor> weld=true` terminus that unifies free and connecting extrudes into one
+verb. Full design, examples, and open questions in the linked doc.
