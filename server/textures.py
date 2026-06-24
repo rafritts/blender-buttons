@@ -118,7 +118,8 @@ def set_pbr_material(target: str, folder: str, size: str = "", scale: float = 1.
                      displacement: float = 0.0, base_color: list = None,
                      tint: list = None, metallic: float = None, roughness: float = None,
                      material_name: str = "", slot: int = None, use_alpha: bool = False,
-                     physical_size: float = 0.0, label: str = "") -> str:
+                     physical_size: float = 0.0, space: str = "box",
+                     label: str = "") -> str:
     """
     Build a PBR material from a LOCAL texture-set folder and apply it — vendor-neutral
     (Poliigon, Megascans, ambientCG, or any folder of maps). Maps are auto-detected by
@@ -170,6 +171,7 @@ def set_pbr_material(target: str, folder: str, size: str = "", scale: float = 1.
     if slot is not None:       params["slot"] = slot
     if use_alpha:              params["use_alpha"] = True
     if physical_size > 0:      params["physical_size"] = physical_size
+    if space and space != "box": params["space"] = space
 
     # G139: loading + decoding a full PBR set (4K/8K maps) is disk-bound and routinely
     # exceeds the 30s default; give it a longer ceiling so a slow load doesn't read as a
@@ -191,7 +193,8 @@ def set_textured_material(target: str, asset_id: str, scale: float = 1.0,
                           tint: list = None, metallic: float = None,
                           roughness: float = None, material_name: str = "",
                           slot: int = None, use_alpha: bool = False,
-                          physical_size: float = 0.0, label: str = "") -> str:
+                          physical_size: float = 0.0, space: str = "box",
+                          label: str = "") -> str:
     """
     Apply a real photo-scanned PBR material from Poly Haven (CC0) to an object or
     group. Downloads + caches the diffuse/normal/roughness/metal maps server-side,
@@ -246,6 +249,8 @@ def set_textured_material(target: str, asset_id: str, scale: float = 1.0,
         params["use_alpha"] = True
     if physical_size > 0:
         params["physical_size"] = physical_size
+    if space and space != "box":
+        params["space"] = space
     # G139: loading + decoding a full PBR set (4K/8K maps) is disk-bound and routinely
     # exceeds the 30s default; give it a longer ceiling so a slow load doesn't read as a
     # dead instance.

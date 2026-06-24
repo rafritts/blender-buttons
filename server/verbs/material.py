@@ -46,6 +46,11 @@ def material(
     physical_size: tag(float, "[textured/pbr] real-world metres ONE texture tile should cover — "
                               "derives the box-projection scale from the object's measured size "
                               "so grain reads at a true physical scale (G141)") = 0.0,
+    space: tag(str, "[textured/pbr] box (default) | uv. box = object-coordinate box "
+                    "projection, needs NO unwrap (the default for blockout/portfolio). "
+                    "uv = read the mesh's active UV layer (run `uv op=unwrap` first) — "
+                    "only when grain must follow a curved surface. In uv mode physical_size "
+                    "is ignored and `scale` means UV tiling.") = "box",
     resolution: tag(str, "[textured] 1k|2k|4k") = "1k",
     tint: tag(list, "[textured/pbr] tint [r,g,b]") = None,
     folder: tag(str, "[pbr] local texture-set folder (Poliigon/Megascans/etc.) — maps auto-detected by filename") = "",
@@ -82,6 +87,10 @@ def material(
                   filename — vendor-neutral (Poliigon/Megascans/ambientCG/loose folders),
                   no addon or login needed (target, folder, size, scale, displacement,
                   base_color/tint, metallic, roughness, slot)
+
+      textured/pbr take space=box|uv: box (default) projects off object coordinates and
+      needs NO unwrap; uv reads the mesh's active UV layer (run `uv op=unwrap` first) for
+      grain that must follow a curved surface (a mug belly, a plate rim). SPEC-18.
       outline   — add an inverted-hull outline (target, thickness, color)
       remove_outline — strip it                (target)
       shade_smooth — smooth shading            (target(s), auto_smooth_angle)
@@ -107,12 +116,12 @@ def material(
         return textures.set_textured_material(target, asset_id, scale, resolution,
                                               base_color, tint, metallic, roughness,
                                               material_name, slot, use_alpha,
-                                              physical_size, label)
+                                              physical_size, space, label)
     if o == "pbr":
         return textures.set_pbr_material(target, folder, size, scale, displacement,
                                          base_color, tint, metallic, roughness,
                                          material_name, slot, use_alpha,
-                                         physical_size, label)
+                                         physical_size, space, label)
     if o == "outline":
         return shaders.add_outline(target, thickness, color, label)
     if o == "remove_outline":

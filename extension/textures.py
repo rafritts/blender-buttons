@@ -53,6 +53,11 @@ def set_textured_material(params):
     # G141: physical_size (meters per texture tile) makes the box-projection scale a
     # DERIVED real-world quantity instead of a unitless guess — see the mapping block.
     physical_size = float(params.get("physical_size", 0.0) or 0.0)
+    # SPEC-18 §4: which coordinate space the image nodes read. box (default) = the
+    # existing object-coordinate box projection (no UVs); uv = the mesh's active UV
+    # layer + FLAT projection (needs a prior uv op=unwrap).
+    space = (params.get("space") or "box").lower().strip()
+    use_uv = space == "uv"
     resolution = params.get("resolution", "1k")
     asset_id = params.get("asset_id", "")
     base_color = params.get("base_color")
@@ -71,6 +76,15 @@ def set_textured_material(params):
     if blocked:
         return {"error": blocked}
 
+    # SPEC-18 §4: UV mode is inert (renders black) without a UV layer. Refuse legibly
+    # instead — point at the unwrap verb rather than silently shipping a black texture.
+    if use_uv:
+        no_uv = [o.name for o in meshes if not o.data.uv_layers]
+        if no_uv:
+            return {"error": f"space=uv but {', '.join(no_uv)} has no UV layer — run "
+                             f"`uv op=unwrap target={no_uv[0]}` first (or use the default "
+                             f"box projection, which needs no UVs)."}
+
     # G138: target may arrive as a list (multi-object shade with one material) —
     # derive a clean string label for the default material name.
     tgt_label = target if isinstance(target, str) else (target[0] if target else "material")
@@ -84,29 +98,44 @@ def set_textured_material(params):
     bsdf = nt.nodes.new('ShaderNodeBsdfPrincipled'); bsdf.location = (300, 0)
     nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
 
-    # Box projection driven by object coordinates — no UV unwrap needed.
+    # Texture coordinate source: object-coordinate box projection (default), or the
+    # mesh's active UV layer (SPEC-18 §4) when space=uv.
     texco = nt.nodes.new('ShaderNodeTexCoord'); texco.location = (-700, 0)
     mapping = nt.nodes.new('ShaderNodeMapping'); mapping.location = (-500, 0)
-    # G141: 'Object' coordinates are the mesh's LOCAL coords, so a texture feature's WORLD
-    # size = its local size × the object's world scale. To make one tile span exactly
-    # `physical_size` METRES in world space, the Mapping scale per axis is therefore
-    # world_scale / physical_size — a value DERIVED from the part's measured transform,
-    # not a unitless guess. Falls back to the raw `scale` when physical_size isn't given.
-    if physical_size > 0.0:
-        ws = meshes[0].matrix_world.to_scale()
-        map_scale = tuple(abs(c) / physical_size for c in ws)
-    else:
+    uv_ignored_physical = False
+    if use_uv:
+        # UV mode: the texel story IS the unwrap, so physical_size (a world-metres box
+        # concept) doesn't apply — `scale` becomes plain UV-space tiling. The Mapping
+        # node scales the UVs uniformly; the image node projects FLAT off the UV layer.
+        if physical_size > 0.0:
+            uv_ignored_physical = True
         map_scale = (scale, scale, scale)
-    mapping.inputs['Scale'].default_value = map_scale
-    nt.links.new(texco.outputs['Object'], mapping.inputs['Vector'])
+        mapping.inputs['Scale'].default_value = map_scale
+        nt.links.new(texco.outputs['UV'], mapping.inputs['Vector'])
+    else:
+        # G141: 'Object' coordinates are the mesh's LOCAL coords, so a texture feature's
+        # WORLD size = its local size × the object's world scale. To make one tile span
+        # exactly `physical_size` METRES in world space, the Mapping scale per axis is
+        # world_scale / physical_size — a value DERIVED from the part's measured
+        # transform, not a guess. Falls back to raw `scale` when physical_size is unset.
+        if physical_size > 0.0:
+            ws = meshes[0].matrix_world.to_scale()
+            map_scale = tuple(abs(c) / physical_size for c in ws)
+        else:
+            map_scale = (scale, scale, scale)
+        mapping.inputs['Scale'].default_value = map_scale
+        nt.links.new(texco.outputs['Object'], mapping.inputs['Vector'])
 
     def image_node(path, colorspace, y):
         n = nt.nodes.new('ShaderNodeTexImage'); n.location = (-250, y)
         img = bpy.data.images.load(path, check_existing=True)
         n.image = img
         img.colorspace_settings.name = colorspace
-        n.projection = 'BOX'
-        n.projection_blend = 0.2
+        if use_uv:
+            n.projection = 'FLAT'
+        else:
+            n.projection = 'BOX'
+            n.projection_blend = 0.2
         nt.links.new(mapping.outputs['Vector'], n.inputs['Vector'])
         return n
 
@@ -218,8 +247,9 @@ def set_textured_material(params):
             pass
         wired.append(f"displacement={float(disp_amt)}")
 
-    store = {"asset_id": asset_id, "resolution": resolution, "scale": scale}
-    if physical_size > 0.0:
+    store = {"asset_id": asset_id, "resolution": resolution, "scale": scale,
+             "space": space}
+    if physical_size > 0.0 and not use_uv:
         store["physical_size"] = physical_size
         store["scale"] = [round(c, 5) for c in map_scale]
     if base_color is not None:
@@ -252,10 +282,16 @@ def set_textured_material(params):
         "slot": slot_idx,
         "assigned_to": [o.name for o in meshes],
         "maps_wired": wired,
+        "space": space,
     }
-    if physical_size > 0.0:
+    if physical_size > 0.0 and not use_uv:
         out["physical_size"] = physical_size
         out["map_scale"] = [round(c, 5) for c in map_scale]
+    if uv_ignored_physical:
+        out.setdefault("notes", []).append(
+            "space=uv: physical_size was ignored (it's a box-projection concept — world "
+            "metres per tile). In UV mode the texel scale IS the unwrap; `scale` is plain "
+            "UV tiling.")
     if alpha_skipped:
         out["alpha_skipped"] = True
         out.setdefault("notes", []).append(

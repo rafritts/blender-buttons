@@ -45,6 +45,7 @@ from . import (
     textures,
     topology,
     transforms,
+    uv,
     validation,
     viewport,
 )
@@ -84,6 +85,7 @@ _TOOL_MODULES = (
     topology,
     handles,
     assembly,
+    uv,          # SPEC-18: uv_unwrap (parametric/auto projections)
     validation,  # SPEC-16: validate_* ops (expect / intended / stats / run)
     addons,      # generic addon/operator bridge (addon_list / addon_inspect / addon_run)
 )

@@ -143,6 +143,11 @@ ground-truth reads above.
   Poliigon search, so for Poliigon you download via its own addon, then apply with
   `material op=pbr`. Don't fall back to a flat tint + `set` when a real texture set is
   on disk.
+- **UVs: box projection is the default and needs none.** `material op=textured/pbr`
+  projects off object coordinates (box) with zero UV work — keep it for blockout and
+  portfolio renders. Reach for `uv op=unwrap` + `material … space=uv` **only** when
+  grain must follow a curved surface (a mug belly → `method=cylinder`, a plate rim, wood
+  edge grain). `space=uv` with no UV layer refuses and points you at `uv op=unwrap`.
 - One soft AREA key light angled across the subject adds sparkle the HDRI alone
   doesn't give. Aim with `target=`.
 - DOF: `set_camera_dof(focus_object=...)`; f/4 keeps a tabletop scene readable,

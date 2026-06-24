@@ -48,10 +48,12 @@ straight from high-poly → materials → lighting → render.
 - **TELLS:** A second, much lighter mesh exists alongside the high-poly; quads with deliberate edge flow.
 - **DONE WHEN:** Low-poly silhouette matches high-poly; topology supports deformation/UVs.
 
-## Stage 6 — UV Unwrap *(skip for portfolio renders)*
+## Stage 6 — UV Unwrap *(skip for portfolio renders — box projection needs no UVs)*
 - **GOAL:** Flatten the low-poly into 2D islands for texturing.
-- **TELLS:** UV seams marked; UV editor shows packed islands.
+- **TELLS:** UV seams marked; UV editor shows packed islands. → `uv op=unwrap`
+  (method=smart|cube|cylinder|sphere); then consume with `material … space=uv`.
 - **DONE WHEN:** No stretching; texel density is uniform; islands pack efficiently.
+  (`uv op=check` reports the texel-density CV / stretch / packing verdict — SPEC-18 Phase 3.)
 
 ## Stage 7 — Bake *(skip for portfolio renders)*
 - **GOAL:** Project high-poly detail onto low-poly UVs.

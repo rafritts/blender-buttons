@@ -1,9 +1,15 @@
 # SPEC-18 — UV Unwrap & Texture-Space Wiring
 
-_Status: **Designed 2026-06-24, verb home signed off — ready to build (not yet built).** Closes
-**gaps.md G152** (no UV-unwrap verb; `material op=pbr`/`textured` assumes box projection forever)
-and fills **Stage 6** of `docs/art_pipeline.md`, which `project-vision.md` lists as in-scope.
-The one open decision — the verb home (§2.0) — is resolved: a **dedicated `uv` verb**._
+_Status: **Phase 1 BUILT 2026-06-24** (core unwrap + `material space=uv`); Phases 2–3 designed,
+not yet built. Closes **gaps.md G152** (no UV-unwrap verb; `material op=pbr`/`textured` assumed
+box projection forever) for the no-seam case, and fills **Stage 6** of `docs/art_pipeline.md`,
+which `project-vision.md` lists as in-scope. Verb home (§2.0) is resolved: a **dedicated `uv`
+verb**. Phase 1 ships `uv op=unwrap` (method=smart|cube|cylinder|sphere) + `material … space=uv`;
+seam marking + seam-driven methods (Phase 2) and the deterministic `uv op=check` verdict
+(Phase 3) remain. Verified headless against Blender 5.1.2 (`tests/e2e_uv_unwrap.py`, 36 checks):
+all four projections run clean, multi-target unwrap, G157 mode hygiene, the no-UV refusal, and
+the `space=uv`→TexCoord.UV/FLAT vs `space=box`→TexCoord.Object/BOX node wiring. Not yet exercised
+over the live socket (a design session held the GUI instance at build time)._
 
 Scope discipline: this exposes Blender's existing unwrappers and the UV-map material wiring
 as **mechanical setters + one deterministic check**. We do not build a UV editor, manual

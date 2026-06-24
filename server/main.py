@@ -46,6 +46,7 @@ from server import (  # noqa: F401
     lint,
     introspect,
     topology,
+    uv,
 )
 
 # SPEC-05: register the ~15 verbs (one per Blender menu), then prune everything

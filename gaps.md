@@ -35,20 +35,6 @@ contradicts the intuitive "set up the prototype, scatter it" workflow. Candidate
 
 ---
 
-## G152 — no UV-unwrap verb; `material op=pbr`/`textured` assumes box projection forever
-
-Stage 6 of the art pipeline (UV unwrap) and `project-vision.md` list UVs as in-scope, but no
-verb exposes `smart_uv_project`, seam marking, island pack, or UV-space material wiring.
-`material op=pbr`/`textured` explicitly use box projection ("no UV unwrap needed"), which is
-fine for blockout but wrong when grain should follow a curved rim (ceramic plate lip, mug
-belly, wood edge grain). The agent was asked to Smart UV Project the plate and mug and had to
-say "do it by hand in Blender." Candidate fix: a `uv` verb (or `edit op=unwrap`) with
-`method=SMART_PROJECT|ANGLE_BASED|…`, optional `target=`, and a follow-on `pack=` — enough
-to flatten a hard-surface prop for texture painting without dropping to bpy.ops in a one-off
-script.
-
----
-
 ## G153 — `object op=join` is the only weld primitive and it topology-nukes swept attachments; no clean handle-to-body attach
 
 Attaching a swept tube handle to a hollow vessel has no middle path: keep separate (gap at
