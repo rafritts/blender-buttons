@@ -470,3 +470,84 @@ fixes: auto-recognize a settled scatter (N instances of one source resting on on
 offer/auto-apply a collection-level intent; persist the intend-registry into the .blend so a
 re-open doesn't drop it; and always show NEW-this-op findings above the truncation line, never
 behind it.
+
+## G126 — a PBR set's alpha map silently makes an opaque object invisible, and `material op=set` can't un-wire it (reusing a material name only patches Principled inputs)
+
+`material op=pbr folder=…FoodCoffee…` auto-detected an `alpha` map and wired it into the
+Principled BSDF's Alpha, so the coffee — an opaque liquid — rendered 100% transparent (read as
+"invisible"). The importer treats every detected map as wanted; an alpha channel in a *surface*
+scan (a coffee/crema mask, a decal cutout) is almost never meant to drive whole-material
+transparency. Worse, the obvious fix failed twice: `material op=set target=Coffee base_color=…
+alpha=1` *reused the existing material datablock by name* and only overrode the Principled scalar
+inputs, leaving the alpha **texture node** still connected and driving transparency (`object info`
+confirmed `alpha_driven: nodegraph` after the "fix"). It only became opaque once set with a NEW
+`material_name`, which mints a fresh Principled node with no texture graph. Two candidate fixes:
+(1) `material op=pbr` should not hook an alpha map into transparency unless asked (a `use_alpha`
+opt-in, or skip alpha for clearly-opaque presets); (2) `material op=set` on an existing
+name should either fully rebuild the node graph or explicitly report "texture nodes still drive
+metallic/roughness/alpha — pass a new material_name to replace" so the agent isn't left fighting a
+node it can't see.
+
+## G127 — boolean UNION of an open-ended tube leaves an internal non-manifold membrane; and a hollow-vessel build needs the one reliable recipe spelled out
+
+Attaching a mug handle by unioning a converted-curve tube (open at both ends, embedded in the wall)
+into the body left 12–14 **interior** non-manifold edges at each handle root that survived a
+merge-by-distance — the open tube ends became dangling membranes the EXACT solver couldn't resolve.
+A boolean operand that isn't watertight should be flagged (or auto-capped) *before* the op, not
+silently fused into a defect. Compounding this, two earlier mug attempts burned calls on hollowing:
+`inset top cap → extrude inner face DOWN` on a closed cylinder produced a phantom **bottom**
+boundary (χ inconsistent, the opening landed at the base not the mouth), and `solidify`'s grow
+direction was unverifiable before applying because the status bbox reports the **cage**, not the
+evaluated mesh — both ±1 offsets appeared to grow inward. The recipe that actually worked, and
+that the guidance should name for "hollow open vessel": delete the top cap → `SOLIDIFY` (closes
+into a rounded-rim manifold cup) → bevel the rim. Candidate fixes: auto-cap non-watertight boolean
+operands; have `modifier solidify` report the evaluated thickness/offset direction in its result;
+and add a `hollow`/`shell` recipe so a mug/bowl/cup isn't reverse-engineered each time.
+
+## G128 — `feel op=radial` collapses to the bbox centre (r=0) on a holed/ring anchor, minting identical useless handles
+
+Trying to place drip handles at clock angles around the icing, `feel op=radial anchor=Icing
+angle=35/155/255` returned the **same** point `[-0.009,-0.009,0.070]` for every angle — it resolved
+the ring radius to 0 and handed back the bbox centre ("r=0.0m on Z") regardless of the angle asked.
+For a torus/annulus/holed shell the centre is empty space, so a centre-anchored radial cast is
+meaningless; the agent got three coincident handles and had to abandon the op for a 4-call
+band∩half-space selection instead. Candidate fix: `radial` should cast from the centre OUT to the
+surface at the requested angle (returning the silhouette/wall hit), or detect a degenerate r=0 and
+refuse with a hint, rather than silently returning the centre point as if it were on the surface.
+
+## G129 — the always-on non-manifold floor flags legitimate OPEN geometry (a flat tabletop, a vessel mouth) as an un-silenceable defect, with no `expect` path
+
+The correctness floor counts open boundary loops as `non_manifold` and declares them
+"never OK, cannot be silenced." But a flat ground-plane tabletop (4 boundary edges) and an open mug
+mouth are *correct* geometry, not defects. This forced the table from a plane to a thin box, and
+would force a coffee mug to be sealed shut (hiding the coffee the spec requires) if taken at face
+value. Unlike clipping — which has `validate op=expect` to declare an intended overlap — there is
+no way to declare "this boundary is intended," so the count sits there forever as noise next to the
+genuine defects. Candidate fix: distinguish *boundary* edges (1 face — often intentional: planes,
+cup rims, cloth) from true *non-manifold* edges (3+ faces — always wrong), and either stop flagging
+clean boundaries or give them an `expect`-style intent so an open vessel can be declared open.
+
+## G130 — there is no path to a volumetric light shaft (god-ray); the verbs expose no world/volume scatter and the addon bridge is bpy.ops-only
+
+The brief explicitly asked for a visible morning "beam through the scene." A real volumetric shaft
+needs EEVEE/Cycles volumetrics enabled plus a scattering medium (a world Volume Scatter node or a
+volume domain) — none of which any verb exposes: `scene world` sets a flat colour/HDRI, `material`
+has emission but no volume scatter, `render` has no volumetric toggle, and `addon op=run` only
+dispatches registered operators, not node/property setup. The beam had to be faked with a tight
+warm spot pooling light on the hero — a legible approximation, but not the literal shaft. Candidate
+fix: a `scene world volume=` (density/colour) and/or `add type=volume` + a `light … beam=true`
+helper that turns on volumetrics and sizes a cone, so atmosphere/god-rays/fog are reachable without
+hand-editing nodes.
+
+## G131 — `view op=check_framing` occlusion is measured over the whole object bbox, so a partially-visible surface reads as fully hidden (and "visible in render" needs camera-vs-cavity reasoning)
+
+A coffee cylinder filling a mug reported `100.0% occluded` from the hero camera even though its top
+surface was plainly visible through the mug's mouth — the metric occludes the *whole submerged
+bbox* (almost all of it is inside opaque ceramic) and so can't answer the real question, "is the
+liquid surface visible?" It also surfaced a genuine staging trap the tools don't help with: a
+recessed liquid in a tall vessel is occluded by its own rim at low camera elevations, so "coffee
+visible in the render" silently fails until you either raise the camera or fill closer to the rim —
+something the agent only caught via `check_framing` returning 100% and reasoning about it, not from
+any direct read. Candidate fixes: report occlusion of the *visible silhouette / front-facing
+surface* (or expose a "fraction of surface area visible") rather than whole-bbox; and a
+`check_visible target= from=camera` that answers yes/no for the surface a human would actually see.
