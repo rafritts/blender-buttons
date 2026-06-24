@@ -38,12 +38,16 @@ def clean():
         bpy.data.objects.remove(obj, do_unlink=True)
 
 
-def boundary_loops(name):
+def topo(name):
+    """(boundary_loops, components, chi) for an object's mesh."""
+    from extension.common import boundary_loop_count, mesh_components
     o = bpy.data.objects.get(name)
     bm = bmesh.new(); bm.from_mesh(o.data)
-    from extension.common import boundary_loop_count
-    n = boundary_loop_count(bm); bm.free()
-    return n
+    loops = boundary_loop_count(bm)
+    comps = mesh_components(bm)
+    chi = len(bm.verts) - len(bm.edges) + len(bm.faces)
+    bm.free()
+    return loops, comps, chi
 
 
 # ---- G106/G127: object op=hollow makes an open cup -----------------------------------
@@ -53,19 +57,25 @@ bpy.context.active_object.name = "Mug"
 res = run("hollow", target="Mug", thickness=0.004, open="top")
 check("hollow succeeds + applies", res.get("success") and res.get("applied"), res.get("error", ""))
 check("hollow removed the top cap", res.get("cap_faces_removed", 0) >= 1, str(res))
-check("hollow opens exactly one boundary loop (the mouth)", boundary_loops("Mug") == 1,
-      str(boundary_loops("Mug")))
+# A thick-walled solid cup is WATERTIGHT: the mouth is a concave upward dimple, not an open
+# edge. open=top → one connected genus-0 solid (χ=2) whose cavity opens to the outside.
+loops, comps, chi = topo("Mug")
+check("hollow cup is watertight (mouth is a cavity, not an open boundary)", loops == 0, str(loops))
+check("hollow cup is one connected solid (cavity opens outward)", comps == 1, str(comps))
+check("hollow cup is genus-0 (χ=2)", chi == 2, str(chi))
 rep = lint.check_mesh({"target": "Mug"})["reports"][0]
 check("hollow wall is manifold (no non-manifold edges)", rep["non_manifold_edges"] == 0, str(rep))
 check("hollow result is Euler-consistent", rep["euler_ok"], str(rep))
 
-# open=none → a closed hollow shell (no boundary)
+# open=none → a SEALED double-wall shell: two separate closed surfaces (χ=4), cavity
+# enclosed, no boundary. This is the topological tell that distinguishes it from open=top.
 clean()
 bpy.ops.mesh.primitive_cylinder_add(radius=0.05, depth=0.10, vertices=48)
 bpy.context.active_object.name = "Shell"
 res = run("hollow", target="Shell", thickness=0.004, open="none")
-check("hollow open=none leaves no boundary", res.get("success") and boundary_loops("Shell") == 0,
-      str(boundary_loops("Shell")))
+loops, comps, chi = topo("Shell")
+check("hollow open=none leaves no boundary", res.get("success") and loops == 0, str(loops))
+check("hollow open=none is a sealed double shell (2 components)", comps == 2, str(comps))
 
 
 # ---- G127: boolean flags a non-watertight operand -----------------------------------

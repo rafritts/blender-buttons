@@ -1964,7 +1964,14 @@ def select_by_radius(params):
                          "center_selection=True, or handle="}
     cx, cy, cz = float(center[0]), float(center[1]), float(center[2])
 
-    r_in2, r_out2 = r_in * r_in, r_out * r_out
+    # Band bounds are usually MEASURED radii (an agent feels r=0.05, then bands [0, 0.05]
+    # to grab that shell). A surface sitting exactly on the band edge scatters across it by
+    # float noise (~1e-9 m), silently dropping a fifth of the ring. Pad the band by a
+    # sub-micron epsilon so "outer = the radius I measured" reliably includes that surface.
+    eps = max(1e-6, r_out * 1e-4)
+    lo = max(0.0, r_in - eps)
+    hi = r_out + eps
+    r_in2, r_out2 = lo * lo, hi * hi
     count = 0
     for v in bm.verts:
         wv = mw @ v.co

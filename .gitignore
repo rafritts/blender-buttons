@@ -10,3 +10,4 @@ __pycache__/
 *.jpeg
 *.jpg
 prompts.md
+tests/_run_all.log
