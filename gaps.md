@@ -90,21 +90,6 @@ afterward buries/displaces every scattered child, and there is no cheap re-seat 
 was delete + re-scatter). The good news: `object op=delete name=<group>` cleanly removed all
 120 + the group in one call.
 
-## G104 — `transform op=scatter` has no up-facing / face-orientation filter
-
-Scattering sprinkles with `align_normal=True` placed copies on **every** face of the icing —
-underside and inner-hole wall included — where they're hidden or wasted. `within=` masks an
-XY footprint but cannot say *which faces by orientation*. **Want:** a normal-gate (only faces
-whose normal is within N° of +Z, or of a given direction) or "scatter only onto the live face
-selection," so "sprinkles on top only" doesn't mean scattering 2× the count and hiding the
-rest.
-**RESOLVED 2026-06-23:** `transform op=scatter up_only=True` (with `max_slope`, default 45°)
-gates sampling to up-facing faces, so the underside and inner-hole walls are excluded;
-`normal_dir=[x,y,z]` gates to an arbitrary direction. Density is computed over the gated area.
-A gate that matches no face errors cleanly. Tested in e2e_g104_scatter_up.py. (The fuller
-weight-painted / scatter-as-modifier toolchain from the dogfood's P0.3 — and per-instance
-material variety, G113 — remain open as larger follow-ons.)
-
 ## G105 — mutating ops don't auto-flag a NEW/leftover open boundary the way they auto-flag penetration
 
 A coffee mug built blind — `add cylinder cap_fill=NGON` → `select top` → `inset` → `extrude
@@ -140,67 +125,6 @@ the boolean) would make cup/bowl/vessel carving a single intent-level call inste
 cutter-cylinder dance. Until then: **carve cavities with `edit op=boolean`, not
 inset→extrude.**
 
-## G107 — `feel op=resting`/`contacts` measures a cavity-seated part against the cavity RIM, not the support surface under its footprint
-
-A slumped donut (outer radius 4.5cm) seated into a shallow plate **well** (floor flat at
-z=0.008 out past radius 5cm, rim lip at z=0.013) was reported `sunk 5.0mm` /
-`penetrating Plate 5.0mm` when its underside ring actually rested *exactly* on the well
-floor. The 5.0mm is precisely the rim-to-floor depth: the op took the plate's **highest face
-overlapping the donut's XY footprint** — the rim lip — as the support datum, even though the
-donut sits entirely *inside* the well where the real support is the floor 5mm lower. Acting
-on that bad reading lifted the donut 5mm and floated it; only four `feel op=aim` raycasts
-(which hit the true floor at 0.008 across radii 0–5cm) exposed it. Every placing op also
-volunteered the same wrong "penetrates Plate 5mm" auto-flag for the rest of the build. **Want:**
-when a part nests inside a concave region, `resting`/`contacts` should measure against the
-**nearest support surface directly beneath the part's lowest geometry** (a downward cast from
-its underside), not the tallest footprint-overlapping face — the rim is not what it's standing
-on. Workflow corollary already proven: to verify a part seated in a well, trust a downward
-`op=aim` cast onto the floor over `op=resting`'s rim-referenced verdict.
-
-**Fixed (resting half) — `check_resting`:** the datum is no longer the support's bbox top.
-`_surface_under` casts straight DOWN from the part's lowest verts onto the support's BVH and
-takes the highest hit — the real load-bearing surface (the well floor), not the rim. A seated
-donut now reads `resting`, not `sunk 5mm`. And it's **legible**: the result carries
-`support_z`, and when the support is concave (rim well above the floor) a `note` names BOTH
-the surface measured against and the rim it is NOT — shown in the agent text as a `↳`
-sub-line. Silent for flat supports (no new noise). Regression: `tests/e2e_gaps_g107.py`
-(seated→resting, datum=floor, concave→note, flat→no note, real float still caught).
-**Fixed (contacts half) — `check_contacts` + `auto_proximity_note`:** penetration is now
-gated on BOTH the old all-axis bbox overlap (kept, so nothing new is ever flagged) AND a
-signed crossing test `_penetration_depth` — for each of a part's verts, a point pulled 25%
-toward its centroid (just INSIDE its own surface) is tested against the other solid by the
-nearest face's outward normal. Pulling inward is the trick that survives MATCHED FOOTPRINTS
-(the case the old comment defended bbox-overlap for): raw verts on a shared plane are
-sign-ambiguous, but an interior point is unambiguously in/out. A part seated in a recess has
-its interior in the open cavity → reads 0 → no false "penetrates Nmm" unasked on every
-placement; a genuine sunk marker / chain link still crosses → still flagged, now with a true
-inside-depth instead of the bbox overlap. Because it's an AND-gate it can only REMOVE a false
-penetration, never invent or lose one. Regression: `tests/e2e_gaps_g107b.py` — an
-8-vertex matched-footprint interpenetration (the hard case) still reads penetrating with a
-real depth; recess-seating reads connected; flush stacks read connected. **Caveat noted:** the
-signed test trusts nearest-face normals, so on a NON-watertight other-mesh (an open shell with
-ill-defined normals) the gate can miss a real crossing — acceptable because (a) bbox-overlap
-was the only signal there anyway and (b) a missed flag is safer than the recess false-flag it
-replaces; logged for a future watertight-guard if it bites.
-
-## G108 — `transform op=rest_on` pushes a part that straddles the target plane DEEPER instead of lifting it to rest
-
-A plate cylinder centered on the origin (bounds z=[-0.0065, 0.0065], so half *below* the
-table plane at z=0) sent through `rest_on target=floor` moved **down** 1.5mm (to
-z=[-0.008, 0.005]) — further into penetration — instead of rising 6.5mm to seat its bottom on
-z=0. `rest_on` only travels along −axis, so a part that already intersects/sits below the
-target has no way to come up; it drops to some lower BVH hit and deepens the overlap. **Want:**
-`rest_on` should resolve to genuine resting regardless of starting side — detect that the
-source's lowest geometry is at/below the target and **lift** it to contact, or at minimum
-refuse-and-report ("source already below target, not dropping") rather than silently pushing
-it deeper. Until then: seat parts that start straddling a plane by arithmetic on the status
-bbox (lowest-bound → target-top delta), not `rest_on`.
-**RESOLVED 2026-06-23:** rest_on now casts each ray from ABOVE the target's top (not from the
-vert), so a vert already at/below the target still finds the surface beneath it and yields a
-SIGNED clearance — the part is LIFTED to rest (negative `dropped_mm`, shown as ↑ in the verb)
-when it straddles or sits below, dropped when above. Genuine resting from any starting side.
-Tested in e2e_g108_rest_on.py (straddle / above / fully-below).
-
 ## G109 — boolean UNION (EXACT) on a tube-meets-thin-wall join shatters into degenerate boundary loops; DIFFERENCE at the same scale is clean
 
 Welding a 4.5mm-radius handle tube onto a 4mm-walled mug where they overlapped a clean 1.1mm
@@ -213,65 +137,6 @@ weld a shallow tangential overlap as robustly as DIFFERENCE cuts one (or auto-cl
 sliver/degenerate output it knows it just produced). Workflow fallback proven: for a handle on
 a vessel, keep it a **separate object** with a small (~1mm) verified overlap — it reads as
 connected, no gap, no lump, and dodges the UNION shatter entirely.
-
-## G110 — `history op=undo` trips the SPEC-15 external-mutation lock on the server's OWN undo
-
-After a bad `edit op=boolean`, `history op=undo steps=2` correctly reverted it — then the very
-next mutating call (`shade_smooth`) was **ABORTED** with "WORLD STATE IS DIRTY … the scene
-changed by something other than this server" citing the undo's own vert/face delta on the Mug.
-The undo *is* a server op; its topology change should be self-attributed, not flagged as an
-external edit that forces a `history op=acknowledge` round-trip before work can resume. (Same
-self-mis-attribution family as G103's aborted-op case.) **Want:** state changes the server
-itself causes via `history` undo/redo should update the baseline in-place, never arm the
-external-mutation lock.
-**RESOLVED 2026-06-23:** `history.undo_steps`/`redo_steps` now call `_rebaseline_after_history`
-on success — re-grounding the SPEC-15 clean baseline to the post-undo scene so the next op sees
-it as server-known, not external. Guarded by `if not _world_locked` so a genuine external edit
-(which freezes the baseline) is never erased. (undo_to/restore delegate to undo_steps → covered.)
-Tested in e2e_spec15_interlock.py.
-
-## G111 — `validate` clipping DEPTH is nonsensical for small objects and doesn't update after a real move
-
-The always-on floor reported `clipping NEW Donut↔Spr__0010 77.7mm` for a 6mm sprinkle that
-`feel op=clearance` showed grazing the donut by **0.5mm** (13 verts inside, max 0.52mm). The
-magnitude is off by ~150×, and after lifting the whole sprinkle group a real +0.9mm the floor
-reprinted the **identical** "77.7mm" — i.e. the reported depth is not a live penetration
-measurement at all (looks like a bbox-overlap or diagonal proxy), yet it's printed in `mm` as
-if it were. This actively misleads: trusting it, I deleted ~20 correctly-placed sprinkles
-chasing a "deep" clip that `feel` proved was a sub-millimetre graze. **Want:** either make the
-clip line report the true BVH penetration depth (the number `feel op=clearance` already
-computes), or drop the bogus magnitude and just name the pair + a verified-or-unknown flag, so
-the floor's number can be trusted the way the status bbox can. Until fixed: **never act on a
-`validate` clip magnitude for small parts — confirm with `feel op=clearance`/`overlaps` first.**
-**RESOLVED 2026-06-23 (SPEC-16):** the clip line now recomputes the TRUE max vertex-penetration
-depth (the signed nearest-surface read `feel op=clearance` uses) on every report, and gates on
-it — sub-0.3mm grazes are dropped, not screamed as tens of mm. A matched-footprint overlap the
-vertex sampling can't measure is still flagged but with a `feel op=clearance to measure` hint
-instead of a bogus number (extension/validation.py `_true_penetration_mm`).
-
-## G112 — `validate` reports "by exception" capped at ~4 findings, with no full-list mode, no bulk-declare, and no way to forget a declaration
-
-Three compounding holes made declaring a *class* of intended contacts (37 sprinkles resting on
-icing/donut) impractical:
-- **Capped output:** every `validate op=run` (even `targets=Donut`) prints at most ~4 NEW
-  findings with no "…and N more" and no verbose/full-list flag, so enumerating a large set is
-  blind whack-a-mole (declare 4 → re-run → 4 more → …).
-- **No bulk declare:** `op=expect` only takes a single `(a,b)` object pair. There's no way to
-  declare a whole relationship intended (e.g. `Sprinkles`-group ↔ `Icing`, or `*`↔`Icing`),
-  so a legitimately-intended class of contacts can't be quieted in one move.
-- **No forget:** there is no `op=forget`/clear. After deleting a declared object its entry
-  becomes a permanent `VANISHED … (declared intended — confirm or clear)` line with no way to
-  *clear* it — so a re-scatter that renames parts leaves a trail of un-retir­able tripwires.
-**Want:** `validate op=run verbose` (or `limit=`) for the full list; `op=expect` accepting a
-group/collection (or a wildcard) for one-shot class declarations; and `op=forget a= b=` to
-retire a stale declaration. Together these turn "declare the few real ones" from aspiration
-into something actually doable when the count is >4.
-**RESOLVED 2026-06-23 (SPEC-16):** `validate op=run verbose` lists every finding (cap lifted);
-`op=expect` accepts a COLLECTION token in a/b (one `Sprinkles↔Icing` covers every member);
-`op=forget a= b=` retires a declaration; and declarations whose object/collection is deleted are
-auto-pruned, so a re-scatter no longer leaves un-retirable VANISHED tripwires. Also (feedback
-P0.1) the per-op clip line is now delta-scoped — only NEW clips on objects the op TOUCHED, with
-VANISHED gated to touched pairs, so a nudge on an unrelated object no longer re-prints the registry.
 
 ## G113 — per-instance MATERIAL variety is impossible after `scatter` (shared mesh) — `material op=set` writes the datablock, last colour wins for all
 
@@ -286,70 +151,6 @@ per-object colour sticks), or a post-scatter `transform op=tint_palette`/"random
 from a list" over a group, or at minimum a one-line note in the `scatter` schema: *"instances
 share one mesh — for colour/material variety pass `sources=` (multiple prototypes) now; it
 cannot be added later."*
-
-## G114 — `object op=join` on a SUBSET of linked instances corrupts the shared mesh for the survivors
-
-Joining 5 of ~50 scattered (instanced, shared-mesh) sprinkles to cull them wrote the merged
-5-capsule geometry **into the shared datablock**, so every *non-joined* survivor instantly
-rendered as 5 overlapping capsules (bboxes exploding, dozens of spurious `below_floor`
-findings). Join must not mutate a mesh other instances still depend on. **Want:** `join`
-should make the target single-user before appending (or refuse + warn when the targets share a
-datablock with objects outside the join set). Safe workaround found: join **all** instances of
-a shared mesh then delete the result — with no survivors there's nothing to corrupt — but a
-subset join is a silent footgun. (Same shared-datablock root as G103/G113.)
-**RESOLVED 2026-06-23:** `join_objects` now makes the join target single-user before
-`bpy.ops.object.join()` — but only when its mesh is actually shared with an object OUTSIDE the
-join set (so join-all, with no survivors, copies nothing). The merge writes into the private
-copy; survivors keep the pristine datablock. Reported via `made_single_user` + a note. Tested
-in e2e_g114_join_linked.py (subset / join-all / independent).
-
-## G115 — no way to VALIDATE camera focus / depth-of-field; macro-scale DOF silently blurs everything and the agent can't see it
-
-Set `view op=camera_dof focus_object=Donut aperture=4` on a sub-metre tabletop (subject 9cm,
-camera 0.27–0.78m away). At those distances f/4 behaves like extreme macro — the in-focus slab
-is a few mm deep — so **all three delivered renders came back blurry**, and there was no signal
-anywhere to catch it: `view op=check_framing` validates *composition* (coverage/clipping) but
-says nothing about *focus*, and the (correct, G-respected) "don't read the render back" rule
-means the agent has **no** feedback loop on sharpness at all. The aperture f-number is also
-scale-blind — f/4 is "readable tabletop" guidance for a human-scale set but paper-thin here —
-and nothing warns that the subject's own depth exceeds the DOF. **Want:** a focus analogue of
-`check_framing` — e.g. `view op=check_focus` (or a `focus:` block on `check_framing`) reporting
-the near/far focus limits at the current lens+aperture+distance and a pass/fail for whether each
-named target's bbox falls inside the in-focus zone ("Donut 27mm deep vs DOF slab 4mm → 85%
-out of focus"). Bonus: an `aperture` resolver that, given "keep the whole donut sharp," solves
-the f-stop from subject depth + distance instead of making the agent dead-reckon it. Until then
-the agent is flying blind on the one render property it's explicitly forbidden to eyeball.
-**RESOLVED 2026-06-23:** added `view op=check_focus` (introspect.check_focus) — a thin-lens DOF
-model (CoC = sensor_width/1500) that reports the near/far sharp limits + hyperfocal at the
-camera's current (or a hypothetical aperture/focus_distance/focus_object) settings, and a
-per-target SHARP/BLURRED verdict with in-focus-% by projecting each bbox onto the lens axis.
-`resolve_for=<obj>` solves the widest aperture that keeps a subject's full depth sharp ("keep
-the whole donut sharp" → an f-stop). Reports when DOF is disabled. Tested in e2e_g115_check_focus.py.
-
-## G116 — `modifier add SHRINKWRAP` could land on the wrong (active) object and leave a half-built modifier on error
-
-The partner-modifier family forces host = the active object, so `modifier add type=SHRINKWRAP
-target=Cap` while Cap is active set target==host and Blender raised "target ID … assignment to
-itself" — AND the modifier created just before the failing assignment was left in the stack
-(a half-built SHRINKWRAP). The agent had no way to name the receiving object, only the wrap
-surface. **RESOLVED 2026-06-23:** added a `host=` param for the partner mods (SHRINKWRAP/
-MESH_DEFORM/ARMATURE/LATTICE) so the agent names the object that RECEIVES the modifier instead
-of relying on selection; SHRINKWRAP now rejects a self-target with a clear message and removes
-the just-created modifier, and the `mod.target` assignment is wrapped so ANY failure cleans up
-(no half-built modifier ever survives). Tested in e2e_shrinkwrap_partial.py.
-
-## G117 — no periodic whole-scene re-grounding on a long build (mental model goes stale)
-
-On a 100+-call build the per-op feedback is the right spine, but nothing ever re-surfaces the
-whole picture, so the agent's mental model of objects it hasn't touched in 40 ops silently goes
-stale (the SPEC-15 "ground truth is perishable" problem at the model-attention level, not the
-geometry level). **RESOLVED 2026-06-23 (feedback P1.6):** added an epistemic-DRIFT checkpoint in
-`extension/validation.py` — each geometry op accrues drift weighted by how much it can break
-(boolean/remesh/join 25, local topology edits 8, transforms 2); when the accrued drift crosses a
-threshold (100) the next result carries a whole-scene re-ground recap (object map + the
-intent/tripwire registry) and the counter resets. It triggers on DRIFT, not mutation count, and
-never windows the hard-defect validate floor — per-op feedback stays the spine. Tested in
-e2e_spec16.py.
 
 ## G118 — a construction op can betray its own intent (hollow that seals the top, opens the bottom) and report success
 
