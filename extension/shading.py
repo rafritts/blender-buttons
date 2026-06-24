@@ -262,6 +262,21 @@ def set_material(params):
             return {"error": f"'{obj.name}' has {len(mats)} slot(s); slot {slot_idx} is "
                              f"out of range (can only append at index {len(mats)})"}
 
+    # G126: reusing an existing (e.g. PBR-textured) material by name only patches the
+    # Principled SCALAR inputs — but a TEXTURE NODE wired into Alpha/Metallic/Roughness/Base
+    # Color OVERRIDES the scalar (default_value is ignored when the input is linked). So the
+    # 'fix' (alpha=1 to un-hide an invisibly-transparent material) silently does nothing.
+    # Detect the inputs the agent set that are still node-driven and say so.
+    _attempted = []
+    if bc is not None:
+        _attempted.append("Base Color")
+    for key, label in (("metallic", "Metallic"), ("roughness", "Roughness"),
+                       ("ior", "IOR"), ("alpha", "Alpha")):
+        if params.get(key) is not None:
+            _attempted.append(label)
+    shadowed = [lab for lab in _attempted
+                if bsdf.inputs.get(lab) is not None and bsdf.inputs[lab].is_linked]
+
     out = {
         "success": True,
         "target": target,
@@ -271,6 +286,13 @@ def set_material(params):
         "edited_in_place": not meshes,
         "applied": applied,
     }
+    if shadowed:
+        out["shadowed_inputs"] = shadowed
+        out.setdefault("notes", []).append(
+            f"the value(s) you set for {', '.join(shadowed)} are OVERRIDDEN by a texture node "
+            f"still wired into '{mat.name}' — the scalar is ignored while the node is "
+            f"connected. To actually replace them, pass a NEW material_name (mints a fresh "
+            f"Principled with no texture graph).")
     if made_single_user:
         out["made_single_user"] = made_single_user
         out.setdefault("notes", []).append(

@@ -48,6 +48,10 @@ def material(
     folder: tag(str, "[pbr] local texture-set folder (Poliigon/Megascans/etc.) — maps auto-detected by filename") = "",
     size: tag(str, "[pbr] resolution subfolder/token to pick, e.g. 4K (default: largest present)") = "",
     displacement: tag(float, "[pbr] bump-displacement strength from the height map (0=off)") = 0.0,
+    use_alpha: tag(bool, "[pbr/textured] wire a detected alpha/opacity map into transparency. "
+                         "Default False — an alpha channel in a surface scan is usually a "
+                         "mask, not whole-material transparency (auto-wiring it made an opaque "
+                         "material render invisible, G126). Set True for a real cutout.") = False,
     # outline
     thickness: tag(float, "[outline] outline thickness (m)") = 0.01,
     color: tag(list, "[outline] outline [r,g,b]") = None,
@@ -92,11 +96,11 @@ def material(
     if o == "textured":
         return textures.set_textured_material(target, asset_id, scale, resolution,
                                               base_color, tint, metallic, roughness,
-                                              material_name, slot, label)
+                                              material_name, slot, use_alpha, label)
     if o == "pbr":
         return textures.set_pbr_material(target, folder, size, scale, displacement,
                                          base_color, tint, metallic, roughness,
-                                         material_name, slot, label)
+                                         material_name, slot, use_alpha, label)
     if o == "outline":
         return shaders.add_outline(target, thickness, color, label)
     if o == "remove_outline":

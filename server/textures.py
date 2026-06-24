@@ -117,7 +117,8 @@ def _scan_maps(map_dir: str):
 def set_pbr_material(target: str, folder: str, size: str = "", scale: float = 1.0,
                      displacement: float = 0.0, base_color: list = None,
                      tint: list = None, metallic: float = None, roughness: float = None,
-                     material_name: str = "", slot: int = None, label: str = "") -> str:
+                     material_name: str = "", slot: int = None, use_alpha: bool = False,
+                     label: str = "") -> str:
     """
     Build a PBR material from a LOCAL texture-set folder and apply it — vendor-neutral
     (Poliigon, Megascans, ambientCG, or any folder of maps). Maps are auto-detected by
@@ -161,6 +162,7 @@ def set_pbr_material(target: str, folder: str, size: str = "", scale: float = 1.
     if roughness is not None:  params["roughness"] = roughness
     if material_name:          params["material_name"] = material_name
     if slot is not None:       params["slot"] = slot
+    if use_alpha:              params["use_alpha"] = True
 
     result = call_blender("set_textured_material", params, label=label)
     if result.get("success"):
@@ -178,7 +180,7 @@ def set_textured_material(target: str, asset_id: str, scale: float = 1.0,
                           resolution: str = "1k", base_color: list = None,
                           tint: list = None, metallic: float = None,
                           roughness: float = None, material_name: str = "",
-                          slot: int = None, label: str = "") -> str:
+                          slot: int = None, use_alpha: bool = False, label: str = "") -> str:
     """
     Apply a real photo-scanned PBR material from Poly Haven (CC0) to an object or
     group. Downloads + caches the diffuse/normal/roughness/metal maps server-side,
@@ -224,6 +226,8 @@ def set_textured_material(target: str, asset_id: str, scale: float = 1.0,
         params["material_name"] = material_name
     if slot is not None:
         params["slot"] = slot
+    if use_alpha:
+        params["use_alpha"] = True
     result = call_blender("set_textured_material", params, label=label)
     if result.get("success"):
         main = (f"textured '{result['target']}' with {asset_id}@{resolution} "

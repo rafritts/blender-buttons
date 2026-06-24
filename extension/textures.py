@@ -166,15 +166,23 @@ def set_textured_material(params):
             bsdf.inputs['Emission Strength'].default_value = 1.0
         wired.append("emission")
 
-    # --- Alpha / opacity ---
+    # --- Alpha / opacity (G126: OPT-IN) ---
+    # An alpha channel in a SURFACE scan is almost never whole-material transparency — it's
+    # a crema/decal/cutout mask. Auto-wiring it into the BSDF Alpha made an opaque coffee
+    # render 100% invisible. Only wire it when explicitly asked (use_alpha=True); otherwise
+    # report it was detected-but-skipped so the agent can opt in if it really wants a cutout.
+    alpha_skipped = False
     if maps.get("alpha"):
-        a = image_node(maps["alpha"], 'Non-Color', -750)
-        nt.links.new(a.outputs['Color'], bsdf.inputs['Alpha'])
-        try:
-            mat.blend_method = 'CLIP'
-        except Exception:
-            pass
-        wired.append("alpha")
+        if bool(params.get("use_alpha")):
+            a = image_node(maps["alpha"], 'Non-Color', -750)
+            nt.links.new(a.outputs['Color'], bsdf.inputs['Alpha'])
+            try:
+                mat.blend_method = 'CLIP'
+            except Exception:
+                pass
+            wired.append("alpha")
+        else:
+            alpha_skipped = True
 
     # --- Displacement (height → Displacement node → Output), opt-in via `displacement` ---
     disp_amt = params.get("displacement")
@@ -214,7 +222,7 @@ def set_textured_material(params):
             return {"error": f"'{o.name}' has {len(mats)} slot(s); slot {slot_idx} is "
                              f"out of range (can only append at index {len(mats)})"}
 
-    return {
+    out = {
         "success": True,
         "target": target,
         "material": mat.name,
@@ -222,6 +230,13 @@ def set_textured_material(params):
         "assigned_to": [o.name for o in meshes],
         "maps_wired": wired,
     }
+    if alpha_skipped:
+        out["alpha_skipped"] = True
+        out.setdefault("notes", []).append(
+            "an alpha map was detected but NOT wired (it would make the surface transparent — "
+            "usually wrong for an opaque material). Pass use_alpha=True if you want it as a "
+            "cutout/mask.")
+    return out
 
 
 TOOLS = {
