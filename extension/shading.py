@@ -234,33 +234,38 @@ def set_material(params):
     if es is not None and _set_input(bsdf, "Emission Strength", float(es)):
         applied.append(f"emission_strength={es}")
 
-    # G113: a scattered instance shares ONE mesh datablock, so writing a material slot on it
-    # writes the SHARED mesh — and every other instance silently gets the same colour (last
-    # colour wins). Make an object single-user FIRST when its mesh is shared with an object
-    # OUTSIDE this assignment set, so a per-subset colour sticks (same principle as the G114
-    # join fix). Assigning to ALL users (e.g. target=whole group) writes the shared mesh
-    # once — no needless copies.
+    # G113: a scattered instance shares ONE mesh datablock, so writing the mesh's material
+    # slot recolors EVERY instance (last colour wins). When an object's mesh is shared with
+    # objects OUTSIDE this assignment set, override the material on a per-object OBJECT-LINKED
+    # slot — the colour sticks to THIS instance with NO geometry duplication (the mesh stays
+    # shared, which is the whole point of a 100-instance scatter). When every user of the
+    # mesh is already in the target set (recolouring the whole group), write the shared data
+    # slot once instead — no needless per-object overrides.
     mesh_set = set(meshes)
-    made_single_user = []
+    slot_idx = int(slot) if slot is not None else 0
+    object_linked = []
     for obj in meshes:
         me = obj.data
-        if me is not None and me.users > 1:
-            shared_outside = any(u.data is me and u not in mesh_set
-                                 for u in bpy.data.objects)
-            if shared_outside:
-                obj.data = me.copy()
-                made_single_user.append(obj.name)
-
-    slot_idx = int(slot) if slot is not None else 0
-    for obj in meshes:
-        mats = obj.data.materials
-        if slot_idx < len(mats):
-            mats[slot_idx] = mat
-        elif slot_idx == len(mats):
-            mats.append(mat)
+        shared_outside = me is not None and me.users > 1 and any(
+            u.data is me and u not in mesh_set for u in bpy.data.objects)
+        if shared_outside:
+            # Grow the (shared) data slot list so slot_idx exists for every instance, then
+            # override the material for THIS object via the OBJECT link — the shared data
+            # slot itself is left untouched, so the other instances keep their colour.
+            while len(me.materials) <= slot_idx:
+                me.materials.append(None)
+            obj.material_slots[slot_idx].link = 'OBJECT'
+            obj.material_slots[slot_idx].material = mat
+            object_linked.append(obj.name)
         else:
-            return {"error": f"'{obj.name}' has {len(mats)} slot(s); slot {slot_idx} is "
-                             f"out of range (can only append at index {len(mats)})"}
+            mats = me.materials
+            if slot_idx < len(mats):
+                mats[slot_idx] = mat
+            elif slot_idx == len(mats):
+                mats.append(mat)
+            else:
+                return {"error": f"'{obj.name}' has {len(mats)} slot(s); slot {slot_idx} is "
+                                 f"out of range (can only append at index {len(mats)})"}
 
     # G126: reusing an existing (e.g. PBR-textured) material by name only patches the
     # Principled SCALAR inputs — but a TEXTURE NODE wired into Alpha/Metallic/Roughness/Base
@@ -293,12 +298,13 @@ def set_material(params):
             f"still wired into '{mat.name}' — the scalar is ignored while the node is "
             f"connected. To actually replace them, pass a NEW material_name (mints a fresh "
             f"Principled with no texture graph).")
-    if made_single_user:
-        out["made_single_user"] = made_single_user
+    if object_linked:
+        out["object_linked"] = object_linked
         out.setdefault("notes", []).append(
-            f"{len(made_single_user)} instance(s) made single-user so this material sticks "
-            f"per-object (their mesh was shared with objects outside the target) — they no "
-            f"longer share geometry with the rest of the scatter.")
+            f"{len(object_linked)} instance(s) share a mesh with objects outside the target, "
+            f"so this material was assigned via an OBJECT-linked slot — it's per-instance (the "
+            f"others keep theirs) with the mesh still shared, so a scatter gets colour variety "
+            f"without un-sharing geometry.")
     return out
 
 

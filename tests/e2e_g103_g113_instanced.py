@@ -67,18 +67,24 @@ check("single-user member baked (scale reset to 1)", abs(bpy.data.objects["Solo"
       str(bpy.data.objects["Solo"].scale.x))
 
 
-# ---- G113: per-instance material makes single-user --------------------------------
+# ---- G113: per-instance material via an OBJECT-linked slot, mesh stays shared ------
 clean()
 a, b = instance_pair()
 res = run("set_material", target="I0", base_color=[1.0, 0.0, 0.0], material_name="Red")
 check("set_material on a shared instance succeeds", res.get("success"), res.get("error", ""))
-check("targeted instance made single-user", "I0" in res.get("made_single_user", []),
-      str(res.get("made_single_user")))
-check("I0 and I1 no longer share a mesh",
-      bpy.data.objects["I0"].data is not bpy.data.objects["I1"].data)
-# I1 (untargeted) must NOT have the red material
-i1_mats = [m.name for m in bpy.data.objects["I1"].data.materials if m]
-check("untargeted instance did NOT get the material", "Red" not in i1_mats, str(i1_mats))
+check("targeted instance got an object-linked slot", "I0" in res.get("object_linked", []),
+      str(res.get("object_linked")))
+check("I0 and I1 STILL share one mesh (no geometry duplication)",
+      bpy.data.objects["I0"].data is bpy.data.objects["I1"].data)
+# I0 shows Red through its per-object slot override
+i0_slot = bpy.data.objects["I0"].material_slots[0]
+check("I0's slot is OBJECT-linked to Red", i0_slot.link == 'OBJECT' and i0_slot.material
+      and i0_slot.material.name == "Red", f"link={i0_slot.link} mat={i0_slot.material}")
+# I1 (untargeted) reads the shared DATA slot, which was left untouched → not Red
+i1_slot = bpy.data.objects["I1"].material_slots[0]
+check("untargeted instance did NOT get the material",
+      i1_slot.material is None or i1_slot.material.name != "Red",
+      f"link={i1_slot.link} mat={i1_slot.material}")
 
 
 print()
