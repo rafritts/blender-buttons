@@ -542,9 +542,19 @@ def rest_on(params):
     for o in objs:
         if o.name == target_name:
             continue
-        src = _prepare(o, cap=500)
-        if src is None:
+        # G123: cast through the FULL evaluated vertex set, not a ≤500 downsample — on a
+        # convex/domed base (subsurf rounding to a point) the true lowest geometry is a
+        # SPARSE extreme that downsampling skips, so the seat was computed off a higher vert
+        # and the real low point overshot below the surface. The deliberate single op can
+        # afford every vert; the BVH (target) stays the sampled _prepare one.
+        from .common import eval_world_bmesh
+        sbm = eval_world_bmesh(o)
+        if sbm is None or not sbm.verts:
+            if sbm is not None:
+                sbm.free()
             continue
+        src_verts = [v.co.copy() for v in sbm.verts]
+        sbm.free()
         # Smallest SIGNED clearance over source verts that have target surface beneath
         # their lateral position = how far the object moves to seat its lowest point.
         # G108: start each ray ABOVE the target's top (not at the vert), so a vert that
@@ -552,7 +562,7 @@ def rest_on(params):
         # a NEGATIVE clearance — the part is lifted to rest, not dropped deeper.
         ray_top = tgt["bbox"][axis_idx + 3] + 1.0   # 1 m above the target's highest point
         min_clear = None
-        for v in src["verts"]:
+        for v in src_verts:
             origin = v.copy()
             origin[axis_idx] = ray_top
             loc, normal, idx, dist = tgt["bvh"].ray_cast(origin, down)
@@ -684,6 +694,15 @@ def place(params):
         return {"error": "place needs 'on' — a placement spec "
                          "(e.g. {\"left_of\":\"base\",\"gap\":0})"}
 
+    # G123: a PURE horizontal adjacency (right_of/left_of/in_front_of/behind, with no
+    # on/under/at_corner/… vertical anchor) must not carry a vertical component — re-seating
+    # an existing mover to the target's centre Z buried a floor-resting mug 37mm under the
+    # table. Preserve the mover's current Z in that case (it keeps its floor contact); a
+    # combined spec (e.g. right_of + on) still sets Z from the vertical anchor.
+    _ADJ = {"left_of", "right_of", "in_front_of", "behind"}
+    _VERT = {"on", "under", "between", "centered_on", "at_corner", "mirror_of"}
+    keep_z = isinstance(spec, dict) and (set(spec) & _ADJ) and not (set(spec) & _VERT)
+
     placed = []
     for o in objs:
         xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(o)
@@ -693,6 +712,8 @@ def place(params):
             tx, ty, tz = resolve_placement(spec, dims)
         except ValueError as e:
             return {"error": str(e)}
+        if keep_z:
+            tz = cz
         o.location.x += tx - cx
         o.location.y += ty - cy
         o.location.z += tz - cz
