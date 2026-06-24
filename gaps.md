@@ -571,3 +571,38 @@ on a thin-walled shell consumes a large fraction of the wall; and add an in-plac
 thickness control or a `select by_radius`/cylindrical selector so a wall can be re-thinned without
 CSG. Process note for the agent: don't report a derived dimension ("4mm") as fact — `feel op=section`
 is one call and the user's eyeball was right.
+
+## G133 — the auto-fired `feel`/`validate` lines show their OUTPUT but not the CALL that produced it; echoing the invocation would teach the un-predictable verbs by demonstration
+
+Every mutating op auto-fires a perception read and a correctness check and prints their results
+(`feel: Donut — 1152v 2304e · dims …`, `validate: clipping 1 new: Donut↔Plate`), but never the
+command that generated them. This is a missed teaching surface, and it bites precisely the verbs an
+LLM *can't* predict from Blender pretraining — `feel`/`validate` are the server's invented
+vocabulary, with no prior to lean on, so they have to be learned, and the floor fires them dozens of
+times per build as free worked examples that currently go unlabelled. Three concrete costs observed
+this build: (1) no spaced-repetition of the differentiated verbs' syntax — the agent learns them
+once from the schema instead of absorbing them by watching them run; (2) when a deeper read was
+wanted, the auto-`feel` prose was ambiguous about *which* op produced it, so the agent had to guess
+between `contacts`/`clearance`/`resting` instead of just re-running the op it saw fire; (3) it
+obscures *what the floor actually checked*, which matters because some of those checks return
+unreliable numbers (open-shell penetration, G124) and seeing the invocation would cue when to
+distrust the value. Candidate fix: lead each auto-fired line with a compact echo of the call
+(`⟵ feel op=all target=Donut`, `⟵ validate run targets=Donut,Plate`) — one line, not a
+pretty-printed block, to keep the token cost near zero — so every automatic read doubles as a
+reproducible, extendable example of the exact verb to reach for.
+
+## G134 — the no-op detector catches "the op did nothing"; there is no symmetric alarm for "the op succeeded but degraded the geometry" at the moment it happens
+
+The no-op detector (byte-identical before/after) is a standout — it catches the worst silent-failure
+class. But its mirror image is unguarded: ops that *succeed* and quietly make a mess. This build hit
+it repeatedly — `grid_fill` that folded into 15 self-intersections, a boolean UNION that left a
+14-edge internal non-manifold membrane, a `solidify` that grew the wrong direction, and a wall that
+came out ~2× the requested thickness — none of which *errored*. Each only surfaced on the *next*
+read's `validate` line, or (the wall) not until a human eyeballed it. So the agent learns of a
+geometry regression one step late, and only if it happens to read the floor output, and only if the
+floor's numbers are trustworthy for that geometry (they aren't on open shells, G124). The no-op
+detector already diffs the mesh before/after; the same diff could carry a topology delta and warn at
+the moment of the op: `⚠ this op added 2 boundary loops / 14 non-manifold edges / 15
+self-intersections / changed genus 0→?`. That single addition would have caught most of the
+afternoons that actually hurt — the silent-success-with-bad-geometry class is the one the agent has
+no proactive defense against, only the always-one-step-behind validate line.
