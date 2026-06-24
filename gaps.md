@@ -85,3 +85,55 @@ fix: edit-mode select ops always enter edit on `target=` and echo the resulting 
 status block; or a hard `mode=` guard that refuses to run when the target isn't in the
 expected mode with an explicit error instead of silently switching.
 
+
+---
+
+## G159 — `transform op=seat` mis-fires when the source starts overlapping/below the target (axis-aligned, not just rotated)
+
+Distinct trigger from [G155]: seating a torus into an axis-aligned plate well, the donut
+began straddling the plate (spawned at origin, lower half below z=0). `seat` drove it
+*down* 2.9mm — to rest below the table — instead of lifting it onto the well floor. The fix
+that worked for both the donut and (pre-emptively) the coffee was the same: `nudge` the
+source entirely clear above the cavity first, then `seat` (which then dropped a sane
+18.9mm / 67mm onto the real floor). So seat's interior-floor raycast is only trustworthy
+when the source already sits fully above the cavity mouth. Candidate fix: seat should lift
+the source clear of the target's bbox before casting (or detect initial interpenetration and
+auto-lift), so a part that spawns inside/below its destination doesn't seat *through* it.
+
+---
+
+## G161 — `add type=tube` (spline_tube) self-intersects at the ends on a clean low-curvature planar path; curve+bevel→convert is clean
+
+A C-shaped mug handle swept as `add type=tube` through 5–7 coplanar points on a smooth
+half-ellipse (min bend radius ~15mm, tube radius 4.5–6mm — bend ≫ profile everywhere)
+reported 11–15 self-intersections every time, and going *thinner* made it worse (15 vs 11),
+which rules out bend-vs-radius. The identical points fed to `add type=curve subtype=BEZIER
+bevel_depth=…` then `object op=convert` produced a clean watertight tube (0 self-intersections).
+So spline_tube's end-cap/endpoint sampling looks buggy, not the geometry. Candidate fix:
+either route spline_tube through the same curve-bevel path internally, or have the guidance
+steer handle/cable work to curve+bevel and flag spline_tube as endpoint-fragile.
+
+---
+
+## G163 — `transform op=scatter` yields a few corrupt instances (inverted normals, wild misplacement) needing manual cull
+
+Scattering 80 capsule sprinkles onto a curved icing crown left 2 instances with inverted
+normals (mirrored alignment frames → would render dark) and 2 placed 30–45mm into the
+surface (clip depth larger than the whole donut — almost certainly seated onto a wrong/inner
+face near the hole boundary). ~5% defect rate, each a hard `validate` defect with no
+suppression path, fixable only by deleting the offending instances by name. Candidate fix:
+scatter should reject negative-determinant (mirrored) placement frames and discard
+instances whose seat lands deeper than the prototype's own height, reporting the count it
+dropped rather than emitting broken geometry.
+
+---
+
+## G165 — `feel op=resting` reports nonsense when an object contains another (vessel + liquid)
+
+`feel op=resting targets=Mug` returned "on Coffee, 0 contacts, sunk 62.8mm" — the mug rests
+on the *table*, but the read latched onto the Coffee disc sitting *inside* it and reported a
+62mm sink. `feel op=contacts` on the same pair was correct ("Mug connected to Table,
+Coffee"). So resting picks the nearest surface beneath the part without excluding geometry
+the part encloses. Candidate fix: resting should ignore targets fully contained within the
+queried object's footprint+height (or prefer the lowest external support), so a filled
+vessel still reads as resting on the table.
