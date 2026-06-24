@@ -137,3 +137,54 @@ Coffee"). So resting picks the nearest surface beneath the part without excludin
 the part encloses. Candidate fix: resting should ignore targets fully contained within the
 queried object's footprint+height (or prefer the lowest external support), so a filled
 vessel still reads as resting on the table.
+
+---
+
+## G167 — applying a BEVEL modifier near an NGON cap leaves zero-area degenerate faces
+
+Beveling a solid whose caps are NGONs (a cylinder plate with inset rings meeting an NGON
+floor) and then `modifier op=apply` emitted 96 zero-area faces — roughly one per segment — a
+hard `validate` defect with no suppression path. `edit op=merge` at ~0.3mm dissolved them
+cleanly, but nothing warns that apply will produce them, and an agent that doesn't re-run
+`validate` after the apply ships non-renderable geometry. Candidate fix: bevel-apply runs a
+degenerate-dissolve / merge-by-distance pass on the faces it touched (or reports the sliver
+count it left behind), so a rounded ceramic edge can't silently introduce a defect.
+
+---
+
+## G169 — `transform op=scatter` can't lay instances tangent/flat; the upright-peg failure must be dodged by pre-rotating the prototype
+
+scatter offers `align_normal` (aligns the instance's +Z to the surface normal) but no way to
+lay a prototype's LONG axis *along* the surface — so a capsule/cylinder scattered with
+align_normal stands upright like a peg (the exact failure the donut spec dedicates a bullet
+to). The only path is to author the prototype rotated 90° and `apply` it so its local Z
+becomes the thin cross-axis, *then* scatter — a non-obvious bake the server could absorb.
+Candidate fix: a scatter `lay_axis`/`align=tangent` option that orients a chosen local axis
+ALONG the surface (with `rotate_z`/`jitter_tilt` still varying the in-plane spin), so
+sprinkles / rice / fallen debris lie flat without hand-rotating and applying the prototype.
+
+---
+
+## G171 — no min-bend-radius / curvature read for a baked mesh tube (the `feel op=curve` bend check is curve-datablock only)
+
+After building a handle as a tube and converting to mesh (the clean route from [G161]),
+`feel op=curve profile_radius=…` refused: "Handle is a mesh, not a curve." There is then no
+ground-truth way to verify a baked tube's min bend radius exceeds its profile radius — the
+one read that *predicts* a swept form will self-intersect before you commit. I fell back to
+`validate` self_intersection as a post-hoc proxy (it caught it, but only after the fact).
+Candidate fix: let `feel op=fit model=swept_tube` (or a dedicated read) recover the
+centerline + min bend radius from a baked tube mesh, so the bend-vs-profile check works on
+the geometry that actually ships, not only on live curve datablocks.
+
+---
+
+## G173 — `scatter seat=true` on a curved/displaced surface leaves sub-mm float/sink per instance
+
+seat should lift each copy so its lowest point rests on the surface, but across instances on
+a noise-displaced icing crown some floated ~0.6mm (0 contacts) and others sank ~1.0mm — so
+`feel op=resting` on an individual scatter instance reads "floating"/"sunk" rather than clean
+contact. Within the donut spec's stated tolerance, but it means the acceptance check
+("sprinkles on icing — genuine contacts") is technically failed for a fraction of the set.
+Candidate fix: seat each instance against the surface under its *actual* footprint (not the
+prototype's nominal lowest vert), so seating tracks local curvature; and/or have scatter
+report the worst-case seat error so the loose ones are visible without polling each instance.
