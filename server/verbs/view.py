@@ -37,7 +37,10 @@ def view(
     auto_frame: tag(bool, "[orbit] auto-fit the scene") = False,
     target: tag(str, "[orbit] named object to orbit the viewport around (empty=fixed datum)") = "",
     rig: tag(str, "[rig] the object (light/camera) to position+aim around the subject") = "",
-    subject: tag(str, "[rig] the named object the rigged light/camera orbits and aims at") = "",
+    subject: tag(str, "[rig] the subject(s) the rigged light/camera orbits and aims at — "
+                      "one object, a comma-list ('donut,plate,mug'), or a group name") = "",
+    fit: tag(bool, "[rig] auto-derive distance to frame the WHOLE subject set (camera: "
+                   "from its FOV; light: from extent) — no hand-tuning to stop clipping") = False,
     # frame / check_framing
     targets: tag(str, "[frame/check_framing] objects to frame/check") = "",
     include_lights: tag(bool, "[frame] include lights in the frame") = False,
@@ -62,9 +65,11 @@ def view(
       orbit     — orbit the viewport camera (azimuth, elevation, distance, auto_frame,
                   target=<object to orbit around>) — relational viewpoint, no coordinates
       rig       — position+aim a light or camera around a subject: rig=<light/camera>,
-                  subject=<object>, azimuth/elevation/distance. The relational key/fill/
-                  rim or hero-camera rig (spherical analogue of array_radial); aims the
-                  object's -Z at the subject. (re-aim only → object op=aim)
+                  subject=<object|comma-list|group>, azimuth/elevation/distance. The
+                  relational key/fill/rim or hero-camera rig (spherical analogue of
+                  array_radial); aims the object's -Z at the subject(s)' union centre.
+                  fit=True auto-frames the whole subject set from the camera's FOV (or a
+                  light's extent). (re-aim only → object op=aim)
       zoom      — zoom to the current selection (—)
       frame     — frame objects in view  (targets, include_lights)
       check_framing — is everything in the camera frame? Coverage % is relative to
@@ -98,7 +103,7 @@ def view(
         return viewport.orbit_viewport(azimuth, elevation, distance, 0.0, 0.0, 1.0,
                                        auto_frame, target)
     if o == "rig":
-        return scene.rig_object(rig, subject, azimuth, elevation, distance)
+        return scene.rig_object(rig, subject, azimuth, elevation, distance, fit)
     if o == "zoom":
         return viewport.zoom_to_selected()
     if o == "frame":

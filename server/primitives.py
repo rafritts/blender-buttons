@@ -275,10 +275,15 @@ def spline_tube(name: str, points: list, radius: Union[float, list] = 0.02,
     points:  2–32 control points the curve passes through. Each is either
              [x, y, z] world coords (ripcord), or
              {"near": "object_name", "offset": [dx, dy, dz]} — anchored to an
-             existing object's bbox center, resolved once at creation.
-    between: [A, B] — INSTEAD of points: connect two named objects with a straight
+             existing object's bbox center, resolved once at creation, or
+             {"handle": "name"} — a minted handle's LIVE point (feel op=handle),
+             resolved here at creation. THIS is how you span two minted points
+             (e.g. a mug-handle loop between mug_attach_top/bottom) — no throwaway
+             marker objects needed (G144).
+    between: [A, B] — INSTEAD of points: connect two named OBJECTS with a straight
              tube, endpoints at the nearest surface points between them (BVH). The
              generic strut/cable/wire — no offset math, no dead-reckoned endpoints.
+             For minted POINT handles use points=[{"handle":…}, …] instead.
     radius:  tube radius in meters. A single number, OR a list with one radius
              per control point for taper (e.g. [0.03, 0.02, 0.005] = thick root
              to thin tip — a hair strand).
@@ -295,6 +300,20 @@ def spline_tube(name: str, points: list, radius: Union[float, list] = 0.02,
                           [0.11, -0.04, 1.15]],
                   radius=[0.025, 0.018, 0.004])
     """
+    # G144: resolve any {"handle": name} control points to their live world point
+    # here, so a tube can span minted handles without throwaway marker objects.
+    if points:
+        from server import handles as _h
+        resolved = []
+        for p in points:
+            if isinstance(p, dict) and "handle" in p:
+                pt, err, _ = _h.resolve_point(p["handle"])
+                if err:
+                    return err
+                resolved.append(list(pt))
+            else:
+                resolved.append(p)
+        points = resolved
     result = call_blender("spline_tube", {
         "name": name, "points": points, "radius": radius,
         "resolution": resolution, "sides": sides, "between": between,

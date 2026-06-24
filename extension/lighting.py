@@ -125,21 +125,69 @@ def rig_around(params):
     distance) and aim it inward. The relational light/camera rig: a key/fill/rim light or
     a hero camera at an angle + radius around the subject, no typed coordinates — the
     spherical analogue of array_radial. azimuth 0 = front (−Y), 90 = +X (right side);
-    elevation = degrees above the horizon; distance = subject-centre → object."""
+    elevation = degrees above the horizon; distance = subject-centre → object.
+
+    G149 — subject may be SEVERAL objects (comma list or group name): the rig orbits and
+    aims at their UNION bbox centre. fit=True then auto-derives the distance so the whole
+    group fills the frame — for a camera, from its real field of view; for a light, from
+    the subject's extent. So a multi-part vignette (donut + plate + mug) frames in one
+    call instead of hand-tuning distance until check_framing stops clipping."""
     import math
     name = params.get("name")
     obj = bpy.data.objects.get(name) if name else bpy.context.active_object
     if obj is None:
         return {"error": f"object '{name or '(active)'}' not found"}
     subject = params.get("subject") or params.get("target")
-    tgt = bpy.data.objects.get(subject) if subject else None
-    if tgt is None:
-        return {"error": f"subject '{subject}' not found — rig needs a named subject to orbit"}
+    if not subject:
+        return {"error": "rig needs a named subject to orbit"}
+
+    from .common import resolve_targets, world_bbox
+    # Expand a comma list / group name into the set of subject objects to frame.
+    tokens = subject.split(",") if isinstance(subject, str) else subject
+    subj_objs, seen = [], set()
+    for tok in tokens:
+        objs, _ = resolve_targets(tok.strip() if isinstance(tok, str) else tok,
+                                  include_non_mesh=True)
+        for s in (objs or []):
+            if s is not obj and s.name not in seen:   # never orbit the rig around itself
+                seen.add(s.name)
+                subj_objs.append(s)
+    if not subj_objs:
+        return {"error": f"subject '{subject}' not found — rig needs a named subject "
+                         "(or group/comma-list) to orbit"}
+
+    # Union world bbox of every subject → aim centre + extent.
+    mins = [float("inf")] * 3
+    maxs = [float("-inf")] * 3
+    for s in subj_objs:
+        b = world_bbox(s)
+        for i in range(3):
+            mins[i] = min(mins[i], b[i])
+            maxs[i] = max(maxs[i], b[i + 3])
+    c = mathutils.Vector(((mins[0] + maxs[0]) * 0.5,
+                          (mins[1] + maxs[1]) * 0.5,
+                          (mins[2] + maxs[2]) * 0.5))
+    diag = math.sqrt(sum((maxs[i] - mins[i]) ** 2 for i in range(3)))
+    radius = max(diag * 0.5, 1e-4)
+
     az = math.radians(float(params.get("azimuth", 45.0)))
     el = math.radians(float(params.get("elevation", 25.0)))
     dist = float(params.get("distance", 8.0))
-    from .common import world_center
-    c = mathutils.Vector(world_center(tgt))
+    fit = bool(params.get("fit", False))
+    fit_note = None
+    if fit:
+        if obj.type == 'CAMERA':
+            # Distance that fits a sphere of `radius` inside BOTH frame dimensions, given
+            # the camera's true horizontal/vertical FOV, plus a margin off the edges.
+            ax = getattr(obj.data, "angle_x", None) or obj.data.angle
+            ay = getattr(obj.data, "angle_y", None) or obj.data.angle
+            dist = max(radius / math.tan(ax / 2.0), radius / math.tan(ay / 2.0)) * 1.15
+            fit_note = (f"distance {round(dist, 3)}m auto-fit to frame {len(subj_objs)} "
+                        f"subject(s) (bbox diag {round(diag, 3)}m)")
+        else:
+            dist = max(dist, radius * 3.0)
+            fit_note = f"distance {round(dist, 3)}m from subject extent"
+
     dir_to_obj = mathutils.Vector((math.cos(el) * math.sin(az),
                                    -math.cos(el) * math.cos(az),
                                    math.sin(el)))
@@ -148,9 +196,14 @@ def rig_around(params):
     direction = c - pos
     obj.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()
     bpy.context.view_layer.update()
-    return {"success": True, "rigged": [obj.name], "subject": tgt.name,
-            "azimuth": round(math.degrees(az), 1), "elevation": round(math.degrees(el), 1),
-            "distance": round(dist, 4), "location": [round(v, 4) for v in pos]}
+    subj_label = subj_objs[0].name if len(subj_objs) == 1 else \
+        f"{len(subj_objs)} subjects ({', '.join(s.name for s in subj_objs)})"
+    out = {"success": True, "rigged": [obj.name], "subject": subj_label,
+           "azimuth": round(math.degrees(az), 1), "elevation": round(math.degrees(el), 1),
+           "distance": round(dist, 4), "location": [round(v, 4) for v in pos]}
+    if fit_note:
+        out["fit"] = fit_note
+    return out
 
 
 def set_world_background(params):

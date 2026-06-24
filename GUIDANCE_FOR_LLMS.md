@@ -135,6 +135,14 @@ ground-truth reads above.
 - `search_textures` / `search_hdris` → Poly Haven ids; `set_textured_material`
   needs no UVs (box projection). `dark_wood` + `brown_photostudio_02` is a proven
   warm product-shot combo.
+- **Local texture sets you already have on disk (Poliigon, Megascans, ambientCG) →
+  `material op=pbr folder=<asset dir>`.** It auto-detects the maps by filename
+  (BaseColor/COL, Normal/NRM, Roughness/ROUGH, AO, Displacement…), needs no UVs and
+  no addon/login — point it at e.g. `~/.../Poliigon_StoneQuartzite_8060` and it wires
+  the node graph. `search_textures` is **Poly Haven only**; there is no online
+  Poliigon search, so for Poliigon you download via its own addon, then apply with
+  `material op=pbr`. Don't fall back to a flat tint + `set` when a real texture set is
+  on disk.
 - One soft AREA key light angled across the subject adds sparkle the HDRI alone
   doesn't give. Aim with `target=`.
 - DOF: `set_camera_dof(focus_object=...)`; f/4 keeps a tabletop scene readable,

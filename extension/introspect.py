@@ -406,6 +406,13 @@ def check_resting(params):
                 f"measured against {support_name}'s surface beneath the part "
                 f"(z={round(support_z, 4)}m); its rim/bbox-top is {round(rim_above * 1000, 1)}mm "
                 f"higher (z={round(bbox_top_z, 4)}m) and is not load-bearing here")
+        # G145: a subdivided support (cup/bowl with no bottom loop cut) has an evaluated
+        # interior floor that can sit off the cage, so a "resting (0 mm)" read can be a
+        # faithful measurement of a wrong floor. Flag it.
+        from .common import subdiv_floor_caveat
+        caveat = subdiv_floor_caveat(bpy.data.objects.get(support_name))
+        if caveat:
+            result["warning"] = caveat
         results.append(result)
     return {"success": True, "resting": results,
             "provenance": measurement_provenance(report_objs)}

@@ -33,7 +33,8 @@ def move_to(targets: str = "", x: float = None, y: float = None, z: float = None
     with feel op=aim, which returns a world point to drop a marker / move an object to.
 
     Relational placement (add on=…) is still preferred for FIRST placement; move_to is
-    for dropping at a COMPUTED point (e.g. a feel-op=aim hit). Empty targets = active.
+    for dropping at a COMPUTED point (e.g. a feel-op=aim hit). The `transform` verb also
+    resolves a handle= name to its live point before calling here. Empty targets = active.
     Example: move_to("MARK", x=0.04, y=-0.08, z=0.9)"""
     result = call_blender("move_to",
                           {"targets": _targets(targets), "x": x, "y": y, "z": z}, label=label)
@@ -62,8 +63,9 @@ def aim_axis(targets: str = "", frm: list = None, to: list = None,
              axis: str = "Z", label: str = "") -> str:
     """Rotate objects so their local `axis` points down the frm→to segment (G25) — the
     orient-along-an-edge primitive for solids that don't self-orient like add type=tube.
-    Endpoints are world points; the verb resolves handles to points first. Orientation
-    only — pair with move_to to position. Example: lay a helix along a strut's two ends."""
+    Endpoints are world points; the `transform` verb resolves from_handle/to_handle names
+    to points before calling here. Orientation only — pair with move_to to position.
+    Example: lay a helix along a strut's two ends."""
     if frm is None or to is None:
         return ("aim_axis needs both endpoints — aim_from/aim_to points, "
                 "or from_handle/to_handle")

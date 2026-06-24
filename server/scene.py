@@ -19,19 +19,27 @@ def aim_object(name: str = "", subject: str = "", label: str = "") -> str:
 
 
 def rig_object(name: str = "", subject: str = "", azimuth: float = 45.0,
-               elevation: float = 25.0, distance: float = 8.0, label: str = "") -> str:
+               elevation: float = 25.0, distance: float = 8.0, fit: bool = False,
+               label: str = "") -> str:
     """G79 — position an object on a sphere around a subject and aim it inward: the
     relational light/camera rig (key/fill/rim light, hero camera) by azimuth/elevation/
     distance, no typed coordinates — the spherical analogue of array_radial. azimuth
-    0=front (−Y), 90=+X (right); elevation above the horizon; distance = subject→object."""
+    0=front (−Y), 90=+X (right); elevation above the horizon; distance = subject→object.
+
+    G149 — subject can be SEVERAL objects: a comma list ("donut,plate,mug") or a group
+    name. The rig aims at their union-bbox centre. fit=True then auto-derives `distance`
+    so the whole group fills the frame (from the camera's real FOV, or a light's extent),
+    instead of hand-tuning until check_framing stops clipping."""
     if not subject:
-        return "rig needs subject=<object to orbit around>"
+        return "rig needs subject=<object/group/comma-list to orbit around>"
     result = call_blender("rig_around", {"name": name, "subject": subject,
-        "azimuth": azimuth, "elevation": elevation, "distance": distance}, label=label)
+        "azimuth": azimuth, "elevation": elevation, "distance": distance, "fit": fit},
+        label=label)
     if result.get("success"):
+        fit_str = f" — {result['fit']}" if result.get("fit") else ""
         main = (f"rigged {result['rigged']} around {result['subject']} "
-                f"(az {result['azimuth']}° el {result['elevation']}° d {result['distance']}m) "
-                f"[{result.get('op_id','')}]")
+                f"(az {result['azimuth']}° el {result['elevation']}° d {result['distance']}m)"
+                f"{fit_str} [{result.get('op_id','')}]")
     else:
         main = result.get("error", "failed")
     return main + _status(result)

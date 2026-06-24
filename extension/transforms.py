@@ -690,9 +690,14 @@ def seat_into(params):
         o.location[axis_idx] -= drop
         rested.append({"name": o.name, "dropped_mm": round(drop * 1000, 2)})
     bpy.context.view_layer.update()
-    return {"success": True, "target": target_name, "axis": axis_key,
-            "offset": offset, "seated": rested,
-            "rested": rested}   # alias so _status_focus / callers find the names
+    out = {"success": True, "target": target_name, "axis": axis_key,
+           "offset": offset, "seated": rested,
+           "rested": rested}   # alias so _status_focus / callers find the names
+    from .common import subdiv_floor_caveat
+    caveat = subdiv_floor_caveat(target)
+    if caveat:
+        out["warning"] = caveat
+    return out
 
 
 def place(params):

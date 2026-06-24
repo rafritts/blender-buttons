@@ -245,3 +245,36 @@ def set_material(target: str = "",
     else:
         main = result.get("error", "failed")
     return main + _status(result)
+
+
+def assign_material(target: str = "", material: str = "", base_color: list = None,
+                    hex: str = "", metallic: float = None, roughness: float = None,
+                    material_name: str = "", label: str = "") -> str:
+    """
+    Paint a material onto the LIVE edit-mode FACE SELECTION of `target` — the per-region
+    primitive `set_material` isn't (it colours a whole object/slot). Select the faces
+    first (any `select` op), then assign. The material is either an EXISTING one named
+    by `material=`, or a fresh one minted from `base_color`/`hex` (+ metallic/roughness/
+    material_name). A slot is reused if the material is already on the mesh, else appended
+    — other slots and their faces are left alone.
+
+    Example — a brown rim band on a plate:
+      select(op="by_radius", target="plate", ...)        # grab the rim ring
+      material(op="assign", target="plate", hex="#5a3a22", material_name="rim_brown")
+    """
+    params = {"target": target}
+    if material:                params["material"] = material
+    if material_name:           params["material_name"] = material_name
+    if hex:                     params["hex"] = hex
+    if base_color is not None:  params["base_color"] = base_color
+    if metallic is not None:    params["metallic"] = metallic
+    if roughness is not None:   params["roughness"] = roughness
+    result = call_blender("assign_material", params, label=label)
+    if result.get("success"):
+        slot = ("minted slot %d" % result["slot"]) if result.get("slot_minted") \
+            else ("slot %d" % result.get("slot"))
+        main = (f"assigned '{result['material']}' to {result['faces_assigned']} face(s) "
+                f"of '{result.get('target')}' ({slot}) [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)

@@ -13,6 +13,17 @@ from ._common import tag, unknown
 
 _BRUSHES = ["grab", "draw", "inflate", "smooth", "crease", "pinch", "flatten", "gravity"]
 
+# Organic-deform ops that live on OTHER verbs — agents reach for these as "sculpt
+# brushes" (tutorial language calls noise an "inflate brush"), so when one shows up
+# as a brush=, redirect to where it actually lives instead of a bare "unknown brush".
+_ELSEWHERE = {
+    "noise_displace": "edit op=noise_displace (coherent organic surface break-up)",
+    "noise":          "edit op=noise_displace (coherent organic surface break-up)",
+    "displace":       "edit op=noise_displace, or modifier op=add type=displace",
+    "proportional":   "edit op=proportional_move (soft directional bulge)",
+    "proportional_move": "edit op=proportional_move (soft directional bulge)",
+}
+
 
 @mcp.tool(name="sculpt")
 def sculpt(
@@ -69,6 +80,11 @@ def sculpt(
                 whole mesh.
 
     falloff: SMOOTH|SHARP|… subdivide=True adds resolution under the brush first.
+
+    NOT a sculpt brush: organic surface BREAK-UP (lumpy noise, glaze drips) is
+    `edit op=noise_displace`; a soft directional bulge on a dense/irregular mesh is
+    `edit op=proportional_move` (a uniform normal-push `inflate` lumps it — see
+    guidance). Pass either of those to `brush=` and you'll be pointed back here.
     """
     b = brush.lower().strip()
     note = ""
@@ -124,5 +140,9 @@ def sculpt(
                                    plane_normal_x, plane_normal_y, plane_normal_z,
                                    falloff, subdivide, label)
     else:
+        where = _ELSEWHERE.get(b)
+        if where:
+            return (f"sculpt has no '{b}' brush — that's {where}. "
+                    f"sculpt brushes are: {' | '.join(_BRUSHES)}.")
         return unknown("sculpt", "brush", brush, _BRUSHES)
     return note + result

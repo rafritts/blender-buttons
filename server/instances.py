@@ -100,8 +100,15 @@ def detach() -> str:
 def launch(file="", blender="") -> str:
     exe = blender or os.environ.get("BLENDER_BUTTONS_BLENDER") or shutil.which("blender")
     if not exe:
-        return ("Can't find the Blender executable. Set BLENDER_BUTTONS_BLENDER="
-                "/path/to/blender or put `blender` on PATH, then retry.")
+        already = _core.discover_instances()
+        if already:
+            return ("Can't find the Blender executable to launch a NEW one — but "
+                    f"{len(already)} instance(s) are already live. You probably don't "
+                    "need to launch: `connect op=list` to see them, then "
+                    "`connect op=attach port=<N>`.\n" + _fmt(already, _core.attached_port()))
+        return ("Can't find the Blender executable. If an instance is already running, "
+                "`connect op=list` to find and attach it instead. Otherwise set "
+                "BLENDER_BUTTONS_BLENDER=/path/to/blender or put `blender` on PATH, then retry.")
     before = {i["pid"] for i in _core.discover_instances()}
     args = [exe]
     if file:

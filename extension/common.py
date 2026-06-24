@@ -94,6 +94,28 @@ def measurement_provenance(objs, basis="evaluated"):
     return tag
 
 
+_FLOOR_RISK_MODS = {"SUBSURF", "MULTIRES"}
+
+
+def subdiv_floor_caveat(obj):
+    """Warn when a cavity/support host carries a live subdivision modifier whose
+    EVALUATED interior floor can sit well off the editable cage (G145). A cup or bowl
+    with no bottom loop cut rounds its inner floor UPWARD under Subdivision Surface, so a
+    part reported 'seated on the floor (0 mm)' may rest on a surface that isn't where the
+    modelling intent put it — the measurement is a faithful read of the evaluated mesh,
+    but the evaluated mesh is wrong. Returns a note string, or None when there's no risk."""
+    if obj is None:
+        return None
+    live = sorted({m.type for m in obj.modifiers
+                   if m.show_viewport and m.type in _FLOOR_RISK_MODS})
+    if not live:
+        return None
+    return (f"'{obj.name}' has a live {'/'.join(live)} modifier — its evaluated interior "
+            f"floor can sit off the editable cage; with no bottom loop cut, a seat/rest "
+            f"height here may not match intent. Add a loop cut near the base, or confirm "
+            f"with a side view before trusting a 0 mm seat.")
+
+
 def nearby_objects(world_pos, exclude_names=(), max_count=3):
     """Return up to max_count nearest mesh objects to world_pos, sorted by distance."""
     px, py, pz = world_pos
@@ -444,9 +466,32 @@ def object_bvh(obj):
     return tree
 
 
-def scene_mesh_objects():
-    """All visible MESH objects in the active scene."""
-    return [o for o in bpy.context.scene.objects if o.type == 'MESH']
+def scene_mesh_objects(include_hidden=False):
+    """MESH objects in the active scene — by default only the VISIBLE ones.
+
+    An object hidden in the viewport (eye off / disabled) or turned off for render
+    is a helper or work-in-progress, not part of the spatial scene — so every
+    physical read (resting, contacts, intersections, validate, framing) skips it.
+    G147: a scatter *source* mesh hidden at the world origin was being picked as the
+    support surface under a plate, reporting it "sunk into" an object the human
+    couldn't even see. The docstring used to promise "visible" and the code didn't
+    deliver; now it does. Pass include_hidden=True for the raw, unfiltered list."""
+    objs = [o for o in bpy.context.scene.objects if o.type == 'MESH']
+    if include_hidden:
+        return objs
+
+    def _hidden(o):
+        # hide_viewport/hide_render are plain data flags (never raise); hide_get() reads
+        # the active view layer and CAN raise for an object excluded from it — which is
+        # itself "not visible here", so treat a raise as hidden.
+        if o.hide_viewport or o.hide_render:
+            return True
+        try:
+            return o.hide_get()
+        except RuntimeError:
+            return True
+
+    return [o for o in objs if not _hidden(o)]
 
 
 def resolve_camera(name=None, scene=None):

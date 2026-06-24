@@ -308,8 +308,84 @@ def set_material(params):
     return out
 
 
+def assign_material(params):
+    """Assign a material to the LIVE edit-mode FACE SELECTION — the per-region paint
+    primitive (G146). `set_material` colours a whole object/slot; this writes
+    face.material_index on JUST the selected faces, so a plate gets a brown rim band,
+    a bottle a label patch, a wall a wainscot — without separating geometry.
+
+    Run a `select` op to choose the faces first; this reads that live selection (the
+    dispatch re-enters edit mode and restores the selection from the mesh, exactly
+    like `select op=by_material`).
+
+    material:   assign an EXISTING material datablock by name.
+    OR a colour: base_color / hex (+ optional metallic, roughness, material_name) mints
+                 a fresh material and assigns that. material_name defaults to
+                 '<obj>_face_mat'. A slot for the material is reused if present, else
+                 appended — existing slots and their faces are untouched.
+    """
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.type != 'MESH':
+        return {"error": "active object is not a mesh"}
+    if obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode — run a `select` op first to choose the faces"}
+
+    material = params.get("material")
+    if material:
+        mat = bpy.data.materials.get(material)
+        if mat is None:
+            return {"error": f"material '{material}' not found"}
+    elif (params.get("material_name") or params.get("hex")
+          or any(params.get(k) is not None for k in ("base_color", "metallic", "roughness"))):
+        mat_name = params.get("material_name") or f"{obj.name}_face_mat"
+        mat = bpy.data.materials.get(mat_name) or bpy.data.materials.new(mat_name)
+        bsdf = _ensure_principled(mat)
+        bc = params.get("base_color")
+        hex_str = params.get("hex")
+        if hex_str:
+            try:
+                bc = hex_to_linear_rgba(hex_str)
+            except ValueError as e:
+                return {"error": str(e)}
+        if bc is not None:
+            if len(bc) == 3:
+                bc = list(bc) + [1.0]
+            _set_input(bsdf, "Base Color", tuple(bc))
+        for key, lab in (("metallic", "Metallic"), ("roughness", "Roughness")):
+            v = params.get(key)
+            if v is not None:
+                _set_input(bsdf, lab, float(v))
+    else:
+        return {"error": "give material=<existing name>, or a colour "
+                         "(base_color / hex [+ metallic/roughness/material_name]) to "
+                         "paint the selected faces"}
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    sel = [f for f in bm.faces if f.select]
+    if not sel:
+        return {"error": "no faces selected — choose the region with a `select` op first "
+                         "(a vertex/edge-only selection assigns nothing)"}
+
+    me = obj.data
+    slot_idx = next((i for i, m in enumerate(me.materials) if m is mat), None)
+    minted_slot = slot_idx is None
+    if minted_slot:
+        me.materials.append(mat)
+        slot_idx = len(me.materials) - 1
+
+    for f in sel:
+        f.material_index = slot_idx
+    bmesh.update_edit_mesh(me)
+
+    return {"success": True, "target": obj.name, "material": mat.name,
+            "slot": slot_idx, "slot_minted": minted_slot,
+            "faces_assigned": len(sel), "slot_count": len(me.materials)}
+
+
 TOOLS = {
-    "shade_smooth": shade_smooth,
-    "shade_flat":   shade_flat,
-    "set_material": set_material,
+    "shade_smooth":    shade_smooth,
+    "shade_flat":      shade_flat,
+    "set_material":    set_material,
+    "assign_material": assign_material,
 }

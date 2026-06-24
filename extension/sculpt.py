@@ -117,6 +117,27 @@ def _affected_warning(verts_affected, subdivided, brush_name):
             f"in this region. Pass subdivide=True to add density, or increase radius.")
 
 
+# A stroke that shoves a vert much farther than the brush's own radius is almost
+# always a wrong-magnitude `amount`, not intent (G148 — one inflate ballooned icing
+# 56 cm through the floor). We never block — sculpt is destructive-by-design and undo
+# is one call away — but every displacement brush now ECHOES its achieved max move and
+# flags a catastrophic one so the agent sees it in the status block instead of finding
+# out three ops later.
+_RUNAWAY_RADIUS_MULT = 3.0
+
+
+def _displacement_report(max_disp, radius, brush_name):
+    """Return (max_displacement_value, warning_or_None) for a displacement brush."""
+    md = round(float(max_disp), 4)
+    if radius and max_disp > _RUNAWAY_RADIUS_MULT * radius:
+        warn = (f"{brush_name} moved a vert {md} m — over {int(_RUNAWAY_RADIUS_MULT)}x "
+                f"the brush radius ({round(radius, 4)} m). That's almost certainly an "
+                f"over-large amount; check the resulting bounds and `history undo` if "
+                f"it ballooned.")
+        return md, warn
+    return md, None
+
+
 def _verts_in_radius(bm, obj, center_world, radius):
     """Return [(vert, t)] for verts within world-space `radius` of `center_world`.
     t = distance/radius in [0, 1] — pass straight to _falloff_weight."""
@@ -231,12 +252,13 @@ def sculpt_grab(params):
         v.co += offset_local * _falloff_weight(t, falloff)
     _exit_edit(obj)
     push_undo(f"sculpt_grab {obj.name}")
+    md, runaway = _displacement_report(offset_world.length, radius, "sculpt_grab")
     result = {"success": True, "verts_affected": len(hits),
               "offset_world": [round(c, 4) for c in offset_world],
-              "subdivided_edges": subdivided}
+              "max_displacement": md, "subdivided_edges": subdivided}
     if frame:
         result["frame"] = frame
-    warn = _affected_warning(len(hits), subdivided, "sculpt_grab")
+    warn = runaway or _affected_warning(len(hits), subdivided, "sculpt_grab")
     if warn:
         result["warning"] = warn
     return result
@@ -257,17 +279,22 @@ def sculpt_inflate(params):
     bm.normal_update()
     hits = _verts_in_radius(bm, obj, center, radius)
     moved = 0
+    max_disp = 0.0
     for v, t in hits:
         n = v.normal
         if n.length == 0:
             continue
+        disp = abs(amount * _falloff_weight(t, falloff))
         v.co += n * (amount * _falloff_weight(t, falloff))
         moved += 1
+        if disp > max_disp:
+            max_disp = disp
     _exit_edit(obj)
     push_undo(f"sculpt_inflate {amount}")
+    md, runaway = _displacement_report(max_disp, radius, "sculpt_inflate")
     result = {"success": True, "verts_affected": moved, "amount": amount,
-              "subdivided_edges": subdivided}
-    warn = _affected_warning(moved, subdivided, "sculpt_inflate")
+              "max_displacement": md, "subdivided_edges": subdivided}
+    warn = runaway or _affected_warning(moved, subdivided, "sculpt_inflate")
     if warn:
         result["warning"] = warn
     return result
@@ -309,10 +336,11 @@ def sculpt_draw(params):
         v.co += offset_local * _falloff_weight(t, falloff)
     _exit_edit(obj)
     push_undo(f"sculpt_draw {amount}")
+    md, runaway = _displacement_report(abs(amount), radius, "sculpt_draw")
     result = {"success": True, "verts_affected": len(hits), "amount": amount,
               "avg_normal_world": [round(c, 4) for c in avg_n_world],
-              "subdivided_edges": subdivided}
-    warn = _affected_warning(len(hits), subdivided, "sculpt_draw")
+              "max_displacement": md, "subdivided_edges": subdivided}
+    warn = runaway or _affected_warning(len(hits), subdivided, "sculpt_draw")
     if warn:
         result["warning"] = warn
     return result
@@ -388,9 +416,10 @@ def sculpt_crease(params):
 
     _exit_edit(obj)
     push_undo(f"sculpt_crease {amount}")
+    md, runaway = _displacement_report(abs(amount), radius, "sculpt_crease")
     result = {"success": True, "verts_affected": len(hits), "amount": amount,
-              "subdivided_edges": subdivided}
-    warn = _affected_warning(len(hits), subdivided, "sculpt_crease")
+              "max_displacement": md, "subdivided_edges": subdivided}
+    warn = runaway or _affected_warning(len(hits), subdivided, "sculpt_crease")
     if warn:
         result["warning"] = warn
     return result
@@ -434,9 +463,10 @@ def sculpt_pinch(params):
 
     _exit_edit(obj)
     push_undo(f"sculpt_pinch {amount}")
+    md, runaway = _displacement_report(abs(amount), radius, "sculpt_pinch")
     result = {"success": True, "verts_affected": len(hits), "amount": amount,
-              "subdivided_edges": subdivided}
-    warn = _affected_warning(len(hits), subdivided, "sculpt_pinch")
+              "max_displacement": md, "subdivided_edges": subdivided}
+    warn = runaway or _affected_warning(len(hits), subdivided, "sculpt_pinch")
     if warn:
         result["warning"] = warn
     return result

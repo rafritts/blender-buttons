@@ -10,13 +10,13 @@ from server._core import mcp
 from server import finishes, shaders, textures, scene
 from ._common import tag, unknown
 
-_OPS = ["set", "toon", "textured", "pbr", "outline", "remove_outline", "shade_smooth",
-        "shade_flat", "search_textures", "search_hdris"]
+_OPS = ["set", "assign", "toon", "textured", "pbr", "outline", "remove_outline",
+        "shade_smooth", "shade_flat", "search_textures", "search_hdris"]
 
 
 @mcp.tool(name="material")
 def material(
-    op: Literal["set", "toon", "textured", "pbr", "outline", "remove_outline",
+    op: Literal["set", "assign", "toon", "textured", "pbr", "outline", "remove_outline",
                 "shade_smooth", "shade_flat", "search_textures", "search_hdris"],
     target: tag(str, "object(s) to shade: 'name', group, or 'a,b,c'") = "",
     # PBR (set)
@@ -30,7 +30,7 @@ def material(
     emission_color: tag(list, "[set] emission [r,g,b]") = None,
     emission_strength: tag(float, "[set] emission strength") = None,
     material_name: tag(str, "[set/toon/textured] name for the material") = "",
-    material: tag(str, "[set] reuse an existing material by name") = "",
+    material: tag(str, "[set/assign] reuse an existing material by name") = "",
     slot: tag(int, "[set/textured] material slot index") = None,
     # toon
     shadow_color: tag(list, "[toon] shadow band [r,g,b]") = None,
@@ -68,8 +68,12 @@ def material(
     """
     Materials & shading — **Material Properties**. `op` selects:
 
-      set       — PBR material   (target, base_color|hex, metallic, roughness, ior,
-                  alpha, transmission, emission_color/strength, material_name|material, slot)
+      set       — PBR material on a whole object/slot (target, base_color|hex, metallic,
+                  roughness, ior, alpha, transmission, emission_color/strength,
+                  material_name|material, slot)
+      assign    — paint a material onto the LIVE edit-mode FACE SELECTION only — rim
+                  bands, label patches, wainscot (select faces first, then: target,
+                  material=<existing> | base_color|hex [+metallic/roughness/material_name])
       toon      — flat cel material (target, base_color|hex, shadow_color, bands,
                   shadow_softness, rim_color/width, gradient_top/bottom)
       textured  — Poly Haven PBR texture set (target, asset_id, scale, resolution,
@@ -92,6 +96,9 @@ def material(
         return finishes.set_material(target, base_color, hex, metallic, roughness,
                                      ior, alpha, transmission, emission_color,
                                      emission_strength, material_name, material, slot, label)
+    if o == "assign":
+        return finishes.assign_material(target, material, base_color, hex, metallic,
+                                        roughness, material_name, label)
     if o == "toon":
         return shaders.set_toon_material(target, base_color, hex, shadow_color, bands,
                                          shadow_softness, rim_color, rim_width,
