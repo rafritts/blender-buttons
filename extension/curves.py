@@ -165,6 +165,38 @@ def _resolve_curve_point(entry, idx):
                         "'near') or an 'anchor' to derive it from")
 
 
+def _min_bend_radius(pts):
+    """Tightest centreline bend radius (m) over a polyline, via Menger curvature — the same
+    measure feel op=curve reports. None if effectively straight. Used to preflight a sweep
+    for self-intersection (G121): a bend radius below the tube/profile radius folds the wall
+    through itself."""
+    import math  # noqa: F401
+    from mathutils import Vector
+    max_k = 0.0
+    for i in range(1, len(pts) - 1):
+        a, b, c = Vector(pts[i - 1]), Vector(pts[i]), Vector(pts[i + 1])
+        ab, bc, ca = (b - a).length, (c - b).length, (a - c).length
+        cross = (b - a).cross(c - b)
+        denom = ab * bc * ca
+        if denom > 1e-12 and cross.length > 1e-12:
+            k = 4.0 * (cross.length / 2.0) / denom
+            if k > max_k:
+                max_k = k
+    return (1.0 / max_k) if max_k > 1e-9 else None
+
+
+def _bend_warning(min_radius, profile_radius, what="tube"):
+    """G121 — a one-line warning when the tightest bend is smaller than the swept profile, so
+    the wall self-intersects there (interior, invisible in render, but a permanent
+    self_intersection finding). None when the sweep is feasible."""
+    if min_radius is None or profile_radius <= 0 or min_radius >= profile_radius:
+        return None
+    return (f"{what} self-intersects at the tightest bend: min bend radius "
+            f"{min_radius * 100:.2f}cm < profile radius {profile_radius * 100:.2f}cm — the "
+            f"wall folds through itself there. Widen the bend (move the point / raise "
+            f"resolution) or keep the radius below {min_radius * 100:.2f}cm.")
+
+
 def spline_tube(params):
     """Create a tube mesh swept along an interpolating spline through 2–32 points.
 
@@ -280,7 +312,7 @@ def spline_tube(params):
 
     bpy.context.view_layer.update()
     xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
-    return {
+    result = {
         "success": True,
         "object_name": obj.name,
         "points": rounded_pts,
@@ -293,6 +325,14 @@ def spline_tube(params):
             "z": [round(zmin, 4), round(zmax, 4)],
         },
     }
+    # G121: preflight the bend-vs-radius feasibility at creation (instead of only via a
+    # separate feel op=curve) — warn when the tube self-intersects at a tight turn.
+    mbr = _min_bend_radius(samples)
+    result["min_bend_radius"] = round(mbr, 4) if mbr else None
+    warn = _bend_warning(mbr, max(radii), "tube")
+    if warn:
+        result.setdefault("notes", []).append(warn)
+    return result
 
 
 def add_curve(params):

@@ -338,6 +338,52 @@ def _configure_array(mod, params):
 _PARTNER_TYPES = {"SHRINKWRAP", "MESH_DEFORM", "ARMATURE", "LATTICE"}
 
 
+def _subsurf_dome_warning(obj):
+    """G120 — SUBSURF on a capped primitive with no holding edge loop near the cap pulls the
+    flat (n-gon/disk) cap into a downward dome — the classic 'mug base sits on a point' trap.
+    Warn when an axis-aligned flat n-gon cap has NO supporting loop within ~15% of the
+    object's extent on that axis. Gated on n-gon caps (≥5-vert) so a plain box — which just
+    rounds, as intended — doesn't false-warn. Returns a note or None."""
+    import bmesh
+    if obj is None or obj.type != 'MESH' or obj.data is None:
+        return None
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.normal_update()
+    try:
+        if not bm.faces:
+            return None
+        ends = []
+        for axis_i, axis_name in ((0, 'X'), (1, 'Y'), (2, 'Z')):
+            coords = [v.co[axis_i] for v in bm.verts]
+            lo, hi = min(coords), max(coords)
+            ext = hi - lo
+            if ext < 1e-6:
+                continue
+            band = 0.15 * ext
+            for end_pos, sgn, end_name in ((hi, 1.0, '+' + axis_name), (lo, -1.0, '-' + axis_name)):
+                cap = None
+                for f in bm.faces:
+                    if len(f.verts) >= 5 and f.normal[axis_i] * sgn > 0.85:
+                        c = f.calc_center_median()
+                        if abs(c[axis_i] - end_pos) < 0.02 * ext:
+                            cap = f
+                            break
+                if cap is None:
+                    continue
+                supported = any(0.0 < (end_pos - v.co[axis_i]) * sgn < band for v in bm.verts)
+                if not supported:
+                    ends.append(end_name)
+        if not ends:
+            return None
+        return (f"SUBSURF will DOME the flat cap(s) at {', '.join(ends)} — a capped primitive "
+                f"with no holding edge loop near the cap rounds the flat end into a dome (the "
+                f"'sits on a point' trap). Add a holding loop just inside the cap "
+                f"(edit op=loop_cut near the rim) before subsurf, or expect the rounding.")
+    finally:
+        bm.free()
+
+
 def add_modifier(params):
     mod_type = params.get("type", "SUBSURF").upper()
     name     = params.get("name", mod_type.capitalize())
@@ -514,6 +560,10 @@ def add_modifier(params):
                 f"CORRECTIVE_SMOOTH added (rest_source=ORCO — smooths toward the base mesh).")
         return {"success": True, "modifier": mod.name, "note": note}
     out = {"success": True, "modifier": mod.name, "status_focus": obj.name}
+    if mod_type == "SUBSURF":
+        dome = _subsurf_dome_warning(obj)
+        if dome:
+            out.setdefault("notes", []).append(dome)
     if mod_type == "SOLIDIFY":
         # Let thickness/offset be set at add time (so `add type=SOLIDIFY thickness=` works
         # in one call), and report the effective WORLD wall thickness + warn on unapplied
