@@ -117,6 +117,30 @@ def clad_surface(target: str = "", region: str = "whole", clearance: float = 0.0
     return main + _status(result)
 
 
+def hollow(target: str = "", thickness: float = 0.004, open: str = "top",
+           label: str = "") -> str:
+    """Hollow a solid into an OPEN VESSEL in one call (G106/G127) — the reliable recipe
+    (delete the end cap → SOLIDIFY inward → a manifold cup), not inset→extrude (which seals
+    the wrong end) or a manual cutter cylinder. Applies the solidify so the cup is concrete,
+    and reports the MEASURED world wall thickness (catching an unapplied-scale 2× wall).
+
+    target:    mesh to hollow (empty = active). thickness: wall in m (default 4mm, inward).
+    open:      'top' (+Z cap, default) | 'bottom' (−Z) | 'none' (closed hollow shell).
+    Declare the new mouth intended with validate op=expect check=open_boundary if you want
+    it off the floor's quiet count."""
+    result = call_blender("hollow", {"target": target, "thickness": thickness,
+                                     "open": open}, label=label)
+    if result.get("success"):
+        wt = (f" (world wall ~{result['world_thickness']}m — unapplied scale!)"
+              if result.get("world_thickness") else "")
+        main = (f"hollowed '{result['object']}' — wall {round(result['thickness']*1000,1)}mm, "
+                f"open={result['open']}, {result['cap_faces_removed']} cap face(s) removed{wt} "
+                f"[{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 @mcp.tool()
 def duplicate_mirrored(target: str, axis: str = "X", pivot: str = "WORLD",
                        new_name: str = "", label: str = "") -> str:

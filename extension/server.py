@@ -167,7 +167,7 @@ NOOP_CHECK_TOOLS = {
     # signature is byte-identical by design; checking it cried "no-op" on every successful
     # shade-smooth. Shading-only ops have no geometry no-op to detect.
     "boolean", "apply_modifiers", "noise_displace", "bend",
-    "round_corners", "remesh", "join_objects", "bake_shape_keys_to_basis",
+    "round_corners", "remesh", "join_objects", "bake_shape_keys_to_basis", "hollow",
     # sculpt strokes
     "sculpt_grab", "sculpt_inflate", "sculpt_draw", "sculpt_smooth",
     "sculpt_crease", "sculpt_pinch", "sculpt_flatten", "sculpt_gravity",

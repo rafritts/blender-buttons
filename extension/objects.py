@@ -1205,9 +1205,90 @@ def clad_surface(params):
             "thickness": round(thickness, 5), "verts": lifted, "dimensions": dims}
 
 
+def hollow(params):
+    """G106/G127 — hollow a solid into an OPEN VESSEL in one call: the reliable recipe the
+    dogfood reverse-engineered every time (delete the end cap → SOLIDIFY inward → a
+    manifold cup), instead of inset→extrude (which seals the wrong end, G118) or a manual
+    cutter-cylinder. Applies the solidify so the result is concrete + inspectable, and
+    REPORTS the measured world wall thickness (so an unapplied scale can't hide a 2× wall).
+
+    target:    the mesh to hollow (empty = active).
+    thickness: wall thickness in m (default 0.004 = 4mm). Grown INWARD (offset=-1) so the
+               outer silhouette is unchanged.
+    open:      which end to open — 'top' (default, +Z cap) | 'bottom' (−Z) | 'none' (a
+               closed hollow shell, no opening).
+    """
+    import bmesh
+    from .common import scale_unit_note, linked_guard
+    name = params.get("target") or params.get("name")
+    obj = bpy.data.objects.get(name) if name else bpy.context.active_object
+    if obj is None or obj.type != 'MESH':
+        return {"error": f"hollow needs a mesh target (got {name!r})"}
+    err = linked_guard(obj)
+    if err:
+        return {"error": err}
+    thickness = float(params.get("thickness", 0.004))
+    if thickness <= 0:
+        return {"error": "thickness must be > 0 (the wall thickness in m)"}
+    open_end = (params.get("open") or "top").lower()
+    if open_end not in ("top", "bottom", "none"):
+        return {"error": "open must be 'top', 'bottom', or 'none'"}
+
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    deleted = 0
+    if open_end != "none":
+        me = obj.data
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        bm.faces.ensure_lookup_table()
+        bm.normal_update()
+        zs = [v.co.z for v in bm.verts]
+        zmin, zmax = min(zs), max(zs)
+        span = (zmax - zmin) or 1.0
+        ndir = 1.0 if open_end == "top" else -1.0
+        edge_z = zmax if open_end == "top" else zmin
+        caps = []
+        for f in bm.faces:
+            c = f.calc_center_median()
+            if f.normal.z * ndir > 0.7 and abs(c.z - edge_z) < 0.03 * span:
+                caps.append(f)
+        if not caps:
+            bm.free()
+            return {"error": f"no {open_end} cap face found to open — is the mesh capped "
+                             f"on that end, and is +Z its up axis?"}
+        bmesh.ops.delete(bm, geom=caps, context='FACES')
+        deleted = len(caps)
+        bm.to_mesh(me)
+        bm.free()
+
+    mod = obj.modifiers.new(name="Hollow", type='SOLIDIFY')
+    mod.thickness = thickness
+    mod.offset = -1.0   # grow inward; outer silhouette unchanged
+    activate(obj)
+    try:
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+        applied = True
+    except RuntimeError as e:
+        applied = False
+        obj.modifiers.remove(mod)
+        return {"error": f"hollow: SOLIDIFY apply failed ({e}); no change committed."}
+
+    out = {"success": True, "object": obj.name, "thickness": round(thickness, 5),
+           "open": open_end, "cap_faces_removed": deleted, "applied": applied,
+           "status_focus": obj.name}
+    eff, note = scale_unit_note(obj, thickness, what="wall thickness")
+    if note:
+        out["world_thickness"] = eff
+        out.setdefault("notes", []).append(note)
+    return out
+
+
 TOOLS = {
     "remesh":                 remesh,
     "clad_surface":           clad_surface,
+    "hollow":                 hollow,
     "rename_object":          rename_object,
     "select_object":          select_object,
     "delete_object":          delete_object,

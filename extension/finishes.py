@@ -1078,6 +1078,40 @@ def convert_to_mesh(params):
             "vertices": len(me.vertices), "faces": len(me.polygons)}
 
 
+def _has_open_boundary_obj(obj):
+    """True if obj's base mesh has any open boundary edge (1 linked face) — i.e. it isn't
+    watertight, which makes it a fragile boolean operand (G127)."""
+    import bmesh
+    if obj is None or obj.type != 'MESH' or obj.data is None:
+        return False
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    val = any(len(e.link_faces) == 1 for e in bm.edges)
+    bm.free()
+    return val
+
+
+def _weld_clean(obj):
+    """Merge coincident verts + dissolve degenerate edges/faces on obj's base mesh — the
+    sliver junk a boolean UNION leaves at a tangential join (G109). Returns verts removed."""
+    import bmesh
+    if obj is None or obj.type != 'MESH' or obj.data is None:
+        return 0
+    me = obj.data
+    before = len(me.vertices)
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=1e-5)
+    try:
+        bmesh.ops.dissolve_degenerate(bm, dist=1e-6, edges=bm.edges[:])
+    except Exception:
+        pass
+    bm.to_mesh(me)
+    bm.free()
+    me.update()
+    return max(0, before - len(me.vertices))
+
+
 def boolean(params):
     """Cut, fuse, or intersect two meshes via a Boolean modifier.
 
@@ -1119,6 +1153,14 @@ def boolean(params):
     if solver not in ("EXACT", "FAST"):
         return {"error": "solver must be EXACT or FAST"}
 
+    # G127: a non-watertight operand (open boundary edges) makes the EXACT solver leave
+    # internal membranes / dangling faces — the 14-edge non-manifold mess a tube-into-wall
+    # union produced. Flag it up front so the result isn't silently fused into a defect.
+    open_notes = []
+    for label_, ob in (("target", target), ("cutter", cutter)):
+        if _has_open_boundary_obj(ob):
+            open_notes.append(label_)
+
     mod_name = f"bool_{op.lower()}_{cutter_name}"
     mod = target.modifiers.new(name=mod_name, type='BOOLEAN')
     mod.operation = op
@@ -1152,6 +1194,13 @@ def boolean(params):
             except RuntimeError as e:
                 apply_error = str(e)
 
+    # G109/G127: a UNION across a thin-wall/tangential join shatters into sliver/degenerate
+    # boundary loops + coincident verts. Weld them once the result is baked — merge doubles
+    # and dissolve degenerate edges/faces — so the output isn't left a non-manifold mess.
+    welded = 0
+    if applied and bool(params.get("clean", True)):
+        welded = _weld_clean(target)
+
     if hide_cutter:
         try:
             cutter.hide_set(True)
@@ -1169,6 +1218,15 @@ def boolean(params):
         "modifier": None if applied else mod.name,
         "cutter_hidden": hide_cutter,
     }
+    if welded:
+        result["welded_verts"] = welded
+    if open_notes:
+        result.setdefault("notes", []).append(
+            f"boolean operand(s) {', '.join(open_notes)} are NOT watertight (open boundary "
+            f"edges) — EXACT can leave internal membranes / non-manifold edges here. Cap the "
+            f"operand(s) (object op=hollow open=none, or fill the rim) before the boolean, or "
+            f"check the result with feel op=topology. (The topology-delta floor will flag new "
+            f"non-manifold edges this op leaves.)")
     if apply_error is not None:
         result["apply_error"] = apply_error
         result["hint"] = (
