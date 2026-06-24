@@ -156,7 +156,29 @@ def check_framing(targets: str = "", camera: str = "", aspect: str = "") -> str:
             bits.append("clipped " + ", ".join(f"{k} {v}%" for k, v in f["clipped"].items()))
         if f["occluded_pct"] > 1:
             bits.append(f"{f['occluded_pct']}% occluded")
+        if f.get("visible_surface_pct") is not None:
+            bits.append(f"{f['visible_surface_pct']}% of front surface visible")
         lines.append(f"  {f['object']}: " + ", ".join(bits))
+    return "\n".join(lines) + _status(result)
+
+
+def check_visible(targets: str = "", camera: str = "", min_pct: float = 2.0) -> str:
+    """G131 — would a viewer SEE this object's surface from the camera? yes/no per target,
+    plus the % of its FRONT-FACING surface that's unoccluded. Use this for a recessed part
+    (liquid in a vessel, a gem in a setting) whose whole-bbox occlusion reads ~100% even
+    though its visible face is the whole point. targets: object/group list. camera: empty =
+    scene cam. min_pct: visible-surface threshold for the yes/no (default 2%)."""
+    params = {"targets": _targets(targets), "min_pct": min_pct}
+    if camera:
+        params["camera"] = camera
+    result = call_blender("check_visible", params)
+    if not result.get("success"):
+        return result.get("error", "failed")
+    lines = [f"camera '{result['camera']}':"]
+    for v in result["visibility"]:
+        verdict = "VISIBLE" if v["visible"] else "hidden"
+        lines.append(f"  {v['object']}: {verdict} ({v['visible_surface_pct']}% of front "
+                     f"surface unoccluded)")
     return "\n".join(lines) + _status(result)
 
 

@@ -11,13 +11,14 @@ from server import viewport, introspect, scene
 from ._common import tag, unknown
 
 _OPS = ["shading", "angle", "overlays", "orbit", "rig", "zoom", "frame", "check_framing",
-        "check_focus", "camera_dof", "camera_lens", "active_camera"]
+        "check_focus", "check_visible", "camera_dof", "camera_lens", "active_camera"]
 
 
 @mcp.tool(name="view")
 def view(
     op: Literal["shading", "angle", "overlays", "orbit", "rig", "zoom", "frame",
-                "check_framing", "check_focus", "camera_dof", "camera_lens", "active_camera"],
+                "check_framing", "check_focus", "check_visible", "camera_dof", "camera_lens",
+                "active_camera"],
     # shading / angle
     mode: tag(str, "[shading] WIREFRAME|SOLID|MATERIAL|RENDERED") = "MATERIAL",
     angle: tag(str, "[angle] FRONT|BACK|TOP|… or persp/ortho") = "",
@@ -75,6 +76,10 @@ def view(
                   whether each target's full depth is inside the in-focus slab — the
                   sharpness check you can't get from a render you're told not to read.
                   resolve_for=<obj> also solves the widest aperture that keeps it sharp.
+      check_visible — would a viewer SEE this surface from the camera? (G131) yes/no +
+                  % of FRONT-FACING surface unoccluded. For a recessed part (liquid in a
+                  vessel, a gem in a setting) whose whole-bbox occlusion reads ~100% even
+                  though its visible face is the point. (targets, camera)
       camera_dof — depth of field on the camera (focus_distance OR focus_object,
                   aperture f-stop, camera)
       camera_lens — retune the focal length of an existing camera (lens mm, camera) —
@@ -103,6 +108,8 @@ def view(
     if o == "check_focus":
         return introspect.check_focus(targets, camera, aperture, focus_distance,
                                       focus_object, resolve_for)
+    if o == "check_visible":
+        return introspect.check_visible(targets, camera)
     if o == "camera_dof":
         return scene.set_camera_dof(focus_distance, aperture, focus_object, camera)
     if o == "camera_lens":

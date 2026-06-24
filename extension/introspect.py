@@ -479,6 +479,69 @@ def _occlusion_fraction(scene, depsgraph, cam, obj, cap=120):
     return occ / total if total else 0.0
 
 
+def _visible_surface(scene, depsgraph, cam, obj, cap=160):
+    """G131 — visibility of the surface a viewer would actually SEE, not the whole bbox.
+    Samples only FRONT-FACING verts (normal pointing toward the camera) and counts how many
+    are unoccluded. A submerged coffee surface is mostly back-faces + sides buried in opaque
+    ceramic — counting those as 'occluded' made it read 100% hidden even with its top plainly
+    visible through the mouth. Returns (front_facing_count, visible_count)."""
+    bm = eval_world_bmesh(obj)
+    if bm is None or not bm.verts:
+        if bm:
+            bm.free()
+        return 0, 0
+    bm.normal_update()
+    origin = cam.matrix_world.translation
+    n = len(bm.verts)
+    step = max(1, n // cap)
+    front = vis = 0
+    for i in range(0, n, step):
+        v = bm.verts[i]
+        w = v.co
+        to_cam = origin - w
+        dist = to_cam.length
+        if dist < 1e-6:
+            continue
+        # front-facing: the vertex normal points toward the camera
+        if v.normal.dot(to_cam) <= 0:
+            continue
+        front += 1
+        hit, loc, nrm, idx, hitobj, mat = scene.ray_cast(
+            depsgraph, origin, (-to_cam).normalized(), distance=dist - 1e-4)
+        if not (hit and hitobj is not None and hitobj.name != obj.name):
+            vis += 1
+    bm.free()
+    return front, vis
+
+
+def check_visible(params):
+    """G131 — answer 'would a viewer SEE this object's surface from the camera?' yes/no, plus
+    the fraction of its FRONT-FACING surface that's unoccluded. The read for a recessed part
+    (liquid in a vessel, a gem in a setting) whose whole-bbox occlusion says 'hidden' but
+    whose visible face is the point. target= object(s); camera= optional."""
+    scene = bpy.context.scene
+    from .common import resolve_camera
+    cam, err = resolve_camera(params.get("camera"), scene)
+    if err:
+        return {"error": err}
+    report_objs, err = _report_targets(params)
+    if err:
+        return {"error": err}
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    thresh = float(params.get("min_pct", 2.0)) / 100.0
+    results = []
+    for o in report_objs:
+        front, vis = _visible_surface(scene, depsgraph, cam, o)
+        frac = (vis / front) if front else 0.0
+        results.append({
+            "object": o.name,
+            "visible": front > 0 and frac > thresh,
+            "visible_surface_pct": round(frac * 100, 1),
+            "front_facing_sampled": front,
+        })
+    return {"success": True, "camera": cam.name, "visibility": results}
+
+
 def _parse_aspect(spec):
     """Parse a target-frame spec 'WxH' (pixels) or 'W:H' (ratio) → (res_x, res_y) or
     None. A ratio keeps a 1000-px long edge so the numbers stay readable."""
@@ -561,12 +624,18 @@ def check_framing(params):
             if vmin < 0: clip["bottom"] = round(-vmin * 100, 1)
             if vmax > 1: clip["top"] = round((vmax - 1) * 100, 1)
             occ = _occlusion_fraction(scene, depsgraph, cam, o)
+            front, vis = _visible_surface(scene, depsgraph, cam, o)
+            vis_pct = round((vis / front) * 100, 1) if front else 0.0
             results.append({
                 "object": o.name,
                 "frame_pct": [round(cov["frac_w"] * 100, 1), round(cov["frac_h"] * 100, 1)],
                 "behind_camera": not cov["in_front"],
                 "clipped": clip,
                 "occluded_pct": round(occ * 100, 1),
+                # G131: the meaningful 'can a viewer see it' number — front-facing surface
+                # visible — distinct from the whole-bbox occluded_pct (which a recessed part
+                # like liquid-in-a-vessel pegs at ~100% even when its top is plainly visible).
+                "visible_surface_pct": vis_pct,
             })
     finally:
         if saved is not None:
@@ -887,6 +956,7 @@ TOOLS = {
     "check_resting":  check_resting,
     "check_framing":  check_framing,
     "check_focus":    check_focus,
+    "check_visible":  check_visible,
     "trace_profile":  trace_profile,
     "diff_since":     diff_since,
 }
