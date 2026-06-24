@@ -507,21 +507,33 @@ def selection_anchor(target: str = "", as_handle: str = "") -> str:
 
 
 def radial_landmark(anchor: str = "", angle: float = 0.0, radius: float = 0.0,
-                    axis: str = "Z", snap: bool = True, as_handle: str = "") -> str:
-    """G81 — mint a landmark by ANGLE on a round face. Clock-position a point on a ring
-    of `radius` around `anchor`'s centre, plane ⟂ `axis`. `angle` = degrees CLOCKWISE
-    from 12 o'clock (0=top, 90=3 o'clock, 180=6, 270=9), so a sub-dial register or an
-    off-cardinal hour stays in intent-space instead of hand-trig. anchor = a round object
-    (bbox centre) or a handle (its point + plane). Pair with as_handle to make the point
-    addressable by name (G78). Example: feel op=radial anchor=Dial angle=60 radius=0.11
-    as_handle=hour2 → the 2-o'clock surface point, minted."""
+                    axis: str = "Z", snap: bool = True, as_handle: str = "",
+                    crossing: str = "") -> str:
+    """G81 — mint a landmark by ANGLE on a round face. Clock-position a point around
+    `anchor`'s centre, plane ⟂ `axis`. `angle` = degrees CLOCKWISE from 12 o'clock
+    (0=top, 90=3 o'clock, 180=6, 270=9), so an off-cardinal hour stays in intent-space.
+
+    Two modes (G102/G128):
+      • crossing=outer|inner — CAST from the centre outward at the angle and land on the
+        named wall. A ring/torus/holed shell has TWO surfaces along a radial line; 'outer'
+        (default when no radius) is the rim, 'inner' is the hole wall. This is the one to
+        use on a ring — leave radius=0 and it resolves the real radius for you (no more
+        collapsing to the empty bbox centre or silently grabbing the inner wall).
+      • radius=<m> — place at a fixed known distance (back-compat), optionally snapped.
+    anchor = a round object (bbox centre) or a handle. Pair with as_handle to name the point.
+    Example: feel op=radial anchor=Icing angle=60 crossing=outer as_handle=drip2."""
     result = call_blender("radial_landmark", {"anchor": anchor, "angle": angle,
-        "radius": radius, "axis": axis, "snap": snap, "as_handle": as_handle})
+        "radius": radius, "axis": axis, "snap": snap, "as_handle": as_handle,
+        "crossing": crossing})
     if not result.get("success"):
         return result.get("error", "failed")
     p = result["point"]; n = result["normal"]
+    cx = result.get("crossing", "")
+    extra = ""
+    if result.get("crossings_found"):
+        extra = f", {cx} of {result['crossings_found']} crossing(s)"
     return (f"radial landmark @ {result.get('region', '?')} "
-            f"(angle {result['angle']}° r={result['radius']}m on {result['axis']}): "
+            f"(angle {result['angle']}° r={result['radius']}m on {result['axis']}{extra}): "
             f"point=[{p[0]}, {p[1]}, {p[2]}]  normal=[{n[0]}, {n[1]}, {n[2]}]"
             + _minted_line(result, "feel op=radial … as_handle=NAME"))
 

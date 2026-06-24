@@ -98,6 +98,10 @@ def feel(
     snap: tag(bool, "[place/radial] ray-snap the offset point onto the surface (default True)") = True,
     anchor: tag(str, "[radial] round object (bbox centre = ring centre) or handle (its point+plane)") = "",
     angle: tag(float, "[radial] clock angle in degrees CLOCKWISE from 12 o'clock (0=top, 90=3 o'clock)") = 0.0,
+    crossing: tag(str, "[radial] which wall to land on for a ring/holed anchor: 'outer' (the rim — "
+                       "default when radius=0) or 'inner' (the hole wall). Casts from the centre "
+                       "outward and resolves the real radius, so radius=0 no longer collapses to "
+                       "the empty bbox centre (G102/G128). Omit + give radius= to place at a fixed distance.") = "",
     as_handle: tag(str, "[aim/place/anchor/radial/map] mint a named POINT handle at the read's hit "
                         "so the measured point is addressable by name (transform op=move_to "
                         "handle=, aim_axis, sculpt handle=) — no coordinate ever typed (G78)") = "",
@@ -314,7 +318,8 @@ def feel(
         return queries.place_on_surface(target, handle,
                                         up, down, front, back, left, right, snap, as_handle)
     if o == "radial":
-        return queries.radial_landmark(anchor or target, angle, radius, axis, snap, as_handle)
+        return queries.radial_landmark(anchor or target, angle, radius, axis, snap, as_handle,
+                                       crossing)
     if o == "handle":
         return handles.mint_handle(name, source, vertex_parent)
     if o == "handles":

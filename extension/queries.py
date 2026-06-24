@@ -606,19 +606,76 @@ def radial_landmark(params):
                  "Y": (Vector((0, 0, 1)), Vector((1, 0, 0))),
                  "X": (Vector((0, 0, 1)), Vector((0, 1, 0)))}[axis]
     th = math.radians(angle)
-    p = center + radius * (math.sin(th) * right + math.cos(th) * up)
+    direction = (math.sin(th) * right + math.cos(th) * up).normalized()
 
+    # G102/G128: which surface to land on. A ring/annulus/torus presents TWO walls along
+    # any radial cast (inner hole-wall + outer edge), and on a holed anchor the bbox centre
+    # is empty space — so a fixed `radius` (esp. radius=0) silently grabs the wrong one or
+    # collapses to the centre. CAST from the centre outward at the clock angle and let the
+    # caller NAME the crossing: outer (the rim — the default, where glaze drips over),
+    # inner (the hole wall), or supply an explicit radius to place at a known distance.
+    crossing = (params.get("crossing") or "").strip().lower()
     normal = None
-    if params.get("snap", True) and obj is not None and obj.type == 'MESH':
-        snap_w, nrm_w = _snap_to_surface(obj, p)
-        if snap_w is not None:
-            p, normal = snap_w, nrm_w
+    crossings_n = None
+    if radius > 0 and not crossing:
+        # explicit-radius mode (back-compat): place at the named distance, optional snap.
+        p = center + radius * direction
+        if params.get("snap", True) and obj is not None and obj.type == 'MESH':
+            snap_w, nrm_w = _snap_to_surface(obj, p)
+            if snap_w is not None:
+                p, normal = snap_w, nrm_w
+    else:
+        if obj is None or obj.type != 'MESH':
+            return {"error": "radial crossing-cast needs a mesh anchor (got a handle/empty); "
+                             "pass radius= to place at a fixed distance instead"}
+        bb = world_bbox(obj)
+        reach = math.hypot(bb[3] - bb[0], math.hypot(bb[4] - bb[1], bb[5] - bb[2])) + 1e-3
+        hits = _ray_crossings(obj, center, direction, reach)
+        if not hits:
+            return {"error": f"no surface at {angle}° from the centre — the anchor may not be "
+                             f"round/holed in this plane (check axis=), or the centre is outside it"}
+        crossings_n = len(hits)
+        pick = hits[0] if crossing == "inner" else hits[-1]   # default/'outer' = furthest
+        p, normal = pick[0], pick[1]
+        radius = round((Vector(p) - center).length, 5)         # report the resolved radius
+
     res = {"success": True, "point": [round(c, 5) for c in p],
            "normal": [round(c, 4) for c in (normal or Vector((0.0, 0.0, 1.0)))],
-           "angle": angle, "radius": radius, "axis": axis}
+           "angle": angle, "radius": radius, "axis": axis,
+           "crossing": (crossing or ("outer" if crossings_n is not None else "radius"))}
+    if crossings_n is not None:
+        res["crossings_found"] = crossings_n
     if obj is not None:
         res["region"] = region_words(world_bbox(obj), p)
     return handles.mint_point_from_result(params, res)
+
+
+def _ray_crossings(obj, origin, direction, max_dist):
+    """All surface crossings of obj from `origin` along `direction` (world space), as
+    (point, normal, dist) sorted near→far. Re-casts just past each hit so BOTH walls of a
+    ring (inner hole-wall, then outer edge) are returned — the caller picks which."""
+    from mathutils import Vector
+    from .common import object_bvh
+    bvh = object_bvh(obj)
+    if bvh is None:
+        return []
+    o = Vector(origin)
+    d = Vector(direction).normalized()
+    eps = 1e-5
+    out = []
+    travelled = 0.0
+    cur = o.copy()
+    for _ in range(64):
+        loc, nrm, idx, dist = bvh.ray_cast(cur, d, max_dist - travelled)
+        if loc is None:
+            break
+        out.append((loc, (nrm or Vector((0, 0, 1))).normalized(), travelled + dist))
+        step = dist + eps
+        cur = cur + d * step
+        travelled += step
+        if travelled >= max_dist:
+            break
+    return out
 
 
 def _snap_to_surface(obj, point_world):
