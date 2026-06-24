@@ -197,13 +197,25 @@ def scale_group(params):
         o.location = tuple(pivot[i] + factor * (o.location[i] - pivot[i]) for i in range(3))
         o.scale = tuple(s * factor for s in o.scale)
     bpy.context.view_layer.update()
+    # G103: bake scale into mesh data ONLY for single-user meshes. transform_apply ABORTS on
+    # a multi-user (instanced/scattered) mesh — and the old code did this mid-loop AFTER it
+    # had already mutated every object's transform, leaving the group half-applied and
+    # tripping the dirty-world lock on the server's own aborted op. A multi-user mesh doesn't
+    # need the bake: object-level scale renders correctly. So skip it (no abort, atomic) and
+    # report which were kept as object-level scale.
+    baked, kept_scaled = [], []
     for o in objs:
-        if o.type == 'MESH':
-            activate(o)
-            bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        if o.type != 'MESH':
+            continue
+        if o.data is not None and o.data.users > 1:
+            kept_scaled.append(o.name)
+            continue
+        activate(o)
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        baked.append(o.name)
 
     boxes = [world_bbox(o) for o in objs]
-    return {
+    out = {
         "success": True,
         "scaled": [o.name for o in objs],
         "factor": factor,
@@ -214,6 +226,14 @@ def scale_group(params):
             "z": [round(min(b[2] for b in boxes), 4), round(max(b[5] for b in boxes), 4)],
         },
     }
+    if kept_scaled:
+        out["kept_object_scale"] = kept_scaled
+        out.setdefault("notes", []).append(
+            f"{len(kept_scaled)} instanced (shared-mesh) member(s) kept OBJECT-level scale — "
+            f"the mesh-data bake is skipped on multi-user meshes (it would abort); object "
+            f"scale renders correctly. apply_transform can't bake these without making them "
+            f"single-user first.")
+    return out
 
 
 def apply_transform(params):

@@ -234,6 +234,23 @@ def set_material(params):
     if es is not None and _set_input(bsdf, "Emission Strength", float(es)):
         applied.append(f"emission_strength={es}")
 
+    # G113: a scattered instance shares ONE mesh datablock, so writing a material slot on it
+    # writes the SHARED mesh — and every other instance silently gets the same colour (last
+    # colour wins). Make an object single-user FIRST when its mesh is shared with an object
+    # OUTSIDE this assignment set, so a per-subset colour sticks (same principle as the G114
+    # join fix). Assigning to ALL users (e.g. target=whole group) writes the shared mesh
+    # once — no needless copies.
+    mesh_set = set(meshes)
+    made_single_user = []
+    for obj in meshes:
+        me = obj.data
+        if me is not None and me.users > 1:
+            shared_outside = any(u.data is me and u not in mesh_set
+                                 for u in bpy.data.objects)
+            if shared_outside:
+                obj.data = me.copy()
+                made_single_user.append(obj.name)
+
     slot_idx = int(slot) if slot is not None else 0
     for obj in meshes:
         mats = obj.data.materials
@@ -245,7 +262,7 @@ def set_material(params):
             return {"error": f"'{obj.name}' has {len(mats)} slot(s); slot {slot_idx} is "
                              f"out of range (can only append at index {len(mats)})"}
 
-    return {
+    out = {
         "success": True,
         "target": target,
         "assigned_to": [o.name for o in meshes],
@@ -254,6 +271,13 @@ def set_material(params):
         "edited_in_place": not meshes,
         "applied": applied,
     }
+    if made_single_user:
+        out["made_single_user"] = made_single_user
+        out.setdefault("notes", []).append(
+            f"{len(made_single_user)} instance(s) made single-user so this material sticks "
+            f"per-object (their mesh was shared with objects outside the target) — they no "
+            f"longer share geometry with the rest of the scatter.")
+    return out
 
 
 TOOLS = {
