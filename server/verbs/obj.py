@@ -25,6 +25,9 @@ def object_verb(
                 "particle_visibility", "props", "set_prop", "light", "aim", "mode",
                 "remesh"],
     name: tag(str, "object name (empty=active for info/describe)") = "",
+    # delete — bulk by name pattern
+    pattern: tag(str, "[delete] glob ('Sprinkle_inst*') or bare prefix ('Sprinkle_inst') "
+                      "to bulk-delete many objects in one call — clears a whole scatter/array") = "",
     # rename / duplicate
     new_name: tag(str, "[rename/duplicate/duplicate_mirrored] new object name") = "",
     old_name: tag(str, "[rename] source name (alias of name)") = "",
@@ -73,7 +76,8 @@ def object_verb(
       info        — object's placement, dims, material  (name; empty=active)
       describe    — fuller report; posed=True evaluates the rig    (name)
       rename      — name → new_name                                (name, new_name)
-      delete      — remove the object                              (name)
+      delete      — remove the object (name); or bulk-delete by pattern=<glob|prefix>
+                    to clear a whole scatter/array in one call
       duplicate   — copy it  (name, new_name, linked=True for a mesh-sharing instance)
       duplicate_mirrored — mirrored copy   (name, axis=X|Y|Z, pivot=WORLD|.., new_name)
       clad        — create a watertight offset SHELL following a surface region: clothing,
@@ -121,7 +125,7 @@ def object_verb(
     if o == "rename":
         return objects.rename_object(old_name or name, new_name)
     if o == "delete":
-        return objects.delete_object(name, label)
+        return objects.delete_object(name, label, pattern)
     if o == "duplicate":
         return objects.duplicate_object(name, new_name, linked)
     if o == "duplicate_mirrored":

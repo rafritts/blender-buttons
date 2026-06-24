@@ -282,6 +282,7 @@ def scatter_on_surface(params):
 
     created = []
     skipped = 0
+    colored = 0  # G151: instances that carried a per-object material override
     for i in range(count):
         ti = _area_weighted_face_sample(triangles, areas, total_area, rng)
         v0, v1, v2, normal = triangles[ti]
@@ -313,6 +314,20 @@ def scatter_on_surface(params):
         inst = bpy.data.objects.new(name=f"{name_prefix}_{i:04d}", object_data=src_mesh)
         bpy.context.scene.collection.objects.link(inst)
         inst.scale = (s, s, s)
+
+        # G151: an instance gets the source's MESH but not its object-level material
+        # overrides. Linked-duplicate sources coloured for variety carry their colour on
+        # an OBJECT-linked slot (G113), NOT the shared mesh data — so without this copy
+        # every instance would render the default mesh colour and the variety is lost.
+        carried = False
+        for si, sslot in enumerate(chosen_src.material_slots):
+            if sslot.link == 'OBJECT' and sslot.material is not None \
+                    and si < len(inst.material_slots):
+                inst.material_slots[si].link = 'OBJECT'
+                inst.material_slots[si].material = sslot.material
+                carried = True
+        if carried:
+            colored += 1
 
         # Orientation: align to the surface normal, optional spin around it, optional
         # anti-z-fight tilt off it. Build one quaternion so the pieces compose cleanly.
@@ -362,6 +377,7 @@ def scatter_on_surface(params):
         "sources": [o.name for o in source_objs],
         "source_mesh": source_objs[0].data.name,
         "source_meshes": sorted({o.data.name for o in source_objs}),
+        "colored_instances": colored or None,
         "count_placed": count,
         "density": density if density_used else None,
         "seat": seat,

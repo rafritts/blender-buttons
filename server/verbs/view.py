@@ -37,7 +37,7 @@ def view(
     distance: tag(float, "[orbit/rig] distance from the subject/target (m)") = 8.0,
     auto_frame: tag(bool, "[orbit] auto-fit the scene") = False,
     target: tag(str, "[orbit] named object to orbit the viewport around (empty=fixed datum)") = "",
-    rig: tag(str, "[rig] the object (light/camera) to position+aim around the subject") = "",
+    rig: tag(str, "[rig] the object (light/camera) to position+aim around the subject (camera= is accepted as an alias)") = "",
     subject: tag(str, "[rig] the subject(s) the rigged light/camera orbits and aims at — "
                       "one object, a comma-list ('donut,plate,mug'), or a group name") = "",
     fit: tag(bool, "[rig] auto-derive distance to frame the WHOLE subject set (camera: "
@@ -111,7 +111,14 @@ def view(
         return viewport.orbit_viewport(azimuth, elevation, distance, 0.0, 0.0, 1.0,
                                        auto_frame, target)
     if o == "rig":
-        return scene.rig_object(rig, subject, azimuth, elevation, distance, fit)
+        # G158: the rigged object is rig=, but camera= is a natural guess (and a valid
+        # key elsewhere on this verb) — accept it as an alias instead of failing.
+        rigged = rig or camera
+        if not rigged:
+            return ("rig needs rig=<light/camera to position+aim> (and "
+                    "subject=<object/group to orbit around>). "
+                    "Example: view op=rig rig=HeroCamera subject=donut,plate fit=true")
+        return scene.rig_object(rigged, subject, azimuth, elevation, distance, fit)
     if o == "zoom":
         return viewport.zoom_to_selected()
     if o == "frame":

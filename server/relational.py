@@ -217,6 +217,9 @@ def scatter_on_surface(target: str, source: str = "", count: int = 100,
     source: the mesh to instance. Or use `sources` for variety.
     sources: comma-separated mesh names — each instance picks one at random, so the
              scatter has natural variety (3 tuft variants, not N identical clones).
+             For COLOUR variety from linked duplicates (which share one mesh), set a
+             colour on each source with material op=set first — that records an
+             object-linked slot, which scatter copies onto the instances (G151).
     count: number of instances (capped at 5000). Ignored when `density` is set.
     density: instances per square meter — the size-independent "this thick". Overrides
              count (a raw count is meaningless without the surface area). With `within`,
@@ -278,6 +281,15 @@ def scatter_on_surface(target: str, source: str = "", count: int = 100,
         skipped = result.get("skipped", result.get("skipped_in_avoid", 0))
         if skipped:
             main += f"\n  {skipped} instance(s) dropped — couldn't satisfy within/avoid"
+        # G151: confirm that per-source colour overrides carried through. Silence here
+        # when multiple sources were given is the tell that the sources share a mesh with
+        # NO per-object material — so the scatter will render one uniform colour.
+        if result.get("colored_instances"):
+            main += f"\n  {result['colored_instances']} instance(s) carried a per-source colour"
+        elif len(srcs) > 1:
+            main += ("\n  ⚠ multiple sources but no per-object colours found — if these are "
+                     "linked duplicates, set a colour on each with material op=set first "
+                     "(it makes an object-linked slot), else every instance renders identically")
     else:
         main = result.get("error", "failed")
     return main + _status(result)

@@ -296,8 +296,10 @@ def rotate_object(params):
 
     if isinstance(pivot_spec, str):
         mode = pivot_spec.strip().lower()
-        if mode in ("bbox", "bbox_center"):
-            # combined geometric centre of all targets (world space)
+        if mode in ("bbox", "bbox_center", "assembly"):
+            # combined geometric centre of all targets (world space). "assembly" is the
+            # intent-space alias (G154): rotate several parts as one rigid body about
+            # their shared centre, instead of each spinning about its own origin.
             pts = [o.matrix_world @ Vector(c) for o in objs for c in o.bound_box]
             pivot = Vector((sum(p.x for p in pts) / len(pts),
                             sum(p.y for p in pts) / len(pts),

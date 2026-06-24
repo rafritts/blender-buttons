@@ -54,7 +54,15 @@ def select_object(params):
 def delete_object(params):
     """Delete an object OR a group. If 'name' resolves to a collection, every
     mesh inside it (recursively, including nested sub-collections) is deleted
-    and the empty collections are removed."""
+    and the empty collections are removed.
+
+    G156: 'pattern' bulk-deletes every object whose name matches a glob (fnmatch,
+    e.g. 'SprinkleRed_inst*') or — when the pattern has no glob metacharacters — a
+    plain prefix ('SprinkleRed_inst'). One call clears a whole scatter/array instead
+    of N sequential deletes."""
+    pattern = params.get("pattern")
+    if pattern:
+        return _delete_by_pattern(pattern)
     name = params.get("name")
     if name:
         coll = bpy.data.collections.get(name)
@@ -77,6 +85,32 @@ def delete_object(params):
     if deleted in bpy.data.objects:
         return {"error": f"delete failed: '{deleted}' still present after remove()"}
     return {"success": True, "deleted": deleted}
+
+
+def _delete_by_pattern(pattern):
+    """Delete every object whose name matches `pattern` — a glob (if it contains
+    *?[ ) or otherwise a plain prefix. Reports the count and a sample so a too-broad
+    pattern is legible, not a silent scene-wipe."""
+    import fnmatch
+    is_glob = any(c in pattern for c in "*?[")
+    if is_glob:
+        matches = [o for o in bpy.data.objects if fnmatch.fnmatchcase(o.name, pattern)]
+    else:
+        matches = [o for o in bpy.data.objects if o.name.startswith(pattern)]
+    if not matches:
+        kind = "glob" if is_glob else "prefix"
+        return {"error": f"no objects match {kind} '{pattern}' — nothing deleted"}
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    names = [o.name for o in matches]
+    # objects.remove() (not bpy.ops.delete) so hidden/unselectable members go too (T7).
+    for o in matches:
+        bpy.data.objects.remove(o, do_unlink=True)
+    still = [n for n in names if n in bpy.data.objects]
+    if still:
+        return {"error": f"delete failed: {len(still)} still present after remove()"}
+    return {"success": True, "deleted_count": len(names), "pattern": pattern,
+            "deleted_sample": names[:5]}
 
 
 def _delete_collection(coll):

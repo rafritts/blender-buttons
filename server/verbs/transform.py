@@ -51,7 +51,7 @@ def transform(
     height: tag(float, "[resize] absolute Z extent (m)") = None,
     # scale / rotate
     factor: tag(float, "[scale] multiply size by") = 1.0,
-    pivot: tag(str, "[scale/rotate] pivot point. rotate: self=own origin (default) | world=world 0,0,0 | bbox_center | cursor. (legacy aliases: center→self, origin→world — named backwards vs Blender, prefer self/world.) scale: center=bbox centre (default) | bottom_center | world | object name") = "center",
+    pivot: tag(str, "[scale/rotate] pivot point. rotate: self=own origin (default — each target spins about ITSELF; with several targets use assembly instead) | assembly/bbox_center=shared centre of ALL targets (rigid group turn) | world=world 0,0,0 | cursor. (legacy aliases: center→self, origin→world — named backwards vs Blender, prefer self/world.) scale: center=bbox centre (default) | bottom_center | world | object name") = "center",
     pivot_object: tag(str, "[scale/rotate] object to pivot around") = "",
     angle: tag(float, "[rotate] degrees") = 0.0,
     axis: tag(str, "[rotate/match_dim/array_*] axis X|Y|Z; [aim_axis] local axis (signed ok, e.g. -Z); [rest_on/seat] drop axis") = "Z",

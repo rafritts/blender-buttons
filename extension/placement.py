@@ -52,6 +52,21 @@ VALID_SPEC_KEYS = {
     "on_floor", "gap",
 }
 
+# G158: the canonical keys are directional but the natural guess is often the bare
+# direction ("back" not "behind", "left" not "left_of"). Accept those aliases instead
+# of failing a whole RPC on a reasonable typo — translated to the canonical key before
+# validation so the rest of the resolver is unchanged.
+SPEC_KEY_ALIASES = {
+    "back": "behind",
+    "front": "in_front_of",
+    "in_front": "in_front_of",
+    "above": "on",
+    "below": "under",
+    "beneath": "under",
+    "left": "left_of",
+    "right": "right_of",
+}
+
 
 def resolve_placement(spec, dims):
     """Compute world-space center (cx, cy, cz) for a new object with given dims.
@@ -64,6 +79,17 @@ def resolve_placement(spec, dims):
 
     if not isinstance(spec, dict):
         raise ValueError(f"Placement spec must be a dict, got {type(spec).__name__}")
+
+    # G158: fold directional aliases (back→behind, left→left_of, …) onto canonical keys
+    # before validating, so a reasonable guess works instead of costing a failed RPC.
+    if any(k in SPEC_KEY_ALIASES for k in spec):
+        translated = {}
+        for k, v in spec.items():
+            canon = SPEC_KEY_ALIASES.get(k, k)
+            if canon in translated:
+                raise ValueError(f"placement key '{k}' duplicates '{canon}' — use one")
+            translated[canon] = v
+        spec = translated
 
     unknown = set(spec) - VALID_SPEC_KEYS
     if unknown:

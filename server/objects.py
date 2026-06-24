@@ -38,13 +38,23 @@ def set_mode(mode: str, target: str = "") -> str:
 
 
 @mcp.tool()
-def delete_object(name: str, label: str = "") -> str:
+def delete_object(name: str, label: str = "", pattern: str = "") -> str:
     """Delete an object OR a group by name. If `name` is a group, every part inside
     (recursively, through nested sub-groups) is deleted and the empty group is removed.
-    Use get_scene_tree to see object/group names."""
-    result = call_blender("delete_object", {"name": name}, label=label)
+    Use get_scene_tree to see object/group names.
+
+    pattern: bulk-delete every object whose name matches a glob ('SprinkleRed_inst*')
+    or — with no glob chars — a plain prefix ('SprinkleRed_inst'). One call clears a
+    whole scatter/array instead of N sequential deletes (G156)."""
+    params = {"pattern": pattern} if pattern else {"name": name}
+    result = call_blender("delete_object", params, label=label)
     if result.get("success"):
-        if "deleted_group" in result:
+        if "deleted_count" in result:
+            sample = ", ".join(result.get("deleted_sample", []))
+            more = "…" if result["deleted_count"] > len(result.get("deleted_sample", [])) else ""
+            main = (f"Deleted {result['deleted_count']} objects matching '{result['pattern']}'"
+                    f" ({sample}{more}) [{result.get('op_id','')}]")
+        elif "deleted_group" in result:
             members = result["deleted_members"]
             main = (f"Deleted group '{result['deleted_group']}' and {len(members)} part(s) "
                     f"[{result.get('op_id','')}]")

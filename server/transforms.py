@@ -237,20 +237,27 @@ def rotate_object(angle: float, axis: str = "Z", targets: str = "",
       "world" — pivot about the WORLD origin (0,0,0). Alias: "origin".
     ("self" and "world" are named after Blender's own vocabulary — "origin" there
     means the object's origin, so the legacy aliases read backwards; prefer the
-    explicit names.) Also: "bbox_center" (the targets' combined geometric centre —
-    rotate in place even when the origin is off the mesh) and "cursor" (the 3D
-    cursor). For "self" the status echoes each object's world origin (pivot_points),
-    so a hand whose origin sits off the dial is catchable, not silently flung.
+    explicit names.) Also: "assembly" / "bbox_center" (the targets' combined
+    geometric centre — turn several parts as ONE rigid body; the right choice when
+    rotating a multi-part assembly, vs "self" which spins each about itself) and
+    "cursor" (the 3D cursor). For "self" the status echoes each object's world
+    origin (pivot_points), so a hand whose origin sits off the dial is catchable,
+    not silently flung — and a multi-target self-spin now warns that the parts may
+    have drifted apart.
     """
-    params = {"angle": angle, "axis": axis, "targets": _targets(targets)}
+    parsed = _targets(targets)
+    params = {"angle": angle, "axis": axis, "targets": parsed}
+    shared_pivot = True
     if pivot_object:
         params["pivot"] = pivot_object
     elif isinstance(pivot, (list, tuple)):
         params["pivot"] = list(pivot)
     elif isinstance(pivot, str) and pivot.strip().lower() not in ("", "center", "self"):
         params["pivot"] = pivot.strip().lower()
-    # else (pivot="self"/"center"/""): no shared pivot — each object spins about its
-    # own origin; the handler echoes those origins back as pivot_points.
+    else:
+        # pivot="self"/"center"/"": no shared pivot — each object spins about its own
+        # origin; the handler echoes those origins back as pivot_points.
+        shared_pivot = False
     result = call_blender("rotate_object", params, label=label)
     if result.get("success"):
         about = f" about {result['pivot']}" if result.get("pivot") else ""
@@ -258,6 +265,15 @@ def rotate_object(angle: float, axis: str = "Z", targets: str = "",
         if pts:
             about += f" {pts if len(pts) > 1 else pts[0]}"
         main = f"rotated {result['rotated']} by {angle}° on {axis}{about} [{result.get('op_id','')}]"
+        # G154: rotating several parts with the DEFAULT self-pivot spins each about its
+        # OWN origin — they drift apart instead of turning as one body. That's almost
+        # never what "rotate the assembly" means, and it's invisible until you read
+        # clearances. Flag it and name the one-word fix.
+        if shared_pivot is False and isinstance(parsed, list) and len(parsed) > 1:
+            main += ("\n⚠ each of the " + str(len(parsed)) + " targets spun about its OWN "
+                     "origin, not a shared pivot — they may have drifted apart. For a rigid "
+                     "assembly turn, add pivot=assembly (shared bbox centre) or "
+                     "pivot_object=<name>.")
     else:
         main = result.get("error", "failed")
     return main + _status(result)
