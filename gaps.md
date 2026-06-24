@@ -551,3 +551,23 @@ something the agent only caught via `check_framing` returning 100% and reasoning
 any direct read. Candidate fixes: report occlusion of the *visible silhouette / front-facing
 surface* (or expose a "fraction of surface area visible") rather than whole-bbox; and a
 `check_visible target= from=camera` that answers yes/no for the surface a human would actually see.
+
+## G132 — a `SOLIDIFY thickness=0.004` produced a ~7.5–10mm wall, the rim bevel silently pinched the cavity further, and there is no in-place "thin the wall / scale the inner shell" op
+
+A mug built as delete-top-cap → `SOLIDIFY thickness=0.004 offset=-1` → bevel-rim was reported by
+the agent (by *inference* from the solidify param) as a clean 4mm wall — and a section measurement
+later proved that wrong: the inner radius was 0.030 (not the assumed 0.036), making the wall ~10mm
+at the rim and ~7.5mm at the un-beveled base. Two compounding gaps: (1) the solidify wall came out
+~1.85× the requested thickness at the base — the `thickness` arg did not map to the produced wall,
+with no feedback in the result to catch it; (2) the rounded-rim bevel on the inner mouth edge pulled
+the opening inward ~6mm — far more than its 2mm width — pinching the cavity and tapering the wall,
+again silently. The deeper tooling gap is that there was **no easy way to thin the wall in place**:
+the inner shell can't be selected by radius-from-axis (no cylindrical/by-distance vertex select, and
+`in_sphere` needs a handle and is a 3-D ball, not a tube), and flooding from an interior vert crosses
+the rounded rim into the exterior. The fix that worked was a throwaway BOOLEAN-DIFFERENCE cutter
+cylinder sized to the desired inner radius — effective but non-obvious. Candidate fixes: have
+`modifier solidify`/its apply report the *measured* resulting wall thickness; warn when an edge bevel
+on a thin-walled shell consumes a large fraction of the wall; and add an in-place `shell`/`hollow`
+thickness control or a `select by_radius`/cylindrical selector so a wall can be re-thinned without
+CSG. Process note for the agent: don't report a derived dimension ("4mm") as fact — `feel op=section`
+is one call and the user's eyeball was right.
