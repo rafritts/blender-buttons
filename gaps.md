@@ -114,3 +114,50 @@ already speaks vectors in a measured `tangent_normal` frame via `expr_x/y/z`; th
 handle as vectors in its measured `(n,u,v)` basis, optionally a function `f(t)`, with an
 optional `to=<anchor> weld=true` terminus that unifies free and connecting extrudes into one
 verb. Full design, examples, and open questions in the linked doc.
+
+---
+
+## G175 — a second sequential `edit op=boolean` (EXACT) on the same mesh inverts that mesh's normals
+
+Cutting a gate through a curtain wall as two chained `DIFFERENCE` booleans (a box, then an
+arch cylinder) on the *same* target: the first applied clean, the second flipped the whole
+wall — `inverted_normals: wall_front normals appear inverted (most face inward)`. Not the new
+recess faces — the *entire* shell. A single boolean (one combined cutter) on the same wall is
+always clean; arrow-loop strips (one arrayed cutter → one boolean per wall) and the moat
+ring/trench (one boolean each) never inverted. So the trigger is specifically **applying a
+second EXACT boolean to a mesh that is already a boolean result**. The floor correctly flags
+it, but it's non-suppressible (rightly), and there is **no in-place fix** (see [[G176]]) —
+the only recovery was `history op=undo_to` back past both booleans and rebuilding the gate as
+a single combined cut. Candidate fix: recompute/repair output normals after every applied
+boolean (recalc-outside on the result), or at least detect+auto-correct a fully-inverted
+result; failing that, document that multi-cut features must be one unioned cutter.
+
+---
+
+## G176 — no `recalc_normals` / `flip` primitive: a flipped-normal mesh has no recovery path short of undo
+
+When G175 inverted the wall, the floor named the defect but nothing in the schema fixes it.
+`material shade_smooth/flat` is shading, not winding; `object remesh` rebuilds topology
+(destroys crisp boolean edges); `edit` has no `recalc_normals`/`flip`/`make_consistent`.
+Blender's everyday "Mesh ▸ Normals ▸ Recalculate Outside" (Shift-N) — the standard one-keystroke
+fix for exactly this — is simply not exposed. The floor declares flipped normals "never OK and
+cannot be silenced," which is right, but pairing an unsuppressible defect with **no repair op**
+forces a full undo+rebuild for what is a one-operator fix in the UI. Candidate fix: add
+`edit op=recalc_normals` (outside/inside) and `edit op=flip` over the current selection (default
+whole mesh), so a flipped boolean result — or an imported mesh with bad winding — is recoverable
+in place. Pairs with [[G175]].
+
+---
+
+## G177 — straight 2-point `add type=tube` bakes self-intersecting geometry (floor flags it)
+
+Two drawbridge chains built as `add type=tube points=[A,B] tube_radius=0.06 sides=6` — straight,
+no bend — each baked with self-intersections (`self_intersection: chain_left has 8`, `chain_right
+has 6`). A straight swept tube should be a clean prism; the intersections are presumably the
+end-cap fill. Non-suppressible defect on an otherwise-correct prop. Workaround that was fully
+clean: a plain `add type=cylinder` + `rotate_to` along the (hand-derived) tilt + `nudge` to the
+midpoint — i.e. drop the tube primitive entirely and orient a cylinder, which costs the exact
+no-coordinate convenience the tube `points=`/`between=` API exists to provide. Candidate fix:
+clean up the tube end-cap triangulation (or n-gon cap) so a straight tube is self-intersection
+free, and/or add a `tube`-family `between`/`points` that guarantees a manifold prism for the
+straight case.
