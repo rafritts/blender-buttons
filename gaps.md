@@ -315,6 +315,12 @@ clean boundaries or give them an `expect`-style intent so an open vessel can be 
 
 ## G130 — there is no path to a volumetric light shaft (god-ray); the verbs expose no world/volume scatter and the addon bridge is bpy.ops-only
 
+**DEFERRED 2026-06-24 → `docs/SPEC-17-lighting.md`.** Not fixed in the gaps pass: lighting reads
+as a whole under-built domain rather than one gap, so the god-ray flag is parked in the SPEC-17
+stub to be designed holistically later. Recommended MVP when picked up: `scene op=world
+volume=density,color` (medium + volumetric enable) so a normal spot reads as a beam; `light …
+beam=true` is sugar to follow. Kept open here as the live pointer; the design seed lives in SPEC-17.
+
 The brief explicitly asked for a visible morning "beam through the scene." A real volumetric shaft
 needs EEVEE/Cycles volumetrics enabled plus a scattering medium (a world Volume Scatter node or a
 volume domain) — none of which any verb exposes: `scene world` sets a flat colour/HDRI, `material`
