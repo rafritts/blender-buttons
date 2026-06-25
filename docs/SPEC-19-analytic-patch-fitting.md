@@ -10,7 +10,9 @@ vertices→formula **read** half, today limited to canonical primitives). The wh
 line, **"make `fit` speak the same expression language `field` already consumes, over a small menu
 of legible bases, and close the loop."** The compose layer (§7 Phase 3) supersedes **gaps.md
 G153** (no clean handle-to-body attach). Serves the `project-vision.md` named destination
-(sculpt/retopo is "the destination," not the smoke test). Verb home is **proposed, not signed
+(sculpt/retopo is "the destination," not the smoke test). The surface carries **two faces** — a
+compact analytic store and a *legible curve-net* the model reads and draws, two views of one object
+(§2, *the curve-net face*). Verb home is **proposed, not signed
 off** (§3.0)._
 
 Scope discipline: this exposes a **fixed, small menu of LEGIBLE analytic bases** as fit targets,
@@ -128,6 +130,34 @@ it reads `base bowl + cheekbone bump + brow ridge`, one honest layer at a time. 
 exposes this as `progressive=true` (auto-layer until residual < tol) or manual (fit, read residual,
 fit again against `residual=true`).
 
+**The curve-net face (Gordon surface) — the legible way to read and *draw* a patch.** The compact 2D
+formula and a **net of 1D curves are two faces of the same surface**, and the net is the one the
+model should author in — a 1D curve is the most legible object it has, and "draw the curve that fits
+left→right, then top→bottom, then fill the interior" is *already* how it reads geometry (`feel
+op=section`/`profile`). The net is two families of fitted **iso-curves** (each a *1D* fit from the
+same menu — a 1D quadric is a parabola, a 1D `rbf` is bumps along the line); the surface is
+reconstructed by the **Gordon construction** (loft through the u-family + loft through the v-family −
+the tensor term that would double-count the overlap; the **Coons patch** is the four-boundary-curve
+special case). Three properties make it the preferred editing face:
+
+- **The net IS the wireframe.** Its crossing nodes are the shared sample points, so resolution
+  (§1.4) and the matched-boundary rule fall straight out — no separate sampling story.
+- **Refinement is drawable and local.** Two spanning (or four boundary) curves → coarse surface →
+  read the residual → **add one interior iso-curve exactly where the surface is off.** That is
+  progressive fitting in curve form, and far more legible than raising a polynomial order: "add a
+  section line through the wrong part" is an action the model can picture; "raise the degree-4
+  coefficient" is not.
+- **Shared curves give continuity for free.** Two patches sharing a boundary curve are C0 by
+  construction (C1 with a matched tangent ribbon) — the merge keeps dissolving the more the design
+  leans on shared curves (§7 Phase 3).
+
+**The one correctness requirement, do not skip:** the two families must **agree where they cross** —
+each u-curve and v-curve must meet at the same 3D point (the net node). Fit the families
+independently and they generally *won't* intersect, and the net won't close. Enforce it one of two
+ways: fit one family first, then **constrain the second to pass through the first's nodes**; or use
+the Gordon blend, which is *defined* to be node-consistent. This compatibility is to the curve-net
+what the fillet was to the graft — looks like a detail, is actually the whole problem.
+
 **Local frame & the height-field limit.** `h(u,v)` over a best-fit plane handles any patch that is
 single-valued in its own frame (a cheek, a forehead). A **fold or overhang** (an ear, a lip
 underside) is *not* single-valued → the fit must either refuse (§1.5) or use the **vector form**:
@@ -176,6 +206,7 @@ feel op=fit target= model=quadric|superquadric|bspline|rbf|thin_plate   # + exis
             [tol=<mm>]                 # residual target / refusal threshold (§1.5)
             [frame=auto|<plane-handle>]# height-field reference; auto = best-fit plane
             [as_surface=<name>] [resolution=UxV]   # instantiate the fit as a mesh patch
+            [as_net=<name>]            # emit the fit as a NET of 1D iso-curves — the legible/drawable face (§2)
 ```
 
 Returns, inseparably (§1.2): the **coefficient block** (named knobs, not raw matrix), the **`expr`
@@ -186,6 +217,10 @@ Cheek_sel → model=quadric  h(u,v)= -0.31u² -0.18v² +0.04uv +0.02u +0.00v +0.
             captured 91% · max 4.2mm · RMS 1.1mm
             residual is feature-shaped (1 broad lobe) → try progressive=true / model=rbf
 ```
+
+With `as_net=`, the same fit returns as two families of mintable 1D iso-curves (reusing the
+`as_curve` idiom per curve) instead of one coefficient block — the model then edits the patch **one
+drawable curve at a time** and re-fits to verify (§5). Same object, legible face.
 
 ### 3.2 `edit op=field` — the edit-apply (exists, SPEC-13)
 
@@ -248,9 +283,10 @@ primitives to *shaping* a surface.
 2. **Phase 2 — the full menu + progressive fit + the round-trip.** Add `superquadric`, `bspline`,
    `rbf`/`thin_plate`; `progressive=`/`residual=` layering; `as_surface=`+`resolution=` minting; and
    verify that an `edit op=field` of an edited formula **re-fits to the intended coefficients**
-   (the closed loop, §4). The bulk of the value.
-3. **Phase 3 — COMPOSE (the research; supersedes G153).** `edit op=stitch` (B-spline shared-boundary
-   C0/C1 + matched boundary sampling → watertight quilt) and `edit op=graft mode=smin blend=<k>`
+   (the closed loop, §4). Also the **curve-net face** (`as_net=`): emit the fit as two families of
+   iso-curves with the Gordon node-reconciliation so the net closes (§2). The bulk of the value.
+3. **Phase 3 — COMPOSE (the research; supersedes G153).** `edit op=stitch` (B-spline / curve-net shared-boundary
+   C0/C1 — the net's boundary curves are the shared objects — + matched boundary sampling → watertight quilt) and `edit op=graft mode=smin blend=<k>`
    (convert parts to SDFs, smooth-min blend, marching-cubes mesh — the **fillet radius is one
    number**, the merge monster reduced to arithmetic). Highest risk; the merge we currently cannot do
    cleanly becomes algebraic. Retopo of the result stays out of scope.
@@ -273,6 +309,8 @@ destination.
   are a separate pass (its own future spec).
 - **No taste/beauty judge** (§1.6) — no "best fit" auto-pick presented as correct, no "make it look
   good."
+- **No freeform curve-network CAD kit** — the net is *fitted* from a selection (or refined one
+  curve at a time), never a from-scratch hand-drawn-curve modeller with trims/blends.
 - **No general implicit-modelling kit** beyond the `smin` merge primitive in Phase 3.
 
 ---
@@ -282,7 +320,9 @@ destination.
 - **`extension/fit.py`** — new `model=` solvers (`quadric` linear LSQ first; then `superquadric`,
   `bspline`, `rbf`/`thin_plate`); the **coefficient-block + `expr` emitter** (reuse the SPEC-13
   `field` grammar so the formula round-trips); `progressive`/`residual` layering; `as_surface=` +
-  `resolution=` minting (mirror the existing `as_curve=` path).
+  `resolution=` minting (mirror the existing `as_curve=` path); the **`as_net=` emitter** — two
+  families of fitted iso-curves (seed with `feel op=section`/`profile`, mint each via `as_curve`) +
+  the **Gordon node-reconciliation** so families agree at crossings (§2).
 - **`server/verbs/feel.py`** — thread `model` (new values), `basis_terms`, `progressive`,
   `residual`, `tol`, `frame`, `as_surface`, `resolution` onto `op=fit`; `teach()` errors for an
   out-of-menu `model`.
@@ -305,4 +345,5 @@ destination.
   coefficients within tol + residual ≈ 0; **round-trip** — `field` a known `expr` onto a grid, then
   `fit` it back, assert coefficient recovery (the §4 loop); a folded patch under `model=quadric`
   asserts the high-residual refusal (§1.5); two `bspline` patches sharing a control row assert a
-  watertight, crack-free seam (Phase 3).
+  watertight, crack-free seam (Phase 3); an `as_net` fit then Gordon-reconstruct asserts the net nodes
+  coincide and the reconstruction residual ≈ the direct 2D fit (the two faces agree).
