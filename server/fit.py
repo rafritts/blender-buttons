@@ -36,7 +36,32 @@ def _params_block(model, params):
     return "\n".join(lines)
 
 
+def _one_quadric(f):
+    """SPEC-19 Phase 1 — present the analytic patch as an editable formula: the legible
+    h(u,v) face, the shape verdict, the residual honesty stamp, the measured frame, and the
+    ready-to-run round-trip apply line (edit the coefficients, then run it)."""
+    p = f.get("params", {})
+    cap = f.get("captured")
+    cap_s = f"{cap*100:.0f}%" if isinstance(cap, (int, float)) else "?"
+    out = [f"quadric patch — {p.get('shape', '?')}", f"  {f.get('formula', '')}"]
+    out.append(f"  k_max {_fmt_num(p.get('k_max'))}/m · k_min {_fmt_num(p.get('k_min'))}/m   "
+               f"(u along {_fmt_num(p.get('axis_u'))}, v along {_fmt_num(p.get('axis_v'))}, "
+               f"normal {_fmt_num(p.get('normal'))}, origin {_fmt_num(p.get('frame_origin'))})")
+    rmm, tmm = f.get("residual_mm"), f.get("tol_mm")
+    clean = isinstance(rmm, (int, float)) and isinstance(tmm, (int, float)) and rmm <= tmm
+    verdict = ("clean" if clean else "HIGH residual: region is not height-field-like "
+               "(try a finer basis or split the selection)")
+    out.append(f"  captured {cap_s} of height · residual {rmm}mm "
+               f"(max {f.get('residual_max_mm')}mm) · coverage {f.get('coverage')} · "
+               f"tol {tmm}mm — {verdict}")
+    out.append(f"  ↻ apply (edit the coefficients first): edit op=field axis=auto "
+               f"channel={f.get('apply_channel', 'axis:v')} field_mode=add expr=\"{f.get('expr')}\"")
+    return "\n".join(out)
+
+
 def _one(f):
+    if f.get("model") == "quadric":
+        return _one_quadric(f)
     head = f.get("verdict", f.get("model", "?"))
     out = [head]
     pb = _params_block(f.get("model"), f.get("params", {}))

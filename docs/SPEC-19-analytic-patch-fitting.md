@@ -1,6 +1,11 @@
 # SPEC-19 — Analytic Patch Fitting: Geometry as Editable Math
 
-_Status: **DESIGNED — proposal, not built.** Captures the round-trip the model needs in order to
+_Status: **PHASE 1 BUILT & VERIFIED** (commit pending) — `feel op=fit model=quadric` ships the
+READ + the round-trip `expr` emission; Phases 2–3 remain DESIGNED. Phase 1 landed on the proposed
+verb home (§3.0: extend `feel op=fit`, reuse `edit op=field` as the writer — no new verb) and is
+covered end-to-end by `tests/e2e_fit_analytic.py` (exact coefficient recovery, the field
+round-trip closes, a fold refuses with high residual, the Phase-2 menu teach-errors). Captures the
+round-trip the model needs in order to
 **shape** a surface, not just assemble primitives: *select a region of quads → express it as an
 editable analytic formula (with residual) → reason and edit in coefficient-space → instantiate
 back to mesh at a chosen resolution → verify by re-fit → compose patches by continuity/blend.*
@@ -275,11 +280,16 @@ primitives to *shaping* a surface.
 
 ## 7. Build phasing (effort = complexity/risk)
 
-1. **Phase 1 — READ, one basis ("express multiple quads as math, even if limited").** `feel op=fit
-   model=quadric` over a live selection → emit the coefficient block + `expr` + residual, height-field
-   over the best-fit plane. This alone delivers the core ask: a region of quads becomes an editable
-   formula the model can read and reason about. Lowest risk — **linear least squares**, and it reuses
-   SPEC-14's residual/verdict machinery wholesale. No write, no instantiate, no compose yet.
+1. **Phase 1 — READ, one basis ("express multiple quads as math, even if limited"). ✅ BUILT.**
+   `feel op=fit model=quadric` over a live selection → emits the coefficient block (named knobs +
+   principal-curvature shape verdict), the `expr` in the `field` grammar, and the captured-% /
+   residual stamp, height-field over the best-fit plane. This alone delivers the core ask: a region
+   of quads becomes an editable formula the model can read and reason about. Lowest risk — **linear
+   least squares** — and it reuses SPEC-14's residual/verdict machinery wholesale. The round-trip
+   `expr` is exact because the fit derives its frame from the field deformer's own `_group_frame`
+   (so in-plane `u,v` = field `z,x` and height = field `y`); the emitted apply line
+   `edit op=field channel=axis:v field_mode=add expr="(quadric) - y"` lands every vert on the fitted
+   surface (verified). No write *primitive* added, no instantiate (`as_surface`), no compose yet.
 2. **Phase 2 — the full menu + progressive fit + the round-trip.** Add `superquadric`, `bspline`,
    `rbf`/`thin_plate`; `progressive=`/`residual=` layering; `as_surface=`+`resolution=` minting; and
    verify that an `edit op=field` of an edited formula **re-fits to the intended coefficients**

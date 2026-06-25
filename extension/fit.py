@@ -341,6 +341,89 @@ def fit_swept_tube(np, P, d, bands):
     }
 
 
+# ───────────────────────────── analytic patch: quadric (SPEC-19 Phase 1) ─────────────────────────────
+
+def _quadric_shape(k1, k2):
+    """Name the form from the two principal curvatures (1/m). The legible verdict §1.1."""
+    flat = 0.5  # |curvature| below this (1/m, ≈ 2mm sag over a 10cm patch) reads as flat
+    s1 = 0 if abs(k1) < flat else (1 if k1 > 0 else -1)
+    s2 = 0 if abs(k2) < flat else (1 if k2 > 0 else -1)
+    if s1 == 0 and s2 == 0:
+        return "flat (planar)"
+    if s1 >= 0 and s2 >= 0 and (s1 or s2):
+        return "bowl (concave, both curve up)"
+    if s1 <= 0 and s2 <= 0 and (s1 or s2):
+        return "dome (convex, both curve down)"
+    if s1 * s2 < 0:
+        return "saddle (opposing curvatures)"
+    return "trough (curved one way, straight the other)"
+
+
+def _quadric_expr(a, b, c, d, e, f):
+    """The executable round-trip: a `field` expr that SETS height. In the shared AUTO frame
+    the in-plane coords are field `z` (along L) and `x` (along U), and height is field `y`
+    (along V=normal). Displacing along V by (target_height − current_height) lands each vert
+    on the fitted surface — apply via channel=axis:v field_mode=add (§3.2)."""
+    poly = (f"{a:.6g}*z*z {b:+.6g}*x*x {c:+.6g}*z*x "
+            f"{d:+.6g}*z {e:+.6g}*x {f:+.6g}")
+    return f"({poly}) - y"
+
+
+def _quadric_formula(a, b, c, d, e, f):
+    """The legible face: h(u,v) the model reads and reasons over (u along axis_u, v along
+    axis_v, both in metres from the patch centroid; coefficients in 1/m, 1/m, 1/m, —, —, m)."""
+    terms = [f"{a:+.4g}u²", f"{b:+.4g}v²", f"{c:+.4g}uv", f"{d:+.4g}u", f"{e:+.4g}v", f"{f:+.4g}"]
+    return "h(u,v) = " + " ".join(terms).lstrip("+ ")
+
+
+def fit_quadric(np, P):
+    """SPEC-19 Phase 1 — the first ANALYTIC basis: a height-field quadric
+    h(u,v) = a·u² + b·v² + c·u·v + d·u + e·v + f over the best-fit plane, by linear least
+    squares (closed-form, exact residual). A region of quads becomes an editable formula the
+    model reads in coefficient-space.
+
+    The frame is the field deformer's OWN AUTO frame (shared `_group_frame`) so the emitted
+    `expr` round-trips byte-for-byte through `edit op=field`: u along L (field `z`), v along U
+    (field `x`), height along V = the minor/normal axis (field `y`)."""
+    from .fields import _group_frame
+    O, L, U, V = _group_frame(np, P, "AUTO")
+    rel = P - O
+    u = rel @ L            # in-plane axis 1  (field `z`)
+    v = rel @ U            # in-plane axis 2  (field `x`)
+    h = rel @ V            # height along the minor axis = normal  (field `y`)
+    A = np.c_[u * u, v * v, u * v, u, v, np.ones(len(P))]
+    try:
+        sol, *_ = np.linalg.lstsq(A, h, rcond=None)
+    except np.linalg.LinAlgError:
+        return None
+    a, b, c, d, e, f = (float(x) for x in sol)
+    dd = h - A @ sol
+    hv = float(np.var(h))
+    captured = (1.0 - float(np.var(dd)) / hv) if hv > 1e-18 else 1.0
+    # principal curvatures from the Hessian [[2a, c], [c, 2b]]
+    tr, det = 2 * a + 2 * b, (2 * a) * (2 * b) - c * c
+    disc = float(np.sqrt(max(tr * tr / 4 - det, 0.0)))
+    k1, k2 = tr / 2 + disc, tr / 2 - disc
+    return {
+        "model": "quadric", "rank": 7,
+        "params": {"a": round(a, 6), "b": round(b, 6), "c": round(c, 6),
+                   "d": round(d, 6), "e": round(e, 6), "f": round(f, 6),
+                   "k_max": round(k1, 4), "k_min": round(k2, 4),
+                   "shape": _quadric_shape(k1, k2),
+                   "frame_origin": [round(x, 5) for x in O.tolist()],
+                   "axis_u": [round(x, 4) for x in L.tolist()],
+                   "axis_v": [round(x, 4) for x in U.tolist()],
+                   "normal": [round(x, 4) for x in V.tolist()]},
+        "residual": _rms(np, dd), "residual_max": float(np.max(np.abs(dd))) if len(dd) else 0.0,
+        "coverage": _grid_cov(np, _unit01(np, u), _unit01(np, v)),
+        "captured": round(captured, 4),
+        "formula": _quadric_formula(a, b, c, d, e, f),
+        "expr": _quadric_expr(a, b, c, d, e, f),
+        "apply_channel": "axis:v",
+        "point": O, "normal": V,
+    }
+
+
 # ───────────────────────────── components ─────────────────────────────
 
 def _components(np, verts_idx, edges_pairs):
@@ -369,6 +452,8 @@ def _components(np, verts_idx, edges_pairs):
 # ───────────────────────────── the op ─────────────────────────────
 
 _RIGID = ["plane", "sphere", "cylinder", "cone", "ellipsoid", "torus", "swept_tube"]
+_ANALYTIC = ["quadric"]                                   # SPEC-19 Phase 1
+_PLANNED = ["superquadric", "bspline", "rbf", "thin_plate", "gaussians"]  # SPEC-19 Phase 2
 
 
 def _fit_one(np, P, model, axis, bands):
@@ -413,6 +498,8 @@ def _fit_one(np, P, model, axis, bands):
         f = fit_torus(np, P)
     elif model == "swept_tube":
         f = fit_swept_tube(np, P, d, bands)
+    elif model == "quadric":
+        f = fit_quadric(np, P)
     else:
         return "BAD_MODEL", []
     return f, ([f] if f else [])
@@ -486,8 +573,12 @@ def fit_region(params):
     as_handle = (params.get("as_handle", "") or "").strip()
     as_curve = (params.get("as_curve", "") or "").strip()
     target = (params.get("target", "") or "").strip()
-    if model not in (_RIGID + ["auto"]):
-        return {"error": f"model must be auto|{'|'.join(_RIGID)}, got {model!r}"}
+    if model in _PLANNED:
+        return {"error": f"model={model!r} is SPEC-19 Phase 2 (not built yet). Phase 1 ships "
+                         f"model=quadric — a height-field analytic patch you read & edit as a "
+                         f"formula. Rigid primitives available: {'|'.join(_RIGID)}."}
+    if model not in (_RIGID + _ANALYTIC + ["auto"]):
+        return {"error": f"model must be auto|{'|'.join(_RIGID + _ANALYTIC)}, got {model!r}"}
 
     obj = bpy.data.objects.get(target) if target else bpy.context.active_object
     if obj is None or obj.type != 'MESH':

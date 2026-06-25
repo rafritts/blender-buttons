@@ -107,7 +107,10 @@ def feel(
                         "handle=, aim_axis, sculpt handle=) — no coordinate ever typed (G78)") = "",
     steps: tag(int, "[verify] rings to grow/shrink the selection when perturbing (default 1)") = 1,
     # fit (SPEC-14 / G100) — describe a selection as parametric form
-    model: tag(str, "[fit] auto|plane|sphere|cylinder|cone|ellipsoid|torus|swept_tube") = "auto",
+    model: tag(str, "[fit] auto|plane|sphere|cylinder|cone|ellipsoid|torus|swept_tube | "
+                    "quadric (SPEC-19: a region of quads → an editable height-field formula "
+                    "h(u,v)=au²+bv²+cuv+du+ev+f you read & edit in coefficient-space, then "
+                    "round-trip via edit op=field)") = "auto",
     tol: tag(float, "[fit] residual threshold in mm for the clean/organic verdict (default ~3mm or 1% of the selection diagonal)") = None,
     per_component: tag(bool, "[fit] fit each connected sub-shell separately (never average a model across a gap)") = False,
     as_curve: tag(str, "[fit] mint the fitted swept_tube centerline as a named Bézier curve object (then extend it + extrude_along_curve to continue the form)") = "",
@@ -266,6 +269,16 @@ def feel(
                  the fitted axis line; as_curve mints the centerline as a Bézier to extend +
                  re-sweep. Reads the edit-mode selection (whole mesh if none, warned).
                  Read-only (mints only on as_handle/as_curve).
+                 ── SHAPING (SPEC-19): model=quadric fits a height-field analytic patch
+                 h(u,v)=au²+bv²+cuv+du+ev+f over the selection's best-fit plane (linear least
+                 squares). The payoff is the round-trip: it returns the formula + named
+                 coefficients (a,b curvature, c twist/saddle, d,e tilt, f offset), the shape
+                 verdict (dome/bowl/saddle), the captured-% + residual honesty stamp, AND a
+                 ready-to-run `edit op=field` apply line. You read the surface as math, EDIT a
+                 coefficient (steepen the dome: −0.31→−0.45), apply it, then re-fit to verify —
+                 no vertex typed, no render read. This is how you SHAPE a surface instead of
+                 ASSEMBLE primitives. A high residual means the region isn't height-field-like
+                 (a fold/overhang) → it refuses honestly rather than emit a fiction (§1.5).
                  (target, model, axis, tol, per_component, bands, as_handle, as_curve, lod)
       coverage — MODEL-FREE continuity/coverage read (G100) for a selection that ISN'T a
                  swept tube — a flat sheet, a doubly-curved patch, a branching region, where

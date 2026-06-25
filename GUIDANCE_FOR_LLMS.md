@@ -176,3 +176,30 @@ uniform normal-push lumps and *collapses* the form (this sank a bust on the firs
   For "did it grow," the honest signals are the world-bbox bound delta and whole-mesh
   `feel … method=symmetry`; for "is it balanced," the `── edit ──` status block now reports the
   selection's centroid, bbox, and `lr_balance` on every call.
+
+## Shaping a surface as math, not vertices (SPEC-19)
+
+To *shape* a freeform patch — not assemble a primitive — read it as a **formula**, edit the
+formula, write it back, and verify by re-reading the formula. No vertex is ever typed; the whole
+loop lives in coefficient-space, the most legible thing you have:
+
+1. **Select** a coherent region of quads (`select op=in_sphere` / `between` / `flood`).
+2. **`feel op=fit model=quadric`** → a height-field formula over the patch's best-fit plane:
+   `h(u,v) = a·u² + b·v² + c·u·v + d·u + e·v + f`, with **named knobs** (`a,b` = curvature /
+   dome±, `c` = twist/saddle, `d,e` = tilt, `f` = offset), a **shape verdict** (dome / bowl /
+   saddle), and the **honesty stamp** (`captured 91% · residual 1.1mm`). It also hands back a
+   ready-to-run apply line.
+3. **Edit the coefficients** in your head (steepen the dome: `a` −0.31 → −0.45; flatten the
+   twist: `c` → 0). You can predict exactly what each change does — that is the whole point of an
+   admitted basis.
+4. **Apply** the edited formula: `edit op=field axis=auto channel=axis:v field_mode=add
+   expr="(…edited…) - y"` (the fit emits this `expr` for you, in the field grammar, so it
+   round-trips byte-for-byte).
+5. **Verify** by re-fitting — the coefficients + residual confirm the surface matches your intent.
+   You never read a render to check shape.
+
+**The residual is load-bearing.** A high residual is not a failure to paper over — it is the tool
+telling you the basis can't describe this region (a fold, an overhang, a ragged multi-feature
+blob). It **refuses honestly** rather than emit a plausible fiction. When that happens, split the
+selection or pick a finer basis — don't push the bad formula through. (Phase 2 adds the rest of the
+menu — `superquadric`, `bspline`, `rbf` — plus progressive layering and the curve-net face.)

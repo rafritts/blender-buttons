@@ -32,6 +32,10 @@ straight from high-poly → materials → lighting → render.
   - Major cuts and contours are present (ejection ports, panel seams, grip curves).
   - Still mostly hard edges, but topology is intentional.
   - Parts are correctly named and organized in collections.
+  - Freeform/organic patches are *shaped*, not just nudged: read a region as an editable
+    formula (`feel op=fit model=quadric` → `h(u,v)=au²+bv²+cuv+du+ev+f` + residual), edit the
+    coefficients, write it back (`edit op=field channel=axis:v expr="…"`), verify by re-fit
+    (SPEC-19). The destination is sculpt-as-math; retopo stays downstream (Stage 5).
 - **DONE WHEN:** Every major shape is in place; nothing is floating or visibly wrong.
 
 ## Stage 4 — High-poly
