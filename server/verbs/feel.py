@@ -114,6 +114,8 @@ def feel(
     tol: tag(float, "[fit] residual threshold in mm for the clean/organic verdict (default ~3mm or 1% of the selection diagonal)") = None,
     per_component: tag(bool, "[fit] fit each connected sub-shell separately (never average a model across a gap)") = False,
     as_curve: tag(str, "[fit] mint the fitted swept_tube centerline as a named Bézier curve object (then extend it + extrude_along_curve to continue the form)") = "",
+    as_surface: tag(str, "[fit] mint the height-field fit (quadric/bspline/rbf) as a real quad-grid mesh patch with this name — the formula sampled to geometry (SPEC-19 §1.4); re-fit it to verify") = "",
+    surface_res: tag(str, "[fit] as_surface tessellation as 'UxV' (e.g. 16x12); default is suggested from curvature + the faceting tolerance. (= spec's resolution=)") = "",
 ) -> str:
     """
     Feel a mesh — structure, measurements, correctness. Read-only (no status block).
@@ -368,7 +370,7 @@ def feel(
         # anyway, so no capability is lost — only X/Y need to be forced explicitly.
         fit_axis = "auto" if axis == "Z" else axis
         return fit.fit_region(target, model, fit_axis, tol, per_component, bands,
-                              as_handle, as_curve, lod)
+                              as_handle, as_curve, lod, as_surface, surface_res)
     if o == "coverage":
         return fit.coverage_region(target)
     return unknown("feel", "op", op, _OPS)

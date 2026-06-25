@@ -82,11 +82,13 @@ def _one(f):
     return "\n".join(out)
 
 
-def fit_region(target, model, axis, tol, per_component, bands, as_handle, as_curve, lod):
+def fit_region(target, model, axis, tol, per_component, bands, as_handle, as_curve, lod,
+               as_surface="", resolution=""):
     params = {
         "target": target, "model": model, "axis": axis,
         "per_component": per_component, "bands": bands,
         "as_handle": as_handle, "as_curve": as_curve, "lod": lod,
+        "as_surface": as_surface, "resolution": resolution,
     }
     if tol is not None:
         params["tol"] = tol
@@ -112,6 +114,13 @@ def fit_region(target, model, axis, tol, per_component, bands, as_handle, as_cur
                  "extrude_along_curve a matching section to continue the form")
     elif result.get("curve_error"):
         body += f"\n  ⚠ as_curve: {result['curve_error']}"
+    if result.get("surface"):
+        sr = result.get("surface_res", [])
+        body += (f"\n  ✓ minted patch '{result['surface']}' "
+                 f"({sr[0]}×{sr[1]} grid, {result.get('surface_verts')} verts) — the formula "
+                 f"sampled to mesh; re-fit it to verify the coefficients survived")
+    elif result.get("surface_error"):
+        body += f"\n  ⚠ as_surface: {result['surface_error']}"
     for w in result.get("warnings", []):
         body += f"\n⚠ {w}"
     return body

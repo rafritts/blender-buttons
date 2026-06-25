@@ -404,6 +404,13 @@ def fit_quadric(np, P):
     tr, det = 2 * a + 2 * b, (2 * a) * (2 * b) - c * c
     disc = float(np.sqrt(max(tr * tr / 4 - det, 0.0)))
     k1, k2 = tr / 2 + disc, tr / 2 - disc
+    # height-field minting scaffold (as_surface §1.4): the frame, the patch's own (u,v)
+    # extent, and the closure that evaluates h over a sample grid in that frame.
+    uvext = (float(u.min()), float(u.max()), float(v.min()), float(v.max()))
+
+    def _h(uc, vc, _a=a, _b=b, _c=c, _d=d, _e=e, _f=f):
+        return _a * uc * uc + _b * vc * vc + _c * uc * vc + _d * uc + _e * vc + _f
+
     return {
         "model": "quadric", "rank": 7,
         "params": {"a": round(a, 6), "b": round(b, 6), "c": round(c, 6),
@@ -421,6 +428,8 @@ def fit_quadric(np, P):
         "expr": _quadric_expr(a, b, c, d, e, f),
         "apply_channel": "axis:v",
         "point": O, "normal": V,
+        "_frame": (O, L, U, V), "_uv_extent": uvext, "_height": _h,
+        "_curv": (abs(k1), abs(k2)),
     }
 
 
@@ -561,6 +570,64 @@ def _mint(np, f, model, as_handle, as_curve):
     return out
 
 
+def _resolution(np, f, resolution, tol_mm):
+    """The §1.4 'suggested, then chosen' tessellation count. If `resolution`='UxV' the model
+    chose; else propose from curvature + the faceting tolerance: a quad chord of cell `c`
+    deviates from a surface of curvature k by ~k·c²/8, so cell ≈ √(8·tol/|k|) keeps facet
+    error under tol. Clamp [4,64]."""
+    umin, umax, vmin, vmax = f["_uv_extent"]
+    if resolution:
+        try:
+            su, sv = (resolution or "").lower().split("x")
+            return max(2, int(su)), max(2, int(sv))
+        except Exception:
+            pass
+    ku, kv = f.get("_curv", (0.0, 0.0))
+    tol_m = (tol_mm or 1.0) / 1000.0
+    eu, ev = umax - umin, vmax - vmin
+
+    def n_for(extent, k):
+        if k < 1e-6:
+            return 12                      # near-flat → a modest default grid
+        cell = float(np.sqrt(8.0 * tol_m / k))
+        return int(np.clip(np.ceil(extent / max(cell, 1e-6)) + 1, 4, 64))
+    return n_for(eu, ku), n_for(ev, kv)
+
+
+def _mint_surface(np, f, name, resolution, tol_mm):
+    """Instantiate a height-field fit as a real quad-grid mesh patch (the as_surface path,
+    §1.4): sample h(u,v) on a UxV grid in the fit's own frame, place every vert at
+    O + u·L + v·U + h·V, stitch a uniform quad quilt. The formula is the intent; this is one
+    sampling of it. Mirrors the as_curve minting idiom (read-time, opt-in side effect)."""
+    if bpy.data.objects.get(name) is not None:
+        return {"surface_error": f"object '{name}' already exists"}
+    if "_frame" not in f or "_height" not in f or "_uv_extent" not in f:
+        return {"surface_error": f"as_surface needs a height-field fit; model={f['model']} "
+                                 f"mints no patch (use a quadric/bspline/rbf fit)"}
+    O, L, U, V = f["_frame"]
+    umin, umax, vmin, vmax = f["_uv_extent"]
+    nu, nv = _resolution(np, f, resolution, tol_mm)
+    us = np.linspace(umin, umax, nu)
+    vs = np.linspace(vmin, vmax, nv)
+    UU, VV = np.meshgrid(us, vs, indexing="ij")          # (nu, nv)
+    H = np.asarray(f["_height"](UU, VV), dtype=float)
+    W = (O[None, None, :] + UU[..., None] * L[None, None, :]
+         + VV[..., None] * U[None, None, :] + H[..., None] * V[None, None, :])
+    verts = [tuple(float(c) for c in p) for p in W.reshape(-1, 3).tolist()]
+    faces = []
+    for i in range(nu - 1):
+        for j in range(nv - 1):
+            a0 = i * nv + j
+            faces.append((a0, a0 + 1, a0 + nv + 1, a0 + nv))
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(verts, [], faces)
+    me.update()
+    obj = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(obj)
+    bpy.context.view_layer.update()
+    return {"surface": obj.name, "surface_res": [nu, nv], "surface_verts": len(verts)}
+
+
 def fit_region(params):
     import numpy as np
 
@@ -572,6 +639,8 @@ def fit_region(params):
     bands = int(params.get("bands", 0) or 0)
     as_handle = (params.get("as_handle", "") or "").strip()
     as_curve = (params.get("as_curve", "") or "").strip()
+    as_surface = (params.get("as_surface", "") or "").strip()
+    resolution = (params.get("resolution", "") or "").strip()
     target = (params.get("target", "") or "").strip()
     if model in _PLANNED:
         return {"error": f"model={model!r} is SPEC-19 Phase 2 (not built yet). Phase 1 ships "
@@ -627,9 +696,11 @@ def fit_region(params):
         return f, cands
 
     def strip(f):
-        # drop internal / non-JSON keys (numpy arrays, scratch) before it hits the wire
-        for k in ("_span_lo", "_span_hi", "_axis_dir", "_origin", "point", "normal",
-                  "residual", "residual_max", "rank", "clean"):
+        # drop internal / non-JSON keys (numpy arrays, scratch) before it hits the wire:
+        # the named scratch + every "_"-prefixed key (frame/extent/closures for minting)
+        for k in ("point", "normal", "residual", "residual_max", "rank", "clean"):
+            f.pop(k, None)
+        for k in [k for k in f if k.startswith("_")]:
             f.pop(k, None)
         return f
 
@@ -646,8 +717,10 @@ def fit_region(params):
                 fits.append(f)
         if not fits:
             return {"error": "no component could be fit"}
-        # mint only off the first component (needs point/centerline, so before strip)
+        # mint only off the first component (needs point/centerline/frame, so before strip)
         mint = _mint(np, fits[0], fits[0]["model"], as_handle, as_curve)
+        if as_surface:
+            mint.update(_mint_surface(np, fits[0], as_surface, resolution, tol_mm))
         result = {"success": True, "per_component": True,
                   "components": [strip(f) for f in fits],
                   "n_components": len(fits), "tol_mm": round(tol_mm, 2),
@@ -659,6 +732,8 @@ def fit_region(params):
     if f is None:
         return {"error": f"could not fit model={model}"}
     mint = _mint(np, f, f["model"], as_handle, as_curve)
+    if as_surface:
+        mint.update(_mint_surface(np, f, as_surface, resolution, tol_mm))
     f.update({"success": True, "tol_mm": round(tol_mm, 2), "verts": len(P),
               "warnings": warnings})
     f.update(mint)

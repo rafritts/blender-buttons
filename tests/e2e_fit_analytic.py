@@ -153,6 +153,44 @@ check("D: model=bspline refuses with a Phase-2 teach error",
       (not r.get("success")) and "Phase 2" in (r.get("error", "")), f"r={r}")
 
 
+# ───────────── E. INSTANTIATE — mint the fit as a patch, re-fit recovers it ─────────────
+print("== SPEC19-E: as_surface mints a mesh patch; re-fitting it recovers the formula ==")
+clean()
+ALPHA, BETA = 0.6, -0.7                   # saddle, both |k| > the 0.5/m flat threshold
+g = make_grid(1.0, 0.7, subdiv=16)
+displace_quadric(g, ALPHA, BETA)
+# NB: this drives the extension directly (bypassing the server facade that maps
+# surface_res→resolution), so pass the extension's own `resolution=` arg here.
+r = run("fit", model="quadric", as_surface="Patch", resolution="20x14")
+check("E: fit success", r.get("success"), r.get("error"))
+check("E: minted a surface object 'Patch'", r.get("surface") == "Patch", f"surface={r.get('surface')}")
+check("E: surface_res honored (20x14)", r.get("surface_res") == [20, 14], f"res={r.get('surface_res')}")
+patch = bpy.data.objects.get("Patch")
+check("E: Patch exists with 20×14 verts",
+      patch is not None and len(patch.data.vertices) == 20 * 14,
+      f"verts={len(patch.data.vertices) if patch else None}")
+# re-fit the minted patch (object mode → whole mesh) — the §5 verification
+bpy.context.view_layer.objects.active = patch
+r2 = run("fit", model="quadric", target="Patch")
+check("E: re-fit of the minted patch ≈ 0 residual (mesh IS the formula)",
+      r2.get("residual_mm", 99) < 0.05, f"res={r2.get('residual_mm')}mm")
+check("E: re-fit captured ≈ 100%", r2.get("captured", 0) > 0.999, f"captured={r2.get('captured')}")
+p2 = r2.get("params", {})
+check("E: re-fit shape verdict still 'saddle'", "saddle" in p2.get("shape", ""), f"shape={p2.get('shape')}")
+# coefficient magnitudes survive (normal eigenvector sign is arbitrary → compare |·|)
+check("E: |a| ≈ |α| and |b| ≈ |β| (coefficients survived the round-trip)",
+      abs(abs(p2.get("a", 0)) - abs(ALPHA)) < 0.02 and abs(abs(p2.get("b", 0)) - abs(BETA)) < 0.02,
+      f"a={p2.get('a')} b={p2.get('b')}")
+# resolution SUGGESTED when surface_res is unset (curvier patch → a real grid, not the floor)
+clean()
+g = make_grid(1.0, 1.0, subdiv=12)
+displace_quadric(g, 0.6, 0.6)
+r3 = run("fit", model="quadric", as_surface="Patch2")
+sr = r3.get("surface_res") or [0, 0]
+check("E: default resolution suggested when surface_res unset",
+      r3.get("surface") == "Patch2" and min(sr) >= 4, f"res={sr}")
+
+
 # ───────────────── summary ─────────────────
 print()
 if failures:
