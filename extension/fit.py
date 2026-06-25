@@ -1166,7 +1166,10 @@ def fit_region(params):
 
     warnings = []
     mat = obj.matrix_world
-    # Read the selection if in edit mode, else the whole mesh (warned).
+    # G178: scope to the live selection whether or not we're in EDIT mode. The select
+    # verbs auto-exit to OBJECT mode after running (server.py EDIT_MODE_TOOLS), but the
+    # selection survives on me.vertices[i].select — so an OBJECT-mode fit must read it
+    # too, or the documented `select … ; feel op=fit` loop silently fits the whole mesh.
     if obj.mode == 'EDIT':
         import bmesh
         bm = bmesh.from_edit_mesh(obj.data)
@@ -1183,10 +1186,18 @@ def fit_region(params):
                       if e.verts[0].index in vset and e.verts[1].index in vset]
     else:
         me = obj.data
-        P = np.array([list(mat @ v.co) for v in me.vertices], dtype=float)
-        vidx = list(range(len(me.vertices)))
-        edge_pairs = [(e.vertices[0], e.vertices[1]) for e in me.edges]
-        warnings.append("object mode — fitting the WHOLE mesh (select a region in edit mode to scope)")
+        sel_idx = [v.index for v in me.vertices if v.select]
+        if sel_idx:
+            vset = set(sel_idx)
+            P = np.array([list(mat @ me.vertices[i].co) for i in sel_idx], dtype=float)
+            vidx = sel_idx
+            edge_pairs = [(e.vertices[0], e.vertices[1]) for e in me.edges
+                          if e.vertices[0] in vset and e.vertices[1] in vset]
+        else:
+            P = np.array([list(mat @ v.co) for v in me.vertices], dtype=float)
+            vidx = list(range(len(me.vertices)))
+            edge_pairs = [(e.vertices[0], e.vertices[1]) for e in me.edges]
+            warnings.append("no selection — fitting the WHOLE mesh")
 
     if len(P) < 4:
         return {"error": f"need ≥4 verts to fit, have {len(P)}"}
@@ -1276,6 +1287,8 @@ def coverage_region(params):
     mat = obj.matrix_world
 
     warnings = []
+    # G178: honor the live selection in OBJECT mode too — it persists on
+    # me.vertices[i].select after the select verbs auto-exit edit mode.
     if obj.mode == 'EDIT':
         import bmesh
         bm = bmesh.from_edit_mesh(obj.data)
@@ -1290,10 +1303,18 @@ def coverage_region(params):
                       if e.verts[0].index in vset and e.verts[1].index in vset]
     else:
         me = obj.data
-        P = np.array([list(mat @ v.co) for v in me.vertices], dtype=float)
-        vidx = list(range(len(me.vertices)))
-        edge_pairs = [(e.vertices[0], e.vertices[1]) for e in me.edges]
-        warnings.append("object mode — reading the WHOLE mesh (select a region in edit mode to scope)")
+        sel_idx = [v.index for v in me.vertices if v.select]
+        if sel_idx:
+            vset = set(sel_idx)
+            P = np.array([list(mat @ me.vertices[i].co) for i in sel_idx], dtype=float)
+            vidx = sel_idx
+            edge_pairs = [(e.vertices[0], e.vertices[1]) for e in me.edges
+                          if e.vertices[0] in vset and e.vertices[1] in vset]
+        else:
+            P = np.array([list(mat @ v.co) for v in me.vertices], dtype=float)
+            vidx = list(range(len(me.vertices)))
+            edge_pairs = [(e.vertices[0], e.vertices[1]) for e in me.edges]
+            warnings.append("no selection — reading the WHOLE mesh")
 
     if len(P) < 4:
         return {"error": f"need ≥4 verts, have {len(P)}"}

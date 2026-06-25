@@ -275,7 +275,8 @@ def feel(
                  decomposes a limb into centerline + R(s) taper + cross-section and reports
                  empty ring bins as gaps (the direct continuity/void read). as_handle mints
                  the fitted axis line; as_curve mints the centerline as a Bézier to extend +
-                 re-sweep. Reads the edit-mode selection (whole mesh if none, warned).
+                 re-sweep. Reads the live selection (in OBJECT or EDIT mode — it
+                 persists on the mesh after select; whole mesh if none, warned).
                  Read-only (mints only on as_handle/as_curve).
                  ── SHAPING (SPEC-19): model=quadric fits a height-field analytic patch
                  h(u,v)=au²+bv²+cuv+du+ev+f over the selection's best-fit plane (linear least
