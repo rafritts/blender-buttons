@@ -57,6 +57,8 @@ def _one_quadric(f):
     else:
         out.append(f"  (u along {_fmt_num(p.get('axis_u'))}, v along {_fmt_num(p.get('axis_v'))}, "
                    f"normal {_fmt_num(p.get('normal'))}, origin {_fmt_num(p.get('frame_origin'))})")
+    if p.get("knobs_mm"):
+        out.append(f"  knobs in mm: {p.get('knobs_mm')}")
     rmm, tmm = f.get("residual_mm"), f.get("tol_mm")
     clean = isinstance(rmm, (int, float)) and isinstance(tmm, (int, float)) and rmm <= tmm
     verdict = ("clean" if clean else "HIGH residual: region is not height-field-like "

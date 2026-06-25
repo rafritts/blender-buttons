@@ -376,6 +376,31 @@ def _quadric_formula(a, b, c, d, e, f):
     return "h(u,v) = " + " ".join(terms).lstrip("+ ")
 
 
+def _quadric_knobs_mm(a, b, c, d, e, f, uvext):
+    """Translate the abstract coefficients into the millimetre space the model reasons in —
+    the dead-reckoning the server exists to kill (G178 follow-up). For each legible knob:
+    what it CONTRIBUTES to the surface now (rim vs centre, mm) and the leverage of an edit
+    (mm per +1.0 in the coefficient). Both measured at the patch RIM, where a coefficient's
+    effect is largest. a,b,c are 1/m so their reach scales with the half-span²; d,e are tilt
+    scaling with the half-span; f is the offset (already metres). Ru,Rv = the farthest u,v
+    from the patch centre. So 'raise a 6.16→9' stops being abstract: Δ2.84·(Δ1 leverage)."""
+    umin, umax, vmin, vmax = uvext
+    Ru = max(abs(umin), abs(umax))
+    Rv = max(abs(vmin), abs(vmax))
+    mm = 1000.0
+
+    def knob(name, coeff, lever):
+        return f"{name} {coeff*lever*mm:+.1f}mm [Δ1→{lever*mm:+.2f}mm]"
+
+    parts = [knob("a", a, Ru * Ru), knob("b", b, Rv * Rv)]
+    if abs(c) * Ru * Rv * mm >= 0.1:                       # twist: only when it shapes the surface
+        parts.append(knob("c", c, Ru * Rv))
+    if (abs(d) * Ru + abs(e) * Rv) * mm >= 0.1:            # tilt: skip near-zero noise
+        parts.append(f"d,e tilt {d*Ru*mm:+.1f}/{e*Rv*mm:+.1f}mm")
+    parts.append(f"f offset {f*mm:+.1f}mm")
+    return f"rim u±{Ru*mm:.0f}mm v±{Rv*mm:.0f}mm (vs centre): " + " · ".join(parts)
+
+
 def fit_quadric(np, P):
     """SPEC-19 Phase 1 — the first ANALYTIC basis: a height-field quadric
     h(u,v) = a·u² + b·v² + c·u·v + d·u + e·v + f over the best-fit plane, by linear least
@@ -417,6 +442,7 @@ def fit_quadric(np, P):
                    "d": round(d, 6), "e": round(e, 6), "f": round(f, 6),
                    "k_max": round(k1, 4), "k_min": round(k2, 4),
                    "shape": _quadric_shape(k1, k2),
+                   "knobs_mm": _quadric_knobs_mm(a, b, c, d, e, f, uvext),
                    "frame_origin": [round(x, 5) for x in O.tolist()],
                    "axis_u": [round(x, 4) for x in L.tolist()],
                    "axis_v": [round(x, 4) for x in U.tolist()],
@@ -547,6 +573,7 @@ def fit_heightfield(np, P, model, n_terms, progressive, tol_m):
         "params": {"a": round(a, 6), "b": round(b, 6), "c": round(c, 6),
                    "d": round(d, 6), "e": round(e, 6), "f": round(f, 6),
                    "shape": base["params"]["shape"], "n_bumps": len(bumps), "bumps": bumps,
+                   "knobs_mm": _quadric_knobs_mm(a, b, c, d, e, f, base["_uv_extent"]),
                    "frame_origin": base["params"]["frame_origin"],
                    "axis_u": base["params"]["axis_u"], "axis_v": base["params"]["axis_v"],
                    "normal": base["params"]["normal"]},
