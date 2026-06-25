@@ -559,6 +559,103 @@ def fit_heightfield(np, P, model, n_terms, progressive, tol_m):
     }
 
 
+# ───────────── analytic patch: bspline control grid (Phase 2) ─────────────
+
+_BSPLINE_DEG = 3
+
+
+def _bspline_knots(np, n_ctrl, deg=_BSPLINE_DEG):
+    """Clamped open-uniform knot vector: deg+1 zeros, uniform interior, deg+1 ones."""
+    n_int = max(n_ctrl - deg - 1, 0)
+    interior = [(i + 1) / (n_int + 1) for i in range(n_int)]
+    return np.array([0.0] * (deg + 1) + interior + [1.0] * (deg + 1))
+
+
+def _bspline_basis(np, t, knots, n_ctrl, deg=_BSPLINE_DEG):
+    """Cox-de-Boor recursion → (len(t), n_ctrl) basis matrix at params t∈[0,1]. The basis is a
+    partition of unity and non-negative, so the surface stays inside the control hull (no
+    overshoot) — the §1.1 legibility guarantee for a B-spline."""
+    t = np.clip(np.asarray(t, float), 0.0, 1.0 - 1e-9)
+    N = np.zeros((len(t), len(knots) - 1))
+    for i in range(len(knots) - 1):
+        N[:, i] = np.where((t >= knots[i]) & (t < knots[i + 1]), 1.0, 0.0)
+    for d in range(1, deg + 1):
+        Nn = np.zeros((len(t), len(knots) - 1 - d))
+        for i in range(len(knots) - 1 - d):
+            den1, den2 = knots[i + d] - knots[i], knots[i + d + 1] - knots[i + 1]
+            a = ((t - knots[i]) / den1 * N[:, i]) if den1 > 1e-12 else 0.0
+            b = ((knots[i + d + 1] - t) / den2 * N[:, i + 1]) if den2 > 1e-12 else 0.0
+            Nn[:, i] = a + b
+        N = Nn
+    return N[:, :n_ctrl]
+
+
+def fit_bspline(np, P, n_ctrl):
+    """SPEC-19 Phase 2 — the workhorse stitchable surface: a tensor-product cubic B-spline
+    height field over an m×m control grid, control points by LINEAR least squares given the
+    clamped knot vector. Each control point pulls LOCALLY and the surface is convex-hull
+    bounded (no overshoot) — admitted by §1.1. Round-trips via as_surface (the B-spline basis
+    isn't in the field-expr grammar), not a field expr."""
+    from .fields import _group_frame
+    O, L, U, V = _group_frame(np, P, "AUTO")
+    rel = P - O
+    u, v, h = rel @ L, rel @ U, rel @ V
+    umin, umax, vmin, vmax = float(u.min()), float(u.max()), float(v.min()), float(v.max())
+    deg = _BSPLINE_DEG
+    # control count: requested (basis_terms) or 5; never below deg+1, and keep m*m ≤ verts.
+    m = max(deg + 1, int(n_ctrl) if n_ctrl else 5)
+    while m > deg + 1 and m * m > len(P):
+        m -= 1
+
+    def _n01(a, lo, hi):
+        return (a - lo) / (hi - lo) if hi - lo > 1e-12 else np.zeros_like(a)
+
+    ku, kv = _bspline_knots(np, m), _bspline_knots(np, m)
+    Bu = _bspline_basis(np, _n01(u, umin, umax), ku, m)
+    Bv = _bspline_basis(np, _n01(v, vmin, vmax), kv, m)
+    A = (Bu[:, :, None] * Bv[:, None, :]).reshape(len(P), m * m)
+    try:
+        sol, *_ = np.linalg.lstsq(A, h, rcond=None)
+    except np.linalg.LinAlgError:
+        return None
+    dd = h - A @ sol
+    C = sol.reshape(m, m)
+    hv = float(np.var(h))
+    captured = (1.0 - float(np.var(dd)) / hv) if hv > 1e-18 else 1.0
+
+    def _height(uc, vc, _C=C, _ku=ku, _kv=kv, _m=m,
+                _ub=(umin, umax), _vb=(vmin, vmax)):
+        shp = np.shape(uc)
+        uf = np.asarray(uc, float).ravel()
+        vf = np.asarray(vc, float).ravel()
+        bu = _bspline_basis(np, (uf - _ub[0]) / (_ub[1] - _ub[0]) if _ub[1] - _ub[0] > 1e-12
+                            else np.zeros_like(uf), _ku, _m)
+        bv = _bspline_basis(np, (vf - _vb[0]) / (_vb[1] - _vb[0]) if _vb[1] - _vb[0] > 1e-12
+                            else np.zeros_like(vf), _kv, _m)
+        return np.einsum("ni,nj,ij->n", bu, bv, _C).reshape(shp)
+
+    eu, ev = (umax - umin), (vmax - vmin)
+    hspan = float(h.max() - h.min())
+    k = 4.0 * hspan / max(min(eu, ev) ** 2, 1e-6)        # rough curvature for tessellation
+    return {
+        "model": "bspline", "rank": 9,
+        "params": {"control_grid": f"{m}×{m}", "n_ctrl": m * m,
+                   "ctrl_height_range": [round(float(C.min()), 5), round(float(C.max()), 5)],
+                   "frame_origin": [round(x, 5) for x in O.tolist()],
+                   "axis_u": [round(x, 4) for x in L.tolist()],
+                   "axis_v": [round(x, 4) for x in U.tolist()],
+                   "normal": [round(x, 4) for x in V.tolist()]},
+        "residual": _rms(np, dd), "residual_max": float(np.max(np.abs(dd))) if len(dd) else 0.0,
+        "coverage": _grid_cov(np, _unit01(np, u), _unit01(np, v)),
+        "captured": round(captured, 4),
+        "formula": f"B-spline surface · {m}×{m} control grid "
+                   f"(each control point pulls locally, convex-hull bounded — no overshoot)",
+        "point": O, "normal": V,
+        "_frame": (O, L, U, V), "_uv_extent": (umin, umax, vmin, vmax), "_height": _height,
+        "_curv": (k, k),
+    }
+
+
 # ───────────────────────────── components ─────────────────────────────
 
 def _components(np, verts_idx, edges_pairs):
@@ -587,8 +684,8 @@ def _components(np, verts_idx, edges_pairs):
 # ───────────────────────────── the op ─────────────────────────────
 
 _RIGID = ["plane", "sphere", "cylinder", "cone", "ellipsoid", "torus", "swept_tube"]
-_ANALYTIC = ["quadric", "rbf", "gaussians"]               # SPEC-19 Phase 1 + 2 (height fields)
-_PLANNED = ["superquadric", "bspline", "thin_plate"]      # SPEC-19 Phase 2 (remaining)
+_ANALYTIC = ["quadric", "rbf", "gaussians", "bspline"]    # SPEC-19 Phase 1 + 2 (height fields)
+_PLANNED = ["superquadric", "thin_plate"]                 # SPEC-19 Phase 2 (remaining)
 
 
 def _fit_one(np, P, model, axis, bands, progressive=False, n_terms=0, tol_m=0.003):
@@ -638,6 +735,8 @@ def _fit_one(np, P, model, axis, bands, progressive=False, n_terms=0, tol_m=0.00
             else fit_quadric(np, P)
     elif model in ("rbf", "gaussians"):
         f = fit_heightfield(np, P, model, n_terms, True, tol_m)
+    elif model == "bspline":
+        f = fit_bspline(np, P, n_terms)
     else:
         return "BAD_MODEL", []
     return f, ([f] if f else [])

@@ -108,11 +108,11 @@ def feel(
     steps: tag(int, "[verify] rings to grow/shrink the selection when perturbing (default 1)") = 1,
     # fit (SPEC-14 / G100) — describe a selection as parametric form
     model: tag(str, "[fit] auto|plane|sphere|cylinder|cone|ellipsoid|torus|swept_tube | "
-                    "quadric|rbf|gaussians (SPEC-19: a region of quads → an editable "
-                    "height-field formula you read & edit in coefficient-space, then "
-                    "round-trip via edit op=field. quadric = gross dome/bowl/saddle; rbf/"
-                    "gaussians = base + localized bumps; add progressive=true to auto-layer "
-                    "bumps onto a quadric base)") = "auto",
+                    "quadric|rbf|gaussians|bspline (SPEC-19: a region of quads → an editable "
+                    "height-field surface. quadric = gross dome/bowl/saddle (round-trips via "
+                    "edit op=field); rbf/gaussians = base + localized bumps (progressive=true "
+                    "auto-layers them); bspline = workhorse control-grid surface, mints via "
+                    "as_surface and stitches at shared control rows)") = "auto",
     tol: tag(float, "[fit] residual threshold in mm for the clean/organic verdict (default ~3mm or 1% of the selection diagonal)") = None,
     per_component: tag(bool, "[fit] fit each connected sub-shell separately (never average a model across a gap)") = False,
     as_curve: tag(str, "[fit] mint the fitted swept_tube centerline as a named Bézier curve object (then extend it + extrude_along_curve to continue the form)") = "",

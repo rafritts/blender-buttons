@@ -145,12 +145,12 @@ check("C: captured is poor (the formula explains little)", r.get("captured", 1.0
       f"captured={r.get('captured')}")
 
 
-# ───────────────── D. Phase-2 menu refuses cleanly ─────────────────
-print("== SPEC19-D: the Phase-2 bases teach-error instead of silently failing ==")
+# ───────────────── D. unbuilt menu refuses cleanly ─────────────────
+print("== SPEC19-D: a not-yet-built basis teach-errors instead of silently failing ==")
 clean()
 g = make_grid(1.0, 1.0, subdiv=8)
-r = run("fit", model="bspline")
-check("D: model=bspline refuses with a Phase-2 teach error",
+r = run("fit", model="thin_plate")
+check("D: model=thin_plate refuses with a Phase-2 teach error",
       (not r.get("success")) and "Phase 2" in (r.get("error", "")), f"r={r}")
 
 
@@ -244,6 +244,39 @@ rrbf = run("fit", model="rbf", basis_terms=3, tol=1.0)
 check("G: model=rbf returns a layered height field with bumps",
       rrbf.get("success") and rrbf.get("model") == "rbf" and rrbf.get("params", {}).get("n_bumps", 0) >= 1,
       f"r={rrbf.get('model')} n={rrbf.get('params', {}).get('n_bumps')}")
+
+
+# ─────── H. BSPLINE — control-grid fit, refinement, mint+re-fit ───────
+print("== SPEC19-H: bspline control-grid surface — refines with more control points ==")
+clean()
+g = make_grid(1.2, 1.0, subdiv=24)
+bpy.context.view_layer.objects.active = g
+bpy.ops.object.mode_set(mode='EDIT')
+bm = bmesh.from_edit_mesh(g.data)
+for vv in bm.verts:                              # a smooth ripple: low control counts under-fit
+    x, yv = vv.co.x, vv.co.y
+    vv.co.z = 0.05 * math.sin(4 * x) + 0.04 * math.cos(5 * yv)
+bmesh.update_edit_mesh(g.data)
+bpy.ops.object.mode_set(mode='OBJECT')
+
+rh = run("fit", model="bspline", basis_terms=6, as_surface="BPatch", resolution="24x20")
+check("H: bspline success", rh.get("success"), rh.get("error"))
+check("H: reports a 6×6 control grid", rh.get("params", {}).get("control_grid") == "6×6",
+      f"grid={rh.get('params', {}).get('control_grid')}")
+check("H: 6×6 residual small (<2mm)", rh.get("residual_mm", 99) < 2.0, f"res={rh.get('residual_mm')}mm")
+check("H: minted patch 'BPatch'", rh.get("surface") == "BPatch", f"surface={rh.get('surface')}")
+bpy.context.view_layer.objects.active = g
+rc = run("fit", model="bspline", basis_terms=4)
+rf = run("fit", model="bspline", basis_terms=8)
+check("H: more control points → lower residual (4 > 6 > 8)",
+      rc.get("residual_mm", 0) > rh.get("residual_mm", 9) > rf.get("residual_mm", 9),
+      f"4={rc.get('residual_mm')} 6={rh.get('residual_mm')} 8={rf.get('residual_mm')}")
+# re-fit the minted patch — the mesh faithfully IS the B-spline surface
+patch = bpy.data.objects.get("BPatch")
+bpy.context.view_layer.objects.active = patch
+r2 = run("fit", model="bspline", basis_terms=6, target="BPatch")
+check("H: re-fit of the minted patch ≈ 0 residual (mesh is the surface)",
+      r2.get("residual_mm", 99) < 0.5, f"res={r2.get('residual_mm')}mm")
 
 
 # ───────────────── summary ─────────────────

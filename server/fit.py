@@ -69,9 +69,32 @@ def _one_quadric(f):
     return "\n".join(out)
 
 
+def _one_bspline(f):
+    """SPEC-19 Phase 2 — present the B-spline patch: the control-grid summary, the residual
+    honesty stamp, the measured frame, and the instantiate hint (it mints via as_surface, not
+    a field expr — the basis isn't in the expr grammar)."""
+    p = f.get("params", {})
+    cap = f.get("captured")
+    cap_s = f"{cap*100:.0f}%" if isinstance(cap, (int, float)) else "?"
+    out = [f"bspline patch — {p.get('control_grid', '?')} control grid", f"  {f.get('formula', '')}"]
+    out.append(f"  control height range {_fmt_num(p.get('ctrl_height_range'))}m   "
+               f"(u along {_fmt_num(p.get('axis_u'))}, v along {_fmt_num(p.get('axis_v'))}, "
+               f"normal {_fmt_num(p.get('normal'))})")
+    rmm, tmm = f.get("residual_mm"), f.get("tol_mm")
+    clean = isinstance(rmm, (int, float)) and isinstance(tmm, (int, float)) and rmm <= tmm
+    verdict = "clean" if clean else "HIGH residual — raise basis_terms or split the region"
+    out.append(f"  captured {cap_s} of height · residual {rmm}mm "
+               f"(max {f.get('residual_max_mm')}mm) · tol {tmm}mm — {verdict}")
+    out.append("  ⤷ instantiate with as_surface=<name> (then re-fit to verify); shares control "
+               "rows with a neighbour for a continuous seam (edit op=stitch, Phase 3)")
+    return "\n".join(out)
+
+
 def _one(f):
     if f.get("model") in ("quadric", "rbf", "gaussians"):
         return _one_quadric(f)
+    if f.get("model") == "bspline":
+        return _one_bspline(f)
     head = f.get("verdict", f.get("model", "?"))
     out = [head]
     pb = _params_block(f.get("model"), f.get("params", {}))
