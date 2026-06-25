@@ -68,6 +68,30 @@ def displace_quadric(obj, alpha, beta):
     bpy.ops.object.mode_set(mode='OBJECT')
 
 
+def make_superellipsoid(name, A, B, C, e1, e2, n=20):
+    """A point-cloud mesh sampling a known superellipsoid surface (fit reads verts)."""
+    def sg(a, e):
+        return math.copysign(abs(math.sin(a)) ** e, math.sin(a))
+
+    def cg(a, e):
+        return math.copysign(abs(math.cos(a)) ** e, math.cos(a))
+    verts = []
+    for i in range(n):
+        et = -math.pi / 2 + (i + 1) * (math.pi / (n + 1))
+        for j in range(2 * n):
+            om = -math.pi + j * (2 * math.pi / (2 * n))
+            verts.append((A * cg(et, e1) * cg(om, e2),
+                          B * cg(et, e1) * sg(om, e2), C * sg(et, e1)))
+    verts += [(0.0, 0.0, -C), (0.0, 0.0, C)]
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(verts, [], [])
+    me.update()
+    obj = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(obj)
+    bpy.context.view_layer.objects.active = obj
+    return obj
+
+
 # ───────────────── A. READ — recover an exact quadric ─────────────────
 print("== SPEC19-A: model=quadric recovers an exact height-field patch ==")
 clean()
@@ -277,6 +301,47 @@ bpy.context.view_layer.objects.active = patch
 r2 = run("fit", model="bspline", basis_terms=6, target="BPatch")
 check("H: re-fit of the minted patch ≈ 0 residual (mesh is the surface)",
       r2.get("residual_mm", 99) < 0.5, f"res={r2.get('residual_mm')}mm")
+
+
+# ─────── I. SUPERQUADRIC — recover a closed mass, mint a blob, re-fit ───────
+print("== SPEC19-I: superquadric recovers a closed mass + mints/re-fits a blob ==")
+clean()
+A0, B0, C0, E1, E2 = 0.55, 0.40, 0.30, 0.30, 0.30        # a rounded box (boxy both ways)
+make_superellipsoid("SQ", A0, B0, C0, E1, E2)
+r = run("fit", model="superquadric", as_surface="Blob", resolution="20x20")
+check("I: success", r.get("success"), r.get("error"))
+pp = r.get("params", {})
+got = sorted([pp.get("size_xy", [0, 0])[0], pp.get("size_xy", [0, 0])[1], pp.get("size_z", 0)])
+exp = sorted([A0, B0, C0])
+check("I: radii recovered (axis-permutation-robust, sorted)",
+      all(abs(g - e) < 0.03 for g, e in zip(got, exp)), f"got={got} exp={exp}")
+check("I: boxiness exponents recovered (both < 0.6 → boxy)",
+      pp.get("e1_profile", 9) < 0.6 and pp.get("e2_section", 9) < 0.6,
+      f"e1={pp.get('e1_profile')} e2={pp.get('e2_section')}")
+check("I: shape verdict names a box", "box" in pp.get("shape", ""), f"shape={pp.get('shape')}")
+check("I: residual small (closed mass fits)", r.get("residual_mm", 99) < 5.0,
+      f"res={r.get('residual_mm')}mm")
+check("I: minted blob 'Blob'", r.get("surface") == "Blob" and r.get("surface_verts", 0) > 50,
+      f"surface={r.get('surface')} verts={r.get('surface_verts')}")
+# re-fit the minted blob — the parametric mesh IS the superquadric
+blob = bpy.data.objects.get("Blob")
+bpy.context.view_layer.objects.active = blob
+r2 = run("fit", model="superquadric", target="Blob")
+check("I: re-fit of the minted blob low residual", r2.get("residual_mm", 99) < 8.0,
+      f"res={r2.get('residual_mm')}mm")
+got2 = sorted([r2.get("params", {}).get("size_xy", [0, 0])[0],
+               r2.get("params", {}).get("size_xy", [0, 0])[1], r2.get("params", {}).get("size_z", 0)])
+check("I: re-fit radii ≈ original (round-trip closed)",
+      all(abs(g - e) < 0.05 for g, e in zip(got2, exp)), f"got2={got2} exp={exp}")
+
+# a sphere reads as round (e≈1) — the exponent knob actually moves
+clean()
+make_superellipsoid("SP", 0.5, 0.5, 0.5, 1.0, 1.0)
+rs = run("fit", model="superquadric")
+check("J: a sphere reads as round (e1,e2 ≈ 1, shape=ellipsoid)",
+      abs(rs.get("params", {}).get("e1_profile", 0) - 1.0) < 0.2
+      and "ellipsoid" in rs.get("params", {}).get("shape", ""),
+      f"e1={rs.get('params', {}).get('e1_profile')} shape={rs.get('params', {}).get('shape')}")
 
 
 # ───────────────── summary ─────────────────

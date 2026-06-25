@@ -90,11 +90,34 @@ def _one_bspline(f):
     return "\n".join(out)
 
 
+def _one_superquadric(f):
+    """SPEC-19 Phase 2 — present the closed mass: the legible radii + squareness knobs, the
+    shape verdict, the residual stamp, and the instantiate/compose hints."""
+    p = f.get("params", {})
+    cap = f.get("captured")
+    cap_s = f"{cap*100:.0f}%" if isinstance(cap, (int, float)) else "?"
+    sxy = p.get("size_xy", [None, None])
+    out = [f"superquadric mass — {p.get('shape', '?')}", f"  {f.get('formula', '')}"]
+    out.append(f"  A={_fmt_num(sxy[0])} B={_fmt_num(sxy[1])} C={_fmt_num(p.get('size_z'))} m "
+               f"· e1 {_fmt_num(p.get('e1_profile'))} (profile) · e2 {_fmt_num(p.get('e2_section'))} "
+               f"(section) · centre {_fmt_num(p.get('center'))}")
+    rmm, tmm = f.get("residual_mm"), f.get("tol_mm")
+    clean = isinstance(rmm, (int, float)) and isinstance(tmm, (int, float)) and rmm <= tmm
+    verdict = "clean" if clean else "HIGH residual — region isn't a single closed mass"
+    out.append(f"  captured {cap_s} · residual {rmm}mm (max {f.get('residual_max_mm')}mm) · "
+               f"coverage {f.get('coverage')} · tol {tmm}mm — {verdict}")
+    out.append("  ⤷ instantiate with as_surface=<name> (closed blob mesh); merges with another "
+               "mass by smooth-min (edit op=graft mode=smin, Phase 3)")
+    return "\n".join(out)
+
+
 def _one(f):
     if f.get("model") in ("quadric", "rbf", "gaussians"):
         return _one_quadric(f)
     if f.get("model") == "bspline":
         return _one_bspline(f)
+    if f.get("model") == "superquadric":
+        return _one_superquadric(f)
     head = f.get("verdict", f.get("model", "?"))
     out = [head]
     pb = _params_block(f.get("model"), f.get("params", {}))

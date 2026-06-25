@@ -656,6 +656,194 @@ def fit_bspline(np, P, n_ctrl):
     }
 
 
+# ───────────── analytic mass: superquadric (Phase 2) ─────────────
+
+def _superq_io(np, q, A, B, C, e1, e2):
+    """Superellipsoid inside-outside function F (Solina form). F=1 on the surface, <1 inside."""
+    qx = np.abs(q[:, 0] / A) ** (2.0 / e2)
+    qy = np.abs(q[:, 1] / B) ** (2.0 / e2)
+    qz = np.abs(q[:, 2] / C) ** (2.0 / e1)
+    return np.nan_to_num((qx + qy) ** (e2 / e1) + qz, nan=1e6, posinf=1e6)
+
+
+def _superq_resid(np, q, p):
+    A, B, C, e1, e2 = p
+    F = _superq_io(np, q, A, B, C, e1, e2)
+    return np.sqrt(max(A * B * C, 1e-9)) * (F ** e1 - 1.0)
+
+
+def _superq_radial(np, q, p):
+    """Gross-Boult radial point-to-surface distance — the honest residual (the algebraic F-1 is
+    biased by distance; this projects each point radially onto the surface)."""
+    A, B, C, e1, e2 = p
+    F = _superq_io(np, q, A, B, C, e1, e2)
+    qn = np.linalg.norm(q, axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rad = qn * np.abs(1.0 - F ** (-e1 / 2.0))
+    return np.nan_to_num(rad, nan=0.0, posinf=0.0)
+
+
+def _superq_lm(np, q):
+    """Self-rolled Levenberg-Marquardt on the Solina residual (no scipy in Blender). Center +
+    rotation are fixed (PCA, by the caller); this optimizes (A,B,C,e1,e2) only."""
+    ext = np.abs(q).max(0)
+    p = np.array([max(ext[0], 1e-3), max(ext[1], 1e-3), max(ext[2], 1e-3), 1.0, 1.0])
+    lo = np.array([1e-3, 1e-3, 1e-3, 0.1, 0.1])
+    hi = np.array([1e4, 1e4, 1e4, 2.0, 2.0])
+    lam = 1e-3
+    for _ in range(60):
+        r0 = _superq_resid(np, q, p)
+        cost0 = float(np.sum(r0 ** 2))
+        J = np.zeros((len(r0), 5))
+        for k in range(5):
+            dp = np.zeros(5); dp[k] = max(1e-6, abs(p[k]) * 1e-5)
+            J[:, k] = (_superq_resid(np, q, p + dp) - r0) / dp[k]
+        H = J.T @ J
+        g = J.T @ r0
+        for _try in range(8):
+            try:
+                step = np.linalg.solve(H + lam * np.diag(np.diag(H) + 1e-12), -g)
+            except np.linalg.LinAlgError:
+                break
+            pn = np.clip(p + step, lo, hi)
+            if float(np.sum(_superq_resid(np, q, pn) ** 2)) < cost0:
+                p = pn; lam = max(lam * 0.5, 1e-9); break
+            lam *= 3.0
+        else:
+            break
+    rad = _superq_radial(np, q, p)
+    return p, _rms(np, rad), rad
+
+
+def _superq_shape(e1, e2):
+    """Name the mass from the two squareness exponents (≈1 round, →0 boxy, →2 pinched)."""
+    def lab(e):
+        return "boxy" if e < 0.6 else ("round" if e < 1.4 else "pinched")
+    z, xy = lab(e1), lab(e2)
+    if z == xy == "round":
+        return "ellipsoid (rounded mass)"
+    if z == xy == "boxy":
+        return "box (rounded cuboid)"
+    if z == xy == "pinched":
+        return "octahedron/diamond"
+    return f"{xy} cross-section, {z} profile"
+
+
+def fit_superquadric(np, P):
+    """SPEC-19 Phase 2 — the gross MASS of a closed blob (thumb, torso, pebble): a
+    superellipsoid |·|-power surface fit by nonlinear least squares. Legible knobs: A,B,C
+    radii (size) + e1,e2 exponents (boxiness/pinch). Center+orientation come from PCA; because
+    the superquadric has a DISTINGUISHED z-axis, each principal axis is tried as z and the best
+    fit kept. Native SDF → composes by smooth-min (Phase 3 graft). Mints via as_surface (a
+    closed parametric mesh), not a field expr."""
+    c = P.mean(0)
+    Q0 = P - c
+    cov = np.cov(Q0.T)
+    w, Vv = np.linalg.eigh(cov)
+    base = Vv[:, np.argsort(w)[::-1]]
+    best = None
+    for zk in range(3):
+        cols = [j for j in range(3) if j != zk] + [zk]
+        R = base[:, cols]
+        p, rms, rad = _superq_lm(np, Q0 @ R)
+        if best is None or rms < best[1]:
+            best = (p, rms, rad, R)
+    p, rms, rad, R = best
+    A, B, C, e1, e2 = (float(x) for x in p)
+    Ax, Ay, Az = R[:, 0], R[:, 1], R[:, 2]
+
+    def _surface_mesh(resolution, _p=(A, B, C, e1, e2), _R=R, _c=c):
+        return _superq_build(np, _p, _R, _c, resolution)
+
+    def _sdf(pts, _p=(A, B, C, e1, e2), _R=R, _c=c):
+        q = (np.asarray(pts, float) - _c) @ _R
+        return _superq_radial_signed(np, q, _p)
+
+    return {
+        "model": "superquadric", "rank": 10,
+        "params": {"center": [round(x, 5) for x in c.tolist()],
+                   "size_xy": [round(A, 5), round(B, 5)], "size_z": round(C, 5),
+                   "e1_profile": round(e1, 3), "e2_section": round(e2, 3),
+                   "shape": _superq_shape(e1, e2),
+                   "axis_x": [round(x, 4) for x in Ax.tolist()],
+                   "axis_y": [round(x, 4) for x in Ay.tolist()],
+                   "axis_z": [round(x, 4) for x in Az.tolist()]},
+        "residual": float(rms), "residual_max": float(np.max(rad)) if len(rad) else 0.0,
+        "coverage": _superq_coverage(np, Q0 @ R, A, B, C),
+        "captured": round(1.0 - min(float(rms) / (max(A, B, C) + 1e-9), 1.0), 4),
+        "formula": (f"superellipsoid · A={A:.3g} B={B:.3g} C={C:.3g} (radii), "
+                    f"e1={e1:.2g} (profile) e2={e2:.2g} (section)"),
+        "point": c, "normal": Az,
+        "_surface_mesh": _surface_mesh, "_sdf": _sdf,
+    }
+
+
+def _superq_coverage(np, q, A, B, C):
+    """Occupancy over the (azimuth, elevation) angular grid — a full blob covers ~all of it; a
+    fitted cap covers a fraction (guards the half-shell trap, like the rigid fits)."""
+    qn = q / (np.array([A, B, C]) + 1e-12)
+    nrm = np.linalg.norm(qn, axis=1) + 1e-12
+    d = qn / nrm[:, None]
+    az = (np.arctan2(d[:, 1], d[:, 0]) / (2 * np.pi)) + 0.5
+    el = np.arccos(np.clip(d[:, 2], -1, 1)) / np.pi
+    return _grid_cov(np, az, el)
+
+
+def _superq_radial_signed(np, q, p):
+    A, B, C, e1, e2 = p
+    F = _superq_io(np, q, A, B, C, e1, e2)
+    qn = np.linalg.norm(q, axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        d = qn * (1.0 - F ** (-e1 / 2.0))          # <0 inside, >0 outside
+    return np.nan_to_num(d, nan=0.0, posinf=0.0, neginf=-min(A, B, C))
+
+
+def _superq_build(np, p, R, c, resolution):
+    """A closed UV-superellipsoid mesh: rings of 2n verts over the elevation eta, plus two
+    poles. Returns (world_verts, faces). The §1.4 instantiation of a superquadric fit."""
+    A, B, C, e1, e2 = p
+    try:
+        n = max(6, int((resolution or "16x16").lower().split("x")[0]))
+    except Exception:
+        n = 16
+    nom = 2 * n
+
+    def sg(ang, e):
+        return np.sign(np.sin(ang)) * (np.abs(np.sin(ang)) ** e)
+
+    def cg(ang, e):
+        return np.sign(np.cos(ang)) * (np.abs(np.cos(ang)) ** e)
+
+    etas = np.linspace(-np.pi / 2, np.pi / 2, n + 2)[1:-1]   # interior rings (skip poles)
+    oms = np.linspace(-np.pi, np.pi, nom + 1)[:-1]
+    verts = []
+    ring_idx = []
+    for et in etas:
+        row = []
+        for om in oms:
+            x = A * cg(et, e1) * cg(om, e2)
+            y = B * cg(et, e1) * sg(om, e2)
+            z = C * sg(et, e1)
+            row.append(len(verts))
+            verts.append((x, y, z))
+        ring_idx.append(row)
+    south = len(verts); verts.append((0.0, 0.0, -C))
+    north = len(verts); verts.append((0.0, 0.0, C))
+    faces = []
+    for i in range(len(ring_idx) - 1):
+        a, b = ring_idx[i], ring_idx[i + 1]
+        for j in range(nom):
+            jn = (j + 1) % nom
+            faces.append((a[j], a[jn], b[jn], b[j]))
+    for j in range(nom):                                     # pole fans
+        jn = (j + 1) % nom
+        faces.append((south, ring_idx[0][jn], ring_idx[0][j]))
+        faces.append((north, ring_idx[-1][j], ring_idx[-1][jn]))
+    Vloc = np.array(verts, dtype=float)
+    Wv = c[None, :] + Vloc @ R.T                             # local → world
+    return [tuple(float(x) for x in p_) for p_ in Wv.tolist()], faces
+
+
 # ───────────────────────────── components ─────────────────────────────
 
 def _components(np, verts_idx, edges_pairs):
@@ -684,8 +872,8 @@ def _components(np, verts_idx, edges_pairs):
 # ───────────────────────────── the op ─────────────────────────────
 
 _RIGID = ["plane", "sphere", "cylinder", "cone", "ellipsoid", "torus", "swept_tube"]
-_ANALYTIC = ["quadric", "rbf", "gaussians", "bspline"]    # SPEC-19 Phase 1 + 2 (height fields)
-_PLANNED = ["superquadric", "thin_plate"]                 # SPEC-19 Phase 2 (remaining)
+_ANALYTIC = ["quadric", "rbf", "gaussians", "bspline", "superquadric"]   # SPEC-19 Phase 1 + 2
+_PLANNED = ["thin_plate"]                                 # SPEC-19 Phase 2 (remaining)
 
 
 def _fit_one(np, P, model, axis, bands, progressive=False, n_terms=0, tol_m=0.003):
@@ -737,6 +925,8 @@ def _fit_one(np, P, model, axis, bands, progressive=False, n_terms=0, tol_m=0.00
         f = fit_heightfield(np, P, model, n_terms, True, tol_m)
     elif model == "bspline":
         f = fit_bspline(np, P, n_terms)
+    elif model == "superquadric":
+        f = fit_superquadric(np, P)
     else:
         return "BAD_MODEL", []
     return f, ([f] if f else [])
@@ -829,9 +1019,18 @@ def _mint_surface(np, f, name, resolution, tol_mm):
     sampling of it. Mirrors the as_curve minting idiom (read-time, opt-in side effect)."""
     if bpy.data.objects.get(name) is not None:
         return {"surface_error": f"object '{name}' already exists"}
+    if "_surface_mesh" in f:                              # closed parametric (superquadric)
+        verts, faces = f["_surface_mesh"](resolution)
+        me = bpy.data.meshes.new(name)
+        me.from_pydata(verts, [], faces)
+        me.update()
+        obj = bpy.data.objects.new(name, me)
+        bpy.context.scene.collection.objects.link(obj)
+        bpy.context.view_layer.update()
+        return {"surface": obj.name, "surface_res": [len(faces)], "surface_verts": len(verts)}
     if "_frame" not in f or "_height" not in f or "_uv_extent" not in f:
-        return {"surface_error": f"as_surface needs a height-field fit; model={f['model']} "
-                                 f"mints no patch (use a quadric/bspline/rbf fit)"}
+        return {"surface_error": f"as_surface needs a height-field or superquadric fit; "
+                                 f"model={f['model']} mints no patch"}
     O, L, U, V = f["_frame"]
     umin, umax, vmin, vmax = f["_uv_extent"]
     nu, nv = _resolution(np, f, resolution, tol_mm)
