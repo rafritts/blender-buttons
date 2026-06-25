@@ -149,3 +149,37 @@ no-coordinate convenience the tube `points=`/`between=` API exists to provide. C
 clean up the tube end-cap triangulation (or n-gon cap) so a straight tube is self-intersection
 free, and/or add a `tube`-family `between`/`points` that guarantees a manifold prism for the
 straight case.
+
+---
+
+## G178 — `feel op=fit` (SPEC-19) can't be scoped by `select`: the selection verbs exit to OBJECT mode, fit only honors the selection in EDIT mode
+
+The documented SPEC-19 read loop is `select op=in_sphere handle=… ; feel op=fit model=quadric`
+(spec §4). In practice the fit almost always reports `⚠ object mode — fitting the WHOLE mesh`
+and ignores the patch, because the selection-makers and the reader disagree about where the
+live selection lives:
+
+- The `select` family are `EDIT_MODE_TOOLS`: the dispatcher auto-enters EDIT, makes the
+  selection (which persists on `mesh.vertices[i].select`), then a `finally` block force-exits
+  back to OBJECT (`extension/server.py:496-500`). Steady state after any `select` is OBJECT mode.
+- `feel op=fit` reads the selection ONLY when `obj.mode == 'EDIT'` (`extension/fit.py:1170`);
+  the OBJECT-mode branch (`:1184`) ignores the stored selection and fits the whole mesh. Same
+  decoupling in `coverage_region` (`:1279`).
+
+So the mode and the selection are decoupled: the patch IS recorded on the mesh, but `fit`
+won't look at it unless Blender happens to be in EDIT. The only way a scoped fit landed during
+the dogfood was a fluke — the `finally` mode-exit is wrapped in a bare `except Exception: pass`
+(`server.py:499`); when that exit silently fails, Blender is left in EDIT and the NEXT `fit`
+sees the selection. That flaky exception path is the sole route by which `select → fit`
+currently works; the intended OBJECT-mode steady state breaks the whole §4 round-trip read.
+
+Candidate fix: decouple `fit` from the mode — in the OBJECT-mode branch read the stored
+selection (`[v for v in me.vertices if v.select]`) and fall back to whole-mesh only when
+nothing is selected, mirroring the dispatcher's own documented contract ("the selection
+survives on the mesh," `server.py:439`). Apply the same to `coverage_region`. This is the
+general shape of the gap: any read op that scopes to "the live selection" but is NOT itself an
+`EDIT_MODE_TOOL` is unreachable by the selection verbs, because those verbs return to OBJECT
+mode before the reader runs. Phase-1/Phase-2 fits themselves are correct — when a selection
+WAS in scope, quadric recovered a 30-vert brow patch at 99% captured / 0.24mm residual, the
+as_net curve-net closed to 0.0mm (Gordon == direct), the as_surface mint re-fit to an exact
+0.0mm round-trip, and progressive layered base+4 bumps. The math works; it just can't be aimed.
