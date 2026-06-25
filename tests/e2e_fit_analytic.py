@@ -16,6 +16,7 @@ Runs the WORKING-TREE extension headless. Covers Phase 1's acceptance criteria:
 
 Usage: flatpak run org.blender.Blender --background --python /abs/path/to/tests/e2e_fit_analytic.py
 """
+import math
 import os
 import sys
 
@@ -189,6 +190,60 @@ r3 = run("fit", model="quadric", as_surface="Patch2")
 sr = r3.get("surface_res") or [0, 0]
 check("E: default resolution suggested when surface_res unset",
       r3.get("surface") == "Patch2" and min(sr) >= 4, f"res={sr}")
+
+
+# ─────── F. PROGRESSIVE — quadric gross form + a localized bump on the residual ───────
+print("== SPEC19-F: progressive layering recovers a quadric base + a Gaussian bump ==")
+clean()
+CX, CY, AMP, W = 0.18, 0.10, 0.09, 0.16
+g = make_grid(1.2, 1.0, subdiv=24)
+bpy.context.view_layer.objects.active = g
+bpy.ops.object.mode_set(mode='EDIT')
+bm = bmesh.from_edit_mesh(g.data)
+for vv in bm.verts:                          # z = gentle dome + ONE off-centre bump
+    x, yv = vv.co.x, vv.co.y
+    vv.co.z = (-0.08 * x * x - 0.08 * yv * yv
+               + AMP * math.exp(-((x - CX) ** 2 + (yv - CY) ** 2) / (W * W)))
+bmesh.update_edit_mesh(g.data)
+bpy.ops.object.mode_set(mode='OBJECT')
+
+# tol is the single residual target: a loose default leaves the base "clean" and adds no
+# bumps; ask for sub-mm fidelity (tol=1.0) and progressive layers until it gets there.
+rb = run("fit", model="quadric")                                            # base: bump left behind
+rp = run("fit", model="quadric", progressive=True, basis_terms=3, tol=1.0)  # layered: explains it
+check("F: progressive success", rp.get("success"), rp.get("error"))
+pf = rp.get("params", {})
+base_res = rb.get("residual_mm", 0)
+prog_res = rp.get("residual_mm", 99)
+check("F: at least one bump placed", pf.get("n_bumps", 0) >= 1, f"n_bumps={pf.get('n_bumps')}")
+check("F: progressive residual substantially < base (the bump got explained)",
+      prog_res < 0.4 * base_res, f"prog={prog_res} base={base_res}")
+check("F: progressive residual now small (<4mm, a 90mm bump ~96% explained)",
+      prog_res < 4.0, f"res={prog_res}mm")
+bumps = pf.get("bumps", [])
+near = any(abs(abs(b.get("cu", 9)) - CX) < 0.12 and abs(abs(b.get("cv", 9)) - CY) < 0.12
+           and 0.04 < abs(b.get("amp", 0)) < 0.16 for b in bumps)
+check("F: a bump lands near the authored centre with ~right amplitude", near, f"bumps={bumps}")
+
+# the layered expr round-trips through the field sandbox
+emitted = rp.get("expr")
+clean()
+g2 = make_grid(1.2, 1.0, subdiv=24)
+bpy.context.view_layer.objects.active = g2
+bpy.ops.object.mode_set(mode='EDIT')
+bpy.ops.mesh.select_all(action='SELECT')
+bpy.ops.object.mode_set(mode='OBJECT')
+rr = run("field", axis="auto", channel="axis:v", field_mode="add", expr=emitted)
+check("F: layered expr parses + runs in the field sandbox", rr.get("success"), rr.get("error"))
+r2 = run("fit", model="quadric", progressive=True, basis_terms=3, tol=1.0)
+check("F: re-fit of the applied layered field reproduces the small residual (round-trip closed)",
+      r2.get("residual_mm", 99) < 3.0, f"res={r2.get('residual_mm')}mm")
+
+# rbf model is the standalone layered fit (base + bumps), same machinery, on the active mesh
+rrbf = run("fit", model="rbf", basis_terms=3, tol=1.0)
+check("G: model=rbf returns a layered height field with bumps",
+      rrbf.get("success") and rrbf.get("model") == "rbf" and rrbf.get("params", {}).get("n_bumps", 0) >= 1,
+      f"r={rrbf.get('model')} n={rrbf.get('params', {}).get('n_bumps')}")
 
 
 # ───────────────── summary ─────────────────

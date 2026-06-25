@@ -108,14 +108,18 @@ def feel(
     steps: tag(int, "[verify] rings to grow/shrink the selection when perturbing (default 1)") = 1,
     # fit (SPEC-14 / G100) — describe a selection as parametric form
     model: tag(str, "[fit] auto|plane|sphere|cylinder|cone|ellipsoid|torus|swept_tube | "
-                    "quadric (SPEC-19: a region of quads → an editable height-field formula "
-                    "h(u,v)=au²+bv²+cuv+du+ev+f you read & edit in coefficient-space, then "
-                    "round-trip via edit op=field)") = "auto",
+                    "quadric|rbf|gaussians (SPEC-19: a region of quads → an editable "
+                    "height-field formula you read & edit in coefficient-space, then "
+                    "round-trip via edit op=field. quadric = gross dome/bowl/saddle; rbf/"
+                    "gaussians = base + localized bumps; add progressive=true to auto-layer "
+                    "bumps onto a quadric base)") = "auto",
     tol: tag(float, "[fit] residual threshold in mm for the clean/organic verdict (default ~3mm or 1% of the selection diagonal)") = None,
     per_component: tag(bool, "[fit] fit each connected sub-shell separately (never average a model across a gap)") = False,
     as_curve: tag(str, "[fit] mint the fitted swept_tube centerline as a named Bézier curve object (then extend it + extrude_along_curve to continue the form)") = "",
     as_surface: tag(str, "[fit] mint the height-field fit (quadric/bspline/rbf) as a real quad-grid mesh patch with this name — the formula sampled to geometry (SPEC-19 §1.4); re-fit it to verify") = "",
     surface_res: tag(str, "[fit] as_surface tessellation as 'UxV' (e.g. 16x12); default is suggested from curvature + the faceting tolerance. (= spec's resolution=)") = "",
+    progressive: tag(bool, "[fit] auto-layer: fit a quadric gross form, then matching-pursuit localized bumps onto its residual until residual<tol (the §2 block-mass-then-features rhythm)") = False,
+    basis_terms: tag(int, "[fit] rbf/gaussians/progressive: max number of bumps to place (default 4)") = 0,
 ) -> str:
     """
     Feel a mesh — structure, measurements, correctness. Read-only (no status block).
@@ -370,7 +374,8 @@ def feel(
         # anyway, so no capability is lost — only X/Y need to be forced explicitly.
         fit_axis = "auto" if axis == "Z" else axis
         return fit.fit_region(target, model, fit_axis, tol, per_component, bands,
-                              as_handle, as_curve, lod, as_surface, surface_res)
+                              as_handle, as_curve, lod, as_surface, surface_res,
+                              progressive, basis_terms)
     if o == "coverage":
         return fit.coverage_region(target)
     return unknown("feel", "op", op, _OPS)

@@ -37,16 +37,26 @@ def _params_block(model, params):
 
 
 def _one_quadric(f):
-    """SPEC-19 Phase 1 — present the analytic patch as an editable formula: the legible
-    h(u,v) face, the shape verdict, the residual honesty stamp, the measured frame, and the
-    ready-to-run round-trip apply line (edit the coefficients, then run it)."""
+    """SPEC-19 Phase 1/2 — present the analytic patch as an editable formula: the legible
+    h(u,v) face (gross quadric + any localized bumps), the shape verdict, the residual honesty
+    stamp, the measured frame, and the ready-to-run round-trip apply line (edit the
+    coefficients, then run it)."""
     p = f.get("params", {})
     cap = f.get("captured")
     cap_s = f"{cap*100:.0f}%" if isinstance(cap, (int, float)) else "?"
-    out = [f"quadric patch — {p.get('shape', '?')}", f"  {f.get('formula', '')}"]
-    out.append(f"  k_max {_fmt_num(p.get('k_max'))}/m · k_min {_fmt_num(p.get('k_min'))}/m   "
-               f"(u along {_fmt_num(p.get('axis_u'))}, v along {_fmt_num(p.get('axis_v'))}, "
-               f"normal {_fmt_num(p.get('normal'))}, origin {_fmt_num(p.get('frame_origin'))})")
+    label = f.get("model", "quadric")
+    n_bumps = p.get("n_bumps")
+    head = f"{label} patch — {p.get('shape', '?')}"
+    if n_bumps:
+        head += f" + {n_bumps} bump{'s' if n_bumps != 1 else ''}"
+    out = [head, f"  {f.get('formula', '')}"]
+    if p.get("k_max") is not None:
+        out.append(f"  k_max {_fmt_num(p.get('k_max'))}/m · k_min {_fmt_num(p.get('k_min'))}/m   "
+                   f"(u along {_fmt_num(p.get('axis_u'))}, v along {_fmt_num(p.get('axis_v'))}, "
+                   f"normal {_fmt_num(p.get('normal'))}, origin {_fmt_num(p.get('frame_origin'))})")
+    else:
+        out.append(f"  (u along {_fmt_num(p.get('axis_u'))}, v along {_fmt_num(p.get('axis_v'))}, "
+                   f"normal {_fmt_num(p.get('normal'))}, origin {_fmt_num(p.get('frame_origin'))})")
     rmm, tmm = f.get("residual_mm"), f.get("tol_mm")
     clean = isinstance(rmm, (int, float)) and isinstance(tmm, (int, float)) and rmm <= tmm
     verdict = ("clean" if clean else "HIGH residual: region is not height-field-like "
@@ -60,7 +70,7 @@ def _one_quadric(f):
 
 
 def _one(f):
-    if f.get("model") == "quadric":
+    if f.get("model") in ("quadric", "rbf", "gaussians"):
         return _one_quadric(f)
     head = f.get("verdict", f.get("model", "?"))
     out = [head]
@@ -83,12 +93,13 @@ def _one(f):
 
 
 def fit_region(target, model, axis, tol, per_component, bands, as_handle, as_curve, lod,
-               as_surface="", resolution=""):
+               as_surface="", resolution="", progressive=False, basis_terms=0):
     params = {
         "target": target, "model": model, "axis": axis,
         "per_component": per_component, "bands": bands,
         "as_handle": as_handle, "as_curve": as_curve, "lod": lod,
         "as_surface": as_surface, "resolution": resolution,
+        "progressive": progressive, "basis_terms": basis_terms,
     }
     if tol is not None:
         params["tol"] = tol

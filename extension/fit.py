@@ -429,7 +429,133 @@ def fit_quadric(np, P):
         "apply_channel": "axis:v",
         "point": O, "normal": V,
         "_frame": (O, L, U, V), "_uv_extent": uvext, "_height": _h,
-        "_curv": (abs(k1), abs(k2)),
+        "_curv": (abs(k1), abs(k2)), "_coeffs": (a, b, c, d, e, f), "_uvh": (u, v, h),
+    }
+
+
+# ───────────── analytic patch: rbf bumps + progressive layering (Phase 2) ─────────────
+
+def _bump_expr(bumps):
+    """The bump sum in the `field` grammar (u along L = `z`, v along U = `x`). Each term is a
+    localized Gaussian — exp is in the field sandbox, so the whole thing round-trips."""
+    terms = []
+    for bp in bumps:
+        cu, cv, w, amp = bp["cu"], bp["cv"], bp["w"], bp["amp"]
+        terms.append(f"{amp:+.6g}*exp(-((z-({cu:.6g}))*(z-({cu:.6g}))"
+                     f"+(x-({cv:.6g}))*(x-({cv:.6g})))/{w*w:.6g})")
+    return " ".join(terms)
+
+
+def _bump_formula(bumps):
+    """The legible face: each bump as amp·exp(−((u−cu)²+(v−cv)²)/w²), one local feature each."""
+    return " ".join(
+        f"{bp['amp']:+.4g}·exp(−((u{-bp['cu']:+.3g})²+(v{-bp['cv']:+.3g})²)/{bp['w']**2:.3g})"
+        for bp in bumps)
+
+
+def _gaussian_layer(np, u, v, target, n_terms, w_candidates, tol_m):
+    """Matching-pursuit fit of localized Gaussian bumps to the `target` heights (the leftover a
+    gross fit missed). Each round: seed a center at the largest residual, choose its WIDTH by a
+    small sweep over `w_candidates` (the feature's scale isn't known a priori), then jointly
+    refit ALL amplitudes by linear LSQ. Repeat until n_terms placed or RMS residual < tol.
+    Centers come from the data (peaks), widths from the sweep — each term stays LOCAL +
+    INTERPRETABLE (§1.1). Returns (bumps, residual_array)."""
+    centers = []                                   # (cu, cv, w)
+    resid = np.asarray(target, dtype=float).copy()
+    amps = np.zeros(0)
+
+    def design(cs):
+        return np.column_stack([np.exp(-((u - cu) ** 2 + (v - cv) ** 2) / (w ** 2))
+                                for (cu, cv, w) in cs])
+
+    for _ in range(max(1, int(n_terms))):
+        if _rms(np, resid) <= tol_m:
+            break
+        k = int(np.argmax(np.abs(resid)))
+        cu, cv = float(u[k]), float(v[k])
+        best = None                                # (rms, w, amps, resid)
+        for w in w_candidates:
+            cs = centers + [(cu, cv, float(w))]
+            amps_try, *_ = np.linalg.lstsq(design(cs), target, rcond=None)
+            r = target - design(cs) @ amps_try
+            rms = _rms(np, r)
+            if best is None or rms < best[0]:
+                best = (rms, float(w), amps_try, r)
+        centers.append((cu, cv, best[1]))
+        amps, resid = best[2], best[3]
+    bumps = [{"cu": round(cu, 5), "cv": round(cv, 5), "w": round(w, 5),
+              "amp": round(float(amps[i]), 6)}
+             for i, (cu, cv, w) in enumerate(centers)]
+    return bumps, resid
+
+
+def fit_heightfield(np, P, model, n_terms, progressive, tol_m):
+    """SPEC-19 Phase 2 — the layered height field: a quadric GROSS form + a sum of localized
+    Gaussian bumps fit to what the gross form missed (matching-pursuit, §2 progressive). One
+    honest layer at a time — read `base dome + cheekbone bump + brow ridge`, never fifty
+    coupled coefficients. model=rbf/gaussians always layers; model=quadric progressive=true
+    auto-layers until the residual clears tol. Emits the combined formula + a round-tripping
+    `expr` (the bumps are exp terms the field sandbox already speaks)."""
+    base = fit_quadric(np, P)
+    if base is None:
+        return None
+    if model == "quadric" and not progressive:
+        return base
+    u, v, h = base["_uvh"]
+    a, b, c, d, e, f = base["_coeffs"]
+    O, L, U, V = base["_frame"]
+    umin, umax, vmin, vmax = base["_uv_extent"]
+    quad_h = a * u * u + b * v * v + c * u * v + d * u + e * v + f
+    # width sweep candidates: grid-cell spacing × {…}, capped at 60% of the patch — narrow
+    # tubercles to broad lobes, the scale the feature actually sits at.
+    eu, ev = (umax - umin), (vmax - vmin)
+    spacing = float(np.sqrt(max(eu * ev, 1e-9) / max(len(u), 1)))
+    cap = 0.6 * min(eu, ev)
+    w_candidates = sorted({min(spacing * m, cap)
+                           for m in (1.2, 1.7, 2.4, 3.4, 4.7, 6.6, 9.2, 13.0)})
+    nt = n_terms if n_terms else 4
+    # 1. matching-pursuit on the base residual → WHERE the bumps go + each one's width.
+    bumps0, _ = _gaussian_layer(np, u, v, h - quad_h, nt, w_candidates, tol_m)
+    # 2. JOINT re-solve: fit the quadric base AND the bump amplitudes together, so the base
+    #    no longer competes with the bumps for the gross curvature (otherwise the quadric LSQ
+    #    steals part of each bump, inflating the residual the bumps then chase).
+    cols = [u * u, v * v, u * v, u, v, np.ones(len(u))]
+    for bp in bumps0:
+        cols.append(np.exp(-((u - bp["cu"]) ** 2 + (v - bp["cv"]) ** 2) / (bp["w"] ** 2)))
+    A = np.column_stack(cols)
+    sol, *_ = np.linalg.lstsq(A, h, rcond=None)
+    a, b, c, d, e, f = (float(x) for x in sol[:6])
+    amps = sol[6:]
+    bumps = [{**bp, "amp": round(float(amps[i]), 6)} for i, bp in enumerate(bumps0)]
+    dd = h - A @ sol
+
+    def _h2(uc, vc, _bumps=bumps, _a=a, _b=b, _c=c, _d=d, _e=e, _f=f):
+        out = _a * uc * uc + _b * vc * vc + _c * uc * vc + _d * uc + _e * vc + _f
+        for bp in _bumps:
+            out = out + bp["amp"] * np.exp(
+                -((uc - bp["cu"]) ** 2 + (vc - bp["cv"]) ** 2) / (bp["w"] ** 2))
+        return out
+
+    hv = float(np.var(h))
+    captured = (1.0 - float(np.var(dd)) / hv) if hv > 1e-18 else 1.0
+    formula = base["formula"] + (("  +  " + _bump_formula(bumps)) if bumps else "")
+    bexpr = _bump_expr(bumps)
+    quad_poly = (f"{a:.6g}*z*z {b:+.6g}*x*x {c:+.6g}*z*x {d:+.6g}*z {e:+.6g}*x {f:+.6g}")
+    expr = f"({quad_poly}{(' + ' + bexpr) if bexpr else ''}) - y"
+    return {
+        "model": model, "rank": 8,
+        "params": {"a": round(a, 6), "b": round(b, 6), "c": round(c, 6),
+                   "d": round(d, 6), "e": round(e, 6), "f": round(f, 6),
+                   "shape": base["params"]["shape"], "n_bumps": len(bumps), "bumps": bumps,
+                   "frame_origin": base["params"]["frame_origin"],
+                   "axis_u": base["params"]["axis_u"], "axis_v": base["params"]["axis_v"],
+                   "normal": base["params"]["normal"]},
+        "residual": _rms(np, dd), "residual_max": float(np.max(np.abs(dd))) if len(dd) else 0.0,
+        "coverage": base["coverage"], "captured": round(captured, 4),
+        "formula": formula, "expr": expr, "apply_channel": "axis:v",
+        "point": O, "normal": V,
+        "_frame": (O, L, U, V), "_uv_extent": base["_uv_extent"], "_height": _h2,
+        "_curv": base["_curv"],
     }
 
 
@@ -461,11 +587,11 @@ def _components(np, verts_idx, edges_pairs):
 # ───────────────────────────── the op ─────────────────────────────
 
 _RIGID = ["plane", "sphere", "cylinder", "cone", "ellipsoid", "torus", "swept_tube"]
-_ANALYTIC = ["quadric"]                                   # SPEC-19 Phase 1
-_PLANNED = ["superquadric", "bspline", "rbf", "thin_plate", "gaussians"]  # SPEC-19 Phase 2
+_ANALYTIC = ["quadric", "rbf", "gaussians"]               # SPEC-19 Phase 1 + 2 (height fields)
+_PLANNED = ["superquadric", "bspline", "thin_plate"]      # SPEC-19 Phase 2 (remaining)
 
 
-def _fit_one(np, P, model, axis, bands):
+def _fit_one(np, P, model, axis, bands, progressive=False, n_terms=0, tol_m=0.003):
     """Fit one group of points. Returns (chosen_fit, candidates) where candidates is the
     list of every attempted fit (for model=auto's verdict trail)."""
     d = _axis_dir(np, P, axis)
@@ -508,7 +634,10 @@ def _fit_one(np, P, model, axis, bands):
     elif model == "swept_tube":
         f = fit_swept_tube(np, P, d, bands)
     elif model == "quadric":
-        f = fit_quadric(np, P)
+        f = fit_heightfield(np, P, "quadric", n_terms, True, tol_m) if progressive \
+            else fit_quadric(np, P)
+    elif model in ("rbf", "gaussians"):
+        f = fit_heightfield(np, P, model, n_terms, True, tol_m)
     else:
         return "BAD_MODEL", []
     return f, ([f] if f else [])
@@ -637,15 +766,18 @@ def fit_region(params):
         return {"error": f"axis must be X|Y|Z|auto, got {axis!r}"}
     per_component = bool(params.get("per_component", False))
     bands = int(params.get("bands", 0) or 0)
+    progressive = bool(params.get("progressive", False))
+    n_terms = int(params.get("basis_terms", 0) or 0)
     as_handle = (params.get("as_handle", "") or "").strip()
     as_curve = (params.get("as_curve", "") or "").strip()
     as_surface = (params.get("as_surface", "") or "").strip()
     resolution = (params.get("resolution", "") or "").strip()
     target = (params.get("target", "") or "").strip()
     if model in _PLANNED:
-        return {"error": f"model={model!r} is SPEC-19 Phase 2 (not built yet). Phase 1 ships "
-                         f"model=quadric — a height-field analytic patch you read & edit as a "
-                         f"formula. Rigid primitives available: {'|'.join(_RIGID)}."}
+        return {"error": f"model={model!r} is SPEC-19 Phase 2 (not built yet). Height-field "
+                         f"analytic patches available now: {'|'.join(_ANALYTIC)} "
+                         f"(add progressive=true to layer bumps onto a quadric). "
+                         f"Rigid primitives: {'|'.join(_RIGID)}."}
     if model not in (_RIGID + _ANALYTIC + ["auto"]):
         return {"error": f"model must be auto|{'|'.join(_RIGID + _ANALYTIC)}, got {model!r}"}
 
@@ -684,7 +816,7 @@ def fit_region(params):
     tol_mm = float(tol_param) if tol_param not in (None, 0, 0.0) else max(3.0, 0.01 * _diag_mm(np, P))
 
     def finish_one(P_):
-        f, cands = _fit_one(np, P_, model, axis, bands)
+        f, cands = _fit_one(np, P_, model, axis, bands, progressive, n_terms, tol_mm / 1000.0)
         if f == "BAD_MODEL" or f is None:
             return None, cands
         f["verdict"], f["clean"] = _verdict(np, f, tol_mm)
