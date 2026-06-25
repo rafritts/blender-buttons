@@ -17,6 +17,7 @@ from . import (
     assembly,
     bands,
     collab,
+    compose,
     connectors,
     curves,
     designs,
@@ -60,6 +61,7 @@ _TOOL_MODULES = (
     primitives,
     curves,
     connectors,
+    compose,     # SPEC-19 Phase 3: graft (SDF smooth-min) / stitch (watertight quilt)
     objects,
     transforms,
     queries,
@@ -213,6 +215,7 @@ TOPO_CHECK_TOOLS = {
     "subdivide_selection", "grid_fill", "merge_by_distance", "delete_geometry",
     "separate_selection", "bridge_handles", "boolean", "apply_modifiers", "remesh",
     "join_objects", "round_corners", "bevel",
+    "graft", "stitch",                       # SPEC-19 Phase 3 (create/weld geometry)
 }
 
 # SPEC-16 (feedback P1.4): the ambient `feel` delta only earns its keep on ops that

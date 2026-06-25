@@ -35,19 +35,6 @@ contradicts the intuitive "set up the prototype, scatter it" workflow. Candidate
 
 ---
 
-## G153 — `object op=join` is the only weld primitive and it topology-nukes swept attachments; no clean handle-to-body attach
-
-Attaching a swept tube handle to a hollow vessel has no middle path: keep separate (gap at
-endpoints after any assembly rotate) or `join` (43 non-manifold edges, χ=5, 109
-self-intersections on a mug+handle here). `edit op=connect`/`bridge` want boundary handles on
-mesh rims, not "seat this tube endpoint on a curved wall." The spec's failure mode ("handle
-join lumps / open boundaries") matched exactly; undo was the only recovery. Candidate fix: an
-`attach`/`weld_endpoints` primitive that moves tube endpoints to live `feel op=aim` handles,
-optionally fuses only the contact patches (or boolean-union with cleanup), and reports
-remaining boundary loops — the relational version of join for two-part props.
-
----
-
 ## G157 — `select`/`component_mode` can leave edit-mode selection state out of sync with the agent's assumed mode
 
 Several `select op=by_axis` / `component_mode` calls returned status in OBJECT mode while
@@ -108,7 +95,8 @@ empty space) have no surface to address against, so `add type=tube|helix|curve` 
 *divine* coordinates — the one operation with no grounded, intent-space alternative (grounded
 extrudes via `extrude until_contact`/`down=` are fine). This is the **root** that [G161]
 (spline_tube self-intersects on a typed path) and [G171] (no bend read on a baked tube) are
-symptoms of, and it is the caller [G153]'s weld kernel lacks. NOT net-new: `edit op=field`
+symptoms of, and the grounded path the old weld-kernel gap (G153, now superseded by SPEC-19
+Phase 3 `edit op=graft mode=smin`) lacked. NOT net-new: `edit op=field`
 already speaks vectors in a measured `tangent_normal` frame via `expr_x/y/z`; this gap is the
 *uniform application* of that existing language to the sweep family — a path grown from a
 handle as vectors in its measured `(n,u,v)` basis, optionally a function `f(t)`, with an

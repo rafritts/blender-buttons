@@ -8,7 +8,7 @@ selects the operation. The flat handlers manage entering Edit Mode on `target`.
 from typing import Literal
 
 from server._core import mcp
-from server import editmode, finishes, rings, bands, introspect, modifiers, fields
+from server import editmode, finishes, rings, bands, introspect, modifiers, fields, compose
 from ._common import tag, unknown, teach
 
 _OPS = ["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
@@ -17,7 +17,7 @@ _OPS = ["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
         "taper_section", "shape_profile", "flute", "field", "scale_rings", "band", "trace",
         "boolean", "subdivide", "bridge",
         "connect", "reshape", "resample", "strands", "relax", "slide", "poke", "inset",
-        "grid_fill"]
+        "grid_fill", "graft", "stitch"]
 
 
 @mcp.tool(name="edit")
@@ -30,11 +30,11 @@ def edit(
                 "band", "trace",
                 "boolean", "subdivide",
                 "bridge", "connect", "reshape", "resample", "strands", "relax", "slide",
-                "poke", "inset", "grid_fill"],
+                "poke", "inset", "grid_fill", "graft", "stitch"],
     target: tag(str, "mesh object to edit (empty=active)") = "",
     # bridge — weld two boundary handles (SPEC-07 Phase 5 / G10)
-    a: tag(str, "[bridge/connect] first boundary handle (order-independent); [resample] the rim handle to resample") = "",
-    b: tag(str, "[bridge] second boundary handle to weld") = "",
+    a: tag(str, "[bridge/connect] first boundary handle (order-independent); [resample] the rim handle to resample; [graft/stitch] first OBJECT to merge") = "",
+    b: tag(str, "[bridge] second boundary handle to weld; [graft/stitch] second OBJECT to merge") = "",
     # bridge curvature dials (G58 — pass-through to Bridge Edge Loops; defaults = straight)
     bridge_cuts: tag(int, "[bridge] intermediate loops across the span (0=straight strut; raise to bow it)") = 0,
     smoothness: tag(float, "[bridge] tangent bow of the cuts (native default 1.0; needs bridge_cuts>0)") = 1.0,
@@ -159,6 +159,10 @@ def edit(
     bool_op: tag(str, "[boolean] DIFFERENCE|UNION|INTERSECT") = "DIFFERENCE",
     solver: tag(str, "[boolean] EXACT|FAST") = "EXACT",
     hide_cutter: tag(bool, "[boolean] hide the cutter afterward") = True,
+    # graft / stitch (SPEC-19 Phase 3) — algebraic compose; a/b are the two objects
+    blend: tag(float, "[graft] smooth-min fillet radius k (m) — the ONE legible blend number; 0 = a hard union") = 0.0,
+    resolution: tag(int, "[graft] marching-tetrahedra voxel resolution per axis (default 48; higher = finer, slower)") = 0,
+    keep: tag(bool, "[graft/stitch] keep the two source objects (default False = the merge replaces them)") = False,
     # relax (G49) — redistribute spacing, shape preserved
     iterations: tag(int, "[relax] smoothing passes") = 5,
     strength: tag(float, "[relax] per-pass factor 0..1") = 0.5,
@@ -294,6 +298,17 @@ def edit(
       grid_fill   — fill a selected closed edge loop with a clean quad grid (re-flow a
                     hole/region instead of a fan). One even-vert loop selected.
                     (span, grid_offset)
+      graft       — ALGEBRAIC MERGE (SPEC-19 Phase 3): convert two CLOSED masses to
+                    signed-distance fields, smooth-min union them, and marching-tetrahedra
+                    mesh the result — watertight by construction. blend=k is the ONE
+                    fillet-radius number (0 = hard union). The clean mass-to-mass /
+                    handle-to-body weld that join topology-nukes and bridge/connect can't
+                    do (supersedes G153). Replaces the two sources (keep=True retains).
+                    (a, b, mode=smin, blend, resolution, name, keep)
+      stitch      — weld two surface patches that SHARE a boundary into one watertight
+                    quilt (matched sampling + boundary weld → a C0 seam, no crack). Refuses
+                    if the seams aren't coincident — align + match sampling first.
+                    (a, b, name, keep)
     """
     o = op.lower().strip()
     # G23 move 3 — teaching errors for ops whose key input has no safe default.
@@ -310,6 +325,10 @@ def edit(
                     "edit op=strands a=pipe.top b=spout.base count=7 jitter=0.2"),
         "boolean": (bool(cutter), "cutter=<object to cut with>",
                     "edit op=boolean target=block cutter=drill bool_op=DIFFERENCE"),
+        "graft":   (bool(a and b), "a and b (two objects to merge)",
+                    "edit op=graft a=thumb b=palm mode=smin blend=0.02"),
+        "stitch":  (bool(a and b), "a and b (two patches sharing a boundary)",
+                    "edit op=stitch a=cheek b=brow"),
         "extrude_along_curve": (bool(curve), "curve=<curve to sweep along>",
                     "edit op=extrude_along_curve target=ring curve=path"),
         "round":   (bool(corners), "corners=[...] (named corners to round)",
@@ -412,4 +431,8 @@ def edit(
         return editmode.inset_faces(thickness, depth, individual, label, target)
     if o == "grid_fill":
         return editmode.grid_fill(span, grid_offset, label, target)
+    if o == "graft":
+        return compose.graft(a, b, mode, blend, resolution, name, keep, label)
+    if o == "stitch":
+        return compose.stitch(a, b, name, keep, label)
     return unknown("edit", "op", op, _OPS)

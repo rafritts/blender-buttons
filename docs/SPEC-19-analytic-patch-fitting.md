@@ -1,10 +1,16 @@
 # SPEC-19 — Analytic Patch Fitting: Geometry as Editable Math
 
-_Status: **PHASE 1 BUILT & VERIFIED** (commit pending) — `feel op=fit model=quadric` ships the
-READ + the round-trip `expr` emission; Phases 2–3 remain DESIGNED. Phase 1 landed on the proposed
-verb home (§3.0: extend `feel op=fit`, reuse `edit op=field` as the writer — no new verb) and is
-covered end-to-end by `tests/e2e_fit_analytic.py` (exact coefficient recovery, the field
-round-trip closes, a fold refuses with high residual, the Phase-2 menu teach-errors). Captures the
+_Status: **ALL THREE PHASES BUILT & VERIFIED.** Phase 1 — `feel op=fit model=quadric` (the READ
++ round-trip `expr`). Phase 2 — the full basis menu (`quadric`/`rbf`/`gaussians`/`bspline`/
+`superquadric`), `progressive=` bump layering, `as_surface=`/`resolution=` patch minting, and the
+`as_net=` Gordon curve-net. Phase 3 — `edit op=graft mode=smin` (SDF smooth-min → marching
+tetrahedra, supersedes G153) and `edit op=stitch` (matched-sampling watertight quilt). Landed on
+the proposed verb home (§3.0: extend `feel op=fit`, reuse `edit op=field` as the writer, add
+`graft`/`stitch` to the `edit` compose family — no new verb). Covered end-to-end by
+`tests/e2e_fit_analytic.py` (groups A–K: coefficient recovery, the field round-trip closes, folds
+refuse, mint→re-fit, progressive layering, bspline/superquadric recovery, the curve-net closes +
+Gordon agrees) and `tests/e2e_compose.py` (graft is a watertight manifold, the fillet adds
+material, stitch welds a crack-free seam). Captures the
 round-trip the model needs in order to
 **shape** a surface, not just assemble primitives: *select a region of quads → express it as an
 editable analytic formula (with residual) → reason and edit in coefficient-space → instantiate
@@ -290,16 +296,22 @@ primitives to *shaping* a surface.
    (so in-plane `u,v` = field `z,x` and height = field `y`); the emitted apply line
    `edit op=field channel=axis:v field_mode=add expr="(quadric) - y"` lands every vert on the fitted
    surface (verified). No write *primitive* added, no instantiate (`as_surface`), no compose yet.
-2. **Phase 2 — the full menu + progressive fit + the round-trip.** Add `superquadric`, `bspline`,
-   `rbf`/`thin_plate`; `progressive=`/`residual=` layering; `as_surface=`+`resolution=` minting; and
-   verify that an `edit op=field` of an edited formula **re-fits to the intended coefficients**
-   (the closed loop, §4). Also the **curve-net face** (`as_net=`): emit the fit as two families of
-   iso-curves with the Gordon node-reconciliation so the net closes (§2). The bulk of the value.
-3. **Phase 3 — COMPOSE (the research; supersedes G153).** `edit op=stitch` (B-spline / curve-net shared-boundary
-   C0/C1 — the net's boundary curves are the shared objects — + matched boundary sampling → watertight quilt) and `edit op=graft mode=smin blend=<k>`
-   (convert parts to SDFs, smooth-min blend, marching-cubes mesh — the **fillet radius is one
-   number**, the merge monster reduced to arithmetic). Highest risk; the merge we currently cannot do
-   cleanly becomes algebraic. Retopo of the result stays out of scope.
+2. **Phase 2 — the full menu + progressive fit + the round-trip. ✅ BUILT.** `superquadric`
+   (nonlinear LSQ, self-rolled Levenberg-Marquardt on the Solina residual), `bspline` (tensor
+   cubic control grid, linear LSQ), `rbf`/`gaussians` (matching-pursuit bumps + a JOINT base+bump
+   re-solve); `progressive=` layering (`residual=` is subsumed — the server is stateless per call,
+   so progressive does the whole read-residual-then-fit-finer loop in one call); `as_surface=`+
+   `resolution=` minting (suggested-then-chosen tessellation); and the **curve-net face**
+   (`as_net=`): two families of iso-curve Béziers whose nodes coincide by construction, with the
+   Gordon/Coons bilinear reconstruction reported as the "two faces agree" stamp (§2). `thin_plate`
+   stays the lone planned basis (teach-errors).
+3. **Phase 3 — COMPOSE. ✅ BUILT (supersedes G153).** `edit op=graft mode=smin blend=<k>` converts
+   both parts to signed-distance fields (BVH-nearest, signed by the face normal), smooth-min unions
+   them (the **fillet radius is one number** `k`), and meshes the result with **marching
+   tetrahedra** (a tiny unambiguous case table — always watertight/manifold; no scipy/skimage in
+   Blender). `edit op=stitch` welds two boundary-sharing patches into one watertight quilt (matched
+   sampling + a world-space boundary weld; refuses when the seam isn't coincident). The merge we
+   could not do cleanly is now algebraic. Retopo of the result stays out of scope.
 
 Each phase is independently shippable and dogfoodable. Phase 1 is the smoke test; Phase 3 is the
 destination.
@@ -327,6 +339,12 @@ destination.
 
 ## 9. Wiring checklist (per the architecture)
 
+_All items below are **✅ DONE**: solvers + emitters in `extension/fit.py`; `graft`/`stitch` in
+`extension/compose.py`; the `feel op=fit` / `edit op=graft|stitch` threading in `server/`; the
+classification in `extension/server.py`; the doc + guidance updates; G153 deleted; e2e in
+`tests/e2e_fit_analytic.py` (A–K) + `tests/e2e_compose.py`._
+
+
 - **`extension/fit.py`** — new `model=` solvers (`quadric` linear LSQ first; then `superquadric`,
   `bspline`, `rbf`/`thin_plate`); the **coefficient-block + `expr` emitter** (reuse the SPEC-13
   `field` grammar so the formula round-trips); `progressive`/`residual` layering; `as_surface=` +
@@ -339,9 +357,10 @@ destination.
 - **`extension/fields.py` / `server/verbs/edit.py`** — *no change to the writer*; confirm the
   `fit`-emitted `expr` parses in the `field` sandbox (shared grammar test). Document the loop in the
   `field` op help.
-- **Phase 3 only — `extension/connectors.py` + `server/verbs/edit.py`** — `op=stitch` (B-spline
-  boundary continuity + matched sampling) and `op=graft mode=smin` (SDF blend → marching cubes).
-  Classify both as mutating + EDIT-mode in `extension/server.py`.
+- **Phase 3 — `extension/compose.py` (new) + `server/compose.py` + `server/verbs/edit.py`** —
+  `op=graft mode=smin` (SDF smooth-min → **marching tetrahedra**) and `op=stitch` (matched-sampling
+  boundary weld). Classified as mutating + connectivity-changing (`TOPO_CHECK_TOOLS`) in
+  `extension/server.py` — object-level ops (they take two named objects), so NOT auto-edit-mode.
 - **`extension/server.py`** — `fit` stays a read (already non-undoable); `as_surface` minting is a
   mutating op (takes the undo lock).
 - **`GUIDANCE_FOR_LLMS.md`** — a short "shaping a surface: fit a region to an editable formula
@@ -350,7 +369,7 @@ destination.
   sheet.
 - **`docs/art_pipeline.md`** — the sculpt/retopo destination stage gains these verb names in its
   TELLS/DONE-WHEN; note retopo remains downstream.
-- **`gaps.md`** — on Phase 3 landing, **delete G153** (the graft it supersedes).
+- **`gaps.md`** — G153 **deleted** (graft supersedes it); the lingering cross-reference updated.
 - **Tests** — `tests/e2e_fit_analytic.py`: fit a known synthetic quadric patch, assert recovered
   coefficients within tol + residual ≈ 0; **round-trip** — `field` a known `expr` onto a grid, then
   `fit` it back, assert coefficient recovery (the §4 loop); a folded patch under `model=quadric`

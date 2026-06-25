@@ -201,5 +201,24 @@ loop lives in coefficient-space, the most legible thing you have:
 **The residual is load-bearing.** A high residual is not a failure to paper over — it is the tool
 telling you the basis can't describe this region (a fold, an overhang, a ragged multi-feature
 blob). It **refuses honestly** rather than emit a plausible fiction. When that happens, split the
-selection or pick a finer basis — don't push the bad formula through. (Phase 2 adds the rest of the
-menu — `superquadric`, `bspline`, `rbf` — plus progressive layering and the curve-net face.)
+selection or pick a finer basis — don't push the bad formula through.
+
+**The rest of the menu (you read/edit each as a few legible numbers):**
+- `model=rbf` / `progressive=true` — a quadric base **+ localized bumps** (cheekbone, brow). Each
+  bump is one `amp·exp(−r²/w²)` term; `progressive=true tol=<mm>` auto-layers them onto a quadric
+  until the residual clears `tol`. Round-trips via `edit op=field` like the quadric.
+- `model=bspline basis_terms=N` — a workhorse control-grid surface (each control point pulls
+  locally, no overshoot). Mints with `as_surface=<name>`; doesn't round-trip via `field` (mint +
+  re-fit instead).
+- `model=superquadric` — the gross **mass of a closed blob** (A,B,C radii + e1,e2 boxiness). Mints
+  a blob with `as_surface=`.
+- `as_surface=<name> [surface_res=UxV]` — sample any height-field fit to a real mesh patch.
+- `as_net=<name>` — emit the fit as a **net of drawable iso-curves** (the legible face); edit one
+  section line, re-fit to verify. The net closes by construction.
+
+**Compose (SPEC-19 Phase 3) — merge parts as algebra, not topology surgery:**
+- `edit op=graft a=A b=B mode=smin blend=<k>` — smooth-min union of two closed masses; the fillet
+  radius is the one number `k`. Watertight by construction (marching tetrahedra). Replaces the two
+  sources (keep=True to retain). This is the clean handle-to-body / mass-to-mass merge.
+- `edit op=stitch a=A b=B` — weld two patches that share a (coincident) boundary into one
+  watertight quilt. Refuses if their seams don't coincide — match the sampling first.

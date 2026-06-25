@@ -45,6 +45,10 @@ straight from high-poly → materials → lighting → render.
   - Small details present: screws, pins, rivets, seams, engraving, checkering.
   - Subdivision surface or dense geometry; poly count is high.
   - Booleans / sculpt detail baked into the form.
+  - Separate masses merged *algebraically*, not by topology surgery: `edit op=graft a=… b=…
+    mode=smin blend=<k>` smooth-min-unions two closed parts with a one-number fillet radius
+    (watertight by construction); `edit op=stitch` welds two boundary-sharing patches into one
+    quilt (SPEC-19 Phase 3 — supersedes the old `join` weld-monster).
 - **DONE WHEN:** Close-up renders hold up; no edge looks mathematically sharp.
 
 ## Stage 5 — Retopology *(skip for portfolio renders)*
