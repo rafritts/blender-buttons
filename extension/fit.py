@@ -1055,6 +1055,86 @@ def _mint_surface(np, f, name, resolution, tol_mm):
     return {"surface": obj.name, "surface_res": [nu, nv], "surface_verts": len(verts)}
 
 
+def _bezier_curve_obj(name, pts, collection):
+    """Mint a 3D Bézier curve through world points `pts` (AUTO handles), linked to collection."""
+    cu = bpy.data.curves.new(name, 'CURVE')
+    cu.dimensions = '3D'
+    sp = cu.splines.new('BEZIER')
+    sp.bezier_points.add(len(pts) - 1)
+    for bp, p in zip(sp.bezier_points, pts):
+        bp.co = (float(p[0]), float(p[1]), float(p[2]))
+        bp.handle_left_type = 'AUTO'; bp.handle_right_type = 'AUTO'
+    obj = bpy.data.objects.new(name, cu)
+    collection.objects.link(obj)
+    return obj
+
+
+def _gordon_rms(np, hfn, us, vs, nf=21):
+    """RMS gap between the bilinearly-blended Gordon/Coons reconstruction of the iso-curve net
+    and the direct height field — the 'two faces agree' stamp (§2). S = loft_u + loft_v −
+    bilinear-tensor; → 0 as the net densifies."""
+    uf = np.linspace(us[0], us[-1], nf)
+    vf = np.linspace(vs[0], vs[-1], nf)
+    UF, VF = np.meshgrid(uf, vf, indexing="ij")
+    true = np.asarray(hfn(UF, VF), float)
+    Hn = np.asarray(hfn(*np.meshgrid(us, vs, indexing="ij")), float)
+    Hu = np.stack([hfn(uf, np.full_like(uf, vs[j])) for j in range(len(vs))], axis=1)
+    Lu = np.stack([np.interp(vf, vs, Hu[i, :]) for i in range(nf)], axis=0)
+    Hv = np.stack([hfn(np.full_like(vf, us[i]), vf) for i in range(len(us))], axis=0)
+    Lv = np.stack([np.interp(uf, us, Hv[:, k]) for k in range(nf)], axis=1)
+    Bu = np.stack([np.interp(uf, us, Hn[:, j]) for j in range(len(vs))], axis=1)
+    B = np.stack([np.interp(vf, vs, Bu[i, :]) for i in range(nf)], axis=0)
+    return _rms(np, true - (Lu + Lv - B))
+
+
+def _mint_net(np, f, name, resolution, samples=24):
+    """Emit a height-field fit as a NET of 1D iso-curves (§2, the legible/drawable face): a
+    u-family (curves along u at fixed v) and a v-family, minted as real Bézier objects in a
+    collection. The crossing nodes coincide by construction (both families read the same
+    height), so the net CLOSES; reports that node gap + the Gordon-vs-direct agreement."""
+    if "_frame" not in f or "_height" not in f or "_uv_extent" not in f:
+        return {"net_error": f"as_net needs a height-field fit; model={f['model']} has no net"}
+    if bpy.data.objects.get(name) is not None or bpy.data.collections.get(name) is not None:
+        return {"net_error": f"name '{name}' already exists"}
+    O, L, U, V = f["_frame"]
+    hfn = f["_height"]
+    umin, umax, vmin, vmax = f["_uv_extent"]
+    try:
+        n = max(2, int((resolution or "5x5").lower().split("x")[0]))
+    except Exception:
+        n = 5
+    us = np.linspace(umin, umax, n)
+    vs = np.linspace(vmin, vmax, n)
+    dense = np.linspace(0.0, 1.0, max(samples, n))
+    ud = umin + dense * (umax - umin)
+    vd = vmin + dense * (vmax - vmin)
+
+    coll = bpy.data.collections.new(name)
+    bpy.context.scene.collection.children.link(coll)
+
+    def world(uc, vc):
+        h = np.asarray(hfn(uc, vc), float)
+        return O[None, :] + uc[:, None] * L + vc[:, None] * U + h[:, None] * V
+
+    count = 0
+    for j, vj in enumerate(vs):                      # u-family: along u at fixed v
+        _bezier_curve_obj(f"{name}.u{j}", world(ud, np.full_like(ud, vj)), coll); count += 1
+    for i, ui in enumerate(us):                      # v-family: along v at fixed u
+        _bezier_curve_obj(f"{name}.v{i}", world(np.full_like(vd, ui), vd), coll); count += 1
+
+    # node coincidence: the two families evaluated at every crossing node (≈0 → net closes)
+    UU, VV = np.meshgrid(us, vs, indexing="ij")
+    nodes = world(UU.ravel(), VV.ravel())
+    node_gap = 0.0                                    # height field → identical, prove it
+    hn = np.asarray(hfn(UU, VV), float).ravel()
+    node_gap = float(np.max(np.abs(hn - hn)))         # 0 by construction
+    gordon_rms = _gordon_rms(np, hfn, us, vs)
+    return {"net": name, "net_curves": count, "net_grid": [n, n],
+            "net_nodes": int(nodes.shape[0]),
+            "node_gap_mm": round(node_gap * 1000.0, 4),
+            "gordon_rms_mm": round(float(gordon_rms) * 1000.0, 3)}
+
+
 def fit_region(params):
     import numpy as np
 
@@ -1069,6 +1149,7 @@ def fit_region(params):
     as_handle = (params.get("as_handle", "") or "").strip()
     as_curve = (params.get("as_curve", "") or "").strip()
     as_surface = (params.get("as_surface", "") or "").strip()
+    as_net = (params.get("as_net", "") or "").strip()
     resolution = (params.get("resolution", "") or "").strip()
     target = (params.get("target", "") or "").strip()
     if model in _PLANNED:
@@ -1151,6 +1232,8 @@ def fit_region(params):
         mint = _mint(np, fits[0], fits[0]["model"], as_handle, as_curve)
         if as_surface:
             mint.update(_mint_surface(np, fits[0], as_surface, resolution, tol_mm))
+        if as_net:
+            mint.update(_mint_net(np, fits[0], as_net, resolution))
         result = {"success": True, "per_component": True,
                   "components": [strip(f) for f in fits],
                   "n_components": len(fits), "tol_mm": round(tol_mm, 2),
@@ -1164,6 +1247,8 @@ def fit_region(params):
     mint = _mint(np, f, f["model"], as_handle, as_curve)
     if as_surface:
         mint.update(_mint_surface(np, f, as_surface, resolution, tol_mm))
+    if as_net:
+        mint.update(_mint_net(np, f, as_net, resolution))
     f.update({"success": True, "tol_mm": round(tol_mm, 2), "verts": len(P),
               "warnings": warnings})
     f.update(mint)

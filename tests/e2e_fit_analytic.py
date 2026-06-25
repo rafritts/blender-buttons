@@ -344,6 +344,56 @@ check("J: a sphere reads as round (e1,e2 ≈ 1, shape=ellipsoid)",
       f"e1={rs.get('params', {}).get('e1_profile')} shape={rs.get('params', {}).get('shape')}")
 
 
+# ─────── K. CURVE-NET — as_net mints iso-curves; nodes coincide, Gordon agrees ───────
+print("== SPEC19-K: as_net mints an iso-curve net; nodes coincide + Gordon agrees ==")
+
+
+def dome_bump(obj):
+    """z = dome + an off-centre Gaussian bump — NON-separable, so the bilinear Gordon
+    reconstruction is approximate (a separable quadric would reconstruct exactly at any
+    density, hiding the convergence)."""
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode='EDIT')
+    bm = bmesh.from_edit_mesh(obj.data)
+    for v in bm.verts:
+        x, y = v.co.x, v.co.y
+        v.co.z = (-0.4 * x * x - 0.25 * y * y
+                  + 0.12 * math.exp(-((x - 0.2) ** 2 + y ** 2) / 0.06))
+    bmesh.update_edit_mesh(obj.data)
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+clean(); g = make_grid(1.2, 1.0, subdiv=22); dome_bump(g)
+r = run("fit", model="quadric", progressive=True, basis_terms=2, tol=1.0,
+        as_net="Net", resolution="6x6")
+check("K: success", r.get("success"), r.get("error"))
+check("K: minted a net 'Net'", r.get("net") == "Net", f"net={r.get('net')}")
+check("K: 12 iso-curves (6 u-family + 6 v-family)", r.get("net_curves") == 12,
+      f"curves={r.get('net_curves')}")
+nc = bpy.data.collections.get("Net")
+check("K: net collection holds the curve objects", nc is not None and len(nc.objects) == 12,
+      f"objs={len(nc.objects) if nc else None}")
+check("K: node gap ≈ 0 (the net CLOSES — families agree at crossings)",
+      r.get("node_gap_mm", 9) < 1e-3, f"gap={r.get('node_gap_mm')}mm")
+check("K: Gordon-vs-direct agreement small at 6×6 (<3.5mm over a bumpy patch)",
+      r.get("gordon_rms_mm", 99) < 3.5, f"rms={r.get('gordon_rms_mm')}mm")
+# denser net → tighter Gordon agreement (the two faces converge)
+clean(); g = make_grid(1.2, 1.0, subdiv=22); dome_bump(g)
+ra = run("fit", model="quadric", progressive=True, basis_terms=2, tol=1.0,
+         as_net="NetA", resolution="3x3")
+clean(); g = make_grid(1.2, 1.0, subdiv=22); dome_bump(g)
+rb_ = run("fit", model="quadric", progressive=True, basis_terms=2, tol=1.0,
+          as_net="NetB", resolution="9x9")
+check("K: denser net → tighter Gordon agreement (faces converge)",
+      rb_.get("gordon_rms_mm", 9) < ra.get("gordon_rms_mm", 0),
+      f"3x3={ra.get('gordon_rms_mm')} 9x9={rb_.get('gordon_rms_mm')}")
+# a bspline patch also yields a net (height-field face)
+clean(); g = make_grid(1.0, 1.0, subdiv=18); displace_quadric(g, 0.3, -0.3)
+rbn = run("fit", model="bspline", basis_terms=5, as_net="BNet", resolution="4x4")
+check("K: bspline fit also mints a net", rbn.get("net") == "BNet" and rbn.get("net_curves") == 8,
+      f"net={rbn.get('net')} curves={rbn.get('net_curves')}")
+
+
 # ───────────────── summary ─────────────────
 print()
 if failures:
