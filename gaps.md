@@ -150,3 +150,49 @@ clean up the tube end-cap triangulation (or n-gon cap) so a straight tube is sel
 free, and/or add a `tube`-family `between`/`points` that guarantees a manifold prism for the
 straight case.
 
+
+---
+
+## G179 — no material-slot removal: a mesh can be consolidated *to* the right faces but not *trimmed* to the right slot count
+
+Prepping a frankenstein character (two skeletal meshes `object op=join`ed into one — 7 material
+slots, but the target game asset declares 4) for an in-game-compatible slot layout. `material
+op=assign` cleanly moved the surplus faces onto the correct slots, leaving three slots at **0
+faces** — but nothing in the schema can then *remove* them. Neither `material` (set/assign/
+toon/…) nor `object` (info/join/split/rename/…) exposes slot removal, and Blender's one-click
+**Material Properties ▸ ⌄ ▸ "Remove Unused Slots"** is unreachable. So a mesh that must match an
+external asset's exact slot list (game-mod round-trip, FBX hand-off) can be reassigned correctly
+yet never brought to the right slot *count* from the server — the work has to finish in the UI.
+Candidate fix: `material op=remove_slot slot=N` + `op=remove_unused_slots` (drop every zero-face
+slot), and/or a `consolidate` that reassigns-then-trims in one call. Pairs with the export-prep
+naming need (slot names must match the target asset).
+
+---
+
+## G180 — no `.blend` append: combining two existing scenes forces an out-of-band `bpy` script
+
+Building a two-character workbench by bringing a fully-textured rig+mesh out of one saved
+`.blend` into another (the everyday **File ▸ Append**). `file op=import` covers mesh interchange
+formats (obj/stl/ply/glb/gltf/fbx) but **not** appending objects/collections from a `.blend`.
+With the donor already a packed `.blend`, re-importing its source GLB throws away the assemble
+step's wired+packed materials, so the only route was a headless `bpy.data.libraries.load` script
+run *outside* the server (plus a manual parent-aware translate, since nudging a parented mesh
+*and* its armature double-moves the mesh — see the shift gotcha). A user who "doesn't know how to
+import a .blend" cannot be helped by the toolkit at all here. Candidate fix: `file op=append
+path=<blend> [name=<object/collection substr>] [link=false]`, linking the appended roots into the
+scene — the in-server equivalent of Append.
+
+---
+
+## G181 — a selection's spatial extent isn't readable without a manual edit-mode hop
+
+Verifying *where* a material/vgroup selection sits — does CyberBunny's skin reach down the
+forearm, or stop at the shoulder (i.e. is there arm skin under the sleeves)? After `select
+op=material` / `op=group` in Object Mode, the status block's `bounds` report the whole **object**
+bbox, not the selection's, and `select op=current` errors `Must be in edit mode`. Getting
+`sel_bounds`/`sel_z` meant an explicit `object op=mode mode=EDIT` first, then re-running the read
+— a forced mode toggle mid-derivation just to answer "how far does this selection span," which is
+exactly the kind of grounded read THE ONE RULE wants cheap. Candidate fix: have `select
+op=current` report the live selection bbox/centroid regardless of mode (or surface `sel_bounds`
+in the status block whenever a non-empty component selection exists), so a selection's extent is
+one read, not a mode dance.
