@@ -36,8 +36,9 @@ def select(
     world_lo: tag(float, "[between] ABSOLUTE world coord for the low bound — overrides "
                          "`lo`, so the band stays put as the bbox grows mid-build (G184)") = None,
     world_hi: tag(float, "[between] ABSOLUTE world coord for the high bound — overrides `hi`") = None,
-    eps: tag(float, "[between] tolerance (m) widening both bounds so a row sitting exactly "
-                    "on a bound isn't clipped") = 1e-4,
+    eps: tag(float, "[between] float-jitter absorber (m) widening both bounds so a row that "
+                    "should land on a bound isn't clipped by threshold-rounding; raise it for "
+                    "a deliberate mm-scale catch") = 1e-5,
     # boundary
     from_selection: tag(bool, "[boundary] restrict to current selection") = True,
     # limb

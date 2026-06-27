@@ -651,7 +651,7 @@ def select_by_material(name: str = "", action: str = "SELECT", extend: bool = Fa
 def select_between(axis: str = "Z", lo: float = 0.0, hi: float = 1.0,
                    action: str = "SELECT", extend: bool = False, target: str = "",
                    world_lo: float = None, world_hi: float = None,
-                   eps: float = 1e-4) -> str:
+                   eps: float = 1e-5) -> str:
     """
     Select (or deselect) vertices whose world-space position on an axis falls between lo and hi.
     axis: X | Y | Z

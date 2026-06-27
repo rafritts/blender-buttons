@@ -581,7 +581,7 @@ def select_between(params):
     hi         = params.get("hi", 1.0)
     world_lo   = params.get("world_lo", None)
     world_hi   = params.get("world_hi", None)
-    eps        = float(params.get("eps", 1e-4))
+    eps        = float(params.get("eps", 1e-5))
     action     = params.get("action", "SELECT").upper()
     extend     = bool(params.get("extend", False))
     obj = bpy.context.active_object
@@ -595,8 +595,11 @@ def select_between(params):
     # drift as the bbox grows mid-build, OR the legacy 0..1 fraction of the LIVE bbox
     # extent (lo/hi). A world coord wins PER BOUND when given, and each side falls back
     # to its fraction independently — so `world_lo` paired with a fractional `hi` is valid.
-    # `eps` (default 0.1mm) widens both bounds so a vert row landing exactly on the bound
-    # isn't clipped by float jitter (the boundary-inclusivity surprise the gap names).
+    # `eps` (default 0.01mm) widens both bounds so a vert row landing exactly on the bound
+    # isn't clipped by threshold-arithmetic rounding (the boundary-inclusivity surprise the
+    # gap names). It's a float-jitter absorber, not a tolerance band — kept well below any
+    # realistic vert spacing so it never pulls in a neighbouring row; raise it explicitly
+    # when you DO want a millimetre-scale catch.
     lo_thresh = float(world_lo) if world_lo is not None else v_min + lo * (v_max - v_min)
     hi_thresh = float(world_hi) if world_hi is not None else v_min + hi * (v_max - v_min)
     lo_cmp, hi_cmp = lo_thresh - eps, hi_thresh + eps
