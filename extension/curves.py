@@ -172,10 +172,21 @@ def _min_bend_radius(pts):
     through itself."""
     import math  # noqa: F401
     from mathutils import Vector
+    # A near-coincident sample — e.g. a baked tube's center-fan cap-tip ring centroid
+    # sitting almost on its neighbour — makes the Menger denominator tiny and spikes the
+    # curvature into a bogus sub-mm radius (G171: reported 0.8cm on a clean 5cm-radius
+    # bend, firing a false self-intersection warning). Skip any triple whose shortest arm
+    # is a small fraction of the median segment, so a degenerate end-sample can't collapse
+    # the reported bend radius. Uniform curve samples (feel op=curve) skip nothing.
+    seglens = [(Vector(pts[i + 1]) - Vector(pts[i])).length for i in range(len(pts) - 1)]
+    med = sorted(seglens)[len(seglens) // 2] if seglens else 0.0
+    floor = 0.2 * med
     max_k = 0.0
     for i in range(1, len(pts) - 1):
         a, b, c = Vector(pts[i - 1]), Vector(pts[i]), Vector(pts[i + 1])
         ab, bc, ca = (b - a).length, (c - b).length, (a - c).length
+        if med > 0 and (ab < floor or bc < floor):
+            continue
         cross = (b - a).cross(c - b)
         denom = ab * bc * ca
         if denom > 1e-12 and cross.length > 1e-12:
