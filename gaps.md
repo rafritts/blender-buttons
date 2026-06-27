@@ -35,19 +35,6 @@ contradicts the intuitive "set up the prototype, scatter it" workflow. Candidate
 
 ---
 
-## G157 — `select`/`component_mode` can leave edit-mode selection state out of sync with the agent's assumed mode
-
-Several `select op=by_axis` / `component_mode` calls returned status in OBJECT mode while
-the agent believed it was editing (no `── edit ──` block), forcing extra `object op=mode
-EDIT` hops before `inset`/`extrude`. Modal Blender state leaks through the abstraction —
-wastes calls and risks editing the wrong object after a stray viewport assumption. Candidate
-fix: edit-mode select ops always enter edit on `target=` and echo the resulting mode in the
-status block; or a hard `mode=` guard that refuses to run when the target isn't in the
-expected mode with an explicit error instead of silently switching.
-
-
----
-
 ## G161 — `add type=tube` (spline_tube) self-intersects at the ends on a clean low-curvature planar path; curve+bevel→convert is clean
 
 A C-shaped mug handle swept as `add type=tube` through 5–7 coplanar points on a smooth
@@ -105,38 +92,6 @@ verb. Full design, examples, and open questions in the linked doc.
 
 ---
 
-## G175 — a second sequential `edit op=boolean` (EXACT) on the same mesh inverts that mesh's normals
-
-Cutting a gate through a curtain wall as two chained `DIFFERENCE` booleans (a box, then an
-arch cylinder) on the *same* target: the first applied clean, the second flipped the whole
-wall — `inverted_normals: wall_front normals appear inverted (most face inward)`. Not the new
-recess faces — the *entire* shell. A single boolean (one combined cutter) on the same wall is
-always clean; arrow-loop strips (one arrayed cutter → one boolean per wall) and the moat
-ring/trench (one boolean each) never inverted. So the trigger is specifically **applying a
-second EXACT boolean to a mesh that is already a boolean result**. The floor correctly flags
-it, but it's non-suppressible (rightly), and there is **no in-place fix** (see [[G176]]) —
-the only recovery was `history op=undo_to` back past both booleans and rebuilding the gate as
-a single combined cut. Candidate fix: recompute/repair output normals after every applied
-boolean (recalc-outside on the result), or at least detect+auto-correct a fully-inverted
-result; failing that, document that multi-cut features must be one unioned cutter.
-
----
-
-## G176 — no `recalc_normals` / `flip` primitive: a flipped-normal mesh has no recovery path short of undo
-
-When G175 inverted the wall, the floor named the defect but nothing in the schema fixes it.
-`material shade_smooth/flat` is shading, not winding; `object remesh` rebuilds topology
-(destroys crisp boolean edges); `edit` has no `recalc_normals`/`flip`/`make_consistent`.
-Blender's everyday "Mesh ▸ Normals ▸ Recalculate Outside" (Shift-N) — the standard one-keystroke
-fix for exactly this — is simply not exposed. The floor declares flipped normals "never OK and
-cannot be silenced," which is right, but pairing an unsuppressible defect with **no repair op**
-forces a full undo+rebuild for what is a one-operator fix in the UI. Candidate fix: add
-`edit op=recalc_normals` (outside/inside) and `edit op=flip` over the current selection (default
-whole mesh), so a flipped boolean result — or an imported mesh with bad winding — is recoverable
-in place. Pairs with [[G175]].
-
----
-
 ## G177 — straight 2-point `add type=tube` bakes self-intersecting geometry (floor flags it)
 
 Two drawbridge chains built as `add type=tube points=[A,B] tube_radius=0.06 sides=6` — straight,
@@ -149,71 +104,6 @@ no-coordinate convenience the tube `points=`/`between=` API exists to provide. C
 clean up the tube end-cap triangulation (or n-gon cap) so a straight tube is self-intersection
 free, and/or add a `tube`-family `between`/`points` that guarantees a manifold prism for the
 straight case.
-
-
----
-
-## G179 — no material-slot removal: a mesh can be consolidated *to* the right faces but not *trimmed* to the right slot count
-
-Prepping a frankenstein character (two skeletal meshes `object op=join`ed into one — 7 material
-slots, but the target game asset declares 4) for an in-game-compatible slot layout. `material
-op=assign` cleanly moved the surplus faces onto the correct slots, leaving three slots at **0
-faces** — but nothing in the schema can then *remove* them. Neither `material` (set/assign/
-toon/…) nor `object` (info/join/split/rename/…) exposes slot removal, and Blender's one-click
-**Material Properties ▸ ⌄ ▸ "Remove Unused Slots"** is unreachable. So a mesh that must match an
-external asset's exact slot list (game-mod round-trip, FBX hand-off) can be reassigned correctly
-yet never brought to the right slot *count* from the server — the work has to finish in the UI.
-Candidate fix: `material op=remove_slot slot=N` + `op=remove_unused_slots` (drop every zero-face
-slot), and/or a `consolidate` that reassigns-then-trims in one call. Pairs with the export-prep
-naming need (slot names must match the target asset).
-
----
-
-## G180 — no `.blend` append: combining two existing scenes forces an out-of-band `bpy` script
-
-Building a two-character workbench by bringing a fully-textured rig+mesh out of one saved
-`.blend` into another (the everyday **File ▸ Append**). `file op=import` covers mesh interchange
-formats (obj/stl/ply/glb/gltf/fbx) but **not** appending objects/collections from a `.blend`.
-With the donor already a packed `.blend`, re-importing its source GLB throws away the assemble
-step's wired+packed materials, so the only route was a headless `bpy.data.libraries.load` script
-run *outside* the server (plus a manual parent-aware translate, since nudging a parented mesh
-*and* its armature double-moves the mesh — see the shift gotcha). A user who "doesn't know how to
-import a .blend" cannot be helped by the toolkit at all here. Candidate fix: `file op=append
-path=<blend> [name=<object/collection substr>] [link=false]`, linking the appended roots into the
-scene — the in-server equivalent of Append.
-
----
-
-## G181 — a selection's spatial extent isn't readable without a manual edit-mode hop
-
-Verifying *where* a material/vgroup selection sits — does CyberBunny's skin reach down the
-forearm, or stop at the shoulder (i.e. is there arm skin under the sleeves)? After `select
-op=material` / `op=group` in Object Mode, the status block's `bounds` report the whole **object**
-bbox, not the selection's, and `select op=current` errors `Must be in edit mode`. Getting
-`sel_bounds`/`sel_z` meant an explicit `object op=mode mode=EDIT` first, then re-running the read
-— a forced mode toggle mid-derivation just to answer "how far does this selection span," which is
-exactly the kind of grounded read THE ONE RULE wants cheap. Candidate fix: have `select
-op=current` report the live selection bbox/centroid regardless of mode (or surface `sel_bounds`
-in the status block whenever a non-empty component selection exists), so a selection's extent is
-one read, not a mode dance.
-
----
-
-## G182 — `taper_end` / `taper_section` ignore the live vertex selection and operate on GLOBAL axis rings
-
-Tapering one finger of a hand (the finger's 4 rings selected, 16 verts) with `edit op=taper_end
-axis=Y end=MAX scale=0.55` scaled only the single end ring of the *whole mesh*; `edit
-op=taper_section axis=Y from_ring=0 to_ring=-1 …` then reported "tapered rings 0..6 of 7 (44
-verts)" — i.e. it binned **every vert in the object** into rings along Y and tapered the lot,
-squeezing the palm, not the selected finger. There's no way to scope either op to the selection,
-so per-feature tapering (one finger, one phalange band, one limb of many) is impossible with the
-named taper primitives. The reliable fallback was hand-rolling the taper: select each ring by a
-thin `between axis=Y` band and `transform op=scale_verts sx/sz` it individually — N selects + N
-scales where one op should do. The schema reads as selection-aware (it sits in `edit`, which
-"operates on the current selection"), so the global behaviour is a silent contract break.
-Candidate fix: have `taper_end`/`taper_section` parameterize over the **selected** rings only
-(fall back to global when nothing is selected), matching every other `edit` op; or document the
-global scope loudly and add a `selection_only=true`.
 
 ---
 
@@ -235,20 +125,3 @@ found**, warning when the cut spans far fewer edges than the mesh's cross-sectio
 so a stub loop reads as the failure it is, not a silent no-op.
 
 ---
-
-## G184 — fraction-band selection (`select op=between` lo/hi 0..1) restales every time the bbox grows mid-build
-
-Throughout the hand build, isolating a face/ring meant `select op=between axis=X lo hi` with
-lo/hi as 0..1 fractions of the **current** bbox extent. But the bbox keeps growing as you model:
-the moment the middle finger reached Y=0.125, every Y fraction I'd been using shifted (the +Y cap
-row that was fraction 0.57–0.60 became 0.0519–0.057 → selected 0 verts), and an X `hi` that
-landed exactly on a vert row clipped it (x=0.021 verts dropped at `hi=0.742`, a boundary
-inclusivity surprise). So a band that selected the right thing five edits ago is a stale guess
-now — the same perishability THE ONE RULE warns about, but injected by the *addressing scheme*
-itself, forcing a recompute-from-status-bbox before every single selection. It's workable (read
-bounds, redo the arithmetic) but it's the dominant friction tax of detailed component work, and
-the failure is quiet: a wrong fraction just selects fewer/other verts, no error. Candidate fix:
-accept **world-space** lo/hi on `between`/`by_axis` (e.g. `axis=Y world_lo=0.043 world_hi=0.046`)
-so a band addresses a fixed location that doesn't drift as the mesh grows, and/or make `hi`
-inclusive of verts within epsilon of the bound. A world-space band is to fraction-bands what the
-status bbox is to a guessed coordinate — the ground-truth version of the same address.
