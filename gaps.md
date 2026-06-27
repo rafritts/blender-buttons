@@ -196,3 +196,59 @@ exactly the kind of grounded read THE ONE RULE wants cheap. Candidate fix: have 
 op=current` report the live selection bbox/centroid regardless of mode (or surface `sel_bounds`
 in the status block whenever a non-empty component selection exists), so a selection's extent is
 one read, not a mode dance.
+
+---
+
+## G182 — `taper_end` / `taper_section` ignore the live vertex selection and operate on GLOBAL axis rings
+
+Tapering one finger of a hand (the finger's 4 rings selected, 16 verts) with `edit op=taper_end
+axis=Y end=MAX scale=0.55` scaled only the single end ring of the *whole mesh*; `edit
+op=taper_section axis=Y from_ring=0 to_ring=-1 …` then reported "tapered rings 0..6 of 7 (44
+verts)" — i.e. it binned **every vert in the object** into rings along Y and tapered the lot,
+squeezing the palm, not the selected finger. There's no way to scope either op to the selection,
+so per-feature tapering (one finger, one phalange band, one limb of many) is impossible with the
+named taper primitives. The reliable fallback was hand-rolling the taper: select each ring by a
+thin `between axis=Y` band and `transform op=scale_verts sx/sz` it individually — N selects + N
+scales where one op should do. The schema reads as selection-aware (it sits in `edit`, which
+"operates on the current selection"), so the global behaviour is a silent contract break.
+Candidate fix: have `taper_end`/`taper_section` parameterize over the **selected** rings only
+(fall back to global when nothing is selected), matching every other `edit` op; or document the
+global scope loudly and add a `selection_only=true`.
+
+---
+
+## G183 — `loop_cut` can't find a spanning ring once the topology forks; silently grabs a stub loop
+
+On a hand cage grown from a slab (palm → 4 fingers extruded off the +Y cap, 3 webs recessed),
+`edit op=loop_cut axis=Y cuts=2` — meant to ring the palm so the −X wall could be split for a
+thumb base — returned "Cut 2 edges across 2 loop(s) — Y span [0.033, 0.036]": a 2-edge stub near
+the knuckles, nowhere near the palm-spanning ring intended. Once the fingers and webbing broke the
+clean wrist→knuckle edge flow, the loop walker hit poles and stopped, cutting a tiny local loop
+instead of refusing. This kills the recipe idioms "slide loop cuts to isolate a base face" (step
+5) and "add a holding loop on each side of every joint" (step 7) — both assume `loop_cut` finds
+the obvious ring. Workarounds: isolate-then-`subdivide` a single quad for the thumb base; defer
+the joint holding loops entirely. Two problems bundled: (a) no way to *aim* a loop cut (it picks
+the ring from context/selection, and the pick is opaque), and (b) a degenerate short loop is
+returned as success rather than flagged. Candidate fix: let `loop_cut` take an explicit ring
+seed (an edge, a handle, or "the ring crossing plane Y=v") and **report the loop length it
+found**, warning when the cut spans far fewer edges than the mesh's cross-section at that axis —
+so a stub loop reads as the failure it is, not a silent no-op.
+
+---
+
+## G184 — fraction-band selection (`select op=between` lo/hi 0..1) restales every time the bbox grows mid-build
+
+Throughout the hand build, isolating a face/ring meant `select op=between axis=X lo hi` with
+lo/hi as 0..1 fractions of the **current** bbox extent. But the bbox keeps growing as you model:
+the moment the middle finger reached Y=0.125, every Y fraction I'd been using shifted (the +Y cap
+row that was fraction 0.57–0.60 became 0.0519–0.057 → selected 0 verts), and an X `hi` that
+landed exactly on a vert row clipped it (x=0.021 verts dropped at `hi=0.742`, a boundary
+inclusivity surprise). So a band that selected the right thing five edits ago is a stale guess
+now — the same perishability THE ONE RULE warns about, but injected by the *addressing scheme*
+itself, forcing a recompute-from-status-bbox before every single selection. It's workable (read
+bounds, redo the arithmetic) but it's the dominant friction tax of detailed component work, and
+the failure is quiet: a wrong fraction just selects fewer/other verts, no error. Candidate fix:
+accept **world-space** lo/hi on `between`/`by_axis` (e.g. `axis=Y world_lo=0.043 world_hi=0.046`)
+so a band addresses a fixed location that doesn't drift as the mesh grows, and/or make `hi`
+inclusive of verts within epsilon of the bound. A world-space band is to fraction-bands what the
+status bbox is to a guessed coordinate — the ground-truth version of the same address.
