@@ -64,13 +64,15 @@ def list_designs() -> str:
     return f"{result['dir']}:\n" + "\n".join(f"  {d}" for d in designs)
 
 
-def import_mesh(path: str) -> str:
+def import_mesh(path: str, filter: str = "", link: bool = False) -> str:
     """
     Import a mesh file into the current scene — the File > Import menu. Generic
     over the common formats (.obj/.stl/.ply/.glb/.gltf/.fbx); the importer is
-    picked by extension. Returns the imported objects with vert/face/edge counts.
+    picked by extension. A .blend is APPENDED (its objects pulled in, materials and
+    all), optionally name-`filter`ed or library-`link`ed. Returns the imported
+    objects with vert/face/edge counts.
     """
-    result = call_blender("import_mesh", {"path": path})
+    result = call_blender("import_mesh", {"path": path, "name": filter, "link": link})
     if result.get("error"):
         return result["error"]
     meshes = result.get("meshes") or []

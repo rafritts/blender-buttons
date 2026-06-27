@@ -328,18 +328,21 @@ def describe(name: str, posed: bool = False) -> str:
 @mcp.tool()
 def get_current_selection() -> str:
     """
-    Describe the current vertex selection in Edit Mode.
-    Returns: selected vert count, world-space centroid, world-space bounding box.
-    Use this to understand where your selection actually is before moving or scaling it.
-    Must be in Edit Mode.
+    Describe the current selection's spatial extent — world-space count, centroid,
+    and bounding box. Works in EDIT mode (the live vertex selection) AND in OBJECT
+    mode: a material/vertex-group face selection reports its extent off the stored
+    per-vertex flags, and with no component selection it falls back to the bbox over
+    the selected objects — so you can read where a selection is without an edit-mode
+    hop (G181). Use it before moving or scaling a selection.
     """
     result = call_blender("get_current_selection")
     if not result.get("success"):
         return result.get("error", "failed")
     if result["selected_count"] == 0:
-        return "No vertices selected." + _status(result)
+        return "Nothing selected." + _status(result)
+    scope = result.get("scope")
     lines = [
-        f"selected_verts: {result['selected_count']}",
+        f"selected: {result['selected_count']}" + (f"  (scope: {scope})" if scope else ""),
         f"centroid_world: {result['centroid_world']}",
         f"bbox_world:",
         f"  x: {result['bbox_world']['x']}",

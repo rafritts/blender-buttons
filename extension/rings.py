@@ -7,15 +7,19 @@ from .common import nearby_objects
 from .state import push_undo
 
 
-def _compute_rings(obj, axis_idx, decimals=4):
+def _compute_rings(obj, axis_idx, decimals=4, selected_only=False):
     """Group mesh vertices into rings by world-space coordinate on the given axis.
-    Returns (bmesh, [(position_world, [vert_indices]), ...]) sorted by position ascending."""
+    Returns (bmesh, [(position_world, [vert_indices]), ...]) sorted by position ascending.
+    selected_only: bin only verts with v.select set (the rest are ignored), so ring ops
+    can be scoped to a live selection instead of the whole mesh."""
     import bmesh
     bm = bmesh.from_edit_mesh(obj.data)
     bm.verts.ensure_lookup_table()  # callers subscript bm.verts[i] by these indices
     mat = obj.matrix_world
     buckets = {}
     for i, v in enumerate(bm.verts):
+        if selected_only and not v.select:
+            continue
         coord = (mat @ v.co)[axis_idx]
         key = round(coord, decimals)
         buckets.setdefault(key, []).append(i)
@@ -196,7 +200,13 @@ def taper_end(params):
     end = params.get("end", "MAX").upper()
     scale = max(0.0, float(params.get("scale", 0.0)))
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
-    bm, rings = _compute_rings(obj, axis_idx)
+    # G182: respect the live vertex selection when one exists — ring only the selected
+    # verts (still binned into rings by axis among the selection) so an end of a band can
+    # be tapered without touching the rest of the body; fall back to the whole mesh when
+    # nothing is selected.
+    bm = bmesh.from_edit_mesh(obj.data)
+    scoped = any(v.select for v in bm.verts)
+    bm, rings = _compute_rings(obj, axis_idx, selected_only=scoped)
     if not rings:
         return {"error": "No rings found"}
     ring_idx = len(rings) - 1 if end == "MAX" else 0
@@ -256,6 +266,7 @@ def taper_end(params):
         "position_world": round(pos, 4),
         "collapsed_world": [round(world_centroid.x, 4), round(world_centroid.y, 4), round(world_centroid.z, 4)],
         "nearby_objects": nearby,
+        "scope": "selection" if scoped else "whole_mesh",
         "warnings": warnings,
     }
 
@@ -296,7 +307,12 @@ def taper_section(params):
     if curve not in _CURVES:
         return {"error": f"Invalid curve '{curve}'. Use one of {sorted(_CURVES)}"}
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
-    bm, rings = _compute_rings(obj, axis_idx)
+    # G182: scope to the live selection when one exists — rings are binned among the
+    # selected verts only, and from_ring/to_ring index into THAT scoped ring list.
+    # Fall back to the whole mesh when nothing is selected.
+    bm = bmesh.from_edit_mesh(obj.data)
+    scoped = any(v.select for v in bm.verts)
+    bm, rings = _compute_rings(obj, axis_idx, selected_only=scoped)
     n = len(rings)
     if n == 0:
         return {"error": "No rings found"}
@@ -348,6 +364,7 @@ def taper_section(params):
         "ring_count": n,
         "rings_scaled": to_idx - from_idx + 1,
         "verts_affected": affected,
+        "scope": "selection" if scoped else "whole_mesh",
     }
 
 

@@ -119,19 +119,65 @@ _IMPORTERS = {
 }
 
 
+def _append_blend(path, name_filter, link):
+    """Append (or link) objects out of a saved .blend — the File > Append path,
+    which `bpy.ops.wm.<format>_import` can't reach. Uses bpy.data.libraries.load
+    to pull the Object datablocks, then links them into the active scene
+    collection (load alone brings the data in but puts nothing in the scene).
+
+    name_filter: case-insensitive substring; only matching object names are
+                 appended (default: every object in the file).
+    link:        True = library-LINK (read-only, tracks the source file) instead
+                 of a local APPEND copy. Default False (append).
+    """
+    with bpy.data.libraries.load(path, link=link) as (data_from, data_to):
+        names = list(data_from.objects)
+        if name_filter:
+            nf = name_filter.lower()
+            names = [n for n in names if nf in n.lower()]
+        if not names:
+            return {"error": f"no objects in '{path}'"
+                             + (f" matching '{name_filter}'" if name_filter else "")}
+        data_to.objects = names
+    appended = [ob for ob in data_to.objects if ob is not None]
+    coll = bpy.context.scene.collection
+    linked_in = []
+    for ob in appended:
+        try:
+            coll.objects.link(ob)
+            linked_in.append(ob.name)
+        except RuntimeError:
+            pass  # already present in a scene collection
+    meshes = [{"name": ob.name,
+               "verts": len(ob.data.vertices),
+               "faces": len(ob.data.polygons),
+               "edges": len(ob.data.edges)}
+              for ob in appended if ob.type == 'MESH']
+    return {"imported": [ob.name for ob in appended], "meshes": meshes,
+            "path": path, "mode": "link" if link else "append"}
+
+
 def import_mesh(params):
     """Import a mesh file into the current scene (File > Import). Generic over
-    the common formats; the importer is chosen by file extension."""
+    the common formats; the importer is chosen by file extension. A `.blend`
+    path is APPENDED (File > Append) rather than format-imported — its objects
+    are pulled in with their wired/packed materials intact."""
     path = os.path.expanduser(params.get("path", "").strip())
     if not path:
         return {"error": "path is required"}
     if not os.path.isfile(path):
         return {"error": f"no file at {path}"}
     ext = os.path.splitext(path)[1].lower()
+    if ext == ".blend":
+        try:
+            return _append_blend(path, params.get("name", "").strip(),
+                                 bool(params.get("link", False)))
+        except Exception as e:
+            return {"error": f"append failed: {e}"}
     imp = _IMPORTERS.get(ext)
     if imp is None:
         return {"error": f"unsupported format '{ext}'; supported: "
-                         f"{', '.join(sorted(_IMPORTERS))}"}
+                         f"{', '.join(sorted(_IMPORTERS))}, .blend"}
     before = set(bpy.data.objects.keys())
     try:
         imp(path)

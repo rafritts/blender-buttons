@@ -73,10 +73,20 @@ def scatter_on_surface(params):
     scale_min, scale_max: per-instance scale multiplier range. Default 0.8, 1.2.
     align_normal:  if true, each copy's +Z is rotated to point along the target's
                    surface normal at its position. Default true.
+    inherit_orientation: G150 — copy the PROTOTYPE's own rotation into each instance as a
+                   base orientation, composed UNDER any align/spin/jitter. A pre-rotated
+                   prototype (a cylinder laid on its side, a leaf tilted flat) then
+                   scatters in that pose without baking the rotation into mesh data
+                   (`transform op=apply`). With align_normal it lays the prototype's posed
+                   axes onto the surface; without it, the prototype's world pose is kept
+                   and only spun/jittered. Default false.
     seat:          G136 — lift each copy along the normal so its LOWEST point rests ON
                    the surface instead of burying its origin (the source's own extent
                    sets the lift; no thickness guess). The move for sprinkles/pebbles/
-                   leaves that should sit proud. Default false.
+                   leaves that should sit proud. Default false. G173: seating now casts the
+                   footprint onto the ACTUAL target surface (per-instance, curvature-aware)
+                   rather than the prototype's nominal lowest vert against a flat plane, and
+                   reports the worst-case residual as `seat_error` (m) / `seat_error_mm`.
     offset:        G136 — explicit signed distance (m) along the surface normal, added on
                    top of any seat lift (+ = proud, − = sunk). Default 0.
     min_distance:  G137 — Poisson-disk spacing: no two instances closer than this (m).
@@ -136,6 +146,7 @@ def scatter_on_surface(params):
     scale_min = float(params.get("scale_min", 0.8))
     scale_max = float(params.get("scale_max", 1.2))
     align_normal = bool(params.get("align_normal", True))
+    inherit_orientation = bool(params.get("inherit_orientation", False))
     rotate_z = bool(params.get("rotate_z", True))
     seed = int(params.get("seed", 0))
     parent_to_target = bool(params.get("parent_to_target", True))
@@ -296,6 +307,11 @@ def scatter_on_surface(params):
     multi_source = len(source_objs) > 1
     # G136: cache each source's vertex coords once so seat can derive its lowest extent.
     src_coords = {o.name: [v.co.copy() for v in o.data.vertices] for o in source_objs}
+    # G150: cache each prototype's own base rotation (its local rotation, scale/loc
+    # stripped) so inherit_orientation can compose it under the scatter alignment.
+    src_rot = {o.name: o.matrix_basis.to_quaternion() for o in source_objs}
+
+    seat_error = 0.0  # G173: worst-case residual gap of a seated instance's footprint (m)
 
     created = []
     skipped = 0
@@ -372,18 +388,65 @@ def scatter_on_surface(params):
             perp = normal.cross(ref).normalized()
             perp = mathutils.Quaternion(normal, rng.uniform(0.0, 2 * math.pi)) @ perp
             q = mathutils.Quaternion(perp, rng.uniform(0.0, math.radians(jitter_tilt))) @ q
+        # G150: compose the prototype's own rotation UNDER the scatter alignment, so a
+        # pre-posed source (laid-flat cylinder, tilted leaf) scatters in that pose without
+        # baking the rotation into mesh data. Applied first (rightmost) so align/spin/jitter
+        # act on the already-posed prototype; seat below then reads the posed footprint via
+        # the same `q` (src_coords are raw mesh verts, so q must carry the full instance pose).
+        if inherit_orientation:
+            q = q @ src_rot[chosen_src.name]
         inst.rotation_euler = q.to_euler()
 
-        # G136: seat/offset along the surface normal so a flat part sits PROUD instead of
-        # sinking its origin half-under. seat lifts the instance's lowest point (its
-        # min extent along the normal, derived from the source's own geometry — no
-        # thickness guess) onto the surface; offset is an explicit nudge on top.
+        # G136/G173: seat/offset along the surface normal so a flat part sits PROUD instead
+        # of sinking its origin half-under. seat lifts the instance's footprint onto the
+        # surface; offset is an explicit nudge on top.
+        #   G136 (old): lifted by the prototype's nominal lowest vert against the FLAT plane
+        #     of the sampled face at `pos` — on a curved/displaced surface that leaves each
+        #     copy floating or sunk by the local curvature delta.
+        #   G173 (now): cast the lowest footprint verts straight DOWN the surface normal onto
+        #     the REAL evaluated surface (the same BVH used for occlusion) and seat on the
+        #     FIRST true contact, so seating tracks local curvature. `seat_error` reports the
+        #     worst-case residual so floaters/sinkers are visible without polling each copy.
         lift = offset
-        if seat:
+        seat_lift = 0.0
+        coords = src_coords[chosen_src.name]
+        if seat and coords:
             d = q.inverted() @ normal  # the normal in the instance's LOCAL frame
-            min_proj = min((c.dot(d) for c in src_coords[chosen_src.name]), default=0.0)
-            lift += -s * min_proj
+            projs = [c.dot(d) for c in coords]
+            lo = min(projs); hi = max(projs)
+            reach = (hi - lo) * s + 0.01  # cast start clearance: full footprint span + 1cm
+            # The lowest verts along the local normal are the contact candidates.
+            order = sorted(range(len(coords)), key=lambda j: projs[j])
+            cand = order[:min(len(order), 24)]
+            min_gap = None  # signed: vertex height above its surface point (− = penetrating)
+            for j in cand:
+                vw = pos + (q @ (coords[j] * s))
+                hit = tgt_bvh.ray_cast(vw + normal * reach, -normal)
+                if hit[0] is not None:
+                    gap = (vw - hit[0]).dot(normal)
+                    if min_gap is None or gap < min_gap:
+                        min_gap = gap
+            if min_gap is not None:
+                seat_lift = -min_gap  # raise so the first-contact vertex rests on the surface
+            else:
+                # footprint found no surface under it (overhangs a hole/edge) — fall back to
+                # the flat nominal-lowest-vert lift so behaviour degrades to the G136 result.
+                seat_lift = -s * lo
+            lift += seat_lift
         inst.location = pos + lift * normal if lift else pos
+
+        # G173: verify the seating actually landed — residual distance from the lowest
+        # footprint vertex to the real surface, measured at the seat-only position (offset
+        # excluded, since a deliberate proud/sunk offset is not a seating error). Tracks the
+        # worst case across the whole scatter so the loose ones surface in the return dict.
+        if seat and coords:
+            low_j = order[0]
+            low_world = (pos + seat_lift * normal) + (q @ (coords[low_j] * s))
+            near = tgt_bvh.find_nearest(low_world)
+            if near[0] is not None:
+                resid = (low_world - near[0]).length
+                if resid > seat_error:
+                    seat_error = resid
 
         if parent_to_target:
             inst.parent = target
@@ -407,6 +470,9 @@ def scatter_on_surface(params):
         "count_placed": count,
         "density": density if density_used else None,
         "seat": seat,
+        "seat_error": round(seat_error, 6) if seat else None,  # G173: worst residual (m)
+        "seat_error_mm": round(seat_error * 1000.0, 3) if seat else None,
+        "inherit_orientation": inherit_orientation or None,  # G150
         "offset": offset if offset else None,
         "min_distance": min_distance if use_min_dist else None,
         "jitter_tilt": jitter_tilt if jitter_tilt else None,

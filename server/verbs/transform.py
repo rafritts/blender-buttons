@@ -107,6 +107,7 @@ def transform(
     seat: tag(bool, "[scatter] seat copies PROUD — lift each so its lowest point rests on the surface (no burying the origin)") = False,
     min_distance: tag(float, "[scatter] Poisson-disk spacing (m) — no two instances closer than this (anti dense z-fight)") = 0.0,
     jitter_tilt: tag(float, "[scatter] max random tilt (deg) off the normal so coplanar flats cross instead of z-fighting") = 0.0,
+    inherit_orientation: tag(bool, "[scatter] compose each instance ON TOP OF the source object's OWN rotation, so a pre-rotated prototype (a lay-flat leaf) scatters in that pose without baking it into mesh data (G150)") = False,
     # move_verts / scale_verts (edit-mode component transforms)
     x: tag(float, "[move_verts] explicit X amount (m)") = 0.0,
     y: tag(float, "[move_verts] explicit Y amount (m)") = 0.0,
@@ -284,7 +285,7 @@ def transform(
                                              avoid, avoid_margin, sources, within,
                                              within_margin, density, up_only, max_slope,
                                              seat, offset, min_distance, jitter_tilt,
-                                             label)
+                                             inherit_orientation, label)
     if o == "move_verts":
         return editmode.move_vertices(out, inward, up, down, left, right, forward,
                                       back, x, y, z, label, target)

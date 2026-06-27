@@ -11,12 +11,14 @@ from server import finishes, shaders, textures, scene
 from ._common import tag, unknown
 
 _OPS = ["set", "assign", "toon", "textured", "pbr", "outline", "remove_outline",
+        "remove_slot", "remove_unused_slots",
         "shade_smooth", "shade_flat", "search_textures", "search_hdris"]
 
 
 @mcp.tool(name="material")
 def material(
     op: Literal["set", "assign", "toon", "textured", "pbr", "outline", "remove_outline",
+                "remove_slot", "remove_unused_slots",
                 "shade_smooth", "shade_flat", "search_textures", "search_hdris"],
     target: tag(str, "object(s) to shade: 'name', group, or 'a,b,c'") = "",
     # PBR (set)
@@ -31,7 +33,7 @@ def material(
     emission_strength: tag(float, "[set] emission strength") = None,
     material_name: tag(str, "[set/toon/textured] name for the material") = "",
     material: tag(str, "[set/assign] reuse an existing material by name") = "",
-    slot: tag(int, "[set/textured] material slot index") = None,
+    slot: tag(int, "[set/textured/remove_slot] material slot index") = None,
     # toon
     shadow_color: tag(list, "[toon] shadow band [r,g,b]") = None,
     bands: tag(int, "[toon] number of shading bands") = 2,
@@ -93,6 +95,10 @@ def material(
       grain that must follow a curved surface (a mug belly, a plate rim). SPEC-18.
       outline   — add an inverted-hull outline (target, thickness, color)
       remove_outline — strip it                (target)
+      remove_slot — remove one material slot by index — reassign its faces FIRST
+                  (Blender re-homes orphaned faces to slot 0)  (target, slot)
+      remove_unused_slots — drop every slot with no faces — trim a consolidated
+                  mesh to its real slot count               (target)
       shade_smooth — smooth shading            (target(s), auto_smooth_angle)
       shade_flat   — flat shading              (target(s))
       search_textures — find PBR texture ids   (query, limit)
@@ -126,6 +132,10 @@ def material(
         return shaders.add_outline(target, thickness, color, label)
     if o == "remove_outline":
         return shaders.remove_outline(target, label)
+    if o == "remove_slot":
+        return shaders.remove_material_slot(target, slot, label)
+    if o == "remove_unused_slots":
+        return shaders.remove_unused_material_slots(target, label)
     if o == "shade_smooth":
         return finishes.shade_smooth(target, auto_smooth_angle, label)
     if o == "shade_flat":

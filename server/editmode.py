@@ -407,7 +407,8 @@ def delete_geometry(mode: str = "VERT", label: str = "", target: str = "") -> st
 
 
 @mcp.tool()
-def loop_cut(axis: str = "Z", cuts: int = 1, label: str = "", target: str = "") -> str:
+def loop_cut(axis: str = "Z", cuts: int = 1, label: str = "", target: str = "",
+             at: float = None) -> str:
     """
     Add edge loop cuts perpendicular to the given axis using bmesh.
     Finds edges running along that axis and inserts loops crossing it.
@@ -425,14 +426,19 @@ def loop_cut(axis: str = "Z", cuts: int = 1, label: str = "", target: str = "") 
             cut, enter edit mode yourself and select the region first.)
     Must be in edit mode (or provide target).
     """
-    result = call_blender("loop_cut", {"axis": axis, "cuts": cuts, "target": target}, label=label)
+    params = {"axis": axis, "cuts": cuts, "target": target}
+    if at is not None:
+        params["at"] = at
+    result = call_blender("loop_cut", params, label=label)
     if result.get("success"):
         scope = "in selection" if result.get("scoped_to_selection") else "whole mesh"
         region = result.get("region", "")
         span = result.get("span_world")
         span_str = f", {axis} span {span}" if span else ""
+        warn = result.get("warning")
+        warn_str = f"  ⚠ {warn}" if warn else ""
         main = (f"Cut {result['edges_subdivided']} edges across {result.get('loops','?')} "
-                f"loop(s) — {region} ({scope}){span_str} [{result.get('op_id','')}]")
+                f"loop(s) — {region} ({scope}){span_str} [{result.get('op_id','')}]{warn_str}")
     else:
         main = result.get("error", "failed")
     return main + _status(result)
@@ -643,7 +649,9 @@ def select_by_material(name: str = "", action: str = "SELECT", extend: bool = Fa
 
 @mcp.tool()
 def select_between(axis: str = "Z", lo: float = 0.0, hi: float = 1.0,
-                   action: str = "SELECT", extend: bool = False, target: str = "") -> str:
+                   action: str = "SELECT", extend: bool = False, target: str = "",
+                   world_lo: float = None, world_hi: float = None,
+                   eps: float = 1e-4) -> str:
     """
     Select (or deselect) vertices whose world-space position on an axis falls between lo and hi.
     axis: X | Y | Z
@@ -655,9 +663,13 @@ def select_between(axis: str = "Z", lo: float = 0.0, hi: float = 1.0,
     Returns the actual world-space thresholds and total selected vert count.
     Replaces the verbose select_all → deselect_below → deselect_above band pattern.
     """
-    result = call_blender("select_between", {"axis": axis, "lo": lo, "hi": hi,
-                                             "action": action, "extend": extend,
-                                             "target": target})
+    p = {"axis": axis, "lo": lo, "hi": hi, "action": action,
+         "extend": extend, "target": target, "eps": eps}
+    if world_lo is not None:
+        p["world_lo"] = world_lo
+    if world_hi is not None:
+        p["world_hi"] = world_hi
+    result = call_blender("select_between", p)
     if result.get("success"):
         main = (f"ok  {axis}:[{result['lo_world']} → {result['hi_world']}]"
                 f"  selected={result['selected_count']}")
@@ -1121,3 +1133,28 @@ def verify_selection(steps: int = 1) -> str:
     for v in result["verdict"]:
         lines.append(f"  • {v}")
     return "\n".join(lines)
+
+
+@mcp.tool()
+def recalc_normals(inside: bool = False, flip: bool = False,
+                   target: str = "", label: str = "") -> str:
+    """
+    Recalculate face normals consistently — the Mesh ▸ Normals ▸ Recalculate Outside
+    fix (Shift-N), as a primitive so a flipped-normal mesh is repaired IN PLACE instead
+    of a full undo+rebuild. Repairs a boolean result whose shell inverted (G175), or an
+    imported mesh with bad winding. Operates on the selected faces; with nothing selected
+    it recalcs the WHOLE mesh.
+
+    inside: recalc to face OUTWARD (False, default) or INWARD (True).
+    flip:   additionally flip every face normal AFTER the recalc.
+    target: optional object name — auto-selects it, enters edit mode, exits after.
+    """
+    result = call_blender("recalc_normals",
+                          {"inside": inside, "flip": flip, "target": target}, label=label)
+    if result.get("success"):
+        sense = "outward" if result.get("outward") else "inward"
+        scope = "whole mesh" if result.get("whole_mesh") else f"{result['faces']} face(s)"
+        main = f"recalc normals {sense} — {scope} [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)

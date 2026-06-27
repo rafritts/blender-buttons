@@ -712,30 +712,66 @@ def _section_core(src, params):
             "widest": widest, "narrowest": narrow, "profile": sections}
 
 
-def get_current_selection(params):
-    import bmesh
-    obj = bpy.context.active_object
-    if obj is None or obj.mode != 'EDIT':
-        return {"error": "Must be in edit mode"}
-    bm = bmesh.from_edit_mesh(obj.data)
-    sel = [v for v in bm.verts if v.select]
-    if not sel:
-        return {"success": True, "selected_count": 0, "centroid_world": None, "bbox_world": None}
-    world_pos = [obj.matrix_world @ v.co for v in sel]
+def _selection_extent_report(n, world_pos, scope):
+    """Build the centroid/bbox report from a list of world-space points. Shared by
+    every selection-extent path so edit-mode and object-mode reads look identical."""
     xs = [p.x for p in world_pos]
     ys = [p.y for p in world_pos]
     zs = [p.z for p in world_pos]
-    n = len(sel)
+    npts = len(world_pos)
     return {
         "success": True,
         "selected_count": n,
-        "centroid_world": [round(sum(xs)/n, 4), round(sum(ys)/n, 4), round(sum(zs)/n, 4)],
+        "scope": scope,
+        "centroid_world": [round(sum(xs)/npts, 4), round(sum(ys)/npts, 4), round(sum(zs)/npts, 4)],
         "bbox_world": {
             "x": [round(min(xs), 4), round(max(xs), 4)],
             "y": [round(min(ys), 4), round(max(ys), 4)],
             "z": [round(min(zs), 4), round(max(zs), 4)],
         },
     }
+
+
+def get_current_selection(params):
+    """Report the live selection's world-space extent (centroid + bbox), in ANY
+    mode (G181). In EDIT mode it reads the bmesh vertex selection; in OBJECT mode
+    it reads the component selection STILL stored on the active mesh — the verts a
+    `select op=material` / `op=group` flagged before the auto mode-exit — so a
+    material/vgroup region's reach is one read, no edit-mode hop. With no component
+    selection it falls back to the bbox over the selected OBJECTS."""
+    import bmesh
+    from .common import world_bbox_corners
+    obj = bpy.context.active_object
+
+    if obj is not None and obj.mode == 'EDIT':
+        bm = bmesh.from_edit_mesh(obj.data)
+        sel = [v for v in bm.verts if v.select]
+        if not sel:
+            return {"success": True, "selected_count": 0, "scope": "edit verts",
+                    "centroid_world": None, "bbox_world": None}
+        world_pos = [obj.matrix_world @ v.co for v in sel]
+        return _selection_extent_report(len(sel), world_pos, "edit verts")
+
+    # OBJECT (or any non-edit) mode: the per-vertex .select flags persist on the
+    # mesh after the mode exit, so a material/vgroup component selection is still
+    # readable without re-entering edit mode (same source fit/coverage read, G178).
+    if obj is not None and obj.type == 'MESH':
+        me = obj.data
+        sel_verts = [v for v in me.vertices if v.select]
+        if sel_verts:
+            world_pos = [obj.matrix_world @ v.co for v in sel_verts]
+            return _selection_extent_report(len(sel_verts), world_pos,
+                                            "mesh component (object mode)")
+
+    # No component selection — report the extent of the selected OBJECTS so the
+    # read never hard-errors on a mode mismatch.
+    sel_objs = list(bpy.context.selected_objects)
+    if sel_objs:
+        world_pos = [c for o in sel_objs for c in world_bbox_corners(o)]
+        return _selection_extent_report(len(sel_objs), world_pos, "objects")
+
+    return {"success": True, "selected_count": 0, "scope": None,
+            "centroid_world": None, "bbox_world": None}
 
 
 def duplicate_mirrored(params):

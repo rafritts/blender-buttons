@@ -125,6 +125,7 @@ EDIT_MODE_TOOLS = {
     "assign_weight", "select_boundary", "select_limb", "flood_to_crease",
     "select_by_vgroup", "select_by_material", "assign_material",
     "relax_selection", "slide_selection", "poke_faces", "inset_faces", "grid_fill",
+    "recalc_normals",
 }
 
 # Y1: verbs that write VERTEX POSITIONS, so on a keyed mesh they land on the active

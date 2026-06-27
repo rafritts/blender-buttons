@@ -208,7 +208,8 @@ def scatter_on_surface(target: str, source: str = "", count: int = 100,
                        density: float = 0.0, up_only: bool = False,
                        max_slope: float = 45.0, seat: bool = False,
                        offset: float = 0.0, min_distance: float = 0.0,
-                       jitter_tilt: float = 0.0, label: str = "") -> str:
+                       jitter_tilt: float = 0.0, inherit_orientation: bool = False,
+                       label: str = "") -> str:
     """
     Scatter copies of one or more sources across `target`'s surface — the
     donut-tutorial sprinkles step, aimable (G57).
@@ -251,6 +252,9 @@ def scatter_on_surface(target: str, source: str = "", count: int = 100,
             believable dense scatter without coplanar z-fighting.
     jitter_tilt: G137 — max random tilt (deg) off the normal so near-coplanar flats CROSS
             at an angle instead of z-fighting. Default 0.
+    inherit_orientation: G150 — compose each instance on top of the SOURCE object's own
+            rotation, so a pre-rotated prototype (a lay-flat leaf, a tilted shard) scatters
+            in that pose without baking the rotation into its mesh data. Default False.
 
     Instances of each source share its mesh data — cheap memory-wise. Target's
     modifiers are evaluated, so sprinkles land on the visible (post-subsurf) surface.
@@ -266,7 +270,7 @@ def scatter_on_surface(target: str, source: str = "", count: int = 100,
         "within_margin": within_margin, "density": density,
         "up_only": up_only, "max_slope": max_slope,
         "seat": seat, "offset": offset, "min_distance": min_distance,
-        "jitter_tilt": jitter_tilt,
+        "jitter_tilt": jitter_tilt, "inherit_orientation": inherit_orientation,
     }, label=label)
     if result.get("success"):
         srcs = result.get("sources") or [result.get("source")]
@@ -287,6 +291,8 @@ def scatter_on_surface(target: str, source: str = "", count: int = 100,
         # G151: confirm that per-source colour overrides carried through. Silence here
         # when multiple sources were given is the tell that the sources share a mesh with
         # NO per-object material — so the scatter will render one uniform colour.
+        if result.get("seat") and result.get("seat_error_mm") is not None:
+            main += f"\n  seat: worst residual {result['seat_error_mm']}mm off the surface"
         if result.get("colored_instances"):
             main += f"\n  {result['colored_instances']} instance(s) carried a per-source colour"
         elif len(srcs) > 1:

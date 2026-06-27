@@ -197,6 +197,207 @@ def _bend_warning(min_radius, profile_radius, what="tube"):
             f"resolution) or keep the radius below {min_radius * 100:.2f}cm.")
 
 
+def _tube_geometry(samples, radii_per_sample, sides):
+    """Build clean swept-tube mesh data (verts, faces) directly, instead of beveling a POLY
+    curve and converting. G161/G177: the curve-bevel→convert route produced self-intersecting
+    end caps (a fill-cap n-gon over a beveled POLY endpoint folds on itself) and zero-area
+    rings where Catmull-Rom endpoint clamping left near-coincident samples. Building rings on a
+    rotation-minimizing frame + a clean center-vertex cap fan at each end removes BOTH: a
+    straight tube is a manifold prism, and the only self-intersections left are real ones (a
+    bend tighter than the radius). Pure math — no bpy."""
+    import math
+    from mathutils import Vector
+
+    # Dedupe consecutive near-coincident samples (the source of the zero-area end rings),
+    # carrying the larger radius forward so a taper end isn't dropped.
+    pts, rs = [], []
+    for p, r in zip(samples, radii_per_sample):
+        v = Vector(p)
+        if pts and (v - pts[-1]).length < 1e-6:
+            rs[-1] = max(rs[-1], r)
+            continue
+        pts.append(v)
+        rs.append(float(r))
+    n = len(pts)
+    if n < 2:
+        return None, None
+
+    # Per-sample unit tangents (central difference interior, one-sided at the ends).
+    tang = []
+    for i in range(n):
+        if i == 0:
+            t = pts[1] - pts[0]
+        elif i == n - 1:
+            t = pts[-1] - pts[-2]
+        else:
+            t = pts[i + 1] - pts[i - 1]
+        tang.append(t.normalized() if t.length > 1e-9 else Vector((0.0, 0.0, 1.0)))
+
+    # Rotation-minimizing frame (double-reflection, Wang et al. 2008) — a stable normal that
+    # doesn't flip on straight runs (Frenet's failure) and barely twists around bends.
+    seed = Vector((1.0, 0.0, 0.0)) if abs(tang[0].x) < 0.9 else Vector((0.0, 1.0, 0.0))
+    nrm = (seed - tang[0] * seed.dot(tang[0])).normalized()
+    normals = [nrm]
+    for i in range(n - 1):
+        v1 = pts[i + 1] - pts[i]
+        c1 = v1.dot(v1)
+        if c1 > 1e-12:
+            rL = normals[i] - (2.0 / c1) * v1.dot(normals[i]) * v1
+            tL = tang[i] - (2.0 / c1) * v1.dot(tang[i]) * v1
+        else:
+            rL, tL = normals[i], tang[i]
+        v2 = tang[i + 1] - tL
+        c2 = v2.dot(v2)
+        nN = rL - (2.0 / c2) * v2.dot(rL) * v2 if c2 > 1e-12 else rL
+        nN = nN - tang[i + 1] * nN.dot(tang[i + 1])
+        normals.append(nN.normalized() if nN.length > 1e-9 else normals[i])
+
+    cross = max(3, 4 * sides)                      # default sides=4 → 16-sided tube
+    verts = []
+    ring0 = []
+    for i in range(n):
+        T, N = tang[i], normals[i]
+        B = T.cross(N).normalized()
+        ring0.append(len(verts))
+        for k in range(cross):
+            a = 2.0 * math.pi * k / cross
+            off = (math.cos(a) * N + math.sin(a) * B) * rs[i]
+            verts.append((pts[i].x + off.x, pts[i].y + off.y, pts[i].z + off.z))
+
+    faces = []
+    for i in range(n - 1):
+        a0, b0 = ring0[i], ring0[i + 1]
+        for k in range(cross):
+            k2 = (k + 1) % cross
+            faces.append((a0 + k, a0 + k2, b0 + k2, b0 + k))
+
+    # Center-vertex cap fans (clean convex disks — no self-intersecting fill n-gon).
+    c_start = len(verts)
+    verts.append((pts[0].x, pts[0].y, pts[0].z))
+    for k in range(cross):
+        k2 = (k + 1) % cross
+        faces.append((c_start, ring0[0] + k, ring0[0] + k2))
+    c_end = len(verts)
+    verts.append((pts[-1].x, pts[-1].y, pts[-1].z))
+    for k in range(cross):
+        k2 = (k + 1) % cross
+        faces.append((c_end, ring0[-1] + k2, ring0[-1] + k))
+    return verts, faces
+
+
+def _frame_anchor(name):
+    """Resolve a path's start/seed anchor to (origin, (N, U, V)) — a measured orthonormal
+    basis with provenance, never divined. A minted handle Empty (feel op=aim/facing/frame)
+    carries its measured frame in matrix_world (local Z = the outward normal/aim it was minted
+    along); any other object contributes its own world axes about its bbox centre. Returns
+    ((origin, (N,U,V)), None) or (None, error)."""
+    from mathutils import Vector
+    obj = bpy.data.objects.get(name)
+    if obj is None:
+        return None, f"path anchor '{name}' not found"
+    b = obj.matrix_world.to_3x3()
+    X = b.col[0].normalized() if b.col[0].length > 1e-9 else Vector((1.0, 0.0, 0.0))
+    Y = b.col[1].normalized() if b.col[1].length > 1e-9 else Vector((0.0, 1.0, 0.0))
+    Z = b.col[2].normalized() if b.col[2].length > 1e-9 else Vector((0.0, 0.0, 1.0))
+    if obj.get("bb_handle"):
+        origin = obj.matrix_world.translation.copy()
+    else:
+        origin = Vector(world_center(obj))
+    return (origin, (Z, X, Y)), None             # N = normal/aim, (U, V) = the two tangents
+
+
+def _build_relational_path(raw):
+    """G174 — grow a sweep centerline from a MEASURED anchor frame as vectors in its (n,u,v)
+    basis, so no world coordinate is ever typed (origin measured, basis measured, the
+    multipliers are authored dimensions). The uniform application of edit op=field's
+    measured-frame vector language to the sweep family. Detected when raw is a list whose
+    first entry is a dict carrying 'from'. Returns (abs_points, note, error); (None, None,
+    None) when raw is NOT a relational path (caller falls through to literal points).
+
+    Header  raw[0]:  {"from": anchor, "frame": tangent_normal|world,
+                      "f": {steps, t:[t0,t1], n:expr, u:expr, v:expr},  # parametric f(t)
+                      "cumulative": bool}                               # vector-list mode
+    Body    raw[1:]: [n,u,v] basis-vector steps (incremental by default), and/or a terminus
+                     {"to": anchor} that lands the path exactly on a second handle (the
+                     connecting-extrude case — free path = no 'to', connecting = with 'to')."""
+    if not (isinstance(raw, list) and raw and isinstance(raw[0], dict) and "from" in raw[0]):
+        return None, None, None
+    from mathutils import Vector
+    head = raw[0]
+    unknown = set(head) - {"from", "frame", "f", "cumulative"}
+    if unknown:
+        return None, None, f"path header: unknown key(s) {sorted(unknown)}"
+    anc, err = _frame_anchor(head["from"])
+    if err:
+        return None, None, err
+    O, (N, U, V) = anc
+    frame = (head.get("frame") or "tangent_normal").lower()
+    if frame == "world":
+        N, U, V = Vector((0, 0, 1)), Vector((1, 0, 0)), Vector((0, 1, 0))
+
+    def place(nuv):
+        return O + nuv[0] * N + nuv[1] * U + nuv[2] * V
+
+    note = None
+    pts = []
+    fspec = head.get("f")
+    if fspec is not None:
+        # Parametric f(t): the path is COMPUTED (helix/spiral/taper in one expression).
+        import numpy as np
+        from . import fields
+        if not isinstance(fspec, dict):
+            return None, None, "path 'f' must be a dict {steps, n, u, v, t:[t0,t1]}"
+        steps = max(2, min(int(fspec.get("steps", 32)), 1024))
+        trange = fspec.get("t", [0.0, 1.0])
+        if not (isinstance(trange, (list, tuple)) and len(trange) == 2):
+            return None, None, "path f.t must be [t0, t1]"
+        ts = np.linspace(float(trange[0]), float(trange[1]), steps)
+        comps = []
+        for key in ("n", "u", "v"):
+            src = (fspec.get(key) or "0").strip() if isinstance(fspec.get(key), str) else \
+                str(fspec.get(key, 0))
+            arr, e = fields._eval_expr(np, src, {"t": ts}, 0)
+            if e:
+                return None, None, f"path f.{key}: {e}"
+            comps.append(arr)
+        for i in range(steps):
+            pts.append(list(place((float(comps[0][i]), float(comps[1][i]), float(comps[2][i])))))
+        note = f"parametric path from '{head['from']}' · {steps} samples"
+        return pts, note, None
+
+    # Vector-list mode: start AT the anchor, then walk the basis-vector steps.
+    cumulative = bool(head.get("cumulative", False))
+    cur = O.copy()
+    pts.append(list(cur))
+    welded = None
+    for i, entry in enumerate(raw[1:], 1):
+        if isinstance(entry, dict):
+            tk = entry.get("to") or entry.get("weld")
+            if not tk:
+                return None, None, (f"path body[{i}]: dict must be a terminus "
+                                    "{\"to\": anchor} (or [n,u,v] vector)")
+            tanc, err = _frame_anchor(tk)
+            if err:
+                return None, None, err
+            pts.append(list(tanc[0]))
+            welded = tk
+            continue
+        if not (isinstance(entry, (list, tuple)) and len(entry) == 3):
+            return None, None, f"path body[{i}] must be [n,u,v] or {{\"to\": anchor}}"
+        vec = (float(entry[0]), float(entry[1]), float(entry[2]))
+        if cumulative:
+            pts.append(list(place(vec)))
+        else:
+            cur = cur + vec[0] * N + vec[1] * U + vec[2] * V
+            pts.append(list(cur))
+    if len(pts) < 2:
+        return None, None, "relational path needs at least one [n,u,v] step or a {\"to\":…}"
+    note = (f"relational path from '{head['from']}'"
+            + (f" welded to '{welded}'" if welded else " (free end)")
+            + f" · {'cumulative' if cumulative else 'incremental'} steps")
+    return pts, note, None
+
+
 def spline_tube(params):
     """Create a tube mesh swept along an interpolating spline through 2–32 points.
 
@@ -204,6 +405,16 @@ def spline_tube(params):
     points:     list of control points the curve passes THROUGH. Each is
                 [x, y, z] world coords, or {"near": "obj", "offset": [dx,dy,dz]}
                 relative to an existing object's bbox center.
+                RELATIONAL PATH (G174) — instead of typed coordinates, grow the path
+                from a MEASURED handle frame as vectors in its (n,u,v) basis, so no
+                world coordinate is divined. Pass points as a list whose FIRST entry
+                is a header {"from": <handle/obj>, "frame": "tangent_normal"} and the
+                rest are [n,u,v] basis-vector steps (incremental from the anchor), an
+                optional terminus {"to": <handle>} to weld the end onto a second
+                anchor, OR a parametric form
+                {"from":A, "f":{"steps":64, "n":"0.02*cos(tau*5*t)",
+                                "u":"0.02*sin(tau*5*t)", "v":"0.06*t"}} (a helix/coil
+                in one expression; n/u/v are sandboxed exprs in t∈[0,1]).
     between:    [A, B] — alternative to `points`: connect two named objects with a
                 straight tube, endpoints picked at the NEAREST SURFACE points
                 between them (BVH). The generic strut/cable/wire — no offset math.
@@ -248,6 +459,14 @@ def spline_tube(params):
             return {"error": f"no surface path found between '{between[0]}' and '{between[1]}'"}
         raw_points = [[pt_a[0], pt_a[1], pt_a[2]], [pt_b[0], pt_b[1], pt_b[2]]]
 
+    # G174: a relational vector-path (grown from a measured handle frame) in place of typed
+    # coordinates — see _build_relational_path. No-op for ordinary [x,y,z]/{"near"} lists.
+    rel_pts, rel_note, rel_err = _build_relational_path(raw_points)
+    if rel_err:
+        return {"error": rel_err}
+    if rel_pts is not None:
+        raw_points = rel_pts
+
     if not isinstance(raw_points, list) or len(raw_points) < 2:
         return {"error": "'points' must be a list of at least 2 control points (or use 'between')"}
     # G20: the old cap of 32 blocked legitimate hand-authored swept paths (a 9-turn
@@ -282,29 +501,34 @@ def spline_tube(params):
     sides = max(2, min(int(params.get("sides", 4)), 16))
 
     samples, ts = _catmull_rom(points, resolution)
+    radii_per_sample = [_radius_at(radii, t) for t in ts]
 
     if bpy.context.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
 
-    cu = bpy.data.curves.new(name, type='CURVE')
-    cu.dimensions = '3D'
-    cu.bevel_depth = 1.0          # actual radius comes from per-point radius
-    cu.bevel_resolution = sides
-    cu.use_fill_caps = True
-    spline = cu.splines.new('POLY')
-    spline.points.add(len(samples) - 1)
-    for pt, t, cpt in zip(samples, ts, spline.points):
-        cpt.co = (pt[0], pt[1], pt[2], 1.0)
-        cpt.radius = _radius_at(radii, t)
-
-    obj = bpy.data.objects.new(name, cu)
+    # G161/G177: build the swept mesh DIRECTLY (clean rings + center-vertex cap fans on a
+    # rotation-minimizing frame) instead of beveling a POLY curve and converting — that route
+    # self-intersected at the end caps on clean paths and straight runs.
+    verts, faces = _tube_geometry(samples, radii_per_sample, sides)
+    if verts is None:
+        return {"error": "tube path collapsed to one point — give distinct control points"}
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(verts, [], faces)
+    me.update()
+    obj = bpy.data.objects.new(name, me)
     bpy.context.scene.collection.objects.link(obj)
+    import bmesh
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)   # consistent outward winding
+    bm.to_mesh(me)
+    bm.free()
+    me.update()
     bpy.ops.object.select_all(action='DESELECT')
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
-    bpy.ops.object.convert(target='MESH')
-    obj = bpy.context.active_object
     bpy.ops.object.shade_smooth()
+    obj = bpy.context.active_object
 
     rounded_pts = [[round(v, 4) for v in p] for p in points]
     obj["bb_spline_points"] = json.dumps(rounded_pts)
@@ -332,6 +556,9 @@ def spline_tube(params):
     warn = _bend_warning(mbr, max(radii), "tube")
     if warn:
         result.setdefault("notes", []).append(warn)
+    if rel_note:
+        result.setdefault("notes", []).append(rel_note)
+        result["relational_path"] = True
     return result
 
 
@@ -374,6 +601,13 @@ def add_curve(params):
         return {"error": f"Object '{name}' already exists"}
 
     raw = params.get("points") or []
+    # G174: relational vector-path grown from a measured handle frame (same grammar as
+    # spline_tube) → resolve to absolute control points before the normal per-point loop.
+    rel_pts, rel_note, rel_err = _build_relational_path(raw)
+    if rel_err:
+        return {"error": rel_err}
+    if rel_pts is not None:
+        raw = rel_pts
     if len(raw) < 2:
         return {"error": "'points' needs at least 2 control points"}
     pts = []
@@ -447,7 +681,7 @@ def add_curve(params):
 
     bpy.context.view_layer.update()
     xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
-    return {
+    out = {
         "success": True,
         "object_name": obj.name,
         "type": ctype,
@@ -457,6 +691,10 @@ def add_curve(params):
         "anchored": anchored,
         "dimensions": [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)],
     }
+    if rel_note:
+        out["notes"] = [rel_note]
+        out["relational_path"] = True
+    return out
 
 
 _AXES = {"X": 0, "Y": 1, "Z": 2}

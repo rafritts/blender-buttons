@@ -327,14 +327,31 @@ def fit_swept_tube(np, P, d, bands):
     ab = float(np.mean([rg["ab_ratio"] for rg in rings]))
     rolls = np.array([rg["roll"] for rg in rings])
     twist = float(rolls[-1] - rolls[0]) if len(rolls) >= 2 else 0.0
+    # G171: min bend radius over the RECOVERED centerline — the same Menger-curvature read
+    # feel op=curve gives a live curve datablock, now available on a BAKED mesh tube. Paired
+    # with the recovered radius profile it predicts self-intersection the way the live read
+    # does: a centerline bend tighter than the tube radius folds the wall through itself.
+    from .curves import _min_bend_radius
+    mbr = _min_bend_radius(centerline) if len(centerline) >= 3 else None
+    Rmin = float(np.min([rg["R"] for rg in rings])) if rings else 0.0
+    Rmax = float(np.max([rg["R"] for rg in rings])) if rings else 0.0
+    bend_feasible = (mbr is None) or (mbr > Rmax)
     return {
         "model": "swept_tube", "rank": 6,
         "params": {"axis_dir": d.tolist(), "length": span,
                    "section_ab_ratio": round(ab, 3), "twist_rad": round(twist, 4),
-                   "n_rings": len(rings)},
+                   "n_rings": len(rings),
+                   "min_bend_radius": round(mbr, 5) if mbr else None,
+                   "radius_range": [round(Rmin, 5), round(Rmax, 5)],
+                   "bend_feasible": bend_feasible},
         "residual": _rms(np, resid), "residual_max": float(np.max(np.abs(resid))),
         "coverage": coverage,
         "centerline": centerline, "radius_profile": Rprofile,
+        "min_bend_radius": round(mbr, 5) if mbr else None,
+        "bend_warning": (None if bend_feasible else
+                         (f"baked tube self-intersects: min bend radius "
+                          f"{mbr * 100:.2f}cm < tube radius {Rmax * 100:.2f}cm — "
+                          f"the wall folds through itself at the tightest turn")),
         "rings": rings, "gaps": [[round(g[0], 3), round(g[1], 3)] for g in gaps],
         "point": np.array(centerline[len(centerline) // 2]), "normal": d,
         "_span_lo": lo, "_span_hi": hi, "_axis_dir": d, "_origin": c0,

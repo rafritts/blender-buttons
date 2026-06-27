@@ -579,6 +579,9 @@ def select_between(params):
     axis       = params.get("axis", "Z").upper()
     lo         = params.get("lo", 0.0)
     hi         = params.get("hi", 1.0)
+    world_lo   = params.get("world_lo", None)
+    world_hi   = params.get("world_hi", None)
+    eps        = float(params.get("eps", 1e-4))
     action     = params.get("action", "SELECT").upper()
     extend     = bool(params.get("extend", False))
     obj = bpy.context.active_object
@@ -588,12 +591,19 @@ def select_between(params):
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
     world_vals = [(obj.matrix_world @ v.co)[axis_idx] for v in bm.verts]
     v_min, v_max = min(world_vals), max(world_vals)
-    lo_thresh = v_min + lo * (v_max - v_min)
-    hi_thresh = v_min + hi * (v_max - v_min)
+    # G184: a band can address a FIXED world location (world_lo/world_hi) that doesn't
+    # drift as the bbox grows mid-build, OR the legacy 0..1 fraction of the LIVE bbox
+    # extent (lo/hi). A world coord wins PER BOUND when given, and each side falls back
+    # to its fraction independently — so `world_lo` paired with a fractional `hi` is valid.
+    # `eps` (default 0.1mm) widens both bounds so a vert row landing exactly on the bound
+    # isn't clipped by float jitter (the boundary-inclusivity surprise the gap names).
+    lo_thresh = float(world_lo) if world_lo is not None else v_min + lo * (v_max - v_min)
+    hi_thresh = float(world_hi) if world_hi is not None else v_min + hi * (v_max - v_min)
+    lo_cmp, hi_cmp = lo_thresh - eps, hi_thresh + eps
     count = 0
     for vert in bm.verts:
         val = (obj.matrix_world @ vert.co)[axis_idx]
-        in_range = lo_thresh <= val <= hi_thresh
+        in_range = lo_cmp <= val <= hi_cmp
         if action == "DESELECT":
             if in_range:
                 vert.select = False
@@ -614,6 +624,7 @@ def select_between(params):
         "success": True,
         "lo_world": round(lo_thresh, 4),
         "hi_world": round(hi_thresh, 4),
+        "world_addressed": (world_lo is not None) or (world_hi is not None),
         "selected_count": count,
     }
 
@@ -753,6 +764,14 @@ def loop_cut(params):
     cuts     = params.get("cuts", 1)
     axis     = params.get("axis", "Z").upper()
     axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
+    # G183: explicit ring SEED — the world coord on `axis` of the cross-section to ring.
+    # Without it, every along-axis edge is subdivided (cuts evenly-spaced rings across the
+    # whole span); with it, only edges that STRADDLE the plane axis=at are cut, so the loop
+    # lands on the cross-section you aimed at instead of whatever ring the walker stumbles
+    # into once the topology forks.
+    at = params.get("at", None)
+    if at is not None:
+        at = float(at)
 
     bm = bmesh.from_edit_mesh(obj.data)
     mat = obj.matrix_world
@@ -769,17 +788,24 @@ def loop_cut(params):
         return abs(((mat @ e.verts[1].co) - (mat @ e.verts[0].co))
                    .normalized()[axis_idx]) > 0.7
 
+    def straddles(e):
+        a = (mat @ e.verts[0].co)[axis_idx]
+        b = (mat @ e.verts[1].co)[axis_idx]
+        return min(a, b) <= at <= max(a, b)
+
     edges_to_cut = [
         e for e in bm.edges
         if along_axis(e)
+        and (at is None or straddles(e))
         and (not scoped or (e.verts[0].index in selected and e.verts[1].index in selected))
     ]
 
     if not edges_to_cut:
         where = "within the selection " if scoped else ""
-        return {"error": f"No edges {where}run along the {axis} axis. "
-                         + ("Try a different axis, or widen the selection."
-                            if scoped else f"Try a different axis.")}
+        seed = f" crossing {axis}={round(at, 4)}" if at is not None else ""
+        return {"error": f"No edges {where}run along the {axis} axis{seed}. "
+                         + ("Try a different axis/seed, or widen the selection."
+                            if scoped else "Try a different axis or seed (at=).")}
 
     geom = bmesh.ops.subdivide_edges(bm, edges=edges_to_cut, cuts=cuts, use_grid_fill=True)
     bmesh.update_edit_mesh(obj.data)
@@ -798,9 +824,40 @@ def loop_cut(params):
         centroid /= len(new_verts)
     from .common import world_bbox, region_words
     region = region_words(world_bbox(obj), centroid) if new_verts else "center"
-    return {"success": True, "cuts": cuts, "edges_subdivided": len(edges_to_cut),
-            "loops": loops, "axis": axis, "span_world": span, "region": region,
-            "scoped_to_selection": scoped}
+
+    # G183: stub-loop / under-span detection. A real loop RINGS the whole cross-section,
+    # so its extent in the two perpendicular axes should match the mesh's there; a stub
+    # (the walker stopped at a pole on forked topology) rings only a sliver. Measure the
+    # new ring's perpendicular extent against the mesh's and report the COVERAGE, warning
+    # when it spans far less than the cross-section — so a stub reads as the failure it is,
+    # not a silent success. Suppressed when scoped to a selection (a small ring is then the
+    # intent), and skipped for multi-loop cuts where the new verts span several rings.
+    perp = [i for i in (0, 1, 2) if i != axis_idx]
+    coverage = None
+    warning = None
+    if new_verts and loops <= 1:
+        def extent(vs, i):
+            vals = [(mat @ v.co)[i] for v in vs]
+            return max(vals) - min(vals)
+        ratios = []
+        for i in perp:
+            mesh_e = extent(bm.verts, i)
+            if mesh_e > 1e-6:
+                ratios.append(extent(new_verts, i) / mesh_e)
+        if ratios:
+            coverage = round(min(ratios), 3)
+            if not scoped and coverage < 0.5:
+                warning = (f"stub loop: the cut rings only {int(coverage * 100)}% of the "
+                           f"mesh's cross-section on {axis} — the loop walker likely hit a "
+                           f"pole on forked topology and stopped short of a spanning ring. "
+                           f"Aim it with at=<{axis} coord>, or select the ring first.")
+
+    out = {"success": True, "cuts": cuts, "edges_subdivided": len(edges_to_cut),
+           "loops": loops, "axis": axis, "span_world": span, "region": region,
+           "scoped_to_selection": scoped, "seed_at": at, "coverage": coverage}
+    if warning:
+        out["warning"] = warning
+    return out
 
 
 def subdivide_selection(params):
@@ -1714,6 +1771,42 @@ def merge_by_distance(params):
             "verts_after": after, "merged": before - after}
 
 
+def recalc_normals(params):
+    """Recalculate face normals consistently — the Mesh ▸ Normals ▸ Recalculate Outside
+    fix (Shift-N), exposed as a primitive so a flipped-normal mesh (a boolean result whose
+    shell inverted, an imported mesh with bad winding) is repaired IN PLACE instead of
+    forcing a full undo+rebuild. G176 / pairs with G175.
+
+    inside: recalc normals to face OUTWARD (False, default) or INWARD (True).
+    flip:   additionally flip every face normal AFTER the recalc (Mesh ▸ Normals ▸ Flip) —
+            use to invert a known-good shell, or to get the opposite of consistent-outside.
+
+    Operates on the SELECTED faces; with nothing selected it recalcs the WHOLE mesh
+    (selects all first, and leaves it selected — matching Blender). Reports the face count
+    and the resulting outward/inward sense."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    inside = bool(params.get("inside", False))
+    flip   = bool(params.get("flip", False))
+    bm = bmesh.from_edit_mesh(obj.data)
+    whole = not any(f.select for f in bm.faces)
+    if whole:
+        bpy.ops.mesh.select_all(action='SELECT')
+        bm = bmesh.from_edit_mesh(obj.data)
+    faces = sum(1 for f in bm.faces if f.select)
+    if not faces:
+        return {"error": "No faces to recalculate"}
+    bpy.ops.mesh.normals_make_consistent(inside=inside)
+    if flip:
+        bpy.ops.mesh.flip_normals()
+    bmesh.update_edit_mesh(obj.data)
+    push_undo(f"recalc_normals inside={inside} flip={flip}")
+    return {"success": True, "faces": faces, "inside": inside, "flip": flip,
+            "outward": (not inside) ^ flip, "whole_mesh": whole}
+
+
 def bridge_handles(params):
     """edit op=bridge — weld two open boundary loops into a continuous skin (SPEC-07
     Phase 5, the consumer half of gaps.md G10). Consumes two named boundary handles,
@@ -2451,6 +2544,7 @@ TOOLS = {
     "mark_sharp":         mark_sharp,
     "set_edge_crease":    set_edge_crease,
     "merge_by_distance":  merge_by_distance,
+    "recalc_normals":     recalc_normals,
     "select_in_sphere":   select_in_sphere,
     "select_by_radius":   select_by_radius,
     "split_by_part":      split_by_part,

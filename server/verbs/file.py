@@ -16,7 +16,11 @@ _OPS = ["save", "open", "list", "import"]
 def file(
     op: Literal["save", "open", "list", "import"],
     name: tag(str, "[save/open] design name") = "",
-    path: tag(str, "[import] mesh file path (.obj/.stl/.ply/.glb/.gltf/.fbx)") = "",
+    path: tag(str, "[import] mesh/scene file path (.obj/.stl/.ply/.glb/.gltf/.fbx/.blend)") = "",
+    filter: tag(str, "[import .blend] only append objects whose name contains this substring "
+                     "(case-insensitive); empty = every object in the file") = "",
+    link: tag(bool, "[import .blend] library-LINK the objects (read-only, tracks the source "
+                    "file) instead of appending an editable copy") = False,
 ) -> str:
     """
     Persistence — the **File** menu. `op` selects:
@@ -24,7 +28,9 @@ def file(
       save   — save the current design to a named .blend          (name)
       open   — open a named design                                (name)
       list   — list saved designs                                 (—)
-      import — import a mesh file into the scene (any common fmt)  (path)
+      import — import a mesh file into the scene (any common fmt); a .blend is
+               APPENDED (combine two scenes without an out-of-band script)
+               (path, filter, link)
     """
     o = op.lower().strip()
     if o == "save":
@@ -34,5 +40,5 @@ def file(
     if o == "list":
         return designs.list_designs()
     if o == "import":
-        return designs.import_mesh(path)
+        return designs.import_mesh(path, filter, link)
     return unknown("file", "op", op, _OPS)

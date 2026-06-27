@@ -221,6 +221,21 @@ def get_blender_status(params):
         }
         status["world_z_range"] = status["world_bounds"]["z"]
 
+    # G157: an EDIT_MODE_TOOLS select op (select_by_axis / set_component_mode / …) auto-enters
+    # EDIT on target= then exits back to OBJECT — so by the time the status renders, obj.mode is
+    # OBJECT and the `edit` block (which carried component_mode) is gone, leaving the resulting
+    # select mode invisible and the agent assuming it was still editing. The component (vert/edge/
+    # face) select mode is a persistent tool setting that SURVIVES that exit, so surface it at
+    # top level for mesh objects in OBJECT mode: the caller SEES both the resulting object mode
+    # (`mode`, already present) and the select mode it left, instead of divining them.
+    if obj and obj.type == 'MESH' and obj.mode != 'EDIT':
+        _ts = bpy.context.tool_settings
+        status["component_mode"] = (
+            "VERT" if _ts.mesh_select_mode[0] else
+            "EDGE" if _ts.mesh_select_mode[1] else
+            "FACE"
+        )
+
     if obj and obj.mode == 'EDIT' and obj.type == 'MESH':
         bm = _bmesh.from_edit_mesh(obj.data)
         sel_verts  = [v for v in bm.verts if v.select]

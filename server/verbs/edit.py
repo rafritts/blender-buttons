@@ -17,7 +17,7 @@ _OPS = ["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
         "taper_section", "shape_profile", "flute", "field", "scale_rings", "band", "trace",
         "boolean", "subdivide", "bridge",
         "connect", "reshape", "resample", "strands", "relax", "slide", "poke", "inset",
-        "grid_fill", "graft", "stitch"]
+        "grid_fill", "graft", "stitch", "recalc_normals"]
 
 
 @mcp.tool(name="edit")
@@ -30,7 +30,7 @@ def edit(
                 "band", "trace",
                 "boolean", "subdivide",
                 "bridge", "connect", "reshape", "resample", "strands", "relax", "slide",
-                "poke", "inset", "grid_fill", "graft", "stitch"],
+                "poke", "inset", "grid_fill", "graft", "stitch", "recalc_normals"],
     target: tag(str, "mesh object to edit (empty=active)") = "",
     # bridge — weld two boundary handles (SPEC-07 Phase 5 / G10)
     a: tag(str, "[bridge/connect] first boundary handle (order-independent); [resample] the rim handle to resample; [graft/stitch] first OBJECT to merge") = "",
@@ -74,6 +74,11 @@ def edit(
     # loop_cut / axis-based
     axis: tag(str, "[loop_cut/taper_end/taper_section/scale_rings/band/trace] axis X|Y|Z") = "Z",
     cuts: tag(int, "[loop_cut/subdivide] number of cuts to add") = 1,
+    seed_at: tag(float, "[loop_cut] world coord on `axis` to aim the loop at one cross-section "
+                        "(only edges straddling that plane are cut) — seeds a spanning ring on "
+                        "forked topology instead of grabbing a stub loop (G183)") = None,
+    inside: tag(bool, "[recalc_normals] recalc to face INWARD (default False=outward)") = False,
+    flip: tag(bool, "[recalc_normals] additionally flip every face normal after recalc") = False,
     subdivide_smooth: tag(float, "[subdivide] 0=flat (denser cage) … ~1=round toward limit surface") = 0.0,
     # merge / delete / sharp / crease
     threshold: tag(float, "[merge] merge-by-distance threshold (m)") = 0.001,
@@ -190,7 +195,9 @@ def edit(
       extrude     — push the selection out (out/inward/up/down/left/right/forward/back
                     meters, or until_contact=obj / until_length)
       bevel       — round edges/verts   (width OR factor, segments, affect=EDGES|VERTICES)
-      loop_cut    — add edge loops       (axis, cuts)
+      loop_cut    — add edge loops       (axis, cuts, seed_at=cross-section to seed a ring)
+      recalc_normals — repair flipped normals IN PLACE (Shift-N) — fix a boolean
+                    result whose shell inverted, or bad imported winding (inside, flip)
       subdivide   — densify the SELECTED patch locally — sculptable resolution where
                     you select, no global loops, no shape-key block  (cuts, subdivide_smooth)
       merge       — merge by distance    (threshold, selected_only)
@@ -351,7 +358,9 @@ def edit(
     if o == "bevel":
         return editmode.bevel(width, factor, segments, affect, label, target)
     if o == "loop_cut":
-        return editmode.loop_cut(axis, cuts, label, target)
+        return editmode.loop_cut(axis, cuts, label, target, seed_at)
+    if o == "recalc_normals":
+        return editmode.recalc_normals(inside, flip, target, label)
     if o == "subdivide":
         return editmode.subdivide_selection(cuts, subdivide_smooth, label, target)
     if o == "merge":

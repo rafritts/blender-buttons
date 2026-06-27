@@ -383,9 +383,98 @@ def assign_material(params):
             "faces_assigned": len(sel), "slot_count": len(me.materials)}
 
 
+def _resolve_slot_object(params):
+    """Resolve the single object to operate on for slot ops — `target` if given,
+    else the active object. Returns (obj, error_string). Guards linked data and
+    requires the object to actually hold material slots."""
+    from .common import has_material_slots, linked_guard
+    target = params.get("target")
+    if target:
+        objs, err = resolve_targets(target)
+        if err:
+            return None, err
+        meshes = [o for o in objs if has_material_slots(o)]
+        if not meshes:
+            return None, f"'{target}' contains nothing that can hold a material"
+        obj = meshes[0]
+    else:
+        obj = bpy.context.active_object
+        if obj is None:
+            return None, "no active object — pass target=<object>"
+        if not has_material_slots(obj):
+            return None, f"'{obj.name}' can't hold materials"
+    blocked = linked_guard(obj)
+    if blocked:
+        return None, blocked
+    return obj, None
+
+
+def remove_material_slot(params):
+    """Remove a single material slot from an object (Material Properties ▸ −).
+
+    Reassign faces off the slot FIRST (`material op=assign`) — Blender re-homes any
+    faces still on a removed slot to slot 0 and shifts every higher index down by one.
+
+    target: object name (default: active object).
+    slot:   slot index to remove (required).
+    """
+    obj, err = _resolve_slot_object(params)
+    if err:
+        return {"error": err}
+    slot = params.get("slot")
+    if slot is None:
+        return {"error": "slot is required (the slot index to remove)"}
+    slot_idx = int(slot)
+    mats = obj.data.materials
+    n = len(mats)
+    if slot_idx < 0 or slot_idx >= n:
+        return {"error": f"'{obj.name}' has {n} slot(s); slot {slot_idx} is out of range"}
+    removed_name = mats[slot_idx].name if mats[slot_idx] is not None else None
+    activate(obj)
+    obj.active_material_index = slot_idx
+    bpy.ops.object.material_slot_remove()
+    return {"success": True, "target": obj.name, "removed_slot": slot_idx,
+            "removed_material": removed_name,
+            "slot_count": len(obj.data.materials),
+            "slots": [m.name if m else None for m in obj.data.materials]}
+
+
+def remove_unused_material_slots(params):
+    """Remove every material slot with NO faces assigned to it (Material Properties
+    ▸ ⌄ ▸ 'Remove Unused Slots') — trim a consolidated mesh to its real slot count.
+
+    target: object name (default: active object).
+    """
+    obj, err = _resolve_slot_object(params)
+    if err:
+        return {"error": err}
+    before = [m.name if m else None for m in obj.data.materials]
+    activate(obj)
+    try:
+        bpy.ops.object.material_slot_remove_unused()
+    except (AttributeError, RuntimeError):
+        # Fallback for Blender builds without the operator: drop slots that no
+        # face references, removing from the highest index down so the active-
+        # index removal doesn't shift slots we still need to visit.
+        me = obj.data
+        used = {p.material_index for p in me.polygons}
+        for idx in range(len(me.materials) - 1, -1, -1):
+            if idx not in used:
+                obj.active_material_index = idx
+                bpy.ops.object.material_slot_remove()
+    after = [m.name if m else None for m in obj.data.materials]
+    removed = [n for n in before if n not in after]
+    return {"success": True, "target": obj.name,
+            "removed_count": len(before) - len(after),
+            "removed_materials": removed,
+            "slot_count": len(after), "slots": after}
+
+
 TOOLS = {
     "shade_smooth":    shade_smooth,
     "shade_flat":      shade_flat,
     "set_material":    set_material,
     "assign_material": assign_material,
+    "remove_material_slot":         remove_material_slot,
+    "remove_unused_material_slots": remove_unused_material_slots,
 }

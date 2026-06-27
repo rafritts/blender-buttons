@@ -131,6 +131,12 @@ def _one(f):
     if rp:
         shown = ", ".join(f"[{s},{r*100:.1f}cm]" for s, r in rp[:8])
         out.append(f"  R(s): {shown}" + (f"  …+{len(rp)-8}" if len(rp) > 8 else ""))
+    mbr = f.get("min_bend_radius")
+    if mbr is not None:
+        line = f"  min bend radius: {mbr*100:.1f}cm"
+        if f.get("bend_warning"):
+            line += f"  ⚠ {f['bend_warning']}"
+        out.append(line)
     if f.get("gaps"):
         out.append("  gaps: " + ", ".join(f"s∈[{g[0]},{g[1]}]" for g in f["gaps"]))
     cands = f.get("candidates")

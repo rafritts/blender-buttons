@@ -31,8 +31,13 @@ def select(
     factor: tag(float, "[by_axis] threshold 0..1 along axis") = 0.5,
     comparison: tag(str, "[by_axis] GREATER | LESS") = "GREATER",
     # between
-    lo: tag(float, "[between] band low 0..1") = 0.0,
-    hi: tag(float, "[between] band high 0..1") = 1.0,
+    lo: tag(float, "[between] band low 0..1 (fraction of live bbox)") = 0.0,
+    hi: tag(float, "[between] band high 0..1 (fraction of live bbox)") = 1.0,
+    world_lo: tag(float, "[between] ABSOLUTE world coord for the low bound — overrides "
+                         "`lo`, so the band stays put as the bbox grows mid-build (G184)") = None,
+    world_hi: tag(float, "[between] ABSOLUTE world coord for the high bound — overrides `hi`") = None,
+    eps: tag(float, "[between] tolerance (m) widening both bounds so a row sitting exactly "
+                    "on a bound isn't clipped") = 1e-4,
     # boundary
     from_selection: tag(bool, "[boundary] restrict to current selection") = True,
     # limb
@@ -120,7 +125,8 @@ def select(
     if o == "by_axis":
         return editmode.select_by_axis(axis, factor, comparison, action, extend, target)
     if o == "between":
-        return editmode.select_between(axis, lo, hi, action, extend, target)
+        return editmode.select_between(axis, lo, hi, action, extend, target,
+                                       world_lo, world_hi, eps)
     if o == "group":
         return editmode.select_by_vgroup(name, action, extend, min_weight, target)
     if o == "material":

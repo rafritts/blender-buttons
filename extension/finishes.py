@@ -1197,6 +1197,23 @@ def _weld_clean(obj):
     return max(0, before - len(me.vertices))
 
 
+def _recalc_normals_outside(obj):
+    """Recalculate consistent OUTWARD-facing normals on obj's base mesh — Blender's
+    Mesh ▸ Normals ▸ Recalculate Outside (Shift-N). Idempotent: on an already-correct
+    winding it is a no-op (it never regret-flips a correct result), and it repairs a
+    fully-inverted shell (G175)."""
+    import bmesh
+    if obj is None or obj.type != 'MESH' or obj.data is None:
+        return
+    me = obj.data
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    bm.to_mesh(me)
+    bm.free()
+    me.update()
+
+
 def boolean(params):
     """Cut, fuse, or intersect two meshes via a Boolean modifier.
 
@@ -1286,6 +1303,17 @@ def boolean(params):
     if applied and bool(params.get("clean", True)):
         welded = _weld_clean(target)
 
+    # G175: a second sequential EXACT boolean on a mesh that is ALREADY a boolean result
+    # can flip the whole shell's winding (normals face inward) — Blender's boolean apply
+    # doesn't guarantee consistent outward normals, and _weld_clean above only touches
+    # doubles/degenerates, never winding. Recalculate consistent-outside after every applied
+    # boolean so chained cuts can't ship an inverted mesh. recalc-outside is the safe choice:
+    # a no-op on a correctly-wound result, a repair on an inverted one.
+    normals_recalced = False
+    if applied:
+        _recalc_normals_outside(target)
+        normals_recalced = True
+
     if hide_cutter:
         try:
             cutter.hide_set(True)
@@ -1305,6 +1333,8 @@ def boolean(params):
     }
     if welded:
         result["welded_verts"] = welded
+    if normals_recalced:
+        result["normals_recalc_outside"] = True
     if open_notes:
         result.setdefault("notes", []).append(
             f"boolean operand(s) {', '.join(open_notes)} are NOT watertight (open boundary "
