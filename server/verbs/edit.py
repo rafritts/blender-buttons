@@ -77,9 +77,11 @@ def edit(
     seed_at: tag(float, "[loop_cut] world coord on `axis` to aim the loop at one cross-section "
                         "(only edges straddling that plane are cut) — seeds a spanning ring on "
                         "forked topology instead of grabbing a stub loop (G183)") = None,
-    only_selected: tag(bool, "[loop_cut] scope the cut to the current selection — cut only edges "
-                             "with BOTH ends selected (rib one limb). Default False = whole mesh, "
-                             "like native Ctrl+R, so chained cuts need no reselect") = False,
+    only_selected: tag(bool, "[loop_cut/recalc_normals] scope to the current selection instead of "
+                             "the whole mesh — loop_cut: cut only edges with BOTH ends selected "
+                             "(rib one limb); recalc_normals: recalc/flip just one shell. Default "
+                             "False = whole mesh (native Ctrl+R / Recalc Outside), so chained ops "
+                             "need no reselect") = False,
     inside: tag(bool, "[recalc_normals] recalc to face INWARD (default False=outward)") = False,
     flip: tag(bool, "[recalc_normals] additionally flip every face normal after recalc") = False,
     subdivide_smooth: tag(float, "[subdivide] 0=flat (denser cage) … ~1=round toward limit surface") = 0.0,
@@ -204,7 +206,9 @@ def edit(
                     loop_cut Y) with NO reselect between them. only_selected=True opts into
                     scoping — cut only edges with BOTH ends selected, to rib one limb.
       recalc_normals — repair flipped normals IN PLACE (Shift-N) — fix a boolean
-                    result whose shell inverted, or bad imported winding (inside, flip)
+                    result whose shell inverted, or bad imported winding (inside, flip).
+                    WHOLE-MESH by default (ignores leftover selection); only_selected=True
+                    recalcs just one selected shell.
       subdivide   — densify the SELECTED patch locally — sculptable resolution where
                     you select, no global loops, no shape-key block  (cuts, subdivide_smooth)
       merge       — merge by distance    (threshold, selected_only)
@@ -367,7 +371,7 @@ def edit(
     if o == "loop_cut":
         return editmode.loop_cut(axis, cuts, label, target, seed_at, only_selected)
     if o == "recalc_normals":
-        return editmode.recalc_normals(inside, flip, target, label)
+        return editmode.recalc_normals(inside, flip, target, label, only_selected)
     if o == "subdivide":
         return editmode.subdivide_selection(cuts, subdivide_smooth, label, target)
     if o == "merge":

@@ -1170,20 +1170,24 @@ def verify_selection(steps: int = 1) -> str:
 
 @mcp.tool()
 def recalc_normals(inside: bool = False, flip: bool = False,
-                   target: str = "", label: str = "") -> str:
+                   target: str = "", label: str = "", only_selected: bool = False) -> str:
     """
     Recalculate face normals consistently — the Mesh ▸ Normals ▸ Recalculate Outside
     fix (Shift-N), as a primitive so a flipped-normal mesh is repaired IN PLACE instead
     of a full undo+rebuild. Repairs a boolean result whose shell inverted (G175), or an
-    imported mesh with bad winding. Operates on the selected faces; with nothing selected
-    it recalcs the WHOLE mesh.
+    imported mesh with bad winding.
+
+    WHOLE-MESH by default — ignores any leftover selection and fixes the entire shell
+    (what "recalc outside" almost always means). only_selected=True scopes to the current
+    selection to recalc/flip just ONE shell of a multi-part mesh.
 
     inside: recalc to face OUTWARD (False, default) or INWARD (True).
     flip:   additionally flip every face normal AFTER the recalc.
     target: optional object name — auto-selects it, enters edit mode, exits after.
     """
     result = call_blender("recalc_normals",
-                          {"inside": inside, "flip": flip, "target": target}, label=label)
+                          {"inside": inside, "flip": flip, "target": target,
+                           "only_selected": only_selected}, label=label)
     if result.get("success"):
         sense = "outward" if result.get("outward") else "inward"
         scope = "whole mesh" if result.get("whole_mesh") else f"{result['faces']} face(s)"

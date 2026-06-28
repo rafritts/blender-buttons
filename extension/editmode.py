@@ -1859,23 +1859,27 @@ def recalc_normals(params):
     flip:   additionally flip every face normal AFTER the recalc (Mesh ▸ Normals ▸ Flip) —
             use to invert a known-good shell, or to get the opposite of consistent-outside.
 
-    Operates on the SELECTED faces; with nothing selected it recalcs the WHOLE mesh
-    (selects all first, and leaves it selected — matching Blender). Reports the face count
-    and the resulting outward/inward sense."""
+    WHOLE-MESH by default — "Recalculate Outside" almost always means fix the entire
+    shell (e.g. after a boolean), so it ignores any leftover selection from a prior op and
+    selects all first. only_selected=True scopes to the current selection — recalc/flip just
+    ONE shell of a multi-part mesh. Reports the face count and the resulting outward/inward
+    sense."""
     import bmesh
     obj = bpy.context.active_object
     if obj is None or obj.mode != 'EDIT':
         return {"error": "Must be in edit mode"}
     inside = bool(params.get("inside", False))
     flip   = bool(params.get("flip", False))
+    only_selected = bool(params.get("only_selected", False))
     bm = bmesh.from_edit_mesh(obj.data)
-    whole = not any(f.select for f in bm.faces)
+    whole = not only_selected
     if whole:
         bpy.ops.mesh.select_all(action='SELECT')
         bm = bmesh.from_edit_mesh(obj.data)
     faces = sum(1 for f in bm.faces if f.select)
     if not faces:
-        return {"error": "No faces to recalculate"}
+        return {"error": "No faces to recalculate"
+                         + (" (only_selected=True but nothing is selected)" if only_selected else "")}
     bpy.ops.mesh.normals_make_consistent(inside=inside)
     if flip:
         bpy.ops.mesh.flip_normals()
