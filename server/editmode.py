@@ -408,7 +408,7 @@ def delete_geometry(mode: str = "VERT", label: str = "", target: str = "") -> st
 
 @mcp.tool()
 def loop_cut(axis: str = "Z", cuts: int = 1, label: str = "", target: str = "",
-             at: float = None) -> str:
+             at: float = None, only_selected: bool = False) -> str:
     """
     Add edge loop cuts perpendicular to the given axis using bmesh.
     Finds edges running along that axis and inserts loops crossing it.
@@ -416,17 +416,17 @@ def loop_cut(axis: str = "Z", cuts: int = 1, label: str = "", target: str = "",
           producing loops that sit at fixed positions on that axis.
           e.g. axis=Z → horizontal loops; axis=X → vertical loops at constant X.
 
-    SELECTION-SCOPED: if you are already in edit mode with verts selected, only edges
-    inside that selection are cut — add a support loop to ONE limb/region without
-    ribbing the whole mesh. With nothing selected (incl. the target= path, which
-    deselects on entry) it cuts the whole mesh, as before.
+    WHOLE-MESH BY DEFAULT — like native Ctrl+R, the cut ignores the current selection
+    and rings the whole mesh. So you can chain cuts (grid a cube: loop_cut X, then
+    loop_cut Y) with NO reselect between them.
+
+    only_selected=True opts INTO selection-scoping: cut only edges whose BOTH ends are
+    selected — add a support loop to ONE limb/region without ribbing the whole mesh.
 
     target: optional object name — auto-selects it, enters edit mode, exits after.
-            (Note: this clears the selection, so it cuts the WHOLE mesh. To scope a
-            cut, enter edit mode yourself and select the region first.)
     Must be in edit mode (or provide target).
     """
-    params = {"axis": axis, "cuts": cuts, "target": target}
+    params = {"axis": axis, "cuts": cuts, "target": target, "only_selected": only_selected}
     if at is not None:
         params["at"] = at
     result = call_blender("loop_cut", params, label=label)

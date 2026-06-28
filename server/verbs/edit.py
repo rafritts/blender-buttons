@@ -77,6 +77,9 @@ def edit(
     seed_at: tag(float, "[loop_cut] world coord on `axis` to aim the loop at one cross-section "
                         "(only edges straddling that plane are cut) — seeds a spanning ring on "
                         "forked topology instead of grabbing a stub loop (G183)") = None,
+    only_selected: tag(bool, "[loop_cut] scope the cut to the current selection — cut only edges "
+                             "with BOTH ends selected (rib one limb). Default False = whole mesh, "
+                             "like native Ctrl+R, so chained cuts need no reselect") = False,
     inside: tag(bool, "[recalc_normals] recalc to face INWARD (default False=outward)") = False,
     flip: tag(bool, "[recalc_normals] additionally flip every face normal after recalc") = False,
     subdivide_smooth: tag(float, "[subdivide] 0=flat (denser cage) … ~1=round toward limit surface") = 0.0,
@@ -195,7 +198,11 @@ def edit(
       extrude     — push the selection out (out/inward/up/down/left/right/forward/back
                     meters, or until_contact=obj / until_length)
       bevel       — round edges/verts   (width OR factor, segments, affect=EDGES|VERTICES)
-      loop_cut    — add edge loops       (axis, cuts, seed_at=cross-section to seed a ring)
+      loop_cut    — add edge loops       (axis, cuts, seed_at=cross-section to seed a ring).
+                    WHOLE-MESH by default, like native Ctrl+R — ignores the selection and
+                    rings the whole mesh, so you can chain cuts (grid a cube: loop_cut X then
+                    loop_cut Y) with NO reselect between them. only_selected=True opts into
+                    scoping — cut only edges with BOTH ends selected, to rib one limb.
       recalc_normals — repair flipped normals IN PLACE (Shift-N) — fix a boolean
                     result whose shell inverted, or bad imported winding (inside, flip)
       subdivide   — densify the SELECTED patch locally — sculptable resolution where
@@ -358,7 +365,7 @@ def edit(
     if o == "bevel":
         return editmode.bevel(width, factor, segments, affect, label, target)
     if o == "loop_cut":
-        return editmode.loop_cut(axis, cuts, label, target, seed_at)
+        return editmode.loop_cut(axis, cuts, label, target, seed_at, only_selected)
     if o == "recalc_normals":
         return editmode.recalc_normals(inside, flip, target, label)
     if o == "subdivide":

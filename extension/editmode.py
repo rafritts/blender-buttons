@@ -852,12 +852,14 @@ def loop_cut(params):
     bm = bmesh.from_edit_mesh(obj.data)
     mat = obj.matrix_world
 
-    # Z2/X7: honor the current selection — cut only edges whose BOTH ends are
-    # selected, so a support loop can be added to ONE limb without ribbing the whole
-    # mesh. Whole-mesh is the fallback ONLY when nothing is selected (the case the
-    # target= auto-switch produces, since it deselects on entry).
-    selected = {v.index for v in bm.verts if v.select}
-    scoped = len(selected) > 0
+    # Native Ctrl+R ignores the selection — so do we, by DEFAULT: a loop_cut rings the
+    # whole mesh. This matches the human mental model and kills the chaining trap where each
+    # cut left only the new loop selected and silently scoped the NEXT cut to that sliver
+    # (gridding a cube needed a manual reselect-all between every cut). only_selected=True
+    # opts back INTO scoping — cut only edges whose BOTH ends are selected, to rib ONE
+    # limb/region without ribbing the whole mesh (Z2/X7).
+    scoped = bool(params.get("only_selected", False))
+    selected = {v.index for v in bm.verts if v.select} if scoped else set()
     bm.verts.ensure_lookup_table()
 
     def along_axis(e):
