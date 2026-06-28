@@ -679,6 +679,39 @@ def select_between(axis: str = "Z", lo: float = 0.0, hi: float = 1.0,
 
 
 @mcp.tool()
+def list_components(target: str = "", max_verts: int = 60) -> str:
+    """G185 — enumerate the verts in the current selection with stable labels (mesh vertex
+    index), world position, and valence. Narrow with a band, then list to see exactly which
+    verts are there, then pick them with select op=by_index — no coordinate-slab guessing."""
+    result = call_blender("list_components", {"target": target, "max_verts": max_verts})
+    if result.get("success"):
+        lines = [f"  v{v['i']}: ({v['co'][0]}, {v['co'][1]}, {v['co'][2]})  valence {v['valence']}"
+                 for v in result["verts"]]
+        head = f"{result['total']} vert(s) selected"
+        if result["capped"]:
+            head += f" (showing first {result['shown']} — raise max_verts to see more)"
+        main = head + (("\n" + "\n".join(lines)) if lines else "")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
+def select_by_index(indices: list = None, action: str = "SELECT", extend: bool = False,
+                    target: str = "") -> str:
+    """G185 — select verts by their mesh vertex index (the labels from list_components).
+    action SELECT|DESELECT|INTERSECT, extend to union. The precise component selector for
+    small/irregular features where coordinate bands fall between loops or grab the wrong vert."""
+    result = call_blender("select_by_index", {"indices": indices or [], "action": action,
+                                              "extend": extend, "target": target})
+    if result.get("success"):
+        main = f"ok  selected={result['selected_count']} (from {result['requested']} requested)"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def mark_sharp(clear: bool = False, label: str = "", target: str = "") -> str:
     """Mark selected edges as sharp (or clear) in edit mode. Required after SubSurf so
     boxy details (hand/foot edges, jaw line) stay crisp instead of melting into blobs.

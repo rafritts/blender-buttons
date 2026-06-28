@@ -632,6 +632,79 @@ def select_between(params):
     }
 
 
+def list_components(params):
+    """G185 — enumerate the verts in the CURRENT selection with stable labels (their mesh
+    vertex index), world position, and valence, so the agent can then address them by index
+    (select op=by_index) instead of binary-searching coordinate bands. The "list what's
+    here, let me pick by name" primitive: narrow with a band first, then list, then refine.
+
+    Labels are mesh vertex indices — stable across selection/read calls, but a topology op
+    (loop_cut / extrude / delete / merge) renumbers verts, so re-list after any such edit."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode with an active object"}
+    cap = int(params.get("max_verts", 60) or 60)
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    mw = obj.matrix_world
+    sel = [v for v in bm.verts if v.select]
+    sel.sort(key=lambda v: v.index)
+    items = []
+    for v in sel[:cap]:
+        co = mw @ v.co
+        items.append({"i": v.index,
+                      "co": [round(co.x, 4), round(co.y, 4), round(co.z, 4)],
+                      "valence": len(v.link_edges)})
+    return {"success": True, "total": len(sel), "shown": len(items),
+            "capped": len(sel) > cap, "verts": items}
+
+
+def select_by_index(params):
+    """G185 — select verts by their mesh vertex index (the labels from list_components):
+    'select v3, v7' instead of a coordinate slab. action SELECT|DESELECT|INTERSECT, extend
+    to union onto the current selection."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode with an active object"}
+    raw = params.get("indices") or []
+    try:
+        want = {int(i) for i in raw}
+    except (TypeError, ValueError):
+        return {"error": "indices must be a list of integer vertex indices"}
+    if not want:
+        return {"error": "select op=by_index needs indices=[...] — vertex indices from "
+                         "select op=list"}
+    action = params.get("action", "SELECT").upper()
+    extend = bool(params.get("extend", False))
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    n = len(bm.verts)
+    bad = sorted(i for i in want if i < 0 or i >= n)
+    if bad:
+        return {"error": f"vertex index out of range (mesh has {n} verts): {bad[:10]}"}
+    count = 0
+    for v in bm.verts:
+        hit = v.index in want
+        if action == "DESELECT":
+            if hit:
+                v.select = False
+        elif action == "INTERSECT":
+            if not hit:
+                v.select = False
+        elif extend:
+            if hit:
+                v.select = True
+        else:
+            v.select = hit
+        if v.select:
+            count += 1
+    _flush_vert_selection(bm)
+    bmesh.update_edit_mesh(obj.data)
+    return {"success": True, "requested": len(want), "selected_count": count}
+
+
 def select_by_vgroup(params):
     """Select the verts belonging to a named vertex group (or every group whose name
     matches a substring) — the named-handle selector for IMPORTED assets. VRoid/Mixamo/
@@ -2530,6 +2603,8 @@ TOOLS = {
     "select_all":         select_all,
     "select_by_axis":     select_by_axis,
     "select_between":     select_between,
+    "list_components":    list_components,
+    "select_by_index":    select_by_index,
     "select_by_vgroup":   select_by_vgroup,
     "select_by_material": select_by_material,
     "grow_selection":     grow_selection,

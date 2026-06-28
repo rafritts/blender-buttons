@@ -16,20 +16,4 @@ below is a place the agent was forced out of intent-space — into hand-trig, a 
 mode, or a number it couldn't trust. A gap is a general Blender primitive, never a
 task-specific shortcut.
 
-### G185 — address individual components by label, not just by coordinate band
-
-Today the only vertex/edge/face selector is a **spatial band** (`select between` on
-X/Y/Z, intersect to combine). That works on big axis-aligned features but breaks down the
-moment a feature is small or its topology is irregular — building the thumb base, the band
-repeatedly fell *between* loop positions (selected 0), caught a shared finger-wall vert it
-didn't want, or returned 2 verts when 4 were expected, costing a long binary-search of
-coordinate slabs to discover where the geometry actually sat. The agent can *judge* "I want
-those two verts on the thumb-web rim" but has no way to *say* it.
-
-The missing primitive: when the working set is already small (a tight band, the current
-selection, a `feel`-named region), **enumerate the components in it with stable labels**
-(e.g. `v0..vN` with their positions + valence) and let the agent **select by those labels**
-("select v3, v7"). That keeps it in intent-space — point at the components it can already
-see — instead of dead-reckoning a coordinate window narrow enough to isolate them. Pairs
-with the named-handle machinery (`feel as_handle`) but for raw mesh components, not just
-ray-hit points. General primitive: "list what's here, let me pick by name."
+_No open gaps._

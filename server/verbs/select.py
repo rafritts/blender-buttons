@@ -10,16 +10,16 @@ from server._core import mcp
 from server import editmode, objects, rings, queries, handles
 from ._common import tag, unknown
 
-_OPS = ["all", "none", "object", "by_axis", "between", "group", "material", "boundary", "limb",
-        "grow", "shrink", "flood", "random", "in_sphere", "by_radius", "ring", "rings",
-        "component_mode", "current"]
+_OPS = ["all", "none", "object", "by_axis", "between", "list", "by_index", "group", "material",
+        "boundary", "limb", "grow", "shrink", "flood", "random", "in_sphere", "by_radius",
+        "ring", "rings", "component_mode", "current"]
 
 
 @mcp.tool(name="select")
 def select(
-    op: Literal["all", "none", "object", "by_axis", "between", "group", "material", "boundary",
-                "limb", "grow", "shrink", "flood", "random", "in_sphere", "by_radius", "ring",
-                "rings", "component_mode", "current"],
+    op: Literal["all", "none", "object", "by_axis", "between", "list", "by_index", "group",
+                "material", "boundary", "limb", "grow", "shrink", "flood", "random", "in_sphere",
+                "by_radius", "ring", "rings", "component_mode", "current"],
     # object selection
     name: tag(str, "[object] object name to select; [group] vertex-group name substring; [material] material-name substring (case-insensitive, unions all matches; empty = LIST every vgroup/material slot)") = "",
     # generic
@@ -47,7 +47,7 @@ def select(
     steps: tag(int, "[grow/shrink] number of steps") = 1,
     # flood (grow-to-crease)
     angle: tag(float, "[flood] crease threshold (deg) the flood halts at (default 25; lower = subtler creases stop it)") = 25.0,
-    max_verts: tag(int, "[flood] safety cap; hitting it means the region didn't close at a crease") = 20000,
+    max_verts: tag(int, "[flood] safety cap; hitting it means the region didn't close at a crease; [list] cap on verts enumerated (default 60)") = 20000,
     # random
     fraction: tag(float, "[random] fraction 0..1 to select") = 0.2,
     seed: tag(int, "[random] random seed") = 0,
@@ -64,7 +64,7 @@ def select(
     center_selection: tag(bool, "[by_radius] centre on the CURRENT selection's bbox centre (no handle to mint first)") = False,
     # ring / rings
     index: tag(int, "[ring] ring index along axis") = 0,
-    indices: tag(list, "[rings] list of ring indices") = None,
+    indices: tag(list, "[rings] list of ring indices; [by_index] vertex indices to select (the labels from op=list)") = None,
     # component mode
     mode: tag(str, "[component_mode] VERT | EDGE | FACE") = "",
     # group
@@ -81,6 +81,15 @@ def select(
                     already selected AND past the threshold.
       between     — verts in an axis band         (axis, lo, hi, action, extend).
                     action=INTERSECT keeps only already-selected verts inside the band.
+      list        — ENUMERATE the current selection's verts with stable labels (mesh
+                    vertex index), world position + valence (max_verts caps it). The
+                    "list what's here" read for when a band is too coarse: narrow with
+                    between, list to see exactly which verts landed, then pick the right
+                    ones by index. Labels survive reads but a topology edit (loop_cut/
+                    extrude/delete) renumbers — re-list after editing.
+      by_index    — select verts by their index labels (indices=[...] from op=list),
+                    action SELECT|DESELECT|INTERSECT, extend. Address "those two verts"
+                    directly instead of dead-reckoning a coordinate slab around them.
       group       — verts in a named VERTEX GROUP   (name substring, min_weight, action,
                     extend). name='' LISTS every vgroup (the grep). Unions all matches,
                     so name='skirt' grabs every skirt layer at once. The named-handle
@@ -128,6 +137,11 @@ def select(
     if o == "between":
         return editmode.select_between(axis, lo, hi, action, extend, target,
                                        world_lo, world_hi, eps)
+    if o == "list":
+        # max_verts shares the flood default (20000); a small cap fits an enumeration.
+        return editmode.list_components(target, max_verts if max_verts != 20000 else 60)
+    if o == "by_index":
+        return editmode.select_by_index(indices or [], action, extend, target)
     if o == "group":
         return editmode.select_by_vgroup(name, action, extend, min_weight, target)
     if o == "material":

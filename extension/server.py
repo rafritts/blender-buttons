@@ -103,6 +103,7 @@ for _mod in _TOOL_MODULES:
 # geometry, so it's safe — it's how the agent re-grounds before clearing the lock.
 _SELECTION_TOOLS = {
     "set_component_mode", "select_all", "select_by_axis", "select_between",
+    "list_components", "select_by_index",
     "select_by_vgroup", "select_by_material", "grow_selection", "flood_to_crease",
     "random_select", "select_in_sphere", "select_boundary", "select_limb",
     "select_ring", "select_rings", "verify_selection", "select_object",
@@ -116,7 +117,7 @@ LOCK_EXEMPT_TOOLS = (
 # named object and enters edit mode, then exits back to OBJECT mode after the call.
 EDIT_MODE_TOOLS = {
     "bevel", "extrude", "loop_cut", "subdivide_selection", "set_component_mode", "select_all",
-    "select_by_axis", "select_between", "grow_selection", "move_vertices",
+    "select_by_axis", "select_between", "list_components", "select_by_index", "grow_selection", "move_vertices",
     "scale_vertices", "delete_geometry", "separate_selection", "jitter_vertices",
     "random_select", "proportional_move", "inflate_selection", "mark_sharp",
     "set_edge_crease", "merge_by_distance", "select_in_sphere", "select_by_radius", "split_by_part",
