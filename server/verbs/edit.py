@@ -167,7 +167,7 @@ def edit(
     # boolean
     cutter: tag(str, "[boolean] cutter object") = "",
     bool_op: tag(str, "[boolean] DIFFERENCE|UNION|INTERSECT") = "DIFFERENCE",
-    solver: tag(str, "[boolean] EXACT|FAST") = "EXACT",
+    solver: tag(str, "[boolean] EXACT|FLOAT (5.0 renamed 'Fast'->'Float'; legacy FAST ok)") = "EXACT",
     hide_cutter: tag(bool, "[boolean] hide the cutter afterward") = True,
     # graft / stitch (SPEC-19 Phase 3) — algebraic compose; a/b are the two objects
     blend: tag(float, "[graft] smooth-min fillet radius k (m) — the ONE legible blend number; 0 = a hard union") = 0.0,

@@ -82,7 +82,9 @@ def render_to_file(params):
                 the format if missing.
     resolution_x / resolution_y: pixel dims (default: keep the scene's current).
     samples:    render sample count (optional; higher = cleaner + slower).
-    engine:     'BLENDER_EEVEE_NEXT' | 'CYCLES' | ... (default: keep current).
+    engine:     'BLENDER_EEVEE' | 'CYCLES' | ... (default: keep current). Note: Blender
+                5.0 renamed Eevee's id 'BLENDER_EEVEE_NEXT' -> 'BLENDER_EEVEE'; the engine
+                is validated against the build, so pass the build's real id.
     format:     PNG (default) | JPEG | OPEN_EXR | TIFF | WEBP.
     transparent: True → render film with a transparent background (PNG/EXR alpha).
     """

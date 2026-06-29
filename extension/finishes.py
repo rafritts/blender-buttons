@@ -1222,7 +1222,9 @@ def boolean(params):
     op:          DIFFERENCE (default — subtract cutter from target),
                  UNION       (fuse them),
                  INTERSECT   (keep only the overlap).
-    solver:      EXACT (default — robust, slower) | FAST (legacy, brittle).
+    solver:      EXACT (default — robust, slower) | FLOAT (fast, brittle; Blender 5.0
+                 renamed the old "Fast" solver to "Float"). Legacy "FAST" is accepted and
+                 mapped to FLOAT.
     apply:       if True, apply the modifier immediately and bake into target's mesh.
                  If False, leave the modifier live so you can tweak the cutter
                  and see updates. Default False.
@@ -1238,6 +1240,11 @@ def boolean(params):
     cutter_name = params.get("cutter")
     op          = (params.get("op", "DIFFERENCE") or "DIFFERENCE").upper()
     solver      = (params.get("solver", "EXACT") or "EXACT").upper()
+    # Blender 5.0 renamed the Boolean solver value "FAST" -> "FLOAT" (PR#141686), across the
+    # modifier, the edit-mode operator, and the Python enum. Accept the legacy name so older
+    # recipes/callers keep working, but write the 5.x value to the modifier.
+    if solver == "FAST":
+        solver = "FLOAT"
     apply       = bool(params.get("apply", False))
     hide_cutter = bool(params.get("hide_cutter", True))
 
@@ -1252,8 +1259,8 @@ def boolean(params):
         return {"error": "both target and cutter must be mesh objects"}
     if op not in ("UNION", "DIFFERENCE", "INTERSECT"):
         return {"error": "op must be UNION, DIFFERENCE, or INTERSECT"}
-    if solver not in ("EXACT", "FAST"):
-        return {"error": "solver must be EXACT or FAST"}
+    if solver not in ("EXACT", "FLOAT"):
+        return {"error": "solver must be EXACT or FLOAT (legacy 'FAST' is mapped to FLOAT)"}
 
     # G127: a non-watertight operand (open boundary edges) makes the EXACT solver leave
     # internal membranes / dangling faces — the 14-edge non-manifold mess a tube-into-wall
@@ -1347,7 +1354,7 @@ def boolean(params):
         result["hint"] = (
             "boolean apply failed — likely non-manifold geometry, overlapping "
             "faces, or un-applied scale. Try apply_transform(scale=True) on both "
-            "objects, or set solver='FAST'. Modifier is still on the target so "
+            "objects, or set solver='FLOAT'. Modifier is still on the target so "
             "you can inspect or remove_modifier."
         )
     if empty_result:

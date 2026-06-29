@@ -324,7 +324,8 @@ def boolean(target: str, cutter: str, op: str = "DIFFERENCE",
     cutter:      the mesh used as the operand (hidden afterward by default).
     op:          DIFFERENCE (default — subtract cutter from target) |
                  UNION (fuse) | INTERSECT (keep only the overlap).
-    solver:      EXACT (default — robust) | FAST (legacy, brittle).
+    solver:      EXACT (default — robust) | FLOAT (fast, brittle; 5.0 renamed
+                 "Fast"->"Float"). Legacy "FAST" is accepted and mapped to FLOAT.
     apply:       True bakes the result into target's mesh immediately; False
                  (default) leaves the modifier live so you can move the cutter
                  and watch it update, then apply_modifiers later.
@@ -336,7 +337,7 @@ def boolean(target: str, cutter: str, op: str = "DIFFERENCE",
     FRAGILITY: booleans dislike non-manifold meshes, coplanar overlapping faces,
     and un-applied non-uniform scale. If apply fails, run
     apply_transform(targets="<target>,<cutter>", scale=True) and retry, or
-    solver="FAST". On apply failure the modifier is left in place to inspect.
+    solver="FLOAT". On apply failure the modifier is left in place to inspect.
     """
     result = call_blender("boolean", {
         "target": target, "cutter": cutter, "op": op, "solver": solver,

@@ -109,13 +109,23 @@ def _imp_ply(p):
         bpy.ops.import_mesh.ply(filepath=p)
 
 
+def _imp_fbx(p):
+    # Blender 5.0 made the C++ importer (wm.fbx_import) the default and demoted the
+    # Python add-on (import_scene.fbx) to legacy — it is OFF by default, so its operator
+    # is usually unregistered. Prefer the C++ op; fall back only if it's absent.
+    try:
+        bpy.ops.wm.fbx_import(filepath=p)
+    except AttributeError:
+        bpy.ops.import_scene.fbx(filepath=p)
+
+
 _IMPORTERS = {
     ".obj":  lambda p: bpy.ops.wm.obj_import(filepath=p),
     ".stl":  _imp_stl,
     ".ply":  _imp_ply,
     ".glb":  lambda p: bpy.ops.import_scene.gltf(filepath=p),
     ".gltf": lambda p: bpy.ops.import_scene.gltf(filepath=p),
-    ".fbx":  lambda p: bpy.ops.import_scene.fbx(filepath=p),
+    ".fbx":  _imp_fbx,
 }
 
 
