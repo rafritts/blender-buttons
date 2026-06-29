@@ -33,3 +33,25 @@ The missing primitive: a `pivot=individual` (per-connected-island, or per-face) 
 scale_verts / scale_rings / rotate, so "even out / fan / shrink these N features each about
 itself" is one intent-call. Pairs with select op=list/by_index (G185) — list the features,
 then transform them each in place.
+
+### G187 — choosing the render engine is config, but only reachable as a render ACTION
+
+`render op=settings` truthfully reports the build's engines (e.g. `available: BLENDER_EEVEE,
+CYCLES`), and the agent can SEE Cycles is present. But the only path that actually sets
+`scene.render.engine` is buried inside `render op=image engine=CYCLES` — it flips the engine
+*and immediately renders*. There is no standalone "switch the active engine" call:
+`render op=cycles` only tunes Cycles dials (device/samples/denoiser), it doesn't activate the
+engine; `render op=settings` is read-only.
+
+So the active engine — a piece of scene CONFIGURATION an artist sets once, then leaves — is
+trapped behind a render ACTION. To put a scene on Cycles for look-dev (SSS, caustics, a true
+path-traced material preview, or the GPU preflight `render op=settings` already reports) the
+agent must fire a throwaway render purely for the side effect. That also collides with the
+"don't render to self-confirm" rule: the one way to change render config is the one action
+the agent is otherwise told to avoid.
+
+The missing primitive: set the active engine as state, no frame rendered — e.g.
+`render op=engine name=CYCLES` (or an `engine=` on `render op=settings`), reusing the same
+authoritative build-validation that `render op=image` already does (try the assignment, error
+with the real `available:` list if the build can't provide it). Then engine choice lives where
+the other render config lives — `quality` / `cycles` / `color` — instead of riding a render.
