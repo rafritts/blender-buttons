@@ -13,6 +13,37 @@ import time
 
 from server import _core
 
+# SPEC-20 R4 — the Blender version this server was BUILT/VERIFIED against. The native
+# surface (which verbs are native, the cousin tags, the 5.x primer) was derived from this
+# build's release notes + manual. If an attached instance's (major, minor) diverges — a
+# future 6.x on this 5.x-era server — the provenance claims may be stale, so `connect`
+# raises a tripwire the instant you attach. Bump this (and re-derive the primer) on upgrade.
+SERVER_VERIFIED_BLENDER = "5.1"
+
+
+def _ver_pair(version_str: str):
+    """('5','1','2') -> (5, 1); tolerant of junk so a weird string never crashes connect."""
+    try:
+        parts = str(version_str).split(".")
+        return int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
+    except (ValueError, IndexError):
+        return None
+
+
+def _drift_note(version_str: str) -> str:
+    """A one-line tripwire when the attached Blender's (major,minor) differs from the
+    version this server was verified against. Empty string when they match / unknown."""
+    if not version_str:
+        return ""
+    got, want = _ver_pair(version_str), _ver_pair(SERVER_VERIFIED_BLENDER)
+    if got is None or want is None or got == want:
+        return ""
+    direction = ("NEWER than" if got > want else "OLDER than")
+    return (f"\n⚠ version drift: attached Blender {version_str} is {direction} the "
+            f"{SERVER_VERIFIED_BLENDER} this server was verified against — its provenance/"
+            f"native claims may be out of date. Verify 'is this native?' against the build, "
+            f"and treat the 5.x primer as possibly stale.")
+
 
 def _name(i: dict) -> str:
     return i.get("label") or i.get("blend_file") or "(unsaved)"
@@ -20,7 +51,9 @@ def _name(i: dict) -> str:
 
 def _line(i: dict, attached: int) -> str:
     mark = "   ← attached" if i["port"] == attached else ""
-    return (f"  • port {i['port']}: {_name(i)}  [{i.get('mesh_count', '?')} meshes, "
+    ver = i.get("blender_version", "?")
+    return (f"  • port {i['port']}: {_name(i)}  [Blender {ver}, "
+            f"{i.get('mesh_count', '?')} meshes, "
             f"mode {i.get('mode', '?')}, pid {i.get('pid', '?')}]{mark}")
 
 
@@ -28,10 +61,19 @@ def _fmt(live: list, attached: int) -> str:
     if not live:
         return ("No Blender instances are reachable. Open Blender (the extension "
                 "auto-starts its server), or `connect op=launch` to open one.")
-    lines = ["Live Blender instances:"] + [_line(i, attached) for i in live]
+    lines = [f"Live Blender instances (server verified against Blender {SERVER_VERIFIED_BLENDER}):"]
+    lines += [_line(i, attached) for i in live]
     if attached is None:
         lines.append("(none attached — `connect op=attach port=<N>` to bind one; a "
                       "lone instance auto-attaches on the next command)")
+    # Tripwire on the attached instance (or any instance, if none attached yet).
+    for i in live:
+        if attached is None or i["port"] == attached:
+            note = _drift_note(i.get("blender_version", ""))
+            if note:
+                lines.append(note.lstrip("\n"))
+            if attached is not None:
+                break
     return "\n".join(lines)
 
 
@@ -48,7 +90,11 @@ def current() -> str:
     if info is None:
         _core.set_attached(None)
         return f"Was attached to port {a}, but it's no longer reachable — detached."
-    return f"Attached to port {a}: {_name(info)} [{info.get('mesh_count', '?')} meshes]."
+    ver = info.get("blender_version", "?")
+    return (f"Attached to port {a}: {_name(info)} [Blender {ver}, "
+            f"{info.get('mesh_count', '?')} meshes]. "
+            f"Server verified against Blender {SERVER_VERIFIED_BLENDER}."
+            + _drift_note(ver))
 
 
 def _pick(matches: list, field: str, val: str):
@@ -88,7 +134,9 @@ def attach(port=None, label="", file="") -> str:
         return ("Several instances are live — say which: `connect op=attach "
                 "port=<N>`.\n" + _fmt(live, _core.attached_port()))
     _core.set_attached(chosen["port"])
-    return f"Attached to port {chosen['port']}: {_name(chosen)}."
+    ver = chosen.get("blender_version", "?")
+    return (f"Attached to port {chosen['port']}: {_name(chosen)} [Blender {ver}]."
+            + _drift_note(ver))
 
 
 def detach() -> str:

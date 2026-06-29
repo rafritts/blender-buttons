@@ -19,7 +19,23 @@ enumerates every op and the args each one uses.
 Several Blender instances can run at once, each on its own port; this session attaches
 to ONE. With a single Blender open it's automatic — the first command attaches. If the
 tools report multiple instances and ask which to drive, use `connect` (op=list to see
-them, op=attach port=<N> to bind one, op=launch to open a fresh instance).
+them, op=attach port=<N> to bind one, op=launch to open a fresh instance). `connect` also
+reports the ATTACHED Blender version and the version this server was verified against, and
+warns on drift — heed that warning, it means the notes below may be stale.
+
+BUILD — this server targets **Blender 5.x** (verified against 5.1; 5.0 shipped 2025-11-18).
+Your training is densest on ≤4.x, so recalibrate any "is this native?" reflex against the
+build, never memory. The 5.x deltas most likely to bite (sourced from the release notes):
+  • EEVEE's engine id is **BLENDER_EEVEE** (was BLENDER_EEVEE_NEXT). Boolean solver "FAST"
+    is now **"FLOAT"**. Materials/Worlds always use nodes (`use_nodes` is a no-op).
+  • Six **GN-based modifiers** now ship natively — Array (with a **Circular** mode), Scatter
+    on Surface, Instance on Elements, Randomize Instances, Curve to Tube, Geometry Input —
+    reachable via `modifier op=add_asset asset="…"`. This is the native scatter/radial-array
+    path; the old bespoke `scatter`/`array_radial` verbs were retired as cousins (SPEC-20).
+  • Geometry Nodes gained an **SDF + volume-grid** family (Mesh→SDF Grid, SDF Grid Boolean,
+    SDF filters) — a native cousin for smooth-union/blend work.
+  • Files compress on save by default; data-block names up to 255 bytes; default FBX importer
+    is the C++ `wm.fbx_import`; Collada is gone. Cycles SSS is multi-bounce random-walk.
 
 THE ONE RULE — your sense of where things are is a hypothesis, never ground truth. So
 DERIVE, don't DIVINE. A spatial value you compute from what the server just handed you —

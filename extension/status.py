@@ -309,6 +309,9 @@ def ping(params=None):
         "blend_path": path,
         "mode": bpy.context.mode,
         "mesh_count": meshes,
+        # SPEC-20 R4: the ATTACHED Blender version, so `connect` can flag drift against
+        # the version this server was built/verified for (a future 6.x on a 5.x server).
+        "blender_version": ".".join(str(v) for v in bpy.app.version),
     }
 
 
