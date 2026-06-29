@@ -12,7 +12,7 @@ from server import objects, groups, modifiers, queries, scene as _scene
 from ._common import tag, unknown
 
 _OPS = ["info", "describe", "rename", "delete", "duplicate", "duplicate_mirrored",
-        "clad", "hollow", "join", "split", "group", "ungroup", "add_to_group", "parts",
+        "join", "split", "group", "ungroup", "add_to_group", "parts",
         "convert", "visibility", "particle_visibility", "props", "set_prop", "light",
         "aim", "mode", "remesh"]
 
@@ -20,7 +20,7 @@ _OPS = ["info", "describe", "rename", "delete", "duplicate", "duplicate_mirrored
 @mcp.tool(name="object")
 def object_verb(
     op: Literal["info", "describe", "rename", "delete", "duplicate",
-                "duplicate_mirrored", "clad", "hollow", "join", "split", "group", "ungroup",
+                "duplicate_mirrored", "join", "split", "group", "ungroup",
                 "add_to_group", "parts", "convert", "visibility",
                 "particle_visibility", "props", "set_prop", "light", "aim", "mode",
                 "remesh"],
@@ -40,12 +40,6 @@ def object_verb(
     # mirror-duplicate
     axis: tag(str, "[duplicate_mirrored] mirror axis X|Y|Z") = "X",
     pivot: tag(str, "[duplicate_mirrored] WORLD|CURSOR|…") = "WORLD",
-    # clad — surface-offset shell (G97)
-    region: tag(str, "[clad] whole | selection (live vertex selection) | trunk (mesh minus limbs)") = "whole",
-    clearance: tag(float, "[clad] outward standoff in m (default 0.005 = 5mm)") = 0.005,
-    thickness: tag(float, "[clad/hollow] wall thickness in m (default 0.004 = 4mm)") = 0.004,
-    # hollow — vessel-carve (G106/G127)
-    open: tag(str, "[hollow] which end to open: 'top' (+Z, default) | 'bottom' (−Z) | 'none' (closed shell)") = "top",
     # visibility
     viewport: tag(bool, "[visibility] show in viewport") = None,
     render: tag(bool, "[visibility] show in render") = None,
@@ -80,15 +74,6 @@ def object_verb(
                     to clear a whole scatter/array in one call
       duplicate   — copy it  (name, new_name, linked=True for a mesh-sharing instance)
       duplicate_mirrored — mirrored copy   (name, axis=X|Y|Z, pivot=WORLD|.., new_name)
-      clad        — create a watertight offset SHELL following a surface region: clothing,
-                    armor, a phone case, bark, a rind. The create-half of shrinkwrap, with
-                    a clearance standoff baked in. region=whole|selection|trunk (trunk =
-                    mesh minus limbs, to dodge T-posed arms). Verify with feel op=clearance.
-                    (name, region, clearance, thickness, new_name)
-      hollow      — carve a solid into an OPEN VESSEL (cup/bowl/vase) in one call: delete
-                    the end cap → SOLIDIFY inward → a manifold cup. The reliable recipe (not
-                    inset→extrude, which seals the wrong end). Reports the MEASURED world
-                    wall thickness. (name, thickness, open=top|bottom|none)
       join        — weld several into one  (names=[...], merge_threshold)
       split       — split active by loose parts into objects       (—)
       group       — gather parts into a named collection; move/rotate the whole
@@ -130,10 +115,6 @@ def object_verb(
         return objects.duplicate_object(name, new_name, linked)
     if o == "duplicate_mirrored":
         return objects.duplicate_mirrored(name, axis, pivot, new_name, label)
-    if o == "clad":
-        return objects.clad_surface(name, region, clearance, thickness, new_name, label)
-    if o == "hollow":
-        return objects.hollow(name, thickness, open, label)
     if o == "join":
         return objects.join_objects(names or [], merge_threshold)
     if o == "split":

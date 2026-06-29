@@ -35,6 +35,9 @@ from . import (  # noqa: F401
     addon,
     connect,
     uv,
+    # SPEC-20 §3 — composite MACROS, grouped by PURPOSE under buttons-<purpose>-macro
+    # (provenance legible at the call site; each op carries an R1 native-cousin tag).
+    macro_shell,
 )
 
 # The complete MCP surface after the collapse. Every name here is a verb module's
@@ -43,6 +46,8 @@ VERB_NAMES = {
     "add", "object", "edit", "select", "transform", "modifier", "material",
     "sculpt", "pose", "scene", "view", "render", "history", "file", "feel",
     "validate", "collab", "addon", "connect", "uv",
+    # SPEC-20 macro verbs
+    "buttons-shell-macro",
 }
 
 
