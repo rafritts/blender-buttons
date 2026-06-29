@@ -1,8 +1,8 @@
 """E2E for the G96-G98 gap fixes — runs the WORKING-TREE extension headless.
 
-  G96 — edit op=flute respects the live vertex selection (band-local fluting), and
+  G96 — buttons-lathe-macro op=flute respects the live vertex selection (band-local fluting), and
         computes its rotation center from the selection, not the whole-mesh centroid.
-  G97 — object op=clad: one-call surface-offset SHELL (clearance + wall) following a
+  G97 — buttons-shell-macro op=clad: one-call surface-offset SHELL (clearance + wall) following a
         region (whole / selection / trunk).
   G98 — feel op=clearance: SIGNED nearest-surface read — shell outside vs stabbing
         through the surface it wraps.

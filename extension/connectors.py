@@ -18,14 +18,14 @@ What it does that no existing verb could:
     tangent-vs-normal angle, sweep feasibility) in the status block.
 
 SPEC-10 Phase 4 (editability): a weld=False connector stores its recipe (the two
-handles + style/tension/sections/profile) as custom props. `edit op=reshape
+handles + style/tension/sections/profile) as custom props. `buttons-connector-macro op=reshape
 name=<connector>` re-evaluates that recipe against the LIVE handles — deform a pipe
 and the connector follows — with an optional `tension` override for "more / less
 arc". A welded connector is a COMMIT (the rims are fused into the shell, so there is
 nothing live to re-evaluate); reshape it by re-running connect.
 
 Vertex-count match: the exact weld needs both rims at the same vertex count.
-`edit op=resample a=<handle> count=N` resamples a boundary rim to N verts (an
+`buttons-connector-macro op=resample a=<handle> count=N` resamples a boundary rim to N verts (an
 arc-length transition collar), so a 16-vs-32 mismatch is equalised in one call and
 connect stays a clean 1:1 weld. Both owners must be meshes (keyed/rigged refused).
 The multi-strand expressive tier is SPEC-10 Phase 5, not built here.
@@ -189,7 +189,7 @@ def _compute_connector(a_name, b_name, style, tension, sections, profile):
         coarser = a_name if nA < nB else b_name
         return None, (
             f"rims have different vertex counts ({nA} vs {nB}) — connect needs 1:1 "
-            f"weldable rims. Equalise them first: edit op=resample a={coarser} "
+            f"weldable rims. Equalise them first: buttons-connector-macro op=resample a={coarser} "
             f"count={max(nA, nB)} (resamples the coarser rim up to match), then retry.")
     n = nA
 
@@ -565,14 +565,14 @@ def _public_strand_reads(data):
 # ── op=strands (SPEC-10 Phase 5) ──────────────────────────────────────────────
 
 def make_strands(params):
-    """edit op=strands — generate N thin tubes between two rims (SPEC-10 Phase 5).
+    """buttons-connector-macro op=strands — generate N thin tubes between two rims (SPEC-10 Phase 5).
 
     The expressive tier: "a sequence of crazy curves" as cheap relational generation,
     not K hand-placed Béziers. Distributes `count` strands around the two openings,
     each leaving along the opening's normal (G1, like the single connector), with a
     seeded coherent `jitter` bowing each one differently → variety from a count + a
     seed. Emitted as ONE editable mesh object (capped tubes); stores its recipe, so
-    edit op=reshape re-bakes the whole bundle against the LIVE handles.
+    buttons-connector-macro op=reshape re-bakes the whole bundle against the LIVE handles.
 
     a, b:     the two boundary handles to span (mint with feel op=assembly).
     count:    number of strands (>=2).
@@ -590,7 +590,7 @@ def make_strands(params):
     a_name = (params.get("a") or "").strip()
     b_name = (params.get("b") or "").strip()
     if not a_name or not b_name:
-        return {"error": "edit op=strands needs a=<handle> and b=<handle> "
+        return {"error": "buttons-connector-macro op=strands needs a=<handle> and b=<handle> "
                          "(mint boundary handles with feel op=assembly)"}
     if a_name == b_name:
         return {"error": "a and b are the same handle — strands needs two distinct rims"}
@@ -626,7 +626,7 @@ def make_strands(params):
     bpy.context.view_layer.objects.active = obj
     oname = obj.name
 
-    # Recipe → edit op=reshape re-evaluates the bundle against the live handles.
+    # Recipe → buttons-connector-macro op=reshape re-evaluates the bundle against the live handles.
     obj["bb_strands"] = True
     obj["bb_conn_a"] = a_name
     obj["bb_conn_b"] = b_name
@@ -663,7 +663,7 @@ def connect_handles(params):
               round (force a clean circle of the matched radius mid-span).
     weld:     fuse both ends into the owning shell(s) → one watertight manifold
               (default True). False leaves the connector as a separate, EDITABLE mesh
-              object (stores its recipe → edit op=reshape).
+              object (stores its recipe → buttons-connector-macro op=reshape).
     name:     name for the connector object (default 'connector'; shows on weld=False).
     """
     a_name = (params.get("a") or "").strip()
@@ -704,7 +704,7 @@ def connect_handles(params):
 
     if not weld:
         # SPEC-10 Phase 4 — store the recipe so the connector is re-evaluable against
-        # the live handles (edit op=reshape).
+        # the live handles (buttons-connector-macro op=reshape).
         conn["bb_connector"] = True
         conn["bb_conn_a"] = a_name
         conn["bb_conn_b"] = b_name
@@ -762,7 +762,7 @@ def connect_handles(params):
 # ── op=reshape (SPEC-10 Phase 4) ──────────────────────────────────────────────
 
 def reshape_connector(params):
-    """edit op=reshape — re-evaluate an UNWELDED connector against its live handles.
+    """buttons-connector-macro op=reshape — re-evaluate an UNWELDED connector against its live handles.
 
     The connector stored its recipe at create time (the two handles + style/tension/
     sections/profile). reshape re-reads the handles' CURRENT positions and re-bakes
@@ -777,7 +777,7 @@ def reshape_connector(params):
     """
     name = (params.get("name") or "").strip()
     if not name:
-        return {"error": "edit op=reshape needs name=<connector> (an unwelded connector)"}
+        return {"error": "buttons-connector-macro op=reshape needs name=<connector> (an unwelded connector)"}
     obj = bpy.data.objects.get(name)
     if obj is None:
         return {"error": f"object '{name}' not found"}
@@ -822,14 +822,14 @@ def reshape_connector(params):
 
 
 def _reshape_strands(obj, params):
-    """edit op=reshape on a strands object — re-bake the whole bundle against its live
+    """buttons-connector-macro op=reshape on a strands object — re-bake the whole bundle against its live
     handles (same recipe-replay contract as the single connector). The stored seed keeps
     the bundle identical apart from the handles' motion; `tension` overrides the bow."""
     a = obj.get("bb_conn_a", "")
     b = obj.get("bb_conn_b", "")
     if not a or not b:
         return {"error": f"'{obj.name}' has an incomplete strands recipe (missing handle "
-                         f"binding) — re-create it with edit op=strands"}
+                         f"binding) — re-create it with buttons-connector-macro op=strands"}
     style = obj.get("bb_conn_style", "arc")
     sections = int(obj.get("bb_conn_sections", 24) or 24)
     count = int(obj.get("bb_strand_count", 6) or 6)
@@ -893,7 +893,7 @@ def _resample_polyline_closed(pts, count):
 
 
 def resample_loop(params):
-    """edit op=resample — resample a boundary rim to a target vertex count.
+    """buttons-connector-macro op=resample — resample a boundary rim to a target vertex count.
 
     Builds a short arc-length transition collar from the rim out to a fresh `count`-
     vert loop and re-homes the handle onto it, so two rims that didn't match (e.g.
@@ -908,7 +908,7 @@ def resample_loop(params):
     """
     hname = (params.get("a") or params.get("handle") or "").strip()
     if not hname:
-        return {"error": "edit op=resample needs a=<boundary handle> and count=N"}
+        return {"error": "buttons-connector-macro op=resample needs a=<boundary handle> and count=N"}
     count = int(params.get("count", 0) or 0)
     if count < 3:
         return {"error": "count must be >=3 (the target vertex count for the rim)"}

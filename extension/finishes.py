@@ -475,7 +475,7 @@ def add_modifier(params):
             return {"error": (f"SHRINKWRAP target must be a DIFFERENT object than the host "
                               f"'{obj.name}' — name the surface to wrap ONTO via target=, and "
                               f"the object that receives the modifier via host= (or make it "
-                              f"active). For draping a new shell over a form, prefer object op=clad.")}
+                              f"active). For draping a new shell over a form, prefer buttons-shell-macro op=clad.")}
         try:
             mod.target = tgt
         except Exception as e:
@@ -1347,7 +1347,7 @@ def boolean(params):
         result.setdefault("notes", []).append(
             f"boolean operand(s) {', '.join(open_notes)} are NOT watertight (open boundary "
             f"edges) — EXACT can leave internal membranes / non-manifold edges here. Cap the "
-            f"operand(s) (object op=hollow open=none, or fill the rim) before the boolean, or "
+            f"operand(s) (buttons-shell-macro op=hollow open=none, or fill the rim) before the boolean, or "
             f"check the result with feel op=topology. (The topology-delta floor will flag new "
             f"non-manifold edges this op leaves.)")
     if apply_error is not None:

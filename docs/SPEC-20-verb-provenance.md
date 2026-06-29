@@ -1,9 +1,10 @@
 # SPEC-20 — Verb Provenance: native vs blender-buttons, and version anchoring
 
-**Status:** research COMPLETE (2026-06-29) — see **Part II** for the full findings
-(classification of all 245 ops, cousin audit, kill-list, completed 5.x primer,
-extension-health API breaks, and bucket assignments). Decisions in §1–§7 are the agreed
-framing; Part II is the grounded result. Implementation follows the Part II checklist.
+**Status:** IMPLEMENTED (2026-06-29). Research + build complete — see **Part II** for the
+full findings (classification of all 245 ops, cousin audit, kill-list, completed 5.x
+primer, extension-health API breaks, bucket assignments) and the **II.7 checklist** (all
+of A–F shipped) + **II.8 refinements**. Decisions in §1–§7 are the agreed framing; Part II
+is the grounded result as built.
 
 **Target build:** Blender **5.1** (released 2026-03-17; confirmed from the flatpak
 `org.blender.Blender 5.1` and the `BLENDER_EEVEE` render id). Blender 5.0 shipped
@@ -313,15 +314,36 @@ core, color_management, cycles, eevee, pipeline_io, python_api); docs.blender.or
 
 ## II.7 IMPLEMENTATION CHECKLIST (supersedes the §"TODO — research after compact")
 
-Research items 1–3, 5(notes), 6 above are **done**. Remaining build work, in commit order:
+Research items 1–3, 5(notes), 6 above are **done**. Build work — **all complete**:
 
-- [ ] **A. Extension-health fixes (II.4):** boolean `FAST→FLOAT`, FBX `wm.fbx_import`, EEVEE id string.
-- [ ] **B. GN-asset capability (II.5):** `modifier op=add_asset` (Route B) + set-input-by-identifier.
-- [ ] **C. Kill-list (II.3):** delete `scatter`/`scatter_on_surface`; delete/rewrite `array_radial`;
-      migrate `donut.md` and any recipe to the native modifier path.
-- [ ] **D. Cousin tags (R1, II.2):** add the native-cousin citation to every surviving macro's op `tag`.
-- [ ] **E. Version anchoring (R4):** `connect` returns attached-version + server-verified-against (5.1) +
-      drift flag; add the II.6 primer (stamped) to `server/_instructions.py`.
-- [ ] **F. Rename (§3):** lift the II.2 macros into `buttons-<purpose>-macro` verbs
-      (shell/blend/deform/lathe/connector/npr); selection helpers stay plain under `select` (II.1);
-      update `VERB_NAMES`; migrate all `recipies/`.
+- [x] **A. Extension-health fixes (II.4):** boolean `FAST→FLOAT` (+legacy alias), FBX `wm.fbx_import`
+      (with fallback), EEVEE id string corrected.
+- [x] **B. GN-asset capability (II.5):** `modifier op=add_asset` (Route B — globs DATAFILES, appends by
+      name, no hardcoded id) + set-input-by-identifier + `collection=` convenience.
+- [x] **C. Kill-list (II.3):** `scatter`/`scatter_on_surface` deleted (module + verb op + flat tool +
+      validation entry); `array_radial` deleted (native circular Array supersedes); `donut.md` migrated
+      to `modifier op=add_asset asset="Scatter on Surface"`.
+- [x] **D. Cousin tags (R1, II.2):** every surviving macro's verb carries its native-cousin tag (folded
+      into F as the macros moved).
+- [x] **E. Version anchoring (R4):** `ping` reports `blender_version`; `connect` shows attached + verified-
+      against (`SERVER_VERIFIED_BLENDER="5.1"`) + drift tripwire; stamped II.6 primer in `_instructions.py`.
+- [x] **F. Rename (§3):** macros lifted into `buttons-{shell,blend,deform,lathe,connector,npr}-macro`
+      verbs; `edit.py` stripped to native stayers; `VERB_NAMES` updated (26 verbs, registration tested);
+      recipes + `GUIDANCE_FOR_LLMS.md` migrated to the new paths.
+
+### II.8 Refinements made during implementation (the "stays put with a tag" rule)
+
+II.1 established that **selection helpers** stay plain under `select` (the native/macro cut is for
+geometry-MUTATING ops). Implementation surfaced the general principle and three more cases of it: a
+composite op whose **purpose-outcome IS its domain verb's purpose** stays under that verb WITH a macro/
+cousin tag, rather than relocating to a `buttons-*-macro` verb. Relocating buys nothing (you already reach
+for it by that domain) and would fragment a coherent surface. Applied to:
+- **`material op=textured` / `op=pbr`** — composite PBR node-graph builders (≈ Node-Wrangler "Principled
+  Texture Setup"), but you reach for them by "texture this surface" = material application. Stay in
+  `material`, tagged composite. (So `buttons-npr-macro` is the NPR-LOOK only: toon/outline/remove_outline.)
+- **`add type=tube` / `type=helix`** — construction macros (≈ Curve-to-Tube / Screw modifier), but you reach
+  for them by "add a tube/coil" = construction. Stay in `add`, tagged with their cousins.
+- **`object op=duplicate_mirrored`, `transform op=mirror`/`array_*`, `pose op=weight_to_bone`,
+  `object op=bake_shape_keys`** — near-native or single-domain composites; stay put per II.2.
+The rule, stated once: **relocate a macro only when its outcome is a DISTINCT purpose from its current
+verb** (a shell, a blend, a deform, a lathe profile, a connector, an NPR look). Otherwise tag in place.

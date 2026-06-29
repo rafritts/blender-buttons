@@ -863,7 +863,7 @@ def connect(a: str = "", b: str = "", style: str = "arc", tension: float = -1.0,
                      + "` to lint the weld (watertight / normals) · welded = committed; "
                      "re-run connect to reshape")
         else:
-            main += ("\n  → next: tune it with `edit op=reshape name=" + result['connector']
+            main += ("\n  → next: tune it with `buttons-connector-macro op=reshape name=" + result['connector']
                      + " tension=…` (re-evaluates against the live handles); "
                      "re-run with weld=true to commit")
     else:
@@ -883,7 +883,7 @@ def strands(a: str = "", b: str = "", count: int = 0, style: str = "arc",
     opening's OWN outward normal (G1, like `edit op=connect`), with a seeded coherent
     `jitter` bowing each strand its own way. Emitted as ONE editable mesh object
     (capped tubes, not welded into the shells); it stores its recipe, so
-    `edit op=reshape name=<strands>` re-bakes the whole bundle against the live
+    `buttons-connector-macro op=reshape name=<strands>` re-bakes the whole bundle against the live
     handles. Re-run with a new `seed` for a different bundle from the same inputs.
 
     a, b:     the two boundary handles to span (mint with feel op=assembly).
@@ -911,7 +911,7 @@ def strands(a: str = "", b: str = "", count: int = 0, style: str = "arc",
                 f"[{result.get('op_id','')}]")
         if result.get("warning"):
             main += f"\n  ⚠ {result['warning']}"
-        main += ("\n  → next: tune with `edit op=reshape name=" + result['object']
+        main += ("\n  → next: tune with `buttons-connector-macro op=reshape name=" + result['object']
                  + " tension=…` (re-evaluates against the live handles); re-run "
                    "op=strands with a new seed for a different bundle")
     else:
@@ -923,7 +923,7 @@ def reshape(name: str = "", tension: float = -1.0, label: str = "") -> str:
     """Re-evaluate an UNWELDED connector (or a strands bundle) against its live handles
     (SPEC-10 Phase 4/5).
 
-    A weld=False connector — or any `edit op=strands` object — stored its recipe (the
+    A weld=False connector — or any `buttons-connector-macro op=strands` object — stored its recipe (the
     two handles + style/tension/…). reshape re-reads the handles' CURRENT positions and
     re-bakes the geometry in place — so if you deform or move a pipe, the connector or
     the whole strand bundle follows. The one editable knob is `tension` (more/less arc);

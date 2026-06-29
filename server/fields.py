@@ -1,4 +1,4 @@
-"""SPEC-13 / G99 — server facade for the field deformer (edit op=field).
+"""SPEC-13 / G99 — server facade for the field deformer (buttons-deform-macro op=field).
 
 Thin pass-through to the Blender-side `field` engine (extension/fields.py), mirroring how
 rings.* ops are split server⇄extension. All the math lives on the Blender side; this just

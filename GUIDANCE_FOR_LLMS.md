@@ -192,7 +192,7 @@ loop lives in coefficient-space, the most legible thing you have:
 3. **Edit the coefficients** in your head (steepen the dome: `a` −0.31 → −0.45; flatten the
    twist: `c` → 0). You can predict exactly what each change does — that is the whole point of an
    admitted basis.
-4. **Apply** the edited formula: `edit op=field axis=auto channel=axis:v field_mode=add
+4. **Apply** the edited formula: `buttons-deform-macro op=field axis=auto channel=axis:v field_mode=add
    expr="(…edited…) - y"` (the fit emits this `expr` for you, in the field grammar, so it
    round-trips byte-for-byte).
 5. **Verify** by re-fitting — the coefficients + residual confirm the surface matches your intent.
@@ -206,7 +206,7 @@ selection or pick a finer basis — don't push the bad formula through.
 **The rest of the menu (you read/edit each as a few legible numbers):**
 - `model=rbf` / `progressive=true` — a quadric base **+ localized bumps** (cheekbone, brow). Each
   bump is one `amp·exp(−r²/w²)` term; `progressive=true tol=<mm>` auto-layers them onto a quadric
-  until the residual clears `tol`. Round-trips via `edit op=field` like the quadric.
+  until the residual clears `tol`. Round-trips via `buttons-deform-macro op=field` like the quadric.
 - `model=bspline basis_terms=N` — a workhorse control-grid surface (each control point pulls
   locally, no overshoot). Mints with `as_surface=<name>`; doesn't round-trip via `field` (mint +
   re-fit instead).
@@ -217,8 +217,8 @@ selection or pick a finer basis — don't push the bad formula through.
   section line, re-fit to verify. The net closes by construction.
 
 **Compose (SPEC-19 Phase 3) — merge parts as algebra, not topology surgery:**
-- `edit op=graft a=A b=B mode=smin blend=<k>` — smooth-min union of two closed masses; the fillet
+- `buttons-blend-macro op=graft a=A b=B blend=<k>` — smooth-min union of two closed masses; the fillet
   radius is the one number `k`. Watertight by construction (marching tetrahedra). Replaces the two
   sources (keep=True to retain). This is the clean handle-to-body / mass-to-mass merge.
-- `edit op=stitch a=A b=B` — weld two patches that share a (coincident) boundary into one
+- `buttons-blend-macro op=stitch a=A b=B` — weld two patches that share a (coincident) boundary into one
   watertight quilt. Refuses if their seams don't coincide — match the sampling first.

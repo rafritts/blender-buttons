@@ -6,7 +6,7 @@ Runs the WORKING-TREE extension headless. Covers Phase 1's acceptance criteria:
      by model=quadric: coefficients a≈α, b≈β, c≈0, residual ≈ 0, captured ≈ 100%, and the
      shape verdict names it (saddle / dome). By symmetry the centred patch's PCA frame is the
      world axes, so recovery is exact, not approximate.
-  B. ROUND-TRIP — `edit op=field` a KNOWN quadric expr onto a flat grid, then fit it back and
+  B. ROUND-TRIP — `buttons-deform-macro op=field` a KNOWN quadric expr onto a flat grid, then fit it back and
      recover the same surface (the §4 loop). Then apply the FITTED expr back through the real
      field sandbox and confirm it parses + is a no-op on its own surface (verts already satisfy
      it) — the emitted expr is genuinely executable, not decorative.

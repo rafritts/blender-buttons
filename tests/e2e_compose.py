@@ -1,4 +1,4 @@
-"""E2E for SPEC-19 Phase 3 — algebraic compose (edit op=graft / op=stitch).
+"""E2E for SPEC-19 Phase 3 — algebraic compose (buttons-blend-macro op=graft / op=stitch).
 
   GRAFT — two overlapping closed masses merged by SDF smooth-min → marching-tetrahedra mesh:
     the result is a single WATERTIGHT manifold spanning both, the sources are replaced, and the

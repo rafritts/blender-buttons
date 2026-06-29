@@ -1,6 +1,6 @@
 """E2E for Cluster 5 — hollow vessel + boolean robustness:
 
-  G106/G127 — object op=hollow carves a solid into an OPEN, watertight-walled vessel in
+  G106/G127 — buttons-shell-macro op=hollow carves a solid into an OPEN, watertight-walled vessel in
               one call (delete cap → SOLIDIFY inward), reports measured world wall thickness.
   G109      — boolean UNION auto-welds sliver/coincident verts (no degenerate-loop shatter).
   G127      — boolean flags a non-watertight operand.
@@ -50,7 +50,7 @@ def topo(name):
     return loops, comps, chi
 
 
-# ---- G106/G127: object op=hollow makes an open cup -----------------------------------
+# ---- G106/G127: buttons-shell-macro op=hollow makes an open cup -----------------------------------
 clean()
 bpy.ops.mesh.primitive_cylinder_add(radius=0.05, depth=0.10, vertices=48)
 bpy.context.active_object.name = "Mug"

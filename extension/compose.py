@@ -1,9 +1,9 @@
 """compose — SPEC-19 Phase 3: the algebraic merge the bridge/connect family can't do.
 
-`edit op=graft a=<A> b=<B> mode=smin blend=<k>` converts two parts to signed-distance
+`buttons-blend-macro op=graft a=<A> b=<B> mode=smin blend=<k>` converts two parts to signed-distance
 fields, smooth-min unions them (the fillet radius is the ONE legible number `k`), and
 marching-tetrahedra meshes the result — the filleted union that replaces the "merge monster"
-with arithmetic (supersedes gaps.md G153). `edit op=stitch a=<A> b=<B>` welds two surface
+with arithmetic (supersedes gaps.md G153). `buttons-blend-macro op=stitch a=<A> b=<B>` welds two surface
 patches that share a boundary into one watertight quilt (matched sampling + boundary weld),
 the C0 seam the discrete connectors leave cracked.
 

@@ -53,7 +53,7 @@ feature_size=0.35 detail=2 direction=NORMAL`. *Provenance:* amount ≈ 9 % of th
 `select op=by_axis target=Donut axis=Z factor=0.5 comparison=GREATER` (the upper half, `z>0`).
 
 **6 · Mint the shell.**
-`object op=clad name=Donut region=selection clearance=0.0008 thickness=0.003 new_name=Icing`.
+`buttons-shell-macro op=clad name=Donut region=selection clearance=0.0008 thickness=0.003 new_name=Icing`.
 This is the icing in one verb — an offset shell hugging the selected dome.
 ⚠ Two things `clad` does for you: it **auto-stacks SUBSURF+SOLIDIFY** on the new object, and the
 editable **cage is an open shell with 2 rims** (outer ≈ 27 cm + inner ≈ 11 cm). Those rims are
@@ -118,9 +118,9 @@ target=Icing` (Realize Instances).
 
 ## Phase 5 — Stage, light, shoot
 
-**13 · Retire the prototypes — don't delete them.** The 120 instances *reference the prototypes'
-mesh data*; deleting the sources can orphan them. They were duplicated **in place**, so they sit
-stacked at the origin and **z-fight** (a hard defect). Fix by spreading them apart below the floor:
+**13 · Retire the prototypes — don't delete them.** The Scatter-on-Surface modifier instances the
+**Sprinkles collection**, so its 4 members must stay (deleting them empties the scatter). But they
+still sit at the origin and would render there (and overlap). Move them out of frame below the floor:
 `transform op=nudge targets=Sprinkle,Sprinkle_y,Sprinkle_b,Sprinkle_w down=0.3`, then nudge three of
 them sideways (`right=0.06 / 0.12 / 0.18`) so no two are coplanar. Now they're alive, hidden, silent.
 
