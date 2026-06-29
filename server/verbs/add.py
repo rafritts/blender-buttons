@@ -87,15 +87,19 @@ def add(
         icosphere  — radius, subdivisions                (uniform tris; prefer for sculpt)
         circle     — radius, segments, fill_type         (NOTHING|NGON|TRIFAN)
         floor      — size                                (ground plane at z=0)
-      CURVES (take name, points):
+      CURVES (take name, points)  — tube/helix are composite MACROS (SPEC-20): they kept
+      their home under `add` because their purpose IS construction, but each carries an
+      R1 native-cousin note below:
         tube       — points + tube_radius (float OR per-point list for taper),
                      resolution, sides    (baked tube MESH — hair/cable/handle).
                      OR between=[A,B] to strut/connect two objects (nearest-surface
-                     endpoints — no coordinates)
+                     endpoints — no coordinates).  MACRO ≈ a Curve + Bevel / Blender 5.0's
+                     native "Curve to Tube" modifier; tube bakes the swept mesh in one call.
         helix      — turns, height, radius, tube_radius, taper, handedness, axis,
                      segments_per_turn, sides  (continuous coil MESH — wire wrap,
                      spring, screw thread, coiled rope; no point cap). Spawns at the
                      origin — re-seat it relationally with transform op=place.
+                     MACRO ≈ the native Screw modifier / a swept curve.
         curve      — points + subtype (BEZIER|NURBS|POLY), cyclic, resolution,
                      bevel_depth          (LIVE curve datablock — dolly path, rope)
         text       — body=<string>, size (cap height), depth (extrude), bevel

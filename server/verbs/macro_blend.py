@@ -1,0 +1,65 @@
+"""buttons-blend-macro — algebraic mass/patch MERGE macros (SPEC-20 §3, II.2).
+
+blender-buttons MACROS (composite, not native single ops), grouped by purpose with an R1
+native-cousin tag. Dispatch to the same flat handlers (compose.graft / compose.stitch).
+
+  graft  — two CLOSED masses → SDFs → smooth-min union → marching-tetrahedra mesh
+  stitch — weld two surface patches sharing a boundary into one watertight quilt
+"""
+
+from typing import Literal
+
+from server._core import mcp
+from server import compose
+from ._common import tag, unknown, teach
+
+
+@mcp.tool(name="buttons-blend-macro")
+def buttons_blend_macro(
+    op: Literal["graft", "stitch"],
+    a: tag(str, "[graft/stitch] first OBJECT/patch to merge") = "",
+    b: tag(str, "[graft/stitch] second OBJECT/patch to merge") = "",
+    mode: tag(str, "[graft] union mode (smin)") = "smin",
+    blend: tag(float, "[graft] smooth-min fillet radius k (m) — the ONE legible blend number; 0 = a hard union") = 0.0,
+    resolution: tag(int, "[graft] marching-tetrahedra voxel resolution per axis (default 48; higher = finer, slower)") = 0,
+    keep: tag(bool, "[graft/stitch] keep the two source objects (default False = the merge replaces them)") = False,
+    name: tag(str, "[graft/stitch] name for the merged result") = "",
+    label: str = "",
+) -> str:
+    """
+    Algebraic MERGE macros (blender-buttons composites). `op` selects:
+
+      graft  — ALGEBRAIC MERGE (SPEC-19): convert two CLOSED masses to signed-distance
+               fields, smooth-min union them, and marching-tetrahedra mesh the result —
+               watertight by construction. blend=k is the ONE fillet-radius number (0 =
+               hard union). The clean mass-to-mass / handle-to-body weld that join
+               topology-nukes and bridge/connect can't do. Replaces the two sources
+               (keep=True retains).        (a, b, mode=smin, blend, resolution, name, keep)
+      stitch — weld two surface patches that SHARE a boundary into one watertight quilt
+               (matched sampling + boundary weld → a C0 seam, no crack). Refuses if the
+               seams aren't coincident — align + match sampling first.  (a, b, name, keep)
+
+    NATIVE COUSINS (R1):
+      • graft ≈ Blender 5.0's native **SDF Geometry-Nodes** chain: Mesh to SDF Grid →
+        **SDF Grid Boolean** (Union) → **SDF Fillet** → Grid to Mesh. The capability is
+        native as of 5.0, but `SDF Grid Boolean` does a HARD union only (no blend param) —
+        smoothing is a separate iteration-bound Fillet pass, voxel-resolution-bound, with
+        a mesh→grid→mesh round-trip. graft ADDS a single CONTINUOUS smooth-min `k` blend
+        radius and direct marching-tetrahedra (no voxel round-trip).
+      • stitch ≈ **Bridge Edge Loops** / the **Weld modifier** — but those need the user
+        to pick the loops; stitch auto-locates the shared seam and welds it watertight.
+    """
+    o = op.lower().strip()
+    bad = teach("buttons-blend-macro", "op", o, {
+        "graft":  (bool(a and b), "a and b (two objects to merge)",
+                   "buttons-blend-macro op=graft a=thumb b=palm blend=0.02"),
+        "stitch": (bool(a and b), "a and b (two patches sharing a boundary)",
+                   "buttons-blend-macro op=stitch a=cheek b=brow"),
+    })
+    if bad:
+        return bad
+    if o == "graft":
+        return compose.graft(a, b, mode, blend, resolution, name, keep, label)
+    if o == "stitch":
+        return compose.stitch(a, b, name, keep, label)
+    return unknown("buttons-blend-macro", "op", op, ["graft", "stitch"])
