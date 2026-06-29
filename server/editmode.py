@@ -203,7 +203,10 @@ def scale_vertices(in_plane: float = 0.0, x: float = 1.0, y: float = 1.0, z: flo
               When > 0 this path is taken (ignores x/y/z).
     x/y/z: per-WORLD-axis scale multipliers (0.5 = half, 2.0 = double). Used when
            in_plane is 0.
-    pivot: SELECTION (around selection center) | ORIGIN (around object origin)
+    pivot: SELECTION (around the whole selection's center) | INDIVIDUAL (each connected
+           island about its OWN centroid — Blender's Individual Origins; even out /
+           shrink N separate features each in place, e.g. four inset finger faces all
+           squared with one sy= call) | ORIGIN (around object origin)
     target: optional object name — auto-selects it, enters edit mode, exits after.
     Must be in edit mode with vertices selected (or provide target).
     """
@@ -212,6 +215,8 @@ def scale_vertices(in_plane: float = 0.0, x: float = 1.0, y: float = 1.0, z: flo
                                              "target": target}, label=label)
     if result.get("success"):
         frame = f" ({result['frame']})" if result.get("frame") else ""
+        if result.get("islands") is not None:
+            frame = f" ({result['islands']} islands, each about its own centre)"
         main = f"Scaled {result['verts_scaled']} verts{frame} [{result.get('op_id','')}]"
     else:
         main = result.get("error", "failed")

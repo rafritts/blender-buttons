@@ -96,7 +96,9 @@ def transform(
     sy: tag(float, "[scale_verts] Y scale factor") = 1.0,
     sz: tag(float, "[scale_verts] Z scale factor") = 1.0,
     in_plane: tag(float, "[scale_verts] in-plane scale (flatten)") = 0.0,
-    vert_pivot: tag(str, "[scale_verts] SELECTION|CURSOR|…") = "SELECTION",
+    vert_pivot: tag(str, "[scale_verts] SELECTION (shared centre, default) | INDIVIDUAL "
+                         "(each connected island about its OWN centre — even out N "
+                         "separate features in place) | ORIGIN") = "SELECTION",
     # snap_loop
     fit_scale: tag(bool, "[snap_loop] scale the loop rim→rim to the target (False=keep size)") = True,
     fit_rotation: tag(bool, "[snap_loop] tilt the loop's plane parallel to the target") = False,
@@ -144,7 +146,10 @@ def transform(
                    (radial/circular array → modifier op=add_asset asset="Array";
                    surface scatter → modifier op=add_asset asset="Scatter on Surface")
       move_verts — move selected verts (edit) (out/up/.. or x/y/z, target)
-      scale_verts— scale selected verts (edit) (sx/sy/sz, in_plane, vert_pivot, target)
+      scale_verts— scale selected verts (edit) (sx/sy/sz, in_plane, vert_pivot, target).
+                   vert_pivot=individual scales each connected island about its OWN
+                   centre (Blender's Individual Origins) — even out N separate features
+                   in one call instead of looping one face at a time.
       snap_loop  — seat the SELECTED boundary loop onto a target opening (handle):
                    translate centre→centre, optional scale rim→rim (fit_scale) and
                    tilt plane→plane (fit_rotation). The action half of feel op=assembly

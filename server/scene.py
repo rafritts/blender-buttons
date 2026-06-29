@@ -415,6 +415,28 @@ def render_to_file(filepath: str,
     return main + _status(result)
 
 
+def set_render_engine(name: str = "", label: str = "") -> str:
+    """G187 — set the active render engine as state, NO frame rendered. Engine choice is
+    render CONFIG (it lives with quality/cycles/color), but was previously only settable
+    as a side effect of render op=image — which renders too. Use this for look-dev: put
+    the scene on Cycles for SSS/caustics/the GPU preflight render op=settings reports,
+    without firing a throwaway render. Validated against the build (invalid id → the real
+    available list, not a crash)."""
+    if not (name or "").strip():
+        return ("render engine: a 'name' is required (e.g. CYCLES). "
+                "render op=settings lists this build's available engines.")
+    result = call_blender("set_render_engine", {"name": name}, label=label)
+    if result.get("success"):
+        if result.get("unchanged"):
+            main = f"render engine already {result['engine']} (unchanged)"
+        else:
+            main = f"render engine → {result['engine']} (was {result['previous']})"
+        main += f"   available: {', '.join(result['available_engines'])}"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 def render_settings() -> str:
     """G11 — READ the render config (the verb could only write). Reports the build's
     available engines, current engine, output resolution/format, color management, and

@@ -225,7 +225,42 @@ def render_settings(params):
     return out
 
 
+def set_render_engine(params):
+    """G187 — set the active render engine as STATE, no frame rendered.
+
+    Choosing Eevee vs Cycles is scene CONFIGURATION an artist sets once and leaves —
+    it belongs with quality/cycles/color. But the only other path that assigns
+    scene.render.engine is render_to_file, which flips the engine AND immediately
+    renders. That trapped a piece of config behind a render ACTION (and collided with
+    the 'don't render to self-confirm' rule). This sets it standalone, so look-dev on
+    Cycles (SSS, caustics, the GPU preflight render_settings already reports) needs no
+    throwaway render.
+
+    name: the build's engine id — e.g. 'CYCLES', 'BLENDER_EEVEE'. Validated by trying
+          the assignment (Blender refuses an engine it can't provide), so an invalid id
+          returns the build's real available list instead of crashing — same
+          authoritative check render_to_file uses.
+    """
+    name = params.get("name") or params.get("engine")
+    if not name:
+        return {"error": "'name' is required — the engine id to activate "
+                         f"(available: {_available_engines()})"}
+    scene = bpy.context.scene
+    previous = scene.render.engine
+    if name == previous:
+        return {"success": True, "engine": previous, "previous": previous,
+                "available_engines": _available_engines(), "unchanged": True}
+    try:
+        scene.render.engine = name
+    except TypeError:
+        return {"error": f"render engine '{name}' not available in this build; "
+                         f"available: {_available_engines()}"}
+    return {"success": True, "engine": scene.render.engine, "previous": previous,
+            "available_engines": _available_engines()}
+
+
 TOOLS = {
     "render_to_file": render_to_file,
     "render_settings": render_settings,
+    "set_render_engine": set_render_engine,
 }

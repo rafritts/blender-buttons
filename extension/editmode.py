@@ -1216,6 +1216,32 @@ def move_vertices(params):
     return result
 
 
+def _selected_islands(selected):
+    """Partition selected verts into connected components, where connectivity is an
+    edge with BOTH endpoints selected (G186). An isolated selected vert — no selected
+    neighbour across an edge — is its own singleton island. So four separate inset
+    faces split into four islands, while a contiguous patch stays one."""
+    sel = set(selected)
+    seen = set()
+    islands = []
+    for start in selected:
+        if start in seen:
+            continue
+        seen.add(start)
+        stack = [start]
+        comp = []
+        while stack:
+            v = stack.pop()
+            comp.append(v)
+            for e in v.link_edges:
+                o = e.other_vert(v)
+                if o in sel and o not in seen:
+                    seen.add(o)
+                    stack.append(o)
+        islands.append(comp)
+    return islands
+
+
 def scale_vertices(params):
     import bmesh
     obj = bpy.context.active_object
@@ -1224,7 +1250,7 @@ def scale_vertices(params):
     if obj.mode != 'EDIT':
         return {"error": "Must be in edit mode"}
     in_plane = params.get("in_plane")
-    pivot = params.get("pivot", "SELECTION")  # SELECTION | ORIGIN
+    pivot = params.get("pivot", "SELECTION")  # SELECTION | INDIVIDUAL | ORIGIN
     bm = bmesh.from_edit_mesh(obj.data)
     selected = [v for v in bm.verts if v.select]
     if not selected:
@@ -1262,6 +1288,25 @@ def scale_vertices(params):
     sx = params.get("x", 1.0)
     sy = params.get("y", 1.0)
     sz = params.get("z", 1.0)
+    if (pivot or "").upper() == "INDIVIDUAL":
+        # G186: scale each connected ISLAND about its OWN centroid — Blender's
+        # Individual Origins pivot. "Even out these N inset faces, make each square"
+        # means S about each face's own centre; the shared SELECTION pivot instead
+        # drifts every feature toward the common centre. Pairs with select by_index.
+        islands = _selected_islands(selected)
+        for isl in islands:
+            cx = sum(v.co.x for v in isl) / len(isl)
+            cy = sum(v.co.y for v in isl) / len(isl)
+            cz = sum(v.co.z for v in isl) / len(isl)
+            for v in isl:
+                v.co.x = cx + (v.co.x - cx) * sx
+                v.co.y = cy + (v.co.y - cy) * sy
+                v.co.z = cz + (v.co.z - cz) * sz
+        bm.select_flush_mode()  # G87: keep the selection live across the round-trip
+        bmesh.update_edit_mesh(obj.data)
+        push_undo("scale_vertices individual")
+        return {"success": True, "verts_scaled": len(selected),
+                "islands": len(islands)}
     if pivot == "SELECTION":
         cx = sum(v.co.x for v in selected) / len(selected)
         cy = sum(v.co.y for v in selected) / len(selected)

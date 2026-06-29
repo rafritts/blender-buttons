@@ -10,18 +10,19 @@ from server._core import mcp
 from server import scene
 from ._common import tag, unknown
 
-_OPS = ["image", "settings", "quality", "cycles", "color"]
+_OPS = ["image", "settings", "engine", "quality", "cycles", "color"]
 
 
 @mcp.tool(name="render")
 def render(
-    op: Literal["image", "settings", "quality", "cycles", "color"],
+    op: Literal["image", "settings", "engine", "quality", "cycles", "color"],
     # image (render_to_file)
     filepath: tag(str, "[image] render NAME (dir is dropped; renders go to settings render_dir, with an 8-char anti-collision tag + auto extension)") = "",
     output_dir: tag(str, "[image] OVERRIDE the settings render_dir — only when the user asked for a specific location") = "",
     resolution_x: tag(int, "[image] pixel width") = None,
     resolution_y: tag(int, "[image] pixel height") = None,
     engine: tag(str, "[image] engine id — `render op=settings` lists this build's (e.g. CYCLES, BLENDER_EEVEE); empty=keep current") = "",
+    name: tag(str, "[engine] engine id to ACTIVATE as state, no render (e.g. CYCLES, BLENDER_EEVEE); `render op=settings` lists this build's") = "",
     format: tag(str, "[image] PNG|JPEG|OPEN_EXR|TIFF|WEBP") = "PNG",
     transparent: tag(bool, "[image] transparent background") = None,
     timeout: tag(float, "[image] seconds before giving up") = 300,
@@ -68,6 +69,11 @@ def render(
                 for a picture, then hand them the path.
                 (engine: builds vary — CYCLES may be absent, Eevee's id shifts by
                 version. `render op=settings` reports this build's real list.)
+      engine  — SET the active render engine as state, no frame rendered (name=CYCLES
+                | BLENDER_EEVEE | …). Engine choice is config that lives with
+                quality/cycles/color; this is the look-dev switch (put a scene on Cycles
+                for SSS/caustics) without firing a throwaway render. Validated against
+                the build — an invalid id returns the real available list.   (name)
       settings— READ the render config / PREFLIGHT: available engines (the build's
                 own list, dynamically-registered engines included), current engine,
                 resolution/format, color management, the active engine's params, and
@@ -93,6 +99,8 @@ def render(
     if o == "image":
         return scene.render_to_file(filepath, resolution_x, resolution_y, samples,
                                     engine, format, transparent, timeout, output_dir, label)
+    if o == "engine":
+        return scene.set_render_engine(name, label)
     if o == "settings":
         return scene.render_settings()
     if o == "quality":
