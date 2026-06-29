@@ -108,3 +108,44 @@ only real feedback.
 The missing read: an instance-aware count on the evaluated geometry — e.g. `feel op=audit` reporting
 `instances: N (from 'Scatter on Surface')` alongside base tris, so a density/amount can be dialed to a
 target the way every other quantity in this server is measured rather than eyeballed.
+
+### G193 — `graft` (smooth-min SDF) cracks open on a tall-thin organic assembly; voxel-remesh is the working substitute
+
+Building a ~1.55m female blockout, the recipe's core merge step — `buttons-blend-macro op=graft` of the
+torso + a leg (each a clean closed genus-0 shell, verified) — returned a **non-watertight, fragmented**
+result every time: "⚠ has open edges at the seam", and `feel op=topology` showed **31 shells / 31 open
+boundary loops (χ=−129)** at resolution 96, and the same open-seam warning at resolution 64. Two very
+different resolutions failing identically rules out simple voxel noise. The likely cause is the cubic
+`N³` grid stretched over a non-cube bbox: the body is ~1.44m tall but ~0.25–0.45m in X/Y, so the Z cells
+are 3–5× the X/Y cells, and the marching-tetrahedra surface cracks along the anisotropic blend seam. So
+graft — sold as THE clean watertight mass-to-mass weld — fails on exactly the elongated organic
+assembly (a limbed body) it's most wanted for, and there is no `voxel_x/y/z` or "uniform cell size"
+control to fix the anisotropy.
+
+What worked instead: `object op=join` the five primitives (join honors each part's *live* world
+rotation — see G194) then `object op=remesh mode=voxel voxel_size=0.012` → a single **closed genus-0
+shell**, X-symmetric to 0.001mm, watertight by construction, with naturally rounded hip/shoulder joins.
+Native voxel-remesh delivered the graft's stated goal that graft itself couldn't. The missing piece in
+graft: either uniform-cell-size voxelization (cell metres, not a per-axis count) so a tall bbox doesn't
+crack, or an internal fallback to the native voxel path when the bbox aspect ratio is extreme.
+
+### G194 — `duplicate_mirrored` and `apply rotation` silently STRIP a live axis tilt (a splayed limb comes back upright)
+
+A leg given a 4° outward splay (`transform op=rotate axis=Y angle=4`) reads correctly while live —
+`object info` shows `rotation_deg [0,4,0]`, `tilt_off_vertical_deg 4.0`, rotation-aware bbox width 0.245.
+But the moment you try to *commit* or *mirror* that tilt, it vanishes:
+  • `object op=duplicate_mirrored axis=X` produced a twin with `rotation_deg [0,0,0]`, `tilt_off_vertical
+    0.0`, and width **0.190 = the UN-rotated width** — i.e. an upright leg, not the −4° mirror image.
+  • `transform op=apply rotation=True` on the original did the same thing: world bbox collapsed from
+    width 0.245 (tilted) to 0.190 (upright), foot X jumped from −0.213 to −0.157. Applying the rotation
+    *removed* it instead of baking it into the mesh.
+
+So you cannot mirror a splayed limb, and you cannot bake its rotation — both paths quietly discard the
+Y-tilt and leave geometry that's wrong in a way the status block's own numbers contradict. The reflection
+of `Ry(θ)` across the YZ plane should be `Ry(−θ)` (same bbox); apply should leave world geometry
+invariant. Both are broken for an off-axis object rotation.
+
+Workaround used: build each side independently with explicit mirror-image live rotations (`+40°` / `−40°`
+for the arms), never apply/mirror, and let `object op=join` bake the world transforms at merge time —
+join *does* honor live rotation correctly (arm tips landed at ±0.51 as authored). But that only works
+because a later join consumes them; anything that needs a baked-or-mirrored single tilted part is stuck.
