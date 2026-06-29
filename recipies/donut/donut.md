@@ -33,7 +33,7 @@ is the donut's defining feature; if you ever see genus-0 you sealed it.
 `transform op=resize targets=Donut height=0.021` (≈ ×0.81), then bake it:
 `transform op=apply targets=Donut scale=true`. ⚠ `apply` reports a "no-op byte-identical" —
 that's correct: applying scale leaves *world* geometry unchanged, it only zeroes the object
-scale so later modifiers/scatter behave.
+scale so later modifiers (incl. the scatter modifier) behave.
 
 **3 · Smooth dough.**
 `modifier op=add target=Donut type=SUBSURF levels=2 render_levels=2`, then
@@ -76,29 +76,35 @@ then `edit op=smooth_edges target=Icing angle_limit=60`. (The `max_depth=2` enve
 
 ---
 
-## Phase 3 — Sprinkles (the server does the other hard part: `scatter`)
+## Phase 3 — Sprinkles (the NATIVE "Scatter on Surface" GN modifier; SPEC-20)
 
-**10 · One flat-lying prototype.**
+Blender 5.0 ships **"Scatter on Surface"** as a bundled Geometry-Nodes Essentials modifier —
+a full superset of the old bespoke `scatter` verb (Density/Amount, Poisson-Disk min-distance,
+distribution mask, **Collection instance source**, Align-Rotation/Alignment-Axis/Surface-Offset,
+Randomize Rotation/Scale). Drive it with **`modifier op=add_asset asset="Scatter on Surface"`**.
+It emits **instances on points**, not separate objects (so `feel`/`info` see ONE modified Icing,
+not `Spr_0000…`); `modifier op=apply` realizes them into editable geometry when you need it.
+
+**10 · One prototype.**
 `add type=cylinder name=Sprinkle radius=0.0011 height=0.006 segments=6` (≈ 1×6 mm; length along Z).
-A cylinder's length is its local **Z**, and `scatter align_normal` aligns local-Z to the surface
-normal → it would stand the sprinkle **upright**. So lay it down first:
-`transform op=rotate_to targets=Sprinkle deg_x=90` (length now horizontal), and scatter with
-`inherit_orientation=true` to keep that pose.
+You don't pre-rotate for the native scatter — its **Alignment Axis** input picks which local axis
+aligns to the surface normal, and **Align Rotation** lays the rest down (set them in step 12).
 
-**11 · Four colors.** `material op=set target=Sprinkle hex=#e23b3b roughness=0.35 material_name=Sprinkle_red`,
-then `object op=duplicate name=Sprinkle new_name=Sprinkle_y` + `material op=set target=Sprinkle_y
-hex=#f2c33d material_name=Sprinkle_yellow`; repeat for `_b #3d7bf2` and `_w #f0f0f0`.
-⚠ Use **plain** `duplicate` (not `linked=true`): distinct meshes → distinct materials → the scatter
-colorizes per instance.
+**11 · Four colors → one Collection.** `material op=set target=Sprinkle hex=#e23b3b roughness=0.35
+material_name=Sprinkle_red`, then `object op=duplicate name=Sprinkle new_name=Sprinkle_y` +
+`material op=set target=Sprinkle_y hex=#f2c33d material_name=Sprinkle_yellow`; repeat for `_b #3d7bf2`
+and `_w #f0f0f0`. Group the four into one collection the modifier will instance from:
+`object op=group targets=Sprinkle,Sprinkle_y,Sprinkle_b,Sprinkle_w name=Sprinkles`. Per-prototype
+materials in the collection = the multi-color sprinkles (the modifier picks among the members).
 
-**12 · Scatter onto the glaze.**
-`transform op=scatter target=Icing sources=Sprinkle,Sprinkle_y,Sprinkle_b,Sprinkle_w count=120
-up_only=true seat=true inherit_orientation=true rotate_z=true jitter_tilt=18 min_distance=0.0035
-scale_min=0.85 scale_max=1.2 name_prefix=Spr`.
-⚠ The scatter prints *"multiple sources but no per-object colours found … else every instance renders
-identically"* — this is **conservative and fires even when it's fine**. Don't trust it; **verify the
-truth**: `object op=info name=Spr_0000` (and a few others) and read the `materials[0].name` — they
-should vary across red/yellow/blue/white. (They do, for non-linked prototypes.)
+**12 · Scatter onto the glaze (native modifier).**
+`modifier op=add_asset asset="Scatter on Surface" host=Icing collection=Sprinkles
+inputs={"Amount": 120, "Seed": 3, "Align Rotation": true, "Surface Offset": 0.0,
+"Randomize Scale": 0.35}` — then read back the result's `inputs:` list (the exact socket names
+come from the live node group) and set **Alignment Axis** / **Poisson Disk** + min-distance /
+**Density Mask** as needed. The base mesh stays the Icing; the sprinkles are instances on it.
+Bake to real geometry only if a later step must edit individual sprinkles: `modifier op=apply
+target=Icing` (Realize Instances).
 
 ---
 
@@ -143,9 +149,13 @@ above (genus-1 body, declared contacts, per-instance materials), not by reading 
 
 1. `clad region=selection` = instant icing, but it **auto-adds SUBSURF+SOLIDIFY** and leaves a
    **2-rim open cage** — reach for the rims with `select op=boundary`, not a coordinate guess.
-2. A cylinder scatters **upright** unless you `rotate_to deg_x=90` + `inherit_orientation=true`.
-3. `scatter`'s per-object-colour warning is a **false alarm for non-linked dupes** — confirm with
-   `object op=info`, never assume mono.
-4. In-place duplicates **z-fight**; spread (don't delete) the scatter sources.
+2. Native **Scatter on Surface** orients via its **Alignment Axis** + **Align Rotation** inputs —
+   set those instead of pre-rotating the prototype; read the modifier result's `inputs:` for the
+   exact socket names (they come from the live node group, not from memory).
+3. The native modifier instances from a **Collection** — per-prototype materials in that collection
+   give the multi-colour mix; it emits **instances** (one modified Icing), so `op=apply` to realize
+   real geometry before editing individual sprinkles.
+4. In-place duplicate prototypes **z-fight** if their origins coincide; keep the collection members
+   spread, and use Poisson-Disk + min-distance on the scatter to avoid instance overlap.
 5. Fresh Blender ships a default **Cube/Light/Camera** — delete the Cube, set your Cam active.
 6. `transform op=apply scale` legitimately reports "no-op" (world geometry is unchanged by design).

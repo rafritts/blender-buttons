@@ -23,7 +23,7 @@ def rig_object(name: str = "", subject: str = "", azimuth: float = 45.0,
                label: str = "") -> str:
     """G79 — position an object on a sphere around a subject and aim it inward: the
     relational light/camera rig (key/fill/rim light, hero camera) by azimuth/elevation/
-    distance, no typed coordinates — the spherical analogue of array_radial. azimuth
+    distance, no typed coordinates — a radial array on a sphere. azimuth
     0=front (−Y), 90=+X (right); elevation above the horizon; distance = subject→object.
 
     G149 — subject can be SEVERAL objects: a comma list ("donut,plate,mug") or a group

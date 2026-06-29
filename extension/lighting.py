@@ -123,8 +123,8 @@ def aim_at(params):
 def rig_around(params):
     """G79 — position an object on a sphere around a subject (azimuth / elevation /
     distance) and aim it inward. The relational light/camera rig: a key/fill/rim light or
-    a hero camera at an angle + radius around the subject, no typed coordinates — the
-    spherical analogue of array_radial. azimuth 0 = front (−Y), 90 = +X (right side);
+    a hero camera at an angle + radius around the subject, no typed coordinates — a
+    radial array on a sphere. azimuth 0 = front (−Y), 90 = +X (right side);
     elevation = degrees above the horizon; distance = subject-centre → object.
 
     G149 — subject may be SEVERAL objects (comma list or group name): the rig orbits and

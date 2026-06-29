@@ -208,7 +208,7 @@ _drift = 0.0
 _DRIFT_THRESHOLD = 100.0
 _DRIFT_HIGH = {            # structural rearrangers — a lot can shift unseen
     "boolean", "apply_modifiers", "remesh", "join_objects", "noise_displace", "bend",
-    "bake_shape_keys_to_basis", "scatter_on_surface", "separate_selection",
+    "bake_shape_keys_to_basis", "separate_selection",
 }
 _DRIFT_MED = {             # local topology edits
     "extrude", "extrude_along_curve", "inset_faces", "loop_cut", "subdivide_selection",

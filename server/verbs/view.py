@@ -68,8 +68,8 @@ def view(
                   target=<object to orbit around>) — relational viewpoint, no coordinates
       rig       — position+aim a light or camera around a subject: rig=<light/camera>,
                   subject=<object|comma-list|group>, azimuth/elevation/distance. The
-                  relational key/fill/rim or hero-camera rig (spherical analogue of
-                  array_radial); aims the object's -Z at the subject(s)' union centre.
+                  relational key/fill/rim or hero-camera rig (a radial array on a
+                  sphere); aims the object's -Z at the subject(s)' union centre.
                   fit=True auto-frames the whole subject set from the camera's FOV (or a
                   light's extent). (re-aim only → object op=aim)
       zoom      — zoom to the current selection (—)

@@ -1,8 +1,13 @@
 """transform — move / rotate / scale / snap / mirror / array (SPEC-05).
 
 Mode-agnostic transforms: relocate, resize, rotate, snap, mirror, distribute,
-array, scatter — plus vertex-level move/scale. `op` selects the operation;
+array — plus vertex-level move/scale. `op` selects the operation;
 `targets` is "" (active), one name, or "a,b,c".
+
+(Native paths, SPEC-20: a radial/circular array is `modifier op=add_asset asset="Array"`
+— Blender 5.0's GN Array has a native Circular mode; surface scattering is
+`modifier op=add_asset asset="Scatter on Surface"`. The bespoke array_radial / scatter
+ops were retired as native cousins.)
 """
 
 from typing import Literal
@@ -13,7 +18,7 @@ from ._common import tag, unknown, teach
 
 _OPS = ["nudge", "place", "move_to", "rotate_to", "aim_axis", "rest_on", "seat", "resize",
         "scale", "rotate", "apply", "snap", "snap_grid", "match_dim", "mirror", "distribute",
-        "array_corners", "array_along", "array_radial", "scatter", "move_verts",
+        "array_corners", "array_along", "move_verts",
         "scale_verts", "snap_loop"]
 
 
@@ -21,8 +26,8 @@ _OPS = ["nudge", "place", "move_to", "rotate_to", "aim_axis", "rest_on", "seat",
 def transform(
     op: Literal["nudge", "place", "move_to", "rotate_to", "aim_axis", "rest_on", "seat",
                 "resize", "scale", "rotate", "apply", "snap", "snap_grid", "match_dim",
-                "mirror", "distribute", "array_corners", "array_along", "array_radial",
-                "scatter", "move_verts", "scale_verts", "snap_loop"],
+                "mirror", "distribute", "array_corners", "array_along",
+                "move_verts", "scale_verts", "snap_loop"],
     targets: tag(str, "object(s): '' active, 'name', or 'a,b,c'") = "",
     # place (relational re-placement — same DSL as add's on=)
     on: tag(dict, "[place] placement spec — {\"left_of\":\"base\",\"gap\":0}, {\"on\":\"seat\"}, …") = None,
@@ -60,10 +65,10 @@ def transform(
     rotation: tag(bool, "[apply] bake rotation") = False,
     location: tag(bool, "[apply] bake location") = False,
     # snap
-    target: tag(str, "[snap/match_dim] object to snap/measure against; [rest_on] surface to rest on; [seat] cavity to seat into; [scatter] the SURFACE to scatter onto") = "",
+    target: tag(str, "[snap/match_dim] object to snap/measure against; [rest_on] surface to rest on; [seat] cavity to seat into") = "",
     side: tag(str, "[snap] target side, e.g. Z_MAX") = "Z_MAX",
     source_side: tag(str, "[snap] moved-object side (AUTO infers)") = "AUTO",
-    offset: tag(float, "[snap] gap along the snap axis (m); [rest_on/seat] clearance after contact (m); [scatter] signed distance (m) along the surface normal, on top of any seat (+ proud, − sunk)") = 0.0,
+    offset: tag(float, "[snap] gap along the snap axis (m); [rest_on/seat] clearance after contact (m)") = 0.0,
     # snap_grid
     size: tag(float, "[snap_grid] grid size (m)") = 0.1,
     axes: tag(str, "[snap_grid] axes to snap, e.g. XYZ") = "XYZ",
@@ -77,37 +82,12 @@ def transform(
     between: tag(list, "[distribute/array_along] two endpoint objects [a,b]") = None,
     prototype: tag(str, "[array_*] object to copy") = "",
     of: tag(str, "[array_corners] target whose 4 corners to fill") = "",
-    count: tag(int, "[array_along/array_radial] number of copies") = 0,
+    count: tag(int, "[array_along] number of copies") = 0,
     standing_on_floor: tag(bool, "[array_corners] keep copies on the floor") = True,
     keep_original: tag(bool, "[array_*] keep the prototype") = False,
     linked: tag(bool, "[array_*] make INSTANCES sharing the prototype's mesh — one mesh "
-                      "for the whole array (pickets, balusters, spokes); edit one, all change") = False,
-    name_prefix: tag(str, "[array_*/scatter] name prefix for copies") = "",
-    center_object: tag(str, "[array_radial] object at the ring center") = "",
-    start_angle: tag(float, "[array_radial] start angle (deg)") = 0.0,
-    end_angle: tag(float, "[array_radial] end angle (deg); default = full ring from start (start+360). Set for a partial arc") = None,
-    radius: tag(float, "[array_radial] ring radius (m)") = None,
-    align_to_tangent: tag(bool, "[array_radial] rotate copies to the ring tangent") = False,
-    # scatter
-    source: tag(str, "[scatter] the object to instance across the surface (copies share its mesh data); the surface is target=") = "",
-    sources: tag(str, "[scatter] comma-separated source objects for variety (each instance picks one)") = "",
-    scale_min: tag(float, "[scatter] min random scale") = 0.8,
-    scale_max: tag(float, "[scatter] max random scale") = 1.2,
-    align_normal: tag(bool, "[scatter] align copies to surface normal") = True,
-    up_only: tag(bool, "[scatter] scatter ONLY onto up-facing faces (top, not underside/inner walls)") = False,
-    max_slope: tag(float, "[scatter] up_only cone half-angle from +Z in degrees (default 45)") = 45.0,
-    rotate_z: tag(bool, "[scatter] random Z rotation") = True,
-    parent_to_target: tag(bool, "[scatter] parent copies to the surface") = True,
-    seed: tag(int, "[scatter] random seed") = 0,
-    density: tag(float, "[scatter] instances per m² (overrides count)") = 0.0,
-    within: tag(str, "[scatter] region MASK — keep instances inside this object/region's XY footprint") = "",
-    within_margin: tag(float, "[scatter] within-mask margin (m)") = 0.0,
-    avoid: tag(str, "[scatter] object/region to avoid") = "",
-    avoid_margin: tag(float, "[scatter] avoidance margin (m)") = 0.0,
-    seat: tag(bool, "[scatter] seat copies PROUD — lift each so its lowest point rests on the surface (no burying the origin)") = False,
-    min_distance: tag(float, "[scatter] Poisson-disk spacing (m) — no two instances closer than this (anti dense z-fight)") = 0.0,
-    jitter_tilt: tag(float, "[scatter] max random tilt (deg) off the normal so coplanar flats cross instead of z-fighting") = 0.0,
-    inherit_orientation: tag(bool, "[scatter] compose each instance ON TOP OF the source object's OWN rotation, so a pre-rotated prototype (a lay-flat leaf) scatters in that pose without baking it into mesh data (G150)") = False,
+                      "for the whole array (pickets, balusters); edit one, all change") = False,
+    name_prefix: tag(str, "[array_*] name prefix for copies") = "",
     # move_verts / scale_verts (edit-mode component transforms)
     x: tag(float, "[move_verts] explicit X amount (m)") = 0.0,
     y: tag(float, "[move_verts] explicit Y amount (m)") = 0.0,
@@ -161,11 +141,8 @@ def transform(
       array_corners — copy to a target's 4 corners (prototype, of, standing_on_floor)
       array_along  — N copies evenly along the A→B segment, endpoints included
                    (prototype, count, between=[a,b]); direction is the true A→B vector
-      array_radial — N copies in a ring (prototype, count, center_object, axis,
-                   start_angle, end_angle, radius, align_to_tangent)
-      scatter  — scatter copies on a surface (target, source/sources, count OR density,
-                 within=region mask, avoid, scale_min/max, seat, offset, min_distance,
-                 jitter_tilt, …)
+                   (radial/circular array → modifier op=add_asset asset="Array";
+                   surface scatter → modifier op=add_asset asset="Scatter on Surface")
       move_verts — move selected verts (edit) (out/up/.. or x/y/z, target)
       scale_verts— scale selected verts (edit) (sx/sy/sz, in_plane, vert_pivot, target)
       snap_loop  — seat the SELECTED boundary loop onto a target opening (handle):
@@ -214,12 +191,6 @@ def transform(
         "array_along":   (bool(prototype and count) and len(between or []) == 2,
                           "prototype, count, between=[a,b]",
                           "transform op=array_along prototype=picket count=5 between=[postL,postR]"),
-        "array_radial":  (bool(prototype and count and center_object),
-                          "prototype, count, center_object",
-                          "transform op=array_radial prototype=spoke count=8 center_object=hub axis=Z"),
-        "scatter":       (bool(target and (source or sources)),
-                          "target=<surface to scatter onto> and source=<object to instance> (or sources=)",
-                          "transform op=scatter target=lawn source=tuft density=40 within=bed"),
         "snap_loop":     (bool(handle),
                           "handle=<target opening> (be in edit mode, loop selected)",
                           "transform op=snap_loop handle=jar.rim"),
@@ -274,18 +245,6 @@ def transform(
     if o == "array_along":
         return relational.array_along(prototype, count, between or [], axis,
                                       keep_original, name_prefix, linked, label)
-    if o == "array_radial":
-        return relational.array_radial(prototype, count, None, center_object, axis,
-                                       start_angle, end_angle, radius, align_to_tangent,
-                                       keep_original, name_prefix, linked, label)
-    if o == "scatter":
-        return relational.scatter_on_surface(target, source, count or 100, scale_min,
-                                             scale_max, align_normal, rotate_z,
-                                             parent_to_target, seed, name_prefix,
-                                             avoid, avoid_margin, sources, within,
-                                             within_margin, density, up_only, max_slope,
-                                             seat, offset, min_distance, jitter_tilt,
-                                             inherit_orientation, label)
     if o == "move_verts":
         return editmode.move_vertices(out, inward, up, down, left, right, forward,
                                       back, x, y, z, label, target)

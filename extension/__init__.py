@@ -20,7 +20,6 @@ module whose name matches the tool family:
   fit.py          fit — describe a selection as parametric form (the inverse; SPEC-14/G100)
   shading.py      shade_smooth / shade_flat / set_material (Principled BSDF)
   lighting.py     add_light / modify_light / set_world_background / set_camera_dof
-  scatter.py      scatter_on_surface (the donut-tutorial sprinkle step)
   sculpt.py       sculpt_grab / inflate / draw / smooth / crease / pinch / flatten
   viewport.py     view angle / shading mode / framing / orbit / camera positioning
   shaders.py      set_toon_material (cel/anime) / add_outline / remove_outline
