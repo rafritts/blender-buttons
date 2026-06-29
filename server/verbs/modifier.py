@@ -11,15 +11,23 @@ from server._core import mcp
 from server import modifiers
 from ._common import tag, unknown
 
-_OPS = ["add", "modify", "move", "remove", "list", "apply"]
+_OPS = ["add", "add_asset", "modify", "move", "remove", "list", "apply"]
 
 
 @mcp.tool(name="modifier")
 def modifier(
-    op: Literal["add", "modify", "move", "remove", "list", "apply"],
+    op: Literal["add", "add_asset", "modify", "move", "remove", "list", "apply"],
     target: tag(str, "object whose modifier stack to act on") = "",
     # add
     type: tag(str, "[add] SUBSURF|MIRROR|SOLIDIFY|BEVEL|ARRAY|…") = "",
+    # add_asset — bundled Geometry-Nodes Essentials node-group (Blender 5.0+)
+    asset: tag(str, "[add_asset] Essentials node-group: 'Scatter on Surface' | 'Array' | "
+                    "'Instance on Elements' | 'Randomize Instances' | 'Curve to Tube' | "
+                    "'Geometry Input'") = "",
+    collection: tag(str, "[add_asset] collection to assign to the asset's Collection input "
+                         "(e.g. the instance source / prototypes for Scatter on Surface)") = "",
+    inputs: tag(dict, "[add_asset] {socket-name: value} dials, e.g. {'Density': 250, 'Seed': 3}; "
+                      "the result lists every settable input name") = None,
     name: tag(str, "[add] name for the new modifier · [apply] object (alias of target)") = "",
     levels: tag(int, "[add/modify] subsurf viewport levels") = None,
     render_levels: tag(int, "[add/modify] subsurf render levels") = None,
@@ -60,6 +68,10 @@ def modifier(
       add    — add a modifier   (type=SUBSURF|MIRROR|SOLIDIFY|BEVEL|ARRAY|…, target,
                name, + the dials that type uses: levels/render_levels, width/segments,
                offset, axis/mirror_object, factor/iterations, …)
+      add_asset — add a Geometry-Nodes modifier pointing at a BUNDLED Essentials
+               node-group (Blender 5.0+): asset='Scatter on Surface'|'Curve to Tube'|…,
+               target (host), collection (instance source), inputs={dial: value}. The
+               native scatter/instancer/array path. (Emits instances; op=apply realizes.)
       modify — tweak an existing modifier (target, modifier_name, + any dial:
                levels, width, thickness, angle_limit, count, factor, strength,
                show_viewport/show_render, …)
@@ -81,6 +93,9 @@ def modifier(
             target, offset, wrap_method or "NEAREST_SURFACEPOINT", axis,
             merge_threshold, mirror_object, precision, rest_source, factor,
             iterations, vertex_group, count, label, host=host)
+    if o == "add_asset":
+        return modifiers.add_asset_modifier(
+            asset, host or target, name, collection, inputs, label)
     if o == "modify":
         return modifiers.modify_modifier(
             target, modifier_name or modifier, levels, render_levels, width, segments,

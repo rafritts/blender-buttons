@@ -96,6 +96,49 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
 
 
 @mcp.tool()
+def add_asset_modifier(asset: str, host: str = "", name: str = "",
+                       collection: str = "", inputs: dict = None,
+                       label: str = "") -> str:
+    """
+    Add a Geometry-Nodes modifier pointing at a BUNDLED Essentials node-group asset
+    (Blender 5.0+) — the native path that typed `add_modifier` can't reach.
+
+    asset:      Essentials node-group name. The six bundled in 5.0:
+                "Scatter on Surface", "Array", "Instance on Elements",
+                "Randomize Instances", "Curve to Tube", "Geometry Input".
+    host:       object that receives the modifier (defaults to active).
+    name:       modifier name (defaults to the asset name).
+    collection: assign this collection to the asset's Collection input — e.g. the
+                instance source for "Scatter on Surface" (multi-prototype sprinkles).
+    inputs:     {socket-name: value} for the exposed dials (e.g. {"Density": 250,
+                "Seed": 3}). Set by socket identifier; the result lists every settable
+                input name. Object/Collection-typed inputs take the datablock name.
+
+    Note: native GN scatter/instances emit INSTANCES-on-points, not separate objects;
+    use `modifier op=apply` (Realize Instances) if you need editable geometry.
+    """
+    params = {"asset": asset}
+    if host:       params["host"] = host
+    if name:       params["name"] = name
+    if collection: params["collection"] = collection
+    if inputs:     params["inputs"] = inputs
+    result = call_blender("add_asset_modifier", params, label=label)
+    if result.get("success"):
+        main = f"{result['modifier']} ({result['asset']}, NODES)"
+        if result.get("inputs_set"):
+            main += f"\n  set: {result['inputs_set']}"
+        if result.get("inputs_available"):
+            main += f"\n  inputs: {result['inputs_available']}"
+        for n in result.get("notes", []):
+            main += f"\n  {n}"
+    else:
+        main = result.get("error", "failed")
+        if result.get("inputs_available"):
+            main += f"\n  inputs: {result['inputs_available']}"
+    return main + _status(result)
+
+
+@mcp.tool()
 def bind_mesh_deform(mesh: str, cage: str = "", action: str = "bind",
                      modifier: str = "", precision: int = None,
                      timeout: float = 120, label: str = "") -> str:

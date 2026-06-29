@@ -1,6 +1,7 @@
 """Bundled finishes: smooth_edges, round_corners, add_modifier, apply_modifiers."""
 
 import math
+import os
 
 import bpy
 
@@ -1369,12 +1370,158 @@ def boolean(params):
     return result
 
 
+def _essentials_geonode_blends():
+    """Every bundled Essentials geometry-nodes .blend in THIS build (SPEC-20 II.5).
+
+    Blender 5.0 ships the new GN modifiers (Scatter on Surface, GN Array, Instance on
+    Elements, Randomize Instances, Curve to Tube, Geometry Input) as node-group ASSETS
+    under the app's datafiles — not as typed modifiers. We DISCOVER them from the live
+    build rather than hardcode an asset-identifier string (R3: derive from the build,
+    and robust to the exact filename which can't be confirmed headless)."""
+    import glob, os
+    root = os.path.join(bpy.utils.system_resource('DATAFILES'),
+                        "assets", "geometry_nodes")
+    return sorted(glob.glob(os.path.join(root, "*.blend")))
+
+
+def _find_asset_node_group(asset):
+    """Return a GeometryNodeTree named `asset`, appending it from the Essentials library
+    if it isn't already in bpy.data. Match is exact first, then case-insensitive.
+    Returns (node_group, error_str) — exactly one is non-None."""
+    # Already appended in a prior call? Reuse it (don't append a .001 duplicate).
+    existing = bpy.data.node_groups.get(asset)
+    if existing is not None and existing.bl_idname == 'GeometryNodeTree':
+        return existing, None
+
+    want = asset.strip().lower()
+    available = []
+    for path in _essentials_geonode_blends():
+        try:
+            with bpy.data.libraries.load(path, link=False, assets_only=True) as (src, dst):
+                names = list(src.node_groups)
+                available.extend(names)
+                match = next((n for n in names if n == asset), None) \
+                    or next((n for n in names if n.lower() == want), None)
+                if match:
+                    dst.node_groups = [match]
+                else:
+                    continue
+        except Exception as e:  # unreadable .blend — skip, keep scanning
+            continue
+        ng = bpy.data.node_groups.get(match)
+        if ng is not None:
+            return ng, None
+    if not _essentials_geonode_blends():
+        return None, ("no bundled geometry-nodes Essentials assets found in this build "
+                      f"({os.path.join(bpy.utils.system_resource('DATAFILES'),'assets','geometry_nodes')})")
+    return None, (f"asset node-group '{asset}' not found in the Essentials library. "
+                  f"Available: {sorted(set(available))}")
+
+
+def _gn_input_sockets(ng):
+    """Map of {socket-name: (identifier, socket_type)} for a node group's INPUT sockets
+    (the modifier's exposed dials). Identifiers are stable; names/indices are not."""
+    out = {}
+    for item in ng.interface.items_tree:
+        if getattr(item, "item_type", None) == 'SOCKET' and getattr(item, "in_out", None) == 'INPUT':
+            out[item.name] = (item.identifier, getattr(item, "socket_type", ""))
+    return out
+
+
+def add_asset_modifier(params):
+    """Add a Geometry-Nodes modifier that points at a bundled Essentials node-group asset
+    (SPEC-20 II.5) — the path `modifiers.new(type=...)` can't reach. This is what retires
+    the bespoke `scatter_on_surface` sampler: `asset="Scatter on Surface"`.
+
+    asset:      the Essentials node-group name (e.g. "Scatter on Surface", "Curve to Tube").
+    host/target: object that receives the modifier (defaults to active).
+    name:       modifier name (defaults to the asset name).
+    collection: convenience — assign this collection to the modifier's first Collection-typed
+                input (the instance source for Scatter on Surface → multi-prototype sprinkles).
+    inputs:     dict {socket-name: value} set by socket IDENTIFIER (Density, Seed, …).
+    """
+    asset = (params.get("asset") or "").strip()
+    if not asset:
+        return {"error": "'asset' (Essentials node-group name) is required"}
+    host = params.get("host") or params.get("target")
+    obj = bpy.data.objects.get(host) if host else bpy.context.active_object
+    if obj is None:
+        return {"error": f"host '{host}' not found" if host else "no active object"}
+
+    ng, err = _find_asset_node_group(asset)
+    if err:
+        return {"error": err}
+
+    name = params.get("name") or asset
+    mod = obj.modifiers.new(name=name, type='NODES')
+    mod.node_group = ng
+
+    sockets = _gn_input_sockets(ng)
+    set_inputs = {}
+    unknown_inputs = []
+
+    # collection= → the first Collection-typed input socket.
+    coll_name = params.get("collection")
+    if coll_name:
+        coll = bpy.data.collections.get(coll_name)
+        if coll is None:
+            obj.modifiers.remove(mod)
+            return {"error": f"collection '{coll_name}' not found"}
+        coll_socket = next((n for n, (_id, t) in sockets.items() if t == 'NodeSocketCollection'), None)
+        if coll_socket is None:
+            obj.modifiers.remove(mod)
+            return {"error": f"'{asset}' has no Collection input to assign collection='{coll_name}'",
+                    "inputs_available": list(sockets)}
+        mod[sockets[coll_socket][0]] = coll
+        set_inputs[coll_socket] = coll_name
+
+    # inputs={name: value} → set by identifier; match socket name case-insensitively.
+    for key, val in (params.get("inputs") or {}).items():
+        match = next((n for n in sockets if n == key), None) \
+            or next((n for n in sockets if n.lower() == str(key).strip().lower()), None)
+        if match is None:
+            unknown_inputs.append(key)
+            continue
+        ident, stype = sockets[match]
+        if stype == 'NodeSocketCollection':
+            val = bpy.data.collections.get(val)
+        elif stype == 'NodeSocketObject':
+            val = bpy.data.objects.get(val)
+        try:
+            mod[ident] = val
+            set_inputs[match] = params["inputs"][key]
+        except Exception as e:
+            unknown_inputs.append(f"{key} (set failed: {e})")
+
+    mod.id_data.update_tag()
+    bpy.context.view_layer.update()
+
+    result = {
+        "success": True,
+        "object": obj.name,
+        "modifier": mod.name,
+        "asset": ng.name,
+        "type": "NODES",
+        "inputs_available": list(sockets),
+    }
+    if set_inputs:
+        result["inputs_set"] = set_inputs
+    if unknown_inputs:
+        result.setdefault("notes", []).append(
+            f"unrecognised input(s) {unknown_inputs} — settable inputs: {list(sockets)}")
+    result.setdefault("notes", []).append(
+        "native GN scatter/instances emit INSTANCES-on-points, not separate objects; "
+        "add `modifier op=apply` (Realize Instances) if you need editable geometry.")
+    return result
+
+
 TOOLS = {
     "smooth_edges":    smooth_edges,
     "round_corners":   round_corners,
     "bend":            bend,
     "noise_displace":  noise_displace,
     "add_modifier":    add_modifier,
+    "add_asset_modifier": add_asset_modifier,
     "bind_mesh_deform": bind_mesh_deform,
     "rebind_deform":   rebind_deform,
     "modify_modifier": modify_modifier,
