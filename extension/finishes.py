@@ -1376,12 +1376,18 @@ def _essentials_geonode_blends():
     Blender 5.0 ships the new GN modifiers (Scatter on Surface, GN Array, Instance on
     Elements, Randomize Instances, Curve to Tube, Geometry Input) as node-group ASSETS
     under the app's datafiles — not as typed modifiers. We DISCOVER them from the live
-    build rather than hardcode an asset-identifier string (R3: derive from the build,
-    and robust to the exact filename which can't be confirmed headless)."""
+    build rather than hardcode an asset-identifier string (R3: derive from the build).
+
+    The on-disk LAYOUT differs by version — confirmed live, not from memory:
+      • Blender 5.1: consolidated into  assets/nodes/geometry_nodes_essentials.blend
+      • 4.x-era:     one file per asset  assets/geometry_nodes/<name>.blend
+    So we scan assets/ recursively and keep every .blend whose path or filename names
+    'geometry_nodes' — covers both layouts and is robust to the next reshuffle."""
     import glob, os
-    root = os.path.join(bpy.utils.system_resource('DATAFILES'),
-                        "assets", "geometry_nodes")
-    return sorted(glob.glob(os.path.join(root, "*.blend")))
+    assets = os.path.join(bpy.utils.system_resource('DATAFILES'), "assets")
+    found = [p for p in glob.glob(os.path.join(assets, "**", "*.blend"), recursive=True)
+             if "geometry_nodes" in p.lower()]
+    return sorted(set(found))
 
 
 def _find_asset_node_group(asset):

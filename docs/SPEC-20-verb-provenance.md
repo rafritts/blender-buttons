@@ -264,6 +264,13 @@ points a `type='NODES'` modifier at a **bundled essentials node-group asset**. T
   relative_asset_identifier="geometry_nodes/<file>.blend/NodeTree/<Name>")` — the exact op the GUI's
   "Add Modifier ▸ <asset>" fires. Caveat: the literal identifier string couldn't be byte-confirmed
   headless (dev site 403s); needs one GUI read of the auto-logged operator.
+- **⚠ LIVE CORRECTION (the asset path is version-skewed — R3 vindicated):** the research's
+  4.x-era layout `assets/geometry_nodes/<name>.blend` is **wrong for 5.1**. Confirmed against the
+  running flatpak build: 5.1 **consolidates** all GN essentials into a single compressed file
+  `assets/nodes/geometry_nodes_essentials.blend`. (And it's zlib-compressed — `strings` can't read
+  the node-group names; you must `libraries.load` it.) The shipped discovery scans `assets/**/*.blend`
+  recursively and keeps any whose path names `geometry_nodes`, covering BOTH layouts. This is exactly
+  the version-stale-from-memory failure the spec was written to prevent — caught only by testing live.
 - **Route B (R3-clean, preferred — discover, don't hardcode):** glob
   `os.path.join(bpy.utils.system_resource('DATAFILES'), "assets", "geometry_nodes", "*.blend")`,
   `bpy.data.libraries.load(path, link=False, assets_only=True)` to append the node group **whose name
