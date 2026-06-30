@@ -92,8 +92,10 @@ def add(
         floor      — size                                (ground plane at z=0)
         grid       — width, depth, x_subdivisions, y_subdivisions  (a flat subdivided
                      PLANE: a width×depth rectangle of verts already wired into quad
-                     topology. Native Add > Mesh > Grid. The substrate you lay down and
-                     then deform/sculpt into a surface — push its verts after.)
+                     topology. Native Add > Mesh > Grid. The sheet you VACUUM-FORM: lay it
+                     down, then drape it onto a mould with buttons-deform-macro op=field —
+                     the grid is the hot plastic, the function is the mould. Vary the mould
+                     down the sheet or it drapes flat as a ribbon.)
       CURVES (take name, points)  — tube/helix are composite MACROS (SPEC-20): they kept
       their home under `add` because their purpose IS construction, but each carries an
       R1 native-cousin note below:

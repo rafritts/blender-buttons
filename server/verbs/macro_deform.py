@@ -69,6 +69,16 @@ def buttons_deform_macro(
               sandboxed expr. Output displaces through channel (field_mode add|multiply|
               set). Smooth F ⇒ smooth surface. The general engine taper_end/scale_rings/
               shape_profile/flute/jitter are named cases of.
+
+              INTENDED USE — VACUUM FORMING. The signature use of field is to drape a flat
+              `add type=grid` sheet onto a shape: the grid is the hot plastic, the function
+              F is the MOULD, and field is the vacuum that pulls every vert down onto it.
+              Author the form by choosing the mould, not by typing coordinates.
+              ⚠ A loft is properly an ARRAY of moulds — one per line — and the variation
+              ACROSS that array is what gives the sheet its second curvature (a real shell).
+              ONE function applied to every line has nothing to vary against, so it can only
+              EXTRUDE: a single-curvature RIBBON, not a shell. Vary the mould down the grid;
+              a uniform mould drapes flat (sometimes intended — a strap/belt/panel).
       band  — author + place a raised band around a form  (name, target(s), axis, at,
               width, thickness)
       extrude_along_curve — sweep the selection along a curve  (curve, segments, taper)
