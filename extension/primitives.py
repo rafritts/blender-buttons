@@ -58,6 +58,12 @@ def _build_primitive(name, ptype, target_dims, on, rotation_deg, extra=None):
         bpy.ops.mesh.primitive_cube_add(size=1.0, location=(0, 0, 0))
     elif ptype == "PLANE":
         bpy.ops.mesh.primitive_plane_add(size=1.0, location=(0, 0, 0))
+    elif ptype == "GRID":
+        bpy.ops.mesh.primitive_grid_add(
+            x_subdivisions=extra.get("x_subdivisions", 10),
+            y_subdivisions=extra.get("y_subdivisions", 10),
+            size=1.0, location=(0, 0, 0),
+        )
     elif ptype == "CYLINDER":
         bpy.ops.mesh.primitive_cylinder_add(
             vertices=extra.get("vertices", 32),
@@ -119,7 +125,7 @@ def _build_primitive(name, ptype, target_dims, on, rotation_deg, extra=None):
     if ptype == "TORUS":
         # Already at target dims via the actual major/minor radii; resize would distort.
         pass
-    elif ptype in ("PLANE", "CIRCLE"):
+    elif ptype in ("PLANE", "CIRCLE", "GRID"):
         obj.scale = (max(w, 1e-6), max(d, 1e-6), 1.0)
     else:
         obj.scale = (max(w, 1e-6), max(d, 1e-6), max(h, 1e-6))
@@ -399,79 +405,29 @@ def add_floor(params):
     )
 
 
-def surface_patch(params):
-    """Fabricate a parametric surface PATCH: a (u,v) grid whose vertex positions are
-    P(u,v) = [expr_x, expr_y, expr_z] — the three coordinate functions over the unit
-    square. u,v run 0..1; us,vs run -1..1 (both available to the expressions).
+def add_grid(params):
+    """Add a flat GRID: a subdivided plane — a rectangle of verts already wired into
+    quad topology (Blender's native Add > Mesh > Grid / mesh.primitive_grid_add). This
+    is the substrate you deform/sculpt into a surface: lay it down, then push its verts.
 
-    This is the embedding form: three functions of two parameters. Unlike a height
-    field (one function), it represents ANY patch — including overhangs / wraps where
-    one (x,y) needs two heights — because every (u,v) names exactly one point. It is
-    what a Gordon curve-net evaluates to, sampled to a grid. Coordinates are OUTPUT."""
-    import numpy as np
-    from .fields import _eval_expr
-
-    name = params.get("name")
-    if not name:
-        return {"error": "'name' is required — give the patch a meaningful name"}
-    if bpy.data.objects.get(name) is not None:
-        return {"error": f"Object '{name}' already exists — choose a different name or delete it first"}
-
-    nu = max(1, int(params.get("u_segments") or 32))
-    nv = max(1, int(params.get("v_segments") or 32))
-    exprs = {"x": (params.get("expr_x") or "us").strip(),
-             "y": (params.get("expr_y") or "vs").strip(),
-             "z": (params.get("expr_z") or "0").strip()}
-
-    uu = np.linspace(0.0, 1.0, nu + 1)
-    vv = np.linspace(0.0, 1.0, nv + 1)
-    U, V = np.meshgrid(uu, vv, indexing="ij")
-    U, V = U.ravel(), V.ravel()
-    ns = {"u": U, "v": V, "us": 2 * U - 1, "vs": 2 * V - 1, "t": U}
-
-    out = {}
-    for axis, src in exprs.items():
-        arr, err = _eval_expr(np, src, ns, 0)
-        if err:
-            return {"error": f"expr_{axis}: {err}"}
-        out[axis] = arr
-    verts = [(float(out["x"][k]), float(out["y"][k]), float(out["z"][k])) for k in range(len(U))]
-
-    def vid(i, j):
-        return i * (nv + 1) + j
-    faces = [(vid(i, j), vid(i + 1, j), vid(i + 1, j + 1), vid(i, j + 1))
-             for i in range(nu) for j in range(nv)]
-
-    if bpy.context.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
-    bpy.ops.object.select_all(action='DESELECT')
-    mesh = bpy.data.meshes.new(name)
-    mesh.from_pydata(verts, [], faces)
-    mesh.update()
-    obj = bpy.data.objects.new(name, mesh)
-    bpy.context.scene.collection.objects.link(obj)
-    activate(obj)
-    bpy.context.view_layer.update()
-
-    xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
-    return {
-        "success": True,
-        "object_name": obj.name,
-        "dimensions": [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)],
-        "world_bounds": {
-            "x": [round(xmin, 4), round(xmax, 4)],
-            "y": [round(ymin, 4), round(ymax, 4)],
-            "z": [round(zmin, 4), round(zmax, 4)],
-        },
-        "verts": len(verts),
-        "faces": len(faces),
-    }
+    width / depth: the X / Y extent in meters (the rectangle's size).
+    x_subdivisions / y_subdivisions: how many cuts across each axis (more = denser grid).
+    on / rotation_deg: the shared relational placement DSL, same as plane/box."""
+    return _build_primitive(
+        name=params.get("name"),
+        ptype="GRID",
+        target_dims=(params.get("width") or 1.0, params.get("depth") or 1.0, 0.0),
+        on=params.get("on"),
+        rotation_deg=params.get("rotation_deg", [0, 0, 0]),
+        extra={"x_subdivisions": max(1, int(params.get("x_subdivisions") or 10)),
+               "y_subdivisions": max(1, int(params.get("y_subdivisions") or 10))},
+    )
 
 
 TOOLS = {
     "add_box":        add_box,
     "add_text":       add_text,
-    "surface_patch":  surface_patch,
+    "add_grid":       add_grid,
     "add_primitives": add_primitives,
     "add_floor":      add_floor,
     "add_plane":     add_plane,

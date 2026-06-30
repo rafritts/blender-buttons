@@ -110,24 +110,24 @@ def add_plane(name: str, width: float, depth: float,
     return _add_result("PLANE", result) + _status(result)
 
 
-def surface_patch(name: str, expr_x: str, expr_y: str, expr_z: str,
-                  u_segments: int, v_segments: int, label: str = "") -> str:
+def add_grid(name: str, width: float, depth: float,
+             x_subdivisions: int = 10, y_subdivisions: int = 10,
+             on: dict = None, rot_x: float = 0, rot_y: float = 0, rot_z: float = 0,
+             label: str = "") -> str:
     """
-    Fabricate a parametric surface PATCH from three coordinate functions of (u,v):
-    P(u,v) = [expr_x, expr_y, expr_z]. u,v run 0..1; us,vs run -1..1. The expression
-    grammar is the field deformer's (sin/cos/exp/sqrt/smoothstep/…). Builds a
-    u_segments×v_segments quad grid. The embedding form — three functions, not one —
-    so it holds overhangs/wraps a height field can't.
+    Add a flat GRID — a subdivided plane (Blender's native Add > Mesh > Grid). A
+    width×depth rectangle of verts already wired into quad topology: the substrate you
+    lay down and then deform/sculpt into a surface.
+
+    width/depth: X/Y extent in meters. x_subdivisions/y_subdivisions: cuts across each
+    axis (more = denser grid). on: relational placement DSL. rot_x/y/z: degrees.
     """
-    result = call_blender("surface_patch", {
-        "name": name, "expr_x": expr_x, "expr_y": expr_y, "expr_z": expr_z,
-        "u_segments": u_segments, "v_segments": v_segments,
+    result = call_blender("add_grid", {
+        "name": name, "width": width, "depth": depth,
+        "x_subdivisions": x_subdivisions, "y_subdivisions": y_subdivisions,
+        "on": on, "rotation_deg": [rot_x, rot_y, rot_z],
     }, label=label)
-    if result.get("success"):
-        return (_add_result("PATCH", result)
-                + f"  ({result.get('verts')}v {result.get('faces')}f)"
-                + _status(result))
-    return _add_result("PATCH", result) + _status(result)
+    return _add_result("GRID", result) + _status(result)
 
 
 @mcp.tool()

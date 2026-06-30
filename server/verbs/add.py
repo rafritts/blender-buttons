@@ -13,13 +13,13 @@ from server import primitives, scene
 from ._common import tag, unknown, teach
 
 _TYPES = ["box", "plane", "cylinder", "sphere", "cone", "torus", "icosphere",
-          "circle", "patch", "tube", "helix", "curve", "text", "floor", "light", "camera"]
+          "circle", "grid", "tube", "helix", "curve", "text", "floor", "light", "camera"]
 
 
 @mcp.tool(name="add")
 def add(
     type: Literal["box", "plane", "cylinder", "sphere", "cone", "torus",
-                  "icosphere", "circle", "patch", "tube", "helix", "curve", "text", "floor",
+                  "icosphere", "circle", "grid", "tube", "helix", "curve", "text", "floor",
                   "light", "camera"],
     name: tag(str, "object name (required except floor)") = "",
     # ── placement & orientation (the dimensional primitives) ──
@@ -48,12 +48,9 @@ def add(
     minor_segments: tag(int, "[torus] tube resolution") = 0,
     cap_fill: tag(str, "[cylinder/cone] NGON|TRIFAN|NOTHING") = "",
     fill_type: tag(str, "[circle] NOTHING|NGON|TRIFAN") = "",
-    # ── parametric patch (type=patch): P(u,v)=[expr_x,expr_y,expr_z] over a grid ──
-    expr_x: tag(str, "[patch] x(u,v) — coordinate function. u,v in 0..1; us,vs in -1..1") = "",
-    expr_y: tag(str, "[patch] y(u,v) — coordinate function") = "",
-    expr_z: tag(str, "[patch] z(u,v) — coordinate function (a height field if x,y left as us,vs)") = "",
-    u_segments: tag(int, "[patch] grid columns (default 32)") = 0,
-    v_segments: tag(int, "[patch] grid rows (default 32)") = 0,
+    # ── grid (type=grid): a subdivided plane in quad topology ──
+    x_subdivisions: tag(int, "[grid] cuts across X (default 10; more = denser)") = 0,
+    y_subdivisions: tag(int, "[grid] cuts across Y (default 10; more = denser)") = 0,
     # ── curve / tube (type=curve|tube) ──
     points: tag(list, "[tube/curve] control points the curve passes through") = None,
     between: tag(list, "[tube] connect two anchors [A,B] — straight tube, nearest-surface endpoints (alt to points)") = None,
@@ -93,11 +90,10 @@ def add(
         icosphere  — radius, subdivisions                (uniform tris; prefer for sculpt)
         circle     — radius, segments, fill_type         (NOTHING|NGON|TRIFAN)
         floor      — size                                (ground plane at z=0)
-        patch      — expr_x, expr_y, expr_z, u_segments, v_segments  (a PARAMETRIC
-                     surface: P(u,v)=[x,y,z] over a grid. u,v in 0..1, us,vs in -1..1.
-                     Three functions of two params = the embedding form — fabricates
-                     ANY patch incl. overhangs a height field can't. Coordinates are
-                     OUTPUT, never typed. e.g. expr_z="0.05*(1-us*us-vs*vs)" = a dome.)
+        grid       — width, depth, x_subdivisions, y_subdivisions  (a flat subdivided
+                     PLANE: a width×depth rectangle of verts already wired into quad
+                     topology. Native Add > Mesh > Grid. The substrate you lay down and
+                     then deform/sculpt into a surface — push its verts after.)
       CURVES (take name, points)  — tube/helix are composite MACROS (SPEC-20): they kept
       their home under `add` because their purpose IS construction, but each carries an
       R1 native-cousin note below:
@@ -141,9 +137,6 @@ def add(
                   "add type=curve name=path points=[[0,0,0],[1,0,0]] subtype=BEZIER"),
         "text":  (bool(body), "body=<string> the characters to render",
                   "add type=text name=numeral body=\"XII\" size=0.02 depth=0.004"),
-        "patch": (bool(expr_x or expr_y or expr_z),
-                  "at least one of expr_x/expr_y/expr_z — the coordinate functions of u,v",
-                  "add type=patch name=dome expr_z=\"0.05*(1-us*us-vs*vs)\""),
     })
     if bad:
         return bad
@@ -176,9 +169,10 @@ def add(
             fill_type or "NOTHING", *r, label)
     if t == "floor":
         return primitives.add_floor(name or "floor", size or 10.0, label)
-    if t == "patch":
-        return primitives.surface_patch(
-            name, expr_x, expr_y, expr_z, u_segments or 32, v_segments or 32, label)
+    if t == "grid":
+        return primitives.add_grid(
+            name, width or 1.0, depth or 1.0,
+            x_subdivisions or 10, y_subdivisions or 10, on, *r, label)
     if t == "tube":
         return primitives.spline_tube(
             name, points or [], tube_radius if tube_radius is not None else 0.02,
