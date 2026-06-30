@@ -55,6 +55,11 @@ def render(
                 (engine: the build's id, NOT a hardcoded name — Blender 5.x Eevee is
                 `BLENDER_EEVEE`, not `_NEXT`; `render op=settings` lists what's real.)
 
+                ⚠ THE HUMAN IS ALWAYS WATCHING THE LIVE VIEWPORT. They see the mesh
+                in real time as you build it, so rendering to SHOW them — "here's how
+                it looks" — is redundant and wastes tokens. Do NOT render proactively;
+                render ONLY when the human explicitly asks for a saved image file.
+
                 ⚠ THE IMAGE IS FOR THE HUMAN, NOT THE AGENT. Do NOT read it back.
                 Why this is a hard rule, not a style note:
                   • LLM vision is unreliable at this level of precision, and it

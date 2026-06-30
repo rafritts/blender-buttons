@@ -90,7 +90,9 @@ The core loop, by name: feel -> select -> measure -> verify -> act.
      neighbour?)  -> act at the handle/selection, never at a coordinate.
 `verify` certifies CAPTURE, not IDENTITY: if it passes but you are unsure you landed on
 the RIGHT feature, ask the human to eyeball it. Do not render to hunt for a feature —
-vision self-confirms and launders the mistake.
+vision self-confirms and launders the mistake. The human is ALWAYS watching the live
+viewport and sees the mesh in real time, so rendering to SHOW your work or to CHECK it is
+redundant and wasteful — render ONLY when they explicitly ask for a saved image file.
 
 A human is likely in the loop with you (HITL). Unless told otherwise, surface concerns,
 questions, matters of taste, and anywhere you need guidance or clarification — on a
