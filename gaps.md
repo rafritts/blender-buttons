@@ -149,3 +149,29 @@ Workaround used: build each side independently with explicit mirror-image live r
 for the arms), never apply/mirror, and let `object op=join` bake the world transforms at merge time —
 join *does* honor live rotation correctly (arm tips landed at ±0.51 as authored). But that only works
 because a later join consumes them; anything that needs a baked-or-mirrored single tilted part is stuck.
+
+### G195 — draping a grid with ONE function makes a ribbon; the loft path has no per-line function array and no ribbon warning
+
+The grid + field-deform path is, conceptually, **vacuum forming**: the `add type=grid` sheet is the hot
+plastic, a function is the mould, `buttons-deform-macro op=field` is the vacuum that pulls each vert onto
+the form. That framing is sound — and it exposes the gap. A loft/drape is properly an **array of
+functions, one per grid line**; the *variation across that array* is what gives the sheet its second
+curvature (a true double-curved shell). The field deformer applies exactly **one** function (preset |
+points | expr) uniformly across the whole selection — it has no notion of a per-line array — so the only
+shape it can produce in the un-varied direction is an **extrusion**: a single-curvature **ribbon**.
+
+Concrete: built `body_card` (grid 14×80) and ran `field channel=axis:Z add` with a 16-point silhouette
+curve along the height axis. `feel op=profile axis=Z` then showed `Y_width = 0.3000` at **every** height
+band — dead flat across the depth, i.e. the silhouette bent down the length but never across the width.
+Developable ribbon, not a body shell. The mould was a 1-parameter function `w(z)`; a 1-D mould can only
+bend the sheet one way.
+
+Two missing pieces, both intent-level (NOT a return to `surface_patch`'s typed P(u,v) coordinate math,
+which was cut as off-thesis):
+  • a **drape/loft op that takes a per-line function array** (or, equivalently, interpolates between a
+    handful of named cross-section profiles down the grid) so the sheet picks up curvature in both u and
+    v — the actual vacuum-form-onto-a-solid, vs. extrude-a-profile.
+  • a **teaching warning** when the per-line functions are uniform — identical, or differing only by a
+    rigid offset (still developable): `⚠ uniform functions → this drapes as a ribbon (single curvature),
+    not a shell`. A *warn*, never a block — a ribbon is sometimes the intent (a strap, belt, flat curved
+    panel), same spirit as the existing validate ⚠ lines.
