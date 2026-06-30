@@ -110,6 +110,26 @@ def add_plane(name: str, width: float, depth: float,
     return _add_result("PLANE", result) + _status(result)
 
 
+def surface_patch(name: str, expr_x: str, expr_y: str, expr_z: str,
+                  u_segments: int, v_segments: int, label: str = "") -> str:
+    """
+    Fabricate a parametric surface PATCH from three coordinate functions of (u,v):
+    P(u,v) = [expr_x, expr_y, expr_z]. u,v run 0..1; us,vs run -1..1. The expression
+    grammar is the field deformer's (sin/cos/exp/sqrt/smoothstep/…). Builds a
+    u_segments×v_segments quad grid. The embedding form — three functions, not one —
+    so it holds overhangs/wraps a height field can't.
+    """
+    result = call_blender("surface_patch", {
+        "name": name, "expr_x": expr_x, "expr_y": expr_y, "expr_z": expr_z,
+        "u_segments": u_segments, "v_segments": v_segments,
+    }, label=label)
+    if result.get("success"):
+        return (_add_result("PATCH", result)
+                + f"  ({result.get('verts')}v {result.get('faces')}f)"
+                + _status(result))
+    return _add_result("PATCH", result) + _status(result)
+
+
 @mcp.tool()
 def add_cylinder(name: str, radius: float, height: float,
                  on: dict = None, segments: int = None, vertices: int = 32,
