@@ -31,10 +31,31 @@ def field(axis, about, channel, field_mode, per_component,
     result = call_blender("field", params, label=label)
     if not result.get("success"):
         return result.get("error", "failed") + _status(result)
+    return _format(result)
 
+
+def drape(axis, moulds, interp, channel, field_mode, label, target):
+    """Vacuum-form the selection onto an ARRAY of keyed cross-section moulds (the loft).
+
+    The grid is the sheet; each mould is a cross-section profile keyed down the line-axis;
+    the engine interpolates between them and pulls every vert onto the result. Varying the
+    moulds down the sheet is what gives a real (double-curved) shell — a uniform array
+    drapes flat as a ribbon, which the engine flags. See the buttons-deform-macro op=drape
+    docstring for the full language."""
+    params = {
+        "axis": axis, "channel": channel or "normal", "field_mode": field_mode or "add",
+        "moulds": moulds, "interp": interp,
+    }
+    result = call_blender("field", params, label=label)
+    if not result.get("success"):
+        return result.get("error", "failed") + _status(result)
+    return _format(result, verb="drape")
+
+
+def _format(result, verb="field"):
     fr = result.get("f_range", [None, None])
     bb = result.get("sel_bbox", {})
-    main = (f"field {result['channel']} {result['mode']} — "
+    main = (f"{verb} {result['channel']} {result['mode']} — "
             f"{result['verts_moved']}/{result['verts_total']} verts moved "
             f"({result['scope']}, {result['components']} component"
             f"{'s' if result['components'] != 1 else ''})  F∈[{fr[0]}, {fr[1]}]")

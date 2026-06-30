@@ -18,7 +18,7 @@ from ._common import tag, unknown, teach
 
 @mcp.tool(name="buttons-deform-macro")
 def buttons_deform_macro(
-    op: Literal["field", "band", "extrude_along_curve"],
+    op: Literal["field", "drape", "band", "extrude_along_curve"],
     target: tag(str, "mesh object to deform (empty=active)") = "",
     axis: tag(str, "[field/band] axis X|Y|Z") = "Z",
     # field (SPEC-13 / G99) — per-vertex p'=F(vars(p)) over the selection
@@ -37,7 +37,8 @@ def buttons_deform_macro(
     bell_width: tag(float, "[field] bell gaussian width in t") = 0.2,
     phase: tag(float, "[field] sine preset/expr phase (radians)") = 0.0,
     points: tag(list, "[field] control-point curve [[t,val],…] (one function source)") = None,
-    interp: tag(str, "[field] points curve interpolation: linear | smooth | cubic") = "smooth",
+    moulds: tag(list, "[drape] array of keyed cross-section moulds: [{\"at\":0..1,\"points\":[[u,val],…]}, …] — one mould per line, interpolated down the sheet (vary them or it drapes as a ribbon)") = None,
+    interp: tag(str, "[field/drape] points curve interpolation: linear | smooth | cubic") = "smooth",
     expr: tag(str, "[field] sandboxed scalar expression over the var namespace") = "",
     expr_x: tag(str, "[field] channel=vector X-component expression") = "",
     expr_y: tag(str, "[field] channel=vector Y-component expression") = "",
@@ -79,6 +80,15 @@ def buttons_deform_macro(
               ONE function applied to every line has nothing to vary against, so it can only
               EXTRUDE: a single-curvature RIBBON, not a shell. Vary the mould down the grid;
               a uniform mould drapes flat (sometimes intended — a strap/belt/panel).
+      drape — VACUUM-FORM the sheet onto an ARRAY of moulds (the loft done right). moulds=
+              [{"at":0..1,"points":[[u,val],…]}, …] — each entry is a cross-section profile
+              over the cross-axis u, keyed at a position `at` down the line-axis; the engine
+              interpolates between them and pulls every vert onto the result. This is `field`
+              with a per-line mould array instead of one function, so the sheet curves in
+              BOTH directions → a real shell. Displaces along the sheet normal by default.
+              For a flat `add type=grid` (lying in XY, axis=Z): u = across X, the moulds are
+              keyed down Y. ⚠ if the moulds don't actually differ it warns (ribbon, not a
+              shell) — a warn, never a block.
       band  — author + place a raised band around a form  (name, target(s), axis, at,
               width, thickness)
       extrude_along_curve — sweep the selection along a curve  (curve, segments, taper)
@@ -98,6 +108,8 @@ def buttons_deform_macro(
                        bool(expr or expr_x or expr_y or expr_z)]) == 1,
                   "EXACTLY one function source: preset=<name> | points=[[t,val],…] | expr=\"…\"",
                   "buttons-deform-macro op=field axis=Z channel=radial field_mode=multiply preset=smoothstep preset_a=1.0 preset_b=0.6"),
+        "drape": (bool(moulds), "moulds=[{at,points},…] — the array of cross-section moulds",
+                  "buttons-deform-macro op=drape target=sheet moulds=[{\"at\":0,\"points\":[[0,0],[0.5,0.03],[1,0]]},{\"at\":1,\"points\":[[0,0],[0.5,0.12],[1,0]]}]"),
         "extrude_along_curve": (bool(curve), "curve=<curve to sweep along>",
                   "buttons-deform-macro op=extrude_along_curve target=ring curve=path"),
     })
@@ -109,8 +121,13 @@ def buttons_deform_macro(
                             bell_width, phase, points or [], interp, expr,
                             expr_x, expr_y, expr_z, sigma_x, sigma_y, seed,
                             clamp_min, clamp_max, label, target)
+    if o == "drape":
+        # vacuum forming: the tool default channel (radial) is wrong here — drape pushes
+        # along the sheet normal unless the caller asks for something else explicitly.
+        ch = channel if channel and channel != "radial" else "normal"
+        return fields.drape(axis, moulds or [], interp, ch, field_mode, label, target)
     if o == "band":
         return bands.band_around(name, target, axis, at, width or 0.05, thickness, label)
     if o == "extrude_along_curve":
         return editmode.extrude_along_curve(curve, segments, taper, label)
-    return unknown("buttons-deform-macro", "op", op, ["field", "band", "extrude_along_curve"])
+    return unknown("buttons-deform-macro", "op", op, ["field", "drape", "band", "extrude_along_curve"])

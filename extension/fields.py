@@ -281,11 +281,13 @@ def field(params):
     expr_y = (params.get("expr_y", "") or "").strip()
     expr_z = (params.get("expr_z", "") or "").strip()
     has_vec_expr = bool(expr_x or expr_y or expr_z)
-    sources = [bool(preset), bool(points), bool(expr) or has_vec_expr]
+    moulds = params.get("moulds") or []
+    sources = [bool(preset), bool(points), bool(expr) or has_vec_expr, bool(moulds)]
     if sum(sources) != 1:
         return {"error": "supply EXACTLY one function source: preset=<name>, "
-                         "points=[[t,val],...], or expr=\"...\" "
-                         "(expr_x/y/z for channel=vector)"}
+                         "points=[[t,val],...], expr=\"...\" "
+                         "(expr_x/y/z for channel=vector), or "
+                         "moulds=[{at,points},...] (the drape/loft array)"}
 
     # ── gather operated verts (stable order) ──
     bm = bmesh.from_edit_mesh(obj.data)
@@ -381,6 +383,14 @@ def field(params):
             F, err = _eval_points(np, points, params, t)
             if err:
                 return {"error": err}
+        elif moulds:
+            F, err, ribbon = _eval_moulds(np, moulds, params, uu, vv)
+            if err:
+                return {"error": err}
+            if ribbon:
+                warnings.append(
+                    "uniform moulds → this drapes as a RIBBON (single curvature), "
+                    "not a shell; vary the moulds down the sheet for the second curvature")
         else:
             F, err = eval_scalar(expr)
             if err:
@@ -558,6 +568,64 @@ def _eval_points(np, points, params, t):
                             (-p0 + 3 * p1 - 3 * p2 + p3) * lt3)
         return out, None
     return None, f"interp must be linear|smooth|cubic, got {interp!r}"
+
+
+def _eval_moulds(np, moulds, params, u, v):
+    """The DRAPE / LOFT source — vacuum-form onto an ARRAY of cross-section moulds.
+
+    Each mould is a control-point profile over the cross-axis `u`, keyed at a position
+    `at` (0..1) down the line-axis `v`. We sample every key's profile at each vert's u,
+    then blend the keyed values along v (smoothstep between neighbours). The variation of
+    the moulds DOWN v is what gives the sheet its second curvature — a real shell. If the
+    keyed profiles don't actually differ, the result is a single-curvature ribbon, which
+    we flag (third return value) so the caller can warn without blocking.
+
+    Returns (F, error, ribbon)."""
+    keys = []
+    for m in moulds:
+        if not isinstance(m, dict) or "points" not in m:
+            return None, "each mould wants {\"at\": <0..1>, \"points\": [[u,val],...]}", False
+        keys.append([m.get("at"), m["points"]])
+    K = len(keys)
+    if K == 0:
+        return None, "moulds is empty — give at least one {at, points}", False
+    # position each key down v: explicit `at`, else spread evenly across 0..1
+    if any(k[0] is None for k in keys):
+        for i, k in enumerate(keys):
+            if k[0] is None:
+                k[0] = (i / (K - 1)) if K > 1 else 0.0
+    keys.sort(key=lambda k: float(k[0]))
+    vpos = np.array([float(k[0]) for k in keys])
+
+    # sample every key's profile at each vert's u → (n, K)
+    cols = []
+    for _, pts in keys:
+        pv, err = _eval_points(np, pts, params, u)
+        if err:
+            return None, err, False
+        cols.append(pv)
+    M = np.stack(cols, axis=1)
+
+    # blend the keyed profiles along v (smoothstep between bracketing keys)
+    n = len(u)
+    if K == 1:
+        F = M[:, 0]
+    else:
+        idx = np.clip(np.searchsorted(vpos, v) - 1, 0, K - 2)
+        v0 = vpos[idx]; v1 = vpos[idx + 1]
+        lt = np.clip((v - v0) / np.where(v1 - v0 > 1e-12, v1 - v0, 1.0), 0.0, 1.0)
+        e = lt * lt * (3.0 - 2.0 * lt)
+        rows = np.arange(n)
+        f0 = M[rows, idx]; f1 = M[rows, idx + 1]
+        F = f0 + (f1 - f0) * e
+
+    # ribbon detection: do the keyed profiles actually vary across the array?
+    span = float(M.max() - M.min())
+    maxdiff = 0.0
+    for j in range(1, K):
+        maxdiff = max(maxdiff, float(np.max(np.abs(M[:, j] - M[:, 0]))))
+    ribbon = (K < 2) or (maxdiff <= 1e-6 + 1e-3 * max(span, 1e-9))
+    return F, None, ribbon
 
 
 TOOLS = {
