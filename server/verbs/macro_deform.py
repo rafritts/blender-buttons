@@ -38,6 +38,7 @@ def buttons_deform_macro(
     phase: tag(float, "[field] sine preset/expr phase (radians)") = 0.0,
     points: tag(list, "[field] control-point curve [[t,val],…] (one function source)") = None,
     moulds: tag(list, "[drape] array of keyed cross-section moulds: [{\"at\":0..1,\"points\":[[u,val],…]}, …] — one mould per line, interpolated down the sheet (vary them or it drapes as a ribbon)") = None,
+    mould_grid: tag(list, "[drape] a 2D control grid [[v,…],…] AS the mould — rows are cross-sections keyed evenly down the line-axis, cols are values across u; sugar for an evenly-keyed `moulds` array (hand-author the whole surface as a grid of numbers instead of profile dicts). Use moulds OR mould_grid, not both") = None,
     interp: tag(str, "[field/drape] points curve interpolation: linear | smooth | cubic") = "smooth",
     expr: tag(str, "[field] sandboxed scalar expression over the var namespace") = "",
     expr_x: tag(str, "[field] channel=vector X-component expression") = "",
@@ -89,6 +90,12 @@ def buttons_deform_macro(
               For a flat `add type=grid` (lying in XY, axis=Z): u = across X, the moulds are
               keyed down Y. ⚠ if the moulds don't actually differ it warns (ribbon, not a
               shell) — a warn, never a block.
+              SHORTHAND — pass mould_grid=[[v,…],…] instead of moulds: a raw 2D grid of
+              numbers, rows = cross-sections keyed evenly down the line-axis, cols = values
+              across u. It expands to an evenly-keyed mould array, letting you hand-author the
+              whole surface as a grid (the 10×10-of-numbers form) instead of profile dicts.
+              The mould is thus either hand-authored (moulds/mould_grid) or a function (op=field).
+              Use moulds OR mould_grid, not both.
       band  — author + place a raised band around a form  (name, target(s), axis, at,
               width, thickness)
       extrude_along_curve — sweep the selection along a curve  (curve, segments, taper)
@@ -108,7 +115,8 @@ def buttons_deform_macro(
                        bool(expr or expr_x or expr_y or expr_z)]) == 1,
                   "EXACTLY one function source: preset=<name> | points=[[t,val],…] | expr=\"…\"",
                   "buttons-deform-macro op=field axis=Z channel=radial field_mode=multiply preset=smoothstep preset_a=1.0 preset_b=0.6"),
-        "drape": (bool(moulds), "moulds=[{at,points},…] — the array of cross-section moulds",
+        "drape": (bool(moulds or mould_grid),
+                  "moulds=[{at,points},…] OR mould_grid=[[v,…],…] — cross-section moulds as profile dicts or an evenly-keyed control grid",
                   "buttons-deform-macro op=drape target=sheet moulds=[{\"at\":0,\"points\":[[0,0],[0.5,0.03],[1,0]]},{\"at\":1,\"points\":[[0,0],[0.5,0.12],[1,0]]}]"),
         "extrude_along_curve": (bool(curve), "curve=<curve to sweep along>",
                   "buttons-deform-macro op=extrude_along_curve target=ring curve=path"),
@@ -125,7 +133,7 @@ def buttons_deform_macro(
         # vacuum forming: the tool default channel (radial) is wrong here — drape pushes
         # along the sheet normal unless the caller asks for something else explicitly.
         ch = channel if channel and channel != "radial" else "normal"
-        return fields.drape(axis, moulds or [], interp, ch, field_mode, label, target)
+        return fields.drape(axis, moulds or [], interp, ch, field_mode, label, target, mould_grid)
     if o == "band":
         return bands.band_around(name, target, axis, at, width or 0.05, thickness, label)
     if o == "extrude_along_curve":

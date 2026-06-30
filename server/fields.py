@@ -34,14 +34,53 @@ def field(axis, about, channel, field_mode, per_component,
     return _format(result)
 
 
-def drape(axis, moulds, interp, channel, field_mode, label, target):
+def _grid_to_moulds(grid):
+    """Expand a 2D control grid into the canonical keyed-mould array.
+
+    rows = cross-sections keyed evenly down the line-axis (`at` = i/(R-1)); cols = values
+    across the cross-axis u (`u` = j/(C-1)). Pure sugar — the engine's _eval_moulds path is
+    unchanged; a hand-authored grid of numbers is just an evenly-sampled, evenly-keyed loft.
+    Returns (moulds, error)."""
+    if not isinstance(grid, (list, tuple)) or not grid:
+        return None, "mould_grid must be a non-empty 2D list of numbers"
+    rows, width = [], None
+    for i, row in enumerate(grid):
+        if not isinstance(row, (list, tuple)) or not row:
+            return None, f"mould_grid row {i} must be a non-empty list of numbers"
+        if width is None:
+            width = len(row)
+        elif len(row) != width:
+            return None, (f"mould_grid must be rectangular: row {i} has {len(row)} values, "
+                          f"expected {width}")
+        try:
+            rows.append([float(v) for v in row])
+        except (TypeError, ValueError):
+            return None, f"mould_grid row {i} has a non-numeric value"
+    R, C = len(rows), width
+    moulds = [
+        {"at": (i / (R - 1)) if R > 1 else 0.0,
+         "points": [[(j / (C - 1)) if C > 1 else 0.0, vals[j]] for j in range(C)]}
+        for i, vals in enumerate(rows)
+    ]
+    return moulds, None
+
+
+def drape(axis, moulds, interp, channel, field_mode, label, target, mould_grid=None):
     """Vacuum-form the selection onto an ARRAY of keyed cross-section moulds (the loft).
 
     The grid is the sheet; each mould is a cross-section profile keyed down the line-axis;
     the engine interpolates between them and pulls every vert onto the result. Varying the
     moulds down the sheet is what gives a real (double-curved) shell — a uniform array
-    drapes flat as a ribbon, which the engine flags. See the buttons-deform-macro op=drape
-    docstring for the full language."""
+    drapes flat as a ribbon, which the engine flags. The moulds can be hand-authored profile
+    dicts (`moulds=`) OR a raw 2D control grid of numbers (`mould_grid=`), which expands to an
+    evenly-keyed mould array. See the buttons-deform-macro op=drape docstring for the full
+    language."""
+    if mould_grid:
+        if moulds:
+            return "give either moulds or mould_grid, not both"
+        moulds, err = _grid_to_moulds(mould_grid)
+        if err:
+            return err
     params = {
         "axis": axis, "channel": channel or "normal", "field_mode": field_mode or "add",
         "moulds": moulds, "interp": interp,
