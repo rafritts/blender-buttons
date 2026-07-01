@@ -203,3 +203,44 @@ entire physics step back to the human at the viewport. Two missing primitives, b
   • a **timeline/bake primitive** — e.g. `scene op=frame set=N` / `op=step` and `op=bake_physics frames=N`
     — so a simulation can actually be advanced and cached from the server. Pairs with a ground-truth read
     of the settled result (the existing `feel` reads already measure the draped mesh once frames have run).
+
+### G197 — the CURVE deform modifier's curve socket is unbindable (chain-along-a-curve is unreachable)
+
+Built a pocketwatch chain the canonical way: interlocked link-pair prototype → ARRAY modifier → CURVE
+modifier to lay the run along a snaking Bézier. The ARRAY half works; the CURVE half fails at the last
+step — **nothing can point the modifier at its curve object**:
+
+  • `modifier op=modify target=ChainLinks modifier_name=Curve target_object=ChainCurve` returns
+    `skipped: ['target_object']` — the dial exists in the schema but isn't wired for CURVE.
+  • `modifier op=add type=CURVE host=ChainLinks target=ChainCurve` (the PARTNER-mod pattern) is worse
+    than a refusal: `host=` only covers SHRINKWRAP/MESH_DEFORM/ARMATURE/LATTICE, so the call **silently
+    added the modifier to the curve object itself** (`op=list` on the mesh showed only the ARRAY; the
+    stray landed on ChainCurve). A miss that reports success costs a diagnosis round-trip.
+
+CURVE is a partner-taking modifier exactly like the four `host=` already covers — its `object` socket
+should accept the same treatment (and the partner list should be data-driven, not a hardcoded four, so
+the next partner-taking type — HOOK, DATA_TRANSFER, BOOLEAN-as-modifier — doesn't repeat this). Fallback
+used: straight-line ARRAY run, which reads fine for a taut chain but forecloses the draped/snaked pose.
+General framing: **any modifier whose behaviour is defined by a partner object needs its partner nameable
+at add time, and a partner that can't be set should refuse loudly, not land the modifier elsewhere.**
+
+### G198 — `add type=text` mints glyphs with UNWELDED caps: 8–12 open boundaries per numeral out of the box
+
+Added four dial numerals (`add type=text body='XII' depth=0.0003`). Every one arrived as a mesh whose
+front/back caps are **separate shells from the side walls** — `feel op=topology` on 'XII' showed 9
+components / 12 open boundaries for what should be 3 watertight extruded glyphs, and the always-on floor
+flagged `open_boundary` on all four. The fix is mechanical and always the same — `edit op=merge
+threshold=1e-05` welds cap rims to wall rims (80→40 verts, boundaries → 0) — which is exactly why the
+add macro should do it itself before handing the mesh over: a primitive that *always* needs the same
+one-line repair right after minting is a primitive with the repair missing. (Curve-to-mesh conversion
+leaves coincident-but-unmerged verts; one merge-by-distance inside `add type=text` closes it.)
+
+### G199 — `feel op=radial` snap lands on the UNDERSIDE for some clock angles (same call, opposite faces)
+
+Minting the four dial anchors (`feel op=radial anchor=Dial angle=0/90/180/270 radius=0.0155 as_handle=`)
+returned **top-face points for 0°/180°** (z=0.0102, normal +Z) and **bottom-face points for 90°/270°**
+(z=0.0094, normal −Z) — four identical calls, two different faces, purely by angle. The numerals moved to
+the 3/9 handles landed buried inside the dial and needed a hand lift to the face. The snap ray direction
+is evidently angle-dependent; a placement read on a thin disk should either (a) prefer the face whose
+normal agrees with the anchor's outward/up axis, (b) take a `side=top|bottom` hint, or at minimum
+(c) report WHICH face it chose loudly enough that the asymmetry isn't discovered via a buried part.
