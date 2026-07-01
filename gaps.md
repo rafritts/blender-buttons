@@ -258,3 +258,42 @@ honoured must refuse loudly, not report success** — `add` already returns a st
 should be settable in the `op=add` call that creates it (offset, thickness, wrap_method, …) — the
 add→modify split forces two calls for every modifier whose default is wrong, and the first call's
 "success" actively hides that the second is needed.
+
+### G201 — drape/loft `interp` only reaches the CROSS-SECTIONS; the line-axis blend between moulds is hardwired smoothstep (washboard at every mould row)
+
+Vacuum-formed a breast from a 37×29 `mould_grid` and chased a visible lumpiness the human flagged
+("we need a way to smooth everything — not smooth shade, interpolation"). `feel op=profile full=True`
+made the artifact legible: the centreline slope oscillates at EXACTLY the mould-row cadence with the
+smoothstep quarter-gain fingerprint (per-segment ring deltas 14,31,31,14 ≈ the 0.156/0.344/0.344/0.156
+quartiles of 3t²−2t³) — every mould row prints a terrace band on the shell. Re-forming the same grid
+with `interp=cubic` did not move that pattern one millimetre, while it DID change behaviour across u
+(cubic undershoot appeared at the profile edges) — so `interp` is honoured inside each cross-section
+curve but the row-to-row blend down the line-axis ignores it. Three linked misses, one principle:
+
+  • **`interp` must reach both axes.** A mould ARRAY is a surface definition; interpolating one axis
+    cubically and the other with eased-linear produces a shell that is smooth across and corduroy down.
+    The washboard survives ANY authored mould — band-limiting the profiles (tangential landings, 10mm
+    rows) only shrank it. Workaround that finally cleared it: a post-hoc SMOOTH modifier (factor 0.6,
+    iterations 4) — i.e. blur the surface to hide the interpolator, which costs real form (edges pulled
+    0.9mm inboard, nipple −0.4mm).
+  • **Cubic rings and there is no clamp.** Where cubic DOES apply, Catmull-Rom undershoots every
+    positive→zero landing (mound rim dipped −1.9mm below the chest plane; still −1.2mm after authoring
+    the mould band-limited). The field engine already HAS `clamp_min`/`clamp_max`; the drape path just
+    doesn't pass them. Exposing them is one line. Better: offer a MONOTONE cubic (PCHIP/Fritsch–Carlson)
+    — passes keys smoothly, never overshoots, no clamp needed; it is the standard answer to exactly this.
+  • Workaround chain for the record: band-limit the authored mould → `select op=between` the sub-plane
+    verts → `transform op=scale_verts sz=0 vert_pivot=ORIGIN` to re-flatten → SMOOTH modifier for the
+    residual corduroy. Four ops to buy what `interp=bicubic_monotone` would give in the drape call itself.
+
+### G202 — field `expr` variables and `field_mode=set` have unspecified frames: a clamp expression GREW the mesh
+
+Tried to fix G201's −1.9mm undershoot with the field deformer itself: `op=field channel=axis:Z
+field_mode=set expr="max(z,0)"` — intent: set every vert's Z to its clamped value, the obvious algebraic
+clamp. What happened: F∈[0, 0.0795] on a mound whose z spans [0, 0.0948] (so `z` in the expr namespace
+is NOT the vert's z — centroid-relative? normalized? the docstring's var table says "x/y/z local" and no
+more), and the surface PEAK ROSE from 0.095 to 0.174 (so `set` did not set the coordinate either — the
+result looks like an add). Undid it and clamped geometrically instead (select-below + flatten). The
+schema teaches the variable NAMES but not their FRAMES (measured from what origin, in what basis?) nor
+what `set` sets (the coordinate? the displacement-so-far?). For an engine whose whole contract is "type
+a formula, get that surface", every var needs one line of frame semantics in the docstring — an author
+who can't predict F(vars) can only discover it by deforming a mesh wrong.
