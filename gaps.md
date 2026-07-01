@@ -244,3 +244,17 @@ the 3/9 handles landed buried inside the dial and needed a hand lift to the face
 is evidently angle-dependent; a placement read on a thin disk should either (a) prefer the face whose
 normal agrees with the anchor's outward/up axis, (b) take a `side=top|bottom` hint, or at minimum
 (c) report WHICH face it chose loudly enough that the asymmetry isn't discovered via a buried part.
+
+### G200 — `modifier op=add` SILENTLY DROPS type-specific dials it documents for `op=modify` (SOLIDIFY thickness=)
+
+Gave the dust-sheet its cloth thickness with `modifier op=add type=SOLIDIFY thickness=0.002`. The call
+reported plain success ("Solidify [id]") — and the modifier landed with the **10mm Blender default**,
+not 2mm: `thickness` is a `[modify]`-only dial in the schema, so the value I passed at add time was
+accepted by the tool signature and then **dropped without a word**. The miss surfaced one op later as a
+`below_floor: DustSheet dips 1.0mm` finding (10mm shell punched the sheet through the ground plane) and
+cost a diagnose→modify→re-seat round-trip. Same family as G197's lesson: **a parameter that can't be
+honoured must refuse loudly, not report success** — `add` already returns a status block, so echoing
+`skipped: ['thickness']` is one line. Better still: any dial `op=modify` can set on a modifier type
+should be settable in the `op=add` call that creates it (offset, thickness, wrap_method, …) — the
+add→modify split forces two calls for every modifier whose default is wrong, and the first call's
+"success" actively hides that the second is needed.
