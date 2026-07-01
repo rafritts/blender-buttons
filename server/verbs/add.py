@@ -93,9 +93,10 @@ def add(
         grid       — width, depth, x_subdivisions, y_subdivisions  (a flat subdivided
                      PLANE: a width×depth rectangle of verts already wired into quad
                      topology. Native Add > Mesh > Grid. The sheet you VACUUM-FORM: lay it
-                     down, then drape it onto a mould with buttons-deform-macro op=field —
-                     the grid is the hot plastic, the function is the mould. Vary the mould
-                     down the sheet or it drapes flat as a ribbon.)
+                     down, then pull it onto a mould with buttons-deform-macro op=loft
+                     (keyed cross-sections) or op=field (one function) — the grid is the
+                     hot plastic, the mould is authored. Vary the mould down the sheet or
+                     it forms a flat ribbon.)
       CURVES (take name, points)  — tube/helix are composite MACROS (SPEC-20): they kept
       their home under `add` because their purpose IS construction, but each carries an
       R1 native-cousin note below:

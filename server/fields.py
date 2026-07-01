@@ -65,15 +65,15 @@ def _grid_to_moulds(grid):
     return moulds, None
 
 
-def drape(axis, moulds, interp, channel, field_mode, label, target, mould_grid=None):
+def loft(axis, moulds, interp, channel, field_mode, label, target, mould_grid=None):
     """Vacuum-form the selection onto an ARRAY of keyed cross-section moulds (the loft).
 
     The grid is the sheet; each mould is a cross-section profile keyed down the line-axis;
     the engine interpolates between them and pulls every vert onto the result. Varying the
     moulds down the sheet is what gives a real (double-curved) shell — a uniform array
-    drapes flat as a ribbon, which the engine flags. The moulds can be hand-authored profile
+    collapses to a ribbon, which the engine flags. The moulds can be hand-authored profile
     dicts (`moulds=`) OR a raw 2D control grid of numbers (`mould_grid=`), which expands to an
-    evenly-keyed mould array. See the buttons-deform-macro op=drape docstring for the full
+    evenly-keyed mould array. See the buttons-deform-macro op=loft docstring for the full
     language."""
     if mould_grid:
         if moulds:
@@ -88,7 +88,7 @@ def drape(axis, moulds, interp, channel, field_mode, label, target, mould_grid=N
     result = call_blender("field", params, label=label)
     if not result.get("success"):
         return result.get("error", "failed") + _status(result)
-    return _format(result, verb="drape")
+    return _format(result, verb="loft")
 
 
 def _format(result, verb="field"):
