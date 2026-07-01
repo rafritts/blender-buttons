@@ -175,3 +175,31 @@ which was cut as off-thesis):
     rigid offset (still developable): `⚠ uniform functions → this drapes as a ribbon (single curvature),
     not a shell`. A *warn*, never a block — a ribbon is sometimes the intent (a strap, belt, flat curved
     panel), same spirit as the existing validate ⚠ lines.
+
+### G196 — the whole SIMULATION dimension is unreachable: no sim-modifier settings, no way to run frames
+
+The server can **model** a garment but never **drape** it. Concrete: extruded a flared, pleated skirt off
+a waistband loop (clean, unit-scale, ring topology — genuinely sim-ready), then the requested "add cloth,
+run physics 15 frames" fell straight off the verb surface in two independent places:
+
+  • **Sim-modifier settings are unbindable.** `modifier op=add` can name `CLOTH`/`COLLISION`, but a cloth
+    modifier only behaves like a garment once its *data* dials are set — **pin group** (the vertex group it
+    hangs from) and the body's **collision** toggle. Those are property assignments on `modifier.settings`,
+    and nothing exposes them: the `modifier` verb's dials are the generative/deform ones (levels, width,
+    count, factor…), and `addon op=run` fires **operators only**, not property writes. So an added cloth
+    modifier is un-pinned by construction → gravity slides the whole skirt through the floor. (I *can* mint
+    the pin vertex group — `pose op=assign_weight group=pin` — but there's no way to point cloth at it.)
+  • **There is no timeline.** No verb sets or steps the current frame, and none bakes a point cache. A
+    cloth/soft-body/particle sim only evaluates as frames advance from the cache start; with no
+    `frame set`/`frame step`/`bake` primitive, the sim can never run headless. The nearest reach is a blind
+    `addon op=run operator=ptcache.bake`, which needs a point-cache context the operator-runner doesn't set
+    up, and would sag anyway for want of the pin above.
+
+The cost is a whole *class* of intent — "drape this", "let it settle", "run the sim" — for cloth, soft
+body, and particles alike. The agent can build the object and even prep its groups, then has to hand the
+entire physics step back to the human at the viewport. Two missing primitives, both intent-level:
+  • sim-modifier **setting dials** on `modifier op=add/modify` — at minimum `pin_group=` for CLOTH and a
+    `COLLISION` add — so a garment's binding is nameable, not a manual dropdown.
+  • a **timeline/bake primitive** — e.g. `scene op=frame set=N` / `op=step` and `op=bake_physics frames=N`
+    — so a simulation can actually be advanced and cached from the server. Pairs with a ground-truth read
+    of the settled result (the existing `feel` reads already measure the draped mesh once frames have run).
