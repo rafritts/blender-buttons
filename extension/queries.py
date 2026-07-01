@@ -620,15 +620,32 @@ def radial_landmark(params):
     # caller NAME the crossing: outer (the rim — the default, where glaze drips over),
     # inner (the hole wall), or supply an explicit radius to place at a known distance.
     crossing = (params.get("crossing") or "").strip().lower()
+    side = (params.get("side") or "").strip().lower()      # G199: top|bottom hint
+    axis_vec = Vector({"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}[axis])
     normal = None
     crossings_n = None
+    snapped_side = None
     if radius > 0 and not crossing:
         # explicit-radius mode (back-compat): place at the named distance, optional snap.
         p = center + radius * direction
         if params.get("snap", True) and obj is not None and obj.type == 'MESH':
-            snap_w, nrm_w = _snap_to_surface(obj, p)
-            if snap_w is not None:
-                p, normal = snap_w, nrm_w
+            if side in ("top", "bottom"):
+                # G199: DIRECTED snap along the ring axis so a thin disk lands on the
+                # requested face deterministically — nearest-point snap flips between the
+                # two parallel faces by tiny numeric margins (0°/180° grabbed the top,
+                # 90°/270° the bottom, same call), burying the placed part on the wrong side.
+                snap_w, nrm_w = _snap_along_axis(obj, p, axis_vec, side == "top")
+                if snap_w is not None:
+                    p, normal = snap_w, nrm_w
+            else:
+                snap_w, nrm_w = _snap_to_surface(obj, p)
+                if snap_w is not None:
+                    p, normal = snap_w, nrm_w
+        if normal is not None:
+            # report WHICH face the snap chose, so the flat-disk asymmetry is legible
+            # instead of discovered via a buried part (keep the tool honest, not divine).
+            d = normal.dot(axis_vec) if hasattr(normal, "dot") else Vector(normal).dot(axis_vec)
+            snapped_side = "top" if d > 0.3 else "bottom" if d < -0.3 else "edge"
     else:
         if obj is None or obj.type != 'MESH':
             return {"error": "radial crossing-cast needs a mesh anchor (got a handle/empty); "
@@ -648,6 +665,8 @@ def radial_landmark(params):
            "normal": [round(c, 4) for c in (normal or Vector((0.0, 0.0, 1.0)))],
            "angle": angle, "radius": radius, "axis": axis,
            "crossing": (crossing or ("outer" if crossings_n is not None else "radius"))}
+    if snapped_side is not None:
+        res["snapped_side"] = snapped_side
     if crossings_n is not None:
         res["crossings_found"] = crossings_n
     if obj is not None:
@@ -681,6 +700,29 @@ def _ray_crossings(obj, origin, direction, max_dist):
         if travelled >= max_dist:
             break
     return out
+
+
+def _snap_along_axis(obj, point_world, axis_vec, from_top):
+    """G199 — land `point_world` on the face the ray hits when cast ALONG the ring axis
+    (from above for the top face, below for the bottom). Deterministic on a thin flat disk
+    where nearest-point snap flips between the two parallel faces. Returns (loc, nrm) world."""
+    from mathutils import Vector
+    from .common import object_bvh
+    tree = object_bvh(obj)                    # WORLD space
+    if tree is None:
+        return None, None
+    p = Vector(point_world)
+    a = Vector(axis_vec).normalized()
+    bb = world_bbox(obj)
+    reach = math.hypot(bb[3] - bb[0], math.hypot(bb[4] - bb[1], bb[5] - bb[2])) + 1e-3
+    if from_top:
+        origin, d = p + a * reach, -a          # from above, cast down → hits top face
+    else:
+        origin, d = p - a * reach, a           # from below, cast up → hits bottom face
+    loc, nrm, idx, dist = tree.ray_cast(origin, d, 2 * reach + 1e-3)
+    if loc is None:
+        return None, None
+    return loc, nrm.normalized()
 
 
 def _snap_to_surface(obj, point_world):

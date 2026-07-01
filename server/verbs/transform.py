@@ -13,13 +13,13 @@ ops were retired as native cousins.)
 from typing import Literal
 
 from server._core import mcp
-from server import transforms, relational, editmode, handles
+from server import transforms, relational, editmode, handles, primitives
 from ._common import tag, unknown, teach
 
 _OPS = ["nudge", "place", "move_to", "rotate_to", "aim_axis", "rest_on", "seat", "resize",
         "scale", "rotate", "apply", "snap", "snap_grid", "match_dim", "mirror", "distribute",
         "array_corners", "array_along", "move_verts",
-        "scale_verts", "snap_loop"]
+        "scale_verts", "snap_loop", "lattice"]
 
 
 @mcp.tool(name="transform")
@@ -27,8 +27,14 @@ def transform(
     op: Literal["nudge", "place", "move_to", "rotate_to", "aim_axis", "rest_on", "seat",
                 "resize", "scale", "rotate", "apply", "snap", "snap_grid", "match_dim",
                 "mirror", "distribute", "array_corners", "array_along",
-                "move_verts", "scale_verts", "snap_loop"],
+                "move_verts", "scale_verts", "snap_loop", "lattice"],
     targets: tag(str, "object(s): '' active, 'name', or 'a,b,c'") = "",
+    # lattice (warp a deform cage's control points — G189)
+    lat_u: tag(str, "[lattice] U points to move: all|min|max|mid|<index>|[lo,hi]") = None,
+    lat_v: tag(str, "[lattice] V points to move: all|min|max|mid|<index>|[lo,hi]") = None,
+    lat_w: tag(str, "[lattice] W points to move: all|min|max|mid|<index>|[lo,hi]") = None,
+    lat_translate: tag(list, "[lattice] world-space delta [dx,dy,dz] (m)") = None,
+    lat_scale: tag(list, "[lattice] scale the slab about the cage centre [sx,sy,sz]") = None,
     # place (relational re-placement — same DSL as add's on=)
     on: tag(dict, "[place] placement spec — {\"left_of\":\"base\",\"gap\":0}, {\"on\":\"seat\"}, …") = None,
     # nudge (relative meters)
@@ -257,4 +263,7 @@ def transform(
         return editmode.scale_vertices(in_plane, sx, sy, sz, vert_pivot, label, target)
     if o == "snap_loop":
         return editmode.snap_loop(handle, fit_scale, fit_rotation, label)
+    if o == "lattice":
+        return primitives.deform_lattice(targets or target, lat_u, lat_v, lat_w,
+                                         lat_translate, lat_scale, label)
     return unknown("transform", "op", op, _OPS)

@@ -418,6 +418,10 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
     # scene; it resets the history log itself (designs.new_scene) rather than
     # pushing an undo step that would immediately be desynced.
     "new_scene",
+    # G196 timeline/bake: set_frame just moves the playhead (a nav read, like
+    # frame_scene); bake_physics runs the point-cache sim and can't be meaningfully
+    # captured by the geometry-diff undo snapshot — keep both off the undo stack.
+    "set_frame", "bake_physics",
 }
 
 # Tools that should NOT have blender_status appended to their result

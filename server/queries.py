@@ -529,7 +529,7 @@ def selection_anchor(target: str = "", as_handle: str = "") -> str:
 
 def radial_landmark(anchor: str = "", angle: float = 0.0, radius: float = 0.0,
                     axis: str = "Z", snap: bool = True, as_handle: str = "",
-                    crossing: str = "") -> str:
+                    crossing: str = "", side: str = "") -> str:
     """G81 — mint a landmark by ANGLE on a round face. Clock-position a point around
     `anchor`'s centre, plane ⟂ `axis`. `angle` = degrees CLOCKWISE from 12 o'clock
     (0=top, 90=3 o'clock, 180=6, 270=9), so an off-cardinal hour stays in intent-space.
@@ -542,10 +542,14 @@ def radial_landmark(anchor: str = "", angle: float = 0.0, radius: float = 0.0,
         collapsing to the empty bbox centre or silently grabbing the inner wall).
       • radius=<m> — place at a fixed known distance (back-compat), optionally snapped.
     anchor = a round object (bbox centre) or a handle. Pair with as_handle to name the point.
-    Example: feel op=radial anchor=Icing angle=60 crossing=outer as_handle=drip2."""
+    side (G199): on a THIN flat disk a radius-snap flips between the two parallel faces by
+      tiny numeric margins (0°/180° top, 90°/270° bottom, same call) — pass side=top|bottom
+      to land on the intended face deterministically. The result always reports which face
+      it chose (snapped_side).
+    Example: feel op=radial anchor=Dial angle=90 radius=0.0155 side=top as_handle=h3."""
     result = call_blender("radial_landmark", {"anchor": anchor, "angle": angle,
         "radius": radius, "axis": axis, "snap": snap, "as_handle": as_handle,
-        "crossing": crossing})
+        "crossing": crossing, "side": side})
     if not result.get("success"):
         return result.get("error", "failed")
     p = result["point"]; n = result["normal"]
@@ -553,8 +557,10 @@ def radial_landmark(anchor: str = "", angle: float = 0.0, radius: float = 0.0,
     extra = ""
     if result.get("crossings_found"):
         extra = f", {cx} of {result['crossings_found']} crossing(s)"
+    ss = result.get("snapped_side")
+    side_str = f" [{ss} face]" if ss else ""
     return (f"radial landmark @ {result.get('region', '?')} "
-            f"(angle {result['angle']}° r={result['radius']}m on {result['axis']}{extra}): "
+            f"(angle {result['angle']}° r={result['radius']}m on {result['axis']}{extra}){side_str}: "
             f"point=[{p[0]}, {p[1]}, {p[2]}]  normal=[{n[0]}, {n[1]}, {n[2]}]"
             + _minted_line(result, "feel op=radial … as_handle=NAME"))
 

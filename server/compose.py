@@ -21,8 +21,12 @@ def graft(a="", b="", mode="smin", blend=0.0, resolution=0, name="", keep=False,
     if not result.get("success"):
         return result.get("error", "graft failed")
     wt = "watertight ✓" if result.get("watertight") else "⚠ has open edges at the seam"
+    grid = result.get("grid")
+    grid_str = ("×".join(str(g) for g in grid) if grid else f"{result.get('resolution')}³")
+    cell = result.get("cell_size")
+    cell_str = f" @ {cell}m cells" if cell else ""
     body = (f"grafted '{a}' + '{b}' → '{result['object']}' "
-            f"(smooth-min k={result.get('blend')}m, {result.get('resolution')}³ voxels): "
+            f"(smooth-min k={result.get('blend')}m, {grid_str} voxels{cell_str}): "
             f"{result.get('verts')} verts, {result.get('faces')} faces — {wt}")
     if result.get("removed"):
         body += f"\n  removed sources: {', '.join(result['removed'])}"

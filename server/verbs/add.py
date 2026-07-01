@@ -13,14 +13,15 @@ from server import primitives, scene
 from ._common import tag, unknown, teach
 
 _TYPES = ["box", "plane", "cylinder", "sphere", "cone", "torus", "icosphere",
-          "circle", "grid", "tube", "helix", "curve", "text", "floor", "light", "camera"]
+          "circle", "grid", "tube", "helix", "curve", "text", "lattice", "floor",
+          "light", "camera"]
 
 
 @mcp.tool(name="add")
 def add(
     type: Literal["box", "plane", "cylinder", "sphere", "cone", "torus",
-                  "icosphere", "circle", "grid", "tube", "helix", "curve", "text", "floor",
-                  "light", "camera"],
+                  "icosphere", "circle", "grid", "tube", "helix", "curve", "text",
+                  "lattice", "floor", "light", "camera"],
     name: tag(str, "object name (required except floor)") = "",
     # ── placement & orientation (the dimensional primitives) ──
     on: tag(dict, "[mesh primitives] placement DSL — {\"on\":\"seat\"}, {\"on_floor\":true}, …") = None,
@@ -51,6 +52,12 @@ def add(
     # ── grid (type=grid): a subdivided plane in quad topology ──
     x_subdivisions: tag(int, "[grid] cuts across X (default 10; more = denser)") = 0,
     y_subdivisions: tag(int, "[grid] cuts across Y (default 10; more = denser)") = 0,
+    # ── lattice (type=lattice): a deform cage ──
+    enclose: tag(str, "[lattice] size + centre the cage on this object's bbox (drop a cage over a form)") = "",
+    u: tag(int, "[lattice] control-point resolution on U (default 4)") = 0,
+    v: tag(int, "[lattice] control-point resolution on V (default 4)") = 0,
+    w: tag(int, "[lattice] control-point resolution on W (default 4)") = 0,
+    margin: tag(float, "[lattice] fractional oversize so the cage fully encloses (default 0.02)") = None,
     # ── curve / tube (type=curve|tube) ──
     points: tag(list, "[tube/curve] control points the curve passes through") = None,
     between: tag(list, "[tube] connect two anchors [A,B] — straight tube, nearest-surface endpoints (alt to points)") = None,
@@ -115,6 +122,11 @@ def add(
         text       — body=<string>, size (cap height), depth (extrude), bevel
                      (converted to a real editable MESH — dial numerals, maker's
                      marks, gauge labels, keycaps, signage). Placeable with on=.
+      DEFORM CAGE:
+        lattice    — enclose=<object> (or width/depth/height), u/v/w resolution,
+                     margin. A u×v×w control-point cage that warps a dense mesh
+                     non-destructively. Bind it: modifier op=add type=LATTICE
+                     host=<mesh> target=<lattice>; push points: transform op=lattice.
       OBJECTS (spawn at a default viewpoint — re-seat relationally with
       transform op=place / op=nudge, or aim with target=<object>):
         light      — subtype (POINT|SUN|SPOT|AREA), energy, color|hex,
@@ -190,6 +202,11 @@ def add(
         return primitives.add_curve(
             name, points or [], subtype or "BEZIER", cyclic, resolution or 12,
             bevel_depth, label)
+    if t == "lattice":
+        return primitives.add_lattice(
+            name, enclose, u or 4, v or 4, w or 4,
+            width or 1.0, depth or 1.0, height or 1.0,
+            margin if margin is not None else 0.02, on, label)
     if t == "text":
         return primitives.add_text(name, body, size or 0.1, depth, bevel, on, *r, label)
     if t == "light":

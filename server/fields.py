@@ -65,7 +65,8 @@ def _grid_to_moulds(grid):
     return moulds, None
 
 
-def loft(axis, moulds, interp, channel, field_mode, label, target, mould_grid=None):
+def loft(axis, moulds, interp, channel, field_mode, label, target, mould_grid=None,
+         clamp_min=None, clamp_max=None):
     """Vacuum-form the selection onto an ARRAY of keyed cross-section moulds (the loft).
 
     The grid is the sheet; each mould is a cross-section profile keyed down the line-axis;
@@ -85,6 +86,10 @@ def loft(axis, moulds, interp, channel, field_mode, label, target, mould_grid=No
         "axis": axis, "channel": channel or "normal", "field_mode": field_mode or "add",
         "moulds": moulds, "interp": interp,
     }
+    if clamp_min is not None:
+        params["clamp_min"] = clamp_min
+    if clamp_max is not None:
+        params["clamp_max"] = clamp_max
     result = call_blender("field", params, label=label)
     if not result.get("success"):
         return result.get("error", "failed") + _status(result)

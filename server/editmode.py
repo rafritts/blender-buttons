@@ -789,13 +789,14 @@ def bridge(a: str = "", b: str = "", label: str = "", bridge_cuts: int = 0,
     }, label=label)
     if result.get("success"):
         br = result.get("bridge", {})
-        shape = (f", {br['cuts']} cuts/sm{br['smoothness']:g}/{br['interpolation'].lower()}"
+        shape = (f", {br['cuts']} cuts/sm{br['smoothness']:g}"
                  + (f"/twist{br['twist']}" if br.get('twist') else "")
-                 + (f"/prof{br['profile']:g}" if br.get('profile') else "")
                  ) if br.get("cuts") else ""
         main = (f"bridged {result['a']} ↔ {result['b']} on {result['owner']} — "
                 f"+{result['faces_created']} faces ({result['edges_bridged']} edge pairs)"
                 f"{shape} → {result['faces_total']} faces [{result.get('op_id','')}]")
+        for w in result.get("warnings", []):
+            main += f"\n⚠ {w}"
         # G9 follow-up: a fresh weld usually wants a seam-weld + a lint pass.
         main += ("\n  → next: `edit op=merge target=" + result['owner']
                  + "` to weld any coincident seam verts · `feel op=mesh target="

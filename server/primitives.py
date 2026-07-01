@@ -130,6 +130,61 @@ def add_grid(name: str, width: float, depth: float,
     return _add_result("GRID", result) + _status(result)
 
 
+def add_lattice(name: str, enclose: str = "", u: int = 4, v: int = 4, w: int = 4,
+                width: float = 1.0, depth: float = 1.0, height: float = 1.0,
+                margin: float = 0.02, on: dict = None, label: str = "") -> str:
+    """
+    Add a LATTICE deform-cage (G189) — a u×v×w grid of control points that warps any mesh
+    bound to it, non-destructively. The missing partner for modifier op=add type=LATTICE.
+
+    enclose: size + centre the cage on this object's bounding box (the usual path — drop a
+             cage over a form). Else give explicit width/depth/height (m).
+    u/v/w:   control-point resolution on each axis (default 4×4×4).
+    margin:  fractional oversize so the cage fully encloses the target (default 2%).
+    Then: modifier op=add type=LATTICE host=<mesh> target=<this>, and push points with
+    transform op=lattice.
+    """
+    params = {"name": name, "resolution_u": u, "resolution_v": v, "resolution_w": w,
+              "margin": margin}
+    if enclose:
+        params["enclose"] = enclose
+    else:
+        params.update({"width": width, "depth": depth, "height": height, "on": on})
+    result = call_blender("add_lattice", params, label=label)
+    return _add_result("LATTICE", result) + _status(result)
+
+
+def deform_lattice(target: str = "", u=None, v=None, w=None,
+                   translate: list = None, scale: list = None, label: str = "") -> str:
+    """
+    Warp a LATTICE cage (G189) by pushing a SLAB of its control points — every mesh bound
+    to it follows, non-destructively.
+
+    target: the lattice object. u/v/w: which points along each axis move — 'all' (default) |
+      'min' | 'max' | 'mid' | an index | an [lo,hi] range. translate: world-space delta
+      [dx,dy,dz] (m). scale: multiply the slab's local coords about the cage centre [sx,sy,sz].
+    """
+    params = {"target": target}
+    if u is not None:
+        params["u"] = u
+    if v is not None:
+        params["v"] = v
+    if w is not None:
+        params["w"] = w
+    if translate is not None:
+        params["translate"] = translate
+    if scale is not None:
+        params["scale"] = scale
+    result = call_blender("deform_lattice", params, label=label)
+    if result.get("success"):
+        main = f"lattice '{result['object_name']}': {result['points_moved']} point(s) moved [{result.get('op_id','')}]"
+        if result.get("note"):
+            main += f"\n  {result['note']}"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 @mcp.tool()
 def add_cylinder(name: str, radius: float, height: float,
                  on: dict = None, segments: int = None, vertices: int = 32,

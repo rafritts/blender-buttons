@@ -5,14 +5,40 @@ from server._core import mcp, call_blender, _status, _targets
 from server import polyhaven
 
 
+# G188 — when a brief asks for a look "from Poliigon", the honest answer is NOT to
+# silently search Poly Haven and quietly change what was asked for. Poliigon's library is
+# reachable only through its installed, authenticated, version-specific addon API, which
+# has to be driven LIVE — so point the caller at the real route (the generic addon bridge
+# to search+download, then the vendor-neutral local-folder apply) rather than substitute.
+_POLIIGON_SEARCH_GUIDE = (
+    "Poliigon search isn't a first-class server path — its addon API is authenticated and "
+    "version-specific, so it's driven live, not fetched by id server-side. To honour "
+    "'from Poliigon' without substituting Poly Haven:\n"
+    "  1. `addon op=list filter=poliigon`   — confirm the addon is enabled + logged in\n"
+    "  2. `addon op=inspect operator=poliigon`   — list its search/download operators\n"
+    "  3. drive the chosen download operator with `addon op=run`, then apply the downloaded "
+    "maps with `material op=pbr folder=<asset dir>` (vendor-neutral — it reads Poliigon's "
+    "own BaseColor/Normal/Roughness names directly).")
+_POLIIGON_APPLY_GUIDE = (
+    "'from Poliigon' can't be fetched by id server-side (authenticated addon API, live-only). "
+    "Download the asset through the Poliigon addon (`addon op=inspect operator=poliigon` → "
+    "`addon op=run`), then apply it vendor-neutrally with `material op=pbr target=<obj> "
+    "folder=<downloaded asset dir>` — no Poly Haven substitution.")
+
+
 @mcp.tool()
-def search_textures(query: str, limit: int = 10) -> str:
+def search_textures(query: str, limit: int = 10, source: str = "polyhaven") -> str:
     """
-    Search Poly Haven's CC0 texture library by keyword (material, surface, color,
-    use — e.g. "brick", "rusty metal", "wood floor"). Returns asset ids to pass
-    to set_textured_material. Works offline after the first call (catalog is cached
-    24h).
+    Search a PBR texture library by keyword (material, surface, color, use — e.g. "brick",
+    "rusty metal", "wood floor"). Returns asset ids to pass to set_textured_material.
+
+    source: "polyhaven" (default, CC0, fully automated find→fetch→apply; catalog cached 24h)
+      | "poliigon" — the licensed library; there is no server-side fetch-by-id (its addon API
+      is authenticated + live-only), so this returns the exact live route rather than silently
+      searching Poly Haven under a different library's name (G188).
     """
+    if (source or "").strip().lower() in ("poliigon", "poliigon.com"):
+        return _POLIIGON_SEARCH_GUIDE
     try:
         results = polyhaven.search(query, "textures", limit)
     except polyhaven.PolyHavenError as e:
@@ -194,7 +220,7 @@ def set_textured_material(target: str, asset_id: str, scale: float = 1.0,
                           roughness: float = None, material_name: str = "",
                           slot: int = None, use_alpha: bool = False,
                           physical_size: float = 0.0, space: str = "box",
-                          label: str = "") -> str:
+                          source: str = "polyhaven", label: str = "") -> str:
     """
     Apply a real photo-scanned PBR material from Poly Haven (CC0) to an object or
     group. Downloads + caches the diffuse/normal/roughness/metal maps server-side,
@@ -221,10 +247,16 @@ def set_textured_material(target: str, asset_id: str, scale: float = 1.0,
     slot:       material slot index to assign into (default 0) — for texturing a
                 multi-slot mesh's secondary material.
 
+    source: "polyhaven" (default, fetched + wired server-side) | "poliigon" — returns the
+      live download route (its addon API is authenticated/live-only) instead of substituting
+      a Poly Haven scan under the licensed library's name (G188).
+
     A bad id or a network failure returns a clean error and leaves the object's
     material unchanged. Subsequent calls for the same asset/resolution hit the
     local cache (no network).
     """
+    if (source or "").strip().lower() in ("poliigon", "poliigon.com"):
+        return _POLIIGON_APPLY_GUIDE
     try:
         maps = polyhaven.ensure_texture_maps(asset_id, resolution)
     except polyhaven.PolyHavenError as e:

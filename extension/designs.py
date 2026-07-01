@@ -205,10 +205,85 @@ def import_mesh(params):
     return {"imported": new, "meshes": meshes, "path": path}
 
 
+def set_frame(params):
+    """Move the scene's current frame (G196) — the timeline the physics/animation
+    evaluation reads. A cloth/soft-body/particle sim only advances as frames step
+    from the cache start, so this is the primitive that lets a bake run headless.
+
+      frame=N : jump to absolute frame N.
+      step=D  : advance D frames from the current one (negative to go back).
+    Also lets you set the playback range with start=/end= so a subsequent
+    bake_physics knows how far to run.
+    """
+    scene = bpy.context.scene
+    start = params.get("start")
+    end = params.get("end")
+    if start is not None:
+        scene.frame_start = int(start)
+    if end is not None:
+        scene.frame_end = int(end)
+    if params.get("step") is not None:
+        scene.frame_set(scene.frame_current + int(params["step"]))
+    elif params.get("frame") is not None:
+        scene.frame_set(int(params["frame"]))
+    return {"success": True, "current_frame": scene.frame_current,
+            "frame_start": scene.frame_start, "frame_end": scene.frame_end}
+
+
+def bake_physics(params):
+    """Bake every point-cache physics sim in the scene (cloth / soft-body / particles)
+    and leave the scene on the settled last frame (G196). This is what actually RUNS a
+    simulation from the server: without it a cloth modifier just sits at its rest shape.
+
+      frames=N : simulate N frames from `start` (sets frame_start..frame_start+N).
+      start=F  : first frame of the bake (defaults to the scene's current frame_start).
+
+    Freeing any stale bake first, so a re-bake after a settings change is clean. The
+    settled mesh is then readable with the usual `feel` reads (apply the modifier if you
+    need the deformed vertices baked into the mesh data).
+    """
+    scene = bpy.context.scene
+    frames = params.get("frames")
+    start = params.get("start")
+    if start is not None:
+        scene.frame_start = int(start)
+    if frames is not None:
+        scene.frame_end = scene.frame_start + int(frames)
+    from .state import ui_override
+    override = ui_override()
+
+    def _run():
+        try:
+            bpy.ops.ptcache.free_bake_all()
+        except Exception:
+            pass
+        bpy.ops.ptcache.bake_all(bake=True)
+
+    scene.frame_set(scene.frame_start)
+    try:
+        if override:
+            with bpy.context.temp_override(**override):
+                _run()
+        else:
+            _run()
+    except Exception as e:
+        return {"error": f"physics bake failed ({e}); need at least one cloth/soft-body/"
+                         f"particle sim in the scene and a valid 3D-view context."}
+    scene.frame_set(scene.frame_end)
+    return {"success": True,
+            "frame_start": scene.frame_start, "frame_end": scene.frame_end,
+            "baked_frames": scene.frame_end - scene.frame_start,
+            "current_frame": scene.frame_current,
+            "note": f"baked {scene.frame_start}→{scene.frame_end}; scene left on the "
+                    f"settled final frame."}
+
+
 TOOLS = {
     "save_design":  save_design,
     "open_design":  open_design,
     "list_designs": list_designs,
     "new_scene":    new_scene,
     "import_mesh":  import_mesh,
+    "set_frame":    set_frame,
+    "bake_physics": bake_physics,
 }

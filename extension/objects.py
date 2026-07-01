@@ -826,22 +826,38 @@ def duplicate_mirrored(params):
     activate(obj)
     bpy.ops.object.duplicate(linked=False)
     dup = bpy.context.active_object
-    dup.matrix_world = R @ dup.matrix_world
 
     new_name = params.get("new_name") or f"{target}_mirror"
     dup.name = new_name
     if dup.data and dup.data.users == 1:
         dup.data.name = new_name
 
-    # Bake the negative-determinant transform, then fix the inverted normals.
-    activate(dup)
-    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-    if dup.type == 'MESH':
+    # G194: reflect the GEOMETRY in the dup's own local frame and KEEP its object
+    # transform, so the world result is exactly R·M·mesh — the true mirror image with
+    # the tilt intact. The old path assigned the negative-determinant matrix R·M to
+    # matrix_world and let transform_apply's decompose bake it; that decompose silently
+    # dropped an off-axis rotation (a leg splayed 4° about Y came back upright). Baking
+    # the reflection straight into the mesh never touches the rotation, so the tilt
+    # survives. For a non-mesh dup (no editable geometry) fall back to the matrix path.
+    M = dup.matrix_world.copy()
+    if dup.type == 'MESH' and dup.data is not None:
+        local_reflect = M.inverted() @ R @ M
+        dup.data.transform(local_reflect)
+        dup.data.update()
+        # winding flipped by the reflection — recompute outward.
+        activate(dup)
         bpy.ops.object.mode_set(mode='EDIT')
         bpy.ops.mesh.select_all(action='SELECT')
         bpy.ops.mesh.normals_make_consistent(inside=False)
         bpy.ops.object.mode_set(mode='OBJECT')
+        # Re-centre the origin on the reflected geometry (world geometry unchanged) so the
+        # object origin isn't left on the un-mirrored side.
+        activate(dup)
+        bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='MEDIAN')
+    else:
+        dup.matrix_world = R @ M
 
+    bpy.context.view_layer.update()
     xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(dup)
     return {
         "success": True,
@@ -850,6 +866,7 @@ def duplicate_mirrored(params):
         "axis": axis,
         "pivot": pivot,
         "dimensions": [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)],
+        "note": "mirror image baked into geometry — the source's live tilt is preserved.",
     }
 
 

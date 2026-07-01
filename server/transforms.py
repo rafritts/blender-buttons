@@ -217,6 +217,8 @@ def apply_transform(targets: str = "", scale: bool = True,
     if result.get("success"):
         flags = [k for k in ("scale", "rotation", "location") if result.get(k)]
         main = f"applied {flags} on {result['applied_to']} [{result.get('op_id','')}]"
+        for w in result.get("warnings", []):
+            main += f"\n⚠ {w}"
     else:
         main = result.get("error", "failed")
     return main + _status(result)

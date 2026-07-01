@@ -64,6 +64,9 @@ def material(
     # search
     query: tag(str, "[search_textures/search_hdris] search keywords") = "",
     limit: tag(int, "[search_textures/search_hdris] max results") = 10,
+    source: tag(str, "[search_textures/textured] library: 'polyhaven' (default, CC0, fully "
+                     "automated) | 'poliigon' (licensed — returns the live addon-driven route, "
+                     "no silent Poly Haven substitution)") = "polyhaven",
     label: str = "",
 ) -> str:
     """
@@ -110,7 +113,7 @@ def material(
         return textures.set_textured_material(target, asset_id, scale, resolution,
                                               base_color, tint, metallic, roughness,
                                               material_name, slot, use_alpha,
-                                              physical_size, space, label)
+                                              physical_size, space, source, label)
     if o == "pbr":
         return textures.set_pbr_material(target, folder, size, scale, displacement,
                                          base_color, tint, metallic, roughness,
@@ -125,7 +128,7 @@ def material(
     if o == "shade_flat":
         return finishes.shade_flat(target, label)
     if o == "search_textures":
-        return textures.search_textures(query, limit)
+        return textures.search_textures(query, limit, source)
     if o == "search_hdris":
         return scene.search_hdris(query, limit)
     return unknown("material", "op", op, _OPS)

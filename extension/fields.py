@@ -347,6 +347,22 @@ def field(params):
     crnd_by_c = {int(c): _hash01(np, np.array([int(c)]), seed)[0] for c in np.unique(comp)}
     crnd = np.array([crnd_by_c[int(c)] for c in comp])
 
+    # ── the expr/points variable namespace, and the FRAME each var is measured in (G202) ──
+    # The frame is built PER GROUP from the selection's own verts: O = group centroid,
+    # Lax = the longitudinal axis (world `axis`, or PCA for axis=auto), U/V = the two
+    # cross-plane axes. Every var below states its origin + basis so F(vars) is predictable
+    # BEFORE you deform a mesh, not discovered by deforming one wrong:
+    #   t,u,v   : normalized 0..1 position along Lax / U / V within the group's extent
+    #             (t = along the length, u/v = across). us,vs = the same, remapped to -1..1.
+    #   x,y,z   : SIGNED distance from O along U, V, Lax (metres). NOT world coords —
+    #             O-relative. `z` is the longitudinal coord (what field_mode=set on
+    #             channel=axis:<Lax> sets); x,y are the cross-section coords.
+    #   X,Y,Z   : the raw WORLD coordinates (metres) — use these when you mean world space.
+    #   r,theta : polar radius / angle in the U-V cross-plane, about O (r in metres).
+    #   s,L     : arc-length from the group root and the group's total spine length (metres).
+    #   nx,ny,nz: the vertex world NORMAL components (unit).
+    #   i,ci,ring: vertex index / connected-component id / longitudinal ring rank (floats).
+    #   rnd,crnd : deterministic hash-noise in [0,1) keyed per-vertex / per-component.
     namespace = {
         "t": t, "u": uu, "v": vv, "us": 2 * uu - 1, "vs": 2 * vv - 1,
         "r": r, "theta": theta, "s": s, "L": Larc,
@@ -431,7 +447,7 @@ def field(params):
         spec = channel.split(":", 1)[1] if ":" in channel else "long"
         spec = spec.upper()
         if spec in ("X", "Y", "Z"):
-            dir_v = np.array(_AXIS_VEC[spec])[None, :]
+            dir_v = np.broadcast_to(np.array(_AXIS_VEC[spec], dtype=float), (n, 3))
         elif spec == "LONG":
             dir_v = Lax
         elif spec == "U":
@@ -440,7 +456,20 @@ def field(params):
             dir_v = V
         else:
             return {"error": f"axis channel dir must be X|Y|Z|long|u|v, got {spec}"}
-        Pnew = P + F[:, None] * dir_v
+        # field_mode now REACHES the axis channel (G202): the coord measured ALONG dir_v
+        # from the group origin O is the thing add/set/multiply act on — so set actually
+        # SETS the coordinate (in the O-relative frame the `z`/`x`/`y` vars live in),
+        # instead of silently adding like every mode used to here.
+        along = np.einsum("ij,ij->i", P - O, dir_v)
+        if eff_mode == "add":
+            delta = F
+        elif eff_mode == "set":
+            delta = F - along
+        elif eff_mode == "multiply":
+            delta = along * (F - 1.0)
+        else:
+            return {"error": f"axis mode must be add|set|multiply, got {eff_mode}"}
+        Pnew = P + delta[:, None] * dir_v
     elif channel == "twist":
         ca_ = np.cos(F); sa_ = np.sin(F)
         cun = cu * ca_ - cv * sa_
@@ -528,9 +557,119 @@ def _eval_preset(np, preset, params, ns):
     return None, (f"unknown preset {preset!r} — use taper|power|smoothstep|bell|sine|lobes")
 
 
+# interp modes shared by BOTH axes of a loft (the cross-section profiles AND the
+# row-to-row blend down the line-axis) — G201. `pchip`/`bicubic_monotone` alias to
+# `monotone` (Fritsch–Carlson): passes every key smoothly with NO overshoot, the
+# standard cure for the cubic-undershoot rings the drape path used to print.
+_INTERP_MODES = {"linear", "smooth", "cubic", "monotone"}
+
+
+def _resolve_interp(raw):
+    """Normalise an interp name (with aliases). Returns (mode, error)."""
+    interp = (raw or "smooth").lower()
+    if interp in ("pchip", "bicubic_monotone", "monotone_cubic"):
+        interp = "monotone"
+    if interp not in _INTERP_MODES:
+        return None, f"interp must be one of {sorted(_INTERP_MODES)}, got {interp!r}"
+    return interp, None
+
+
+def _fc_tangents(np, xs, ys):
+    """Fritsch–Carlson monotone tangents at each key. ys is (K,) OR (N,K) — one curve
+    per row. Guarantees a monotone Hermite between keys: no over/undershoot."""
+    xs = np.asarray(xs, dtype=float)
+    ys = np.asarray(ys, dtype=float)
+    dx = np.diff(xs)
+    if ys.ndim == 2:
+        d = np.diff(ys, axis=1) / dx[None, :]
+        m = np.empty_like(ys)
+        m[:, 0] = d[:, 0]; m[:, -1] = d[:, -1]
+        if ys.shape[1] > 2:
+            m[:, 1:-1] = 0.5 * (d[:, :-1] + d[:, 1:])
+        for k in range(d.shape[1]):
+            dk = d[:, k]
+            zero = np.abs(dk) < 1e-12
+            m[:, k] = np.where(zero, 0.0, m[:, k])
+            m[:, k + 1] = np.where(zero, 0.0, m[:, k + 1])
+            safe = np.where(zero, 1.0, dk)
+            a = np.where(zero, 0.0, m[:, k] / safe)
+            b = np.where(zero, 0.0, m[:, k + 1] / safe)
+            s = a * a + b * b
+            over = s > 9.0
+            tau = np.where(over, 3.0 / np.sqrt(np.where(over, s, 1.0)), 1.0)
+            m[:, k] = np.where(over, tau * a * dk, m[:, k])
+            m[:, k + 1] = np.where(over, tau * b * dk, m[:, k + 1])
+        return m
+    d = np.diff(ys) / dx
+    m = np.empty_like(ys)
+    m[0] = d[0]; m[-1] = d[-1]
+    if len(ys) > 2:
+        m[1:-1] = 0.5 * (d[:-1] + d[1:])
+    for k in range(len(d)):
+        if abs(d[k]) < 1e-12:
+            m[k] = 0.0; m[k + 1] = 0.0
+            continue
+        a = m[k] / d[k]; b = m[k + 1] / d[k]
+        s = a * a + b * b
+        if s > 9.0:
+            tau = 3.0 / np.sqrt(s)
+            m[k] = tau * a * d[k]; m[k + 1] = tau * b * d[k]
+    return m
+
+
+def _interp_curve(np, xs, ys, q, interp):
+    """1-D interpolation of values ys sampled at sorted keys xs, evaluated at queries q.
+
+    ys may be (K,) — one shared curve (a cross-section profile) — or (N,K) — a separate
+    curve per query row (the loft v-blend: each vert carries its own K profile samples).
+    q is (N,). One code path serves BOTH axes of a loft so the surface is interpolated the
+    same way across and down (G201). interp: linear | smooth | cubic | monotone."""
+    xs = np.asarray(xs, dtype=float)
+    K = len(xs)
+    q = np.asarray(q, dtype=float)
+    n = len(q)
+    ys = np.asarray(ys, dtype=float)
+    per_row = (ys.ndim == 2)
+    if K == 1:
+        return ys[:, 0].copy() if per_row else np.full(n, float(ys[0]))
+    rows = np.arange(n)
+    idx = np.clip(np.searchsorted(xs, q) - 1, 0, K - 2)
+
+    def gy(i):
+        i = np.clip(i, 0, K - 1)
+        return ys[rows, i] if per_row else ys[i]
+
+    x0 = xs[idx]; x1 = xs[idx + 1]
+    seg = np.where(x1 - x0 > 1e-12, x1 - x0, 1.0)
+    lt = np.clip((q - x0) / seg, 0.0, 1.0)
+    p1 = gy(idx); p2 = gy(idx + 1)
+    if interp == "linear":
+        return p1 + (p2 - p1) * lt
+    if interp == "smooth":
+        e = lt * lt * (3.0 - 2.0 * lt)
+        return p1 + (p2 - p1) * e
+    lt2 = lt * lt; lt3 = lt2 * lt
+    if interp == "cubic":
+        p0 = gy(idx - 1); p3 = gy(idx + 2)
+        return 0.5 * ((2 * p1) + (-p0 + p2) * lt +
+                      (2 * p0 - 5 * p1 + 4 * p2 - p3) * lt2 +
+                      (-p0 + 3 * p1 - 3 * p2 + p3) * lt3)
+    # monotone Hermite (Fritsch–Carlson)
+    m = _fc_tangents(np, xs, ys)
+    m1 = m[rows, idx] if per_row else m[idx]
+    m2 = m[rows, idx + 1] if per_row else m[idx + 1]
+    h00 = 2 * lt3 - 3 * lt2 + 1
+    h10 = lt3 - 2 * lt2 + lt
+    h01 = -2 * lt3 + 3 * lt2
+    h11 = lt3 - lt2
+    return h00 * p1 + h10 * seg * m1 + h01 * p2 + h11 * seg * m2
+
+
 def _eval_points(np, points, params, t):
-    """Control-point curve in normalized t. interp = linear | smooth | cubic."""
-    interp = (params.get("interp", "smooth") or "smooth").lower()
+    """Control-point curve in normalized t. interp = linear | smooth | cubic | monotone."""
+    interp, err = _resolve_interp(params.get("interp", "smooth"))
+    if err:
+        return None, err
     cps = []
     for p in points:
         if isinstance(p, (list, tuple)) and len(p) == 2:
@@ -543,31 +682,7 @@ def _eval_points(np, points, params, t):
     ts = np.array([c[0] for c in cps]); vs = np.array([c[1] for c in cps])
     if len(cps) < 2:
         return np.full(len(t), vs[0] if len(vs) else 0.0), None
-    if interp == "linear":
-        return np.interp(t, ts, vs), None
-    if interp == "smooth":
-        # piecewise: locate segment, ease the local parameter with smoothstep
-        idx = np.clip(np.searchsorted(ts, t) - 1, 0, len(ts) - 2)
-        t0 = ts[idx]; t1 = ts[idx + 1]; v0 = vs[idx]; v1 = vs[idx + 1]
-        lt = np.clip((t - t0) / np.where(t1 - t0 > 1e-12, t1 - t0, 1.0), 0.0, 1.0)
-        e = lt * lt * (3.0 - 2.0 * lt)
-        return v0 + (v1 - v0) * e, None
-    if interp == "cubic":
-        # Catmull-Rom through the control points (clamped ends)
-        out = np.empty(len(t))
-        for j, tv in enumerate(t):
-            i = int(np.clip(np.searchsorted(ts, tv) - 1, 0, len(ts) - 2))
-            p1, p2 = vs[i], vs[i + 1]
-            p0 = vs[i - 1] if i - 1 >= 0 else p1
-            p3 = vs[i + 2] if i + 2 < len(vs) else p2
-            seg = ts[i + 1] - ts[i]
-            lt = 0.0 if seg < 1e-12 else (tv - ts[i]) / seg
-            lt2 = lt * lt; lt3 = lt2 * lt
-            out[j] = 0.5 * ((2 * p1) + (-p0 + p2) * lt +
-                            (2 * p0 - 5 * p1 + 4 * p2 - p3) * lt2 +
-                            (-p0 + 3 * p1 - 3 * p2 + p3) * lt3)
-        return out, None
-    return None, f"interp must be linear|smooth|cubic, got {interp!r}"
+    return _interp_curve(np, ts, vs, t, interp), None
 
 
 def _eval_moulds(np, moulds, params, u, v):
@@ -606,24 +721,26 @@ def _eval_moulds(np, moulds, params, u, v):
         cols.append(pv)
     M = np.stack(cols, axis=1)
 
-    # blend the keyed profiles along v (smoothstep between bracketing keys)
-    n = len(u)
+    # blend the keyed profiles ALONG v with the SAME interp used across u (G201) — a
+    # loft is one surface; interpolating u cubically but v with eased-linear is what
+    # printed a terrace band at every mould row. One code path, both axes.
+    interp, err = _resolve_interp(params.get("interp", "smooth"))
+    if err:
+        return None, err, False
     if K == 1:
         F = M[:, 0]
     else:
-        idx = np.clip(np.searchsorted(vpos, v) - 1, 0, K - 2)
-        v0 = vpos[idx]; v1 = vpos[idx + 1]
-        lt = np.clip((v - v0) / np.where(v1 - v0 > 1e-12, v1 - v0, 1.0), 0.0, 1.0)
-        e = lt * lt * (3.0 - 2.0 * lt)
-        rows = np.arange(n)
-        f0 = M[rows, idx]; f1 = M[rows, idx + 1]
-        F = f0 + (f1 - f0) * e
+        F = _interp_curve(np, vpos, M, v, interp)
 
-    # ribbon detection: do the keyed profiles actually vary across the array?
+    # ribbon detection: does the cross-section SHAPE actually change down the array, or
+    # do the profiles only translate (identical shape + a rigid offset — still a
+    # developable ribbon)? Compare each profile to the first AFTER removing its mean, so
+    # a pure vertical offset doesn't read as real second-curvature (G195).
     span = float(M.max() - M.min())
+    Mc = M - M.mean(axis=0, keepdims=True)          # remove each column's offset
     maxdiff = 0.0
     for j in range(1, K):
-        maxdiff = max(maxdiff, float(np.max(np.abs(M[:, j] - M[:, 0]))))
+        maxdiff = max(maxdiff, float(np.max(np.abs(Mc[:, j] - Mc[:, 0]))))
     ribbon = (K < 2) or (maxdiff <= 1e-6 + 1e-3 * max(span, 1e-9))
     return F, None, ribbon
 

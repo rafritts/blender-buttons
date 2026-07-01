@@ -25,7 +25,7 @@ def buttons_deform_macro(
     # field (SPEC-13 / G99) — per-vertex p'=F(vars(p)) over the selection
     about: tag(str, "[field] radial pivot: axis (ship) | spine (deferred)") = "axis",
     channel: tag(str, "[field] how F displaces: radial | normal | axis:<X|Y|Z|long|u|v> | twist | vector") = "radial",
-    field_mode: tag(str, "[field] add | multiply | set (radial: multiply default; offset channels: add)") = "",
+    field_mode: tag(str, "[field] add | multiply | set. radial: multiply default, set writes the radius; axis:<dir>: add default, set writes the coord ALONG dir measured from the group origin (the frame the x/y/z vars use); offset channels default add") = "",
     per_component: tag(bool, "[field] parameterize + apply independently per connected sub-shell") = False,
     frame: tag(str, "[field] channel=vector basis: world | local | tangent_normal") = "world",
     preset: tag(str, "[field] taper|power|smoothstep|bell|sine|lobes (one function source)") = "",
@@ -40,7 +40,7 @@ def buttons_deform_macro(
     points: tag(list, "[field] control-point curve [[t,val],…] (one function source)") = None,
     moulds: tag(list, "[loft] array of keyed cross-section moulds: [{\"at\":0..1,\"points\":[[u,val],…]}, …] — one mould per line, interpolated down the sheet (vary them or it collapses to a ribbon)") = None,
     mould_grid: tag(list, "[loft] a 2D control grid [[v,…],…] AS the mould — rows are cross-sections keyed evenly down the line-axis, cols are values across u; sugar for an evenly-keyed `moulds` array (hand-author the whole surface as a grid of numbers instead of profile dicts). Use moulds OR mould_grid, not both") = None,
-    interp: tag(str, "[field/loft] points curve interpolation: linear | smooth | cubic") = "smooth",
+    interp: tag(str, "[field/loft] curve interpolation, applied to BOTH loft axes (cross-sections AND the row-to-row blend): linear | smooth | cubic | monotone (PCHIP — passes every key, no overshoot)") = "smooth",
     expr: tag(str, "[field] sandboxed scalar expression over the var namespace") = "",
     expr_x: tag(str, "[field] channel=vector X-component expression") = "",
     expr_y: tag(str, "[field] channel=vector Y-component expression") = "",
@@ -100,6 +100,10 @@ def buttons_deform_macro(
               whole surface as a grid (the 10×10-of-numbers form) instead of profile dicts.
               The mould is thus either hand-authored (moulds/mould_grid) or a function (op=field).
               Use moulds OR mould_grid, not both.
+              SMOOTHNESS — `interp` now governs BOTH axes (each cross-section AND the blend
+              down the line-axis), so a loft is smooth across and down, not corduroy down.
+              For landings that must not dip below the base plane (a mound rim, a zero
+              return) use interp=monotone (never overshoots) or clamp_min/clamp_max.
       band  — author + place a raised band around a form  (name, target(s), axis, at,
               width, thickness)
       extrude_along_curve — sweep the selection along a curve  (curve, segments, taper)
@@ -137,7 +141,8 @@ def buttons_deform_macro(
         # vacuum forming: the tool default channel (radial) is wrong here — loft pushes
         # along the sheet normal unless the caller asks for something else explicitly.
         ch = channel if channel and channel != "radial" else "normal"
-        return fields.loft(axis, moulds or [], interp, ch, field_mode, label, target, mould_grid)
+        return fields.loft(axis, moulds or [], interp, ch, field_mode, label, target,
+                           mould_grid, clamp_min, clamp_max)
     if o == "band":
         return bands.band_around(name, target, axis, at, width or 0.05, thickness, label)
     if o == "extrude_along_curve":

@@ -336,7 +336,15 @@ def _configure_array(mod, params):
 # G89: modifier types that consume `target` as a PARTNER object (the surface/cage/
 # armature/lattice that drives the modifier), NOT as the host whose stack gets it.
 # For these the host is the active object and `target` is resolved below as the partner.
-_PARTNER_TYPES = {"SHRINKWRAP", "MESH_DEFORM", "ARMATURE", "LATTICE"}
+# Modifiers whose behaviour is defined by a PARTNER object bound via mod.object /
+# mod.target — host= names the RECEIVER so the modifier never lands on the partner by
+# mistake, and a partner that can't be bound refuses loudly (G89/G197). Keep this a set,
+# not a hardcoded branch list, so the next partner-taking type is one entry, not a repeat.
+_PARTNER_TYPES = {"SHRINKWRAP", "MESH_DEFORM", "ARMATURE", "LATTICE", "CURVE"}
+# Partner types bound through mod.object (SHRINKWRAP uses mod.target, handled separately),
+# mapped to the object TYPE their partner must be.
+_OBJECT_PARTNER_EXPECT = {"MESH_DEFORM": "MESH", "ARMATURE": "ARMATURE",
+                          "LATTICE": "LATTICE", "CURVE": "CURVE"}
 
 
 def _subsurf_dome_warning(obj):
@@ -517,22 +525,34 @@ def add_modifier(params):
     # geometry from a partner via mod.object (a cage mesh, an armature, a lattice)
     # — the recovery door for production deform stacks (gaps.md V1). MESH_DEFORM is
     # added unbound; bind it with bind_mesh_deform.
-    if mod_type in ("MESH_DEFORM", "ARMATURE", "LATTICE"):
+    if mod_type in _OBJECT_PARTNER_EXPECT:
+        partner_role = {"MESH_DEFORM": "cage mesh", "ARMATURE": "armature",
+                        "LATTICE": "lattice", "CURVE": "curve"}[mod_type]
         target_name = params.get("target")
         if not target_name:
             obj.modifiers.remove(mod)
             return {"error": f"{mod_type} requires 'target' "
-                             f"(the {'cage mesh' if mod_type == 'MESH_DEFORM' else mod_type.lower()} that drives the deform)"}
+                             f"(the {partner_role} that {'shapes' if mod_type == 'CURVE' else 'drives'} the deform)"}
         tgt = bpy.data.objects.get(target_name)
         if tgt is None:
             obj.modifiers.remove(mod)
             return {"error": f"target '{target_name}' not found"}
-        expected = {"MESH_DEFORM": "MESH", "ARMATURE": "ARMATURE", "LATTICE": "LATTICE"}[mod_type]
+        expected = _OBJECT_PARTNER_EXPECT[mod_type]
         if tgt.type != expected:
             obj.modifiers.remove(mod)
             return {"error": f"{mod_type} target '{target_name}' must be a {expected}, "
                              f"got {tgt.type}"}
         mod.object = tgt
+        if mod_type == "CURVE":
+            # deform_axis = which of the mesh's local axes runs ALONG the curve
+            # (the ARRAY→CURVE chain-along-a-path pattern). axis= picks it; default X.
+            ax = (params.get("axis") or "X").upper()
+            deform_axis = {"X": "POS_X", "Y": "POS_Y", "Z": "POS_Z"}.get(ax, "POS_X")
+            if hasattr(mod, "deform_axis"):
+                mod.deform_axis = deform_axis
+            return {"success": True, "modifier": mod.name, "status_focus": obj.name,
+                    "note": f"CURVE bound to '{target_name}' (deform_axis={deform_axis}) — "
+                            f"the mesh now bends along that curve."}
         if mod_type == "MESH_DEFORM":
             precision = params.get("precision")
             if precision is not None and hasattr(mod, "precision"):
@@ -560,6 +580,27 @@ def add_modifier(params):
                 if rest_source == "BIND" else
                 f"CORRECTIVE_SMOOTH added (rest_source=ORCO — smooths toward the base mesh).")
         return {"success": True, "modifier": mod.name, "note": note}
+    if mod_type == "CLOTH":
+        # G196: a cloth modifier only behaves like a garment once it's PINNED — the
+        # vertex group it hangs from (else gravity slides the whole thing through the
+        # floor). pin_group names that group; the sim runs via scene op=bake_physics.
+        pin_group = params.get("pin_group")
+        if pin_group:
+            if pin_group not in obj.vertex_groups:
+                obj.modifiers.remove(mod)
+                return {"error": f"pin_group '{pin_group}' not found on '{obj.name}' "
+                                 f"(have: {[g.name for g in obj.vertex_groups]}) — mint it "
+                                 f"with pose op=assign_weight group={pin_group} first"}
+            mod.settings.vertex_group_mass = pin_group
+        return {"success": True, "modifier": mod.name, "status_focus": obj.name,
+                "note": (f"CLOTH added (pin_group={pin_group or 'NONE — unpinned, will fall'})"
+                         f". Add COLLISION to the bodies it should rest on, then run "
+                         f"scene op=bake_physics frames=N to simulate.")}
+    if mod_type == "COLLISION":
+        # G196: the body a garment drapes over needs a COLLISION modifier or the cloth
+        # passes straight through it. Defaults are fine; nothing to dial.
+        return {"success": True, "modifier": mod.name, "status_focus": obj.name,
+                "note": "COLLISION added — cloth/soft-body sims will now collide with this object."}
     out = {"success": True, "modifier": mod.name, "status_focus": obj.name}
     if mod_type == "SUBSURF":
         dome = _subsurf_dome_warning(obj)
@@ -580,6 +621,17 @@ def add_modifier(params):
         if note:
             out["world_thickness"] = eff
             out.setdefault("notes", []).append(note)
+    # G200 — a type-specific dial passed to a type that can't use it must be REPORTED,
+    # not dropped in silence (the trap that landed a 10mm default when thickness= was
+    # meant for a SOLIDIFY but sent to another type). Echo it as skipped so the caller
+    # isn't told plain 'success' while its value evaporated.
+    _dial_owner = {"thickness": "SOLIDIFY", "angle_limit": "BEVEL"}
+    skipped_dials = [f"{d} (only {owner})" for d, owner in _dial_owner.items()
+                     if params.get(d) is not None and mod_type != owner]
+    if skipped_dials:
+        out["skipped"] = skipped_dials
+        out.setdefault("notes", []).append(
+            f"ignored dial(s) not used by {mod_type}: {', '.join(skipped_dials)}")
     # status_focus so the status block reports the HOST object's bounds (G89) even when
     # the modifier was added to a named, non-active object.
     return out
@@ -869,6 +921,30 @@ def modify_modifier(params):
             applied.append(f"target={target_object}")
         else:
             skipped.append("target_object")
+
+    # G191: a Geometry-Nodes modifier's dials are its socket VALUES, not python props —
+    # set them live here with the same {socket: value} map add_asset takes, so raising a
+    # scatter's Density or toggling Realize Instances no longer forces a remove+re-add.
+    if mod.type == 'NODES':
+        inputs = params.get("inputs")
+        if inputs:
+            if mod.node_group is None:
+                return {"error": f"NODES modifier '{mod_name}' has no node group to set inputs on"}
+            sockets = _gn_input_sockets(mod.node_group)
+            set_inputs, unknown = _set_gn_inputs(mod, sockets, inputs)
+            mod.id_data.update_tag()
+            bpy.context.view_layer.update()
+            for name, v in set_inputs.items():
+                applied.append(f"{name}={v}")
+            if unknown:
+                skipped.extend(unknown)
+            out = {"success": True, "target": target, "modifier": mod.name,
+                   "type": mod.type, "applied": applied, "skipped": skipped,
+                   "inputs_available": list(sockets)}
+            if unknown:
+                out.setdefault("notes", []).append(
+                    f"unrecognised input(s) {unknown} — settable inputs: {list(sockets)}")
+            return out
 
     # G73: ARRAY offset is a vector + boolean toggles, not a scalar the generic table
     # below can set — intercept it here and consume the keys so they don't get
@@ -1434,6 +1510,30 @@ def _gn_input_sockets(ng):
     return out
 
 
+def _set_gn_inputs(mod, sockets, inputs):
+    """Set {socket-name: value} on a NODES modifier by socket IDENTIFIER, matching names
+    case-insensitively. Collection/Object-typed sockets take a datablock NAME. Shared by
+    add_asset (create-time) and modify (live-edit, G191). Returns (set_inputs, unknown)."""
+    set_inputs, unknown = {}, []
+    for key, val in (inputs or {}).items():
+        match = next((n for n in sockets if n == key), None) \
+            or next((n for n in sockets if n.lower() == str(key).strip().lower()), None)
+        if match is None:
+            unknown.append(key)
+            continue
+        ident, stype = sockets[match]
+        if stype == 'NodeSocketCollection':
+            val = bpy.data.collections.get(val)
+        elif stype == 'NodeSocketObject':
+            val = bpy.data.objects.get(val)
+        try:
+            mod[ident] = val
+            set_inputs[match] = inputs[key]
+        except Exception as e:
+            unknown.append(f"{key} (set failed: {e})")
+    return set_inputs, unknown
+
+
 def add_asset_modifier(params):
     """Add a Geometry-Nodes modifier that points at a bundled Essentials node-group asset
     (SPEC-20 II.5) — the path `modifiers.new(type=...)` can't reach. This is what retires
@@ -1482,22 +1582,9 @@ def add_asset_modifier(params):
         set_inputs[coll_socket] = coll_name
 
     # inputs={name: value} → set by identifier; match socket name case-insensitively.
-    for key, val in (params.get("inputs") or {}).items():
-        match = next((n for n in sockets if n == key), None) \
-            or next((n for n in sockets if n.lower() == str(key).strip().lower()), None)
-        if match is None:
-            unknown_inputs.append(key)
-            continue
-        ident, stype = sockets[match]
-        if stype == 'NodeSocketCollection':
-            val = bpy.data.collections.get(val)
-        elif stype == 'NodeSocketObject':
-            val = bpy.data.objects.get(val)
-        try:
-            mod[ident] = val
-            set_inputs[match] = params["inputs"][key]
-        except Exception as e:
-            unknown_inputs.append(f"{key} (set failed: {e})")
+    got, unknown_inputs2 = _set_gn_inputs(mod, sockets, params.get("inputs"))
+    set_inputs.update(got)
+    unknown_inputs.extend(unknown_inputs2)
 
     mod.id_data.update_tag()
     bpy.context.view_layer.update()

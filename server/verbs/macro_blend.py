@@ -21,7 +21,7 @@ def buttons_blend_macro(
     b: tag(str, "[graft/stitch] second OBJECT/patch to merge") = "",
     mode: tag(str, "[graft] union mode (smin)") = "smin",
     blend: tag(float, "[graft] smooth-min fillet radius k (m) — the ONE legible blend number; 0 = a hard union") = 0.0,
-    resolution: tag(int, "[graft] marching-tetrahedra voxel resolution per axis (default 48; higher = finer, slower)") = 0,
+    resolution: tag(int, "[graft] marching-tetrahedra samples along the LONGEST axis; cells are kept ~cubic so a tall-thin bbox doesn't crack (default 48; higher = finer, slower)") = 0,
     keep: tag(bool, "[graft/stitch] keep the two source objects (default False = the merge replaces them)") = False,
     name: tag(str, "[graft/stitch] name for the merged result") = "",
     label: str = "",

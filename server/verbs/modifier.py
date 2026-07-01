@@ -19,15 +19,16 @@ def modifier(
     op: Literal["add", "add_asset", "modify", "move", "remove", "list", "apply"],
     target: tag(str, "object whose modifier stack to act on") = "",
     # add
-    type: tag(str, "[add] SUBSURF|MIRROR|SOLIDIFY|BEVEL|ARRAY|…") = "",
+    type: tag(str, "[add] SUBSURF|MIRROR|SOLIDIFY|BEVEL|ARRAY|CURVE|CLOTH|COLLISION|…") = "",
     # add_asset — bundled Geometry-Nodes Essentials node-group (Blender 5.0+)
     asset: tag(str, "[add_asset] Essentials node-group: 'Scatter on Surface' | 'Array' | "
                     "'Instance on Elements' | 'Randomize Instances' | 'Curve to Tube' | "
                     "'Geometry Input'") = "",
     collection: tag(str, "[add_asset] collection to assign to the asset's Collection input "
                          "(e.g. the instance source / prototypes for Scatter on Surface)") = "",
-    inputs: tag(dict, "[add_asset] {socket-name: value} dials, e.g. {'Density': 250, 'Seed': 3}; "
-                      "the result lists every settable input name") = None,
+    inputs: tag(dict, "[add_asset/modify] {socket-name: value} GN dials, e.g. {'Density': 250, "
+                      "'Seed': 3}; the result lists every settable input name. On op=modify this "
+                      "edits a live NODES modifier's sockets in place (no remove+re-add)") = None,
     name: tag(str, "[add] name for the new modifier · [apply] object (alias of target)") = "",
     levels: tag(int, "[add/modify] subsurf viewport levels") = None,
     render_levels: tag(int, "[add/modify] subsurf render levels") = None,
@@ -41,15 +42,17 @@ def modifier(
     mirror_object: tag(str, "[add] mirror across this object") = "",
     precision: tag(int, "[add] mesh-deform bind precision") = None,
     rest_source: tag(str, "[add] corrective-smooth rest source") = "",
-    host: tag(str, "[add] for PARTNER mods (SHRINKWRAP/MESH_DEFORM/ARMATURE/LATTICE) the object "
-                   "that RECEIVES the modifier; name it instead of relying on the active object "
-                   "(must differ from target)") = "",
+    host: tag(str, "[add] for PARTNER mods (SHRINKWRAP/MESH_DEFORM/ARMATURE/LATTICE/CURVE) the "
+                   "object that RECEIVES the modifier; name it instead of relying on the active "
+                   "object (must differ from target)") = "",
+    pin_group: tag(str, "[add] CLOTH pinning vertex group — the seam/waistband the garment hangs "
+                        "from (else it falls); mint via pose op=assign_weight") = "",
     factor: tag(float, "[add/modify] generic strength/factor; ARRAY relative offset (×bbox) along axis") = None,
     iterations: tag(int, "[add/modify] smooth iterations") = None,
     # modify (extra dials)
     modifier_name: tag(str, "[modify/remove] modifier to act on") = "",
-    thickness: tag(float, "[modify] solidify thickness") = None,
-    angle_limit: tag(float, "[modify] bevel angle limit (deg)") = None,
+    thickness: tag(float, "[add/modify] solidify thickness (m)") = None,
+    angle_limit: tag(float, "[add/modify] bevel angle limit (deg)") = None,
     count: tag(int, "[add/modify] ARRAY copy count") = None,
     strength: tag(float, "[modify] displace/other strength") = None,
     show_viewport: tag(bool, "[modify] show in viewport") = None,
@@ -74,7 +77,8 @@ def modifier(
                native scatter/instancer/array path. (Emits instances; op=apply realizes.)
       modify — tweak an existing modifier (target, modifier_name, + any dial:
                levels, width, thickness, angle_limit, count, factor, strength,
-               show_viewport/show_render, …)
+               show_viewport/show_render, …; inputs={socket: value} for a live
+               Geometry-Nodes modifier — the same dials add_asset takes)
       move   — reorder in the stack (target, modifier, index OR before/after)
       remove — delete a modifier   (target, modifier_name)
       list   — list a target's modifiers (target)
@@ -92,7 +96,8 @@ def modifier(
             segments if segments is not None else 1,
             target, offset, wrap_method or "NEAREST_SURFACEPOINT", axis,
             merge_threshold, mirror_object, precision, rest_source, factor,
-            iterations, vertex_group, count, label, host=host)
+            iterations, vertex_group, count, label, host=host,
+            thickness=thickness, angle_limit=angle_limit, pin_group=pin_group)
     if o == "add_asset":
         return modifiers.add_asset_modifier(
             asset, host or target, name, collection, inputs, label)
@@ -100,7 +105,8 @@ def modifier(
         return modifiers.modify_modifier(
             target, modifier_name or modifier, levels, render_levels, width, segments,
             thickness, offset, angle_limit, count, factor, strength, iterations,
-            show_viewport, show_render, wrap_method, target_object, vertex_group, axis, label)
+            show_viewport, show_render, wrap_method, target_object, vertex_group, axis,
+            inputs, label)
     if o == "move":
         return modifiers.move_modifier(target, modifier, index, before, after, label)
     if o == "remove":

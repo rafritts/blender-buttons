@@ -311,8 +311,22 @@ def audit_asset(params):
     cam = scene.camera if scene.camera and scene.camera.type == 'CAMERA' else None
     tri_budget = int(params.get("tri_budget", 5000))
 
+    # G192: GN scatter/instancer modifiers emit INSTANCES-on-points, which to_mesh() does
+    # NOT include — so base tris never reflect a scatter's density. Count them straight off
+    # the evaluated instance stream, keyed by the emitting (original) object, once.
+    inst_counts = {}
+    try:
+        _dg = bpy.context.evaluated_depsgraph_get()
+        for _inst in _dg.object_instances:
+            if _inst.is_instance and _inst.parent is not None:
+                _key = _inst.parent.original.name
+                inst_counts[_key] = inst_counts.get(_key, 0) + 1
+    except Exception:
+        inst_counts = {}
+
     reports = []
     total_tris = 0
+    total_instances = 0
     for o in objs:
         issues = []
         bm = eval_world_bmesh(o)
@@ -323,6 +337,10 @@ def audit_asset(params):
             loose = sum(1 for v in bm.verts if not v.link_faces)
             bm.free()
         total_tris += tris
+
+        instances = inst_counts.get(o.name, 0)
+        inst_source = next((m.name for m in o.modifiers if m.type == 'NODES'), None)
+        total_instances += instances
 
         has_material = bool(o.data.materials) and any(m is not None for m in o.data.materials)
         if not has_material:
@@ -345,15 +363,22 @@ def audit_asset(params):
         if tris > tri_budget:
             issues.append(f"{tris} tris over budget ({tri_budget})")
 
-        reports.append({
+        rep = {
             "object": o.name, "tris": tris, "screen_pct": coverage,
             "has_material": has_material, "issues": issues, "clean": not issues,
-        })
+        }
+        if instances:
+            rep["instances"] = instances
+            rep["instance_source"] = inst_source
+        reports.append(rep)
 
-    return {"success": True, "total_tris": total_tris,
-            "object_count": len(reports), "tri_budget": tri_budget,
-            "reports": reports, "passed": all(r["clean"] for r in reports),
-            "excluded_non_mesh": excluded}
+    out = {"success": True, "total_tris": total_tris,
+           "object_count": len(reports), "tri_budget": tri_budget,
+           "reports": reports, "passed": all(r["clean"] for r in reports),
+           "excluded_non_mesh": excluded}
+    if total_instances:
+        out["total_instances"] = total_instances
+    return out
 
 
 TOOLS = {

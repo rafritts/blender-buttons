@@ -2038,23 +2038,50 @@ def bridge_handles(params):
             f"interpolation '{interp}' invalid — use LINEAR, PATH, or SURFACE"}
 
     faces_before = len(bm.faces)
+    boundary_edges = [e for e in bm.edges if e.select and len(e.link_faces) == 1]
+    # G190: weld the two rims with the LOW-LEVEL bmesh bridge on exactly these boundary
+    # edges, instead of bpy.ops.mesh.bridge_edge_loops. The operator's SINGLE/PAIRS
+    # auto-detect misfires when both loops sit on the SAME shell — it fans self-crossing
+    # faces and leaves both rims open (χ=0, 3 boundary loops, non-manifold). bmesh.ops.
+    # bridge_loops pairs the two rims into a manifold tube, consuming both boundaries
+    # (genus +1) — the canonical two-hole handle.
     try:
-        bpy.ops.mesh.bridge_edge_loops(
-            number_cuts=cuts, interpolation=interp, smoothness=smoothness,
-            profile_shape_factor=profile, twist_offset=twist)
-    except (RuntimeError, TypeError) as ex:
+        res = bmesh.ops.bridge_loops(bm, edges=boundary_edges, use_pairs=False,
+                                     use_cyclic=False, use_merge=False, twist=twist)
+    except (RuntimeError, TypeError, ValueError) as ex:
         bpy.ops.object.mode_set(mode='OBJECT')
-        return {"error": f"bridge_edge_loops failed: {ex}"}
+        return {"error": f"bridge failed: {ex}"}
+    new_faces = res.get("faces", [])
+    new_edges = res.get("edges", [])
+    # cuts subdivide the rungs so the tube can bow; smoothness eases the interpolation.
+    if cuts > 0 and new_edges:
+        bmesh.ops.subdivide_edges(bm, edges=new_edges, cuts=cuts,
+                                  smooth=smoothness, use_smooth_even=True)
+    # the new band inherits arbitrary winding — recompute outward so it's not inside-out.
+    if new_faces:
+        bmesh.ops.recalc_face_normals(bm, faces=[f for f in new_faces if f.is_valid])
+    bm.normal_update()
+    bmesh.update_edit_mesh(obj.data)
 
     bm = bmesh.from_edit_mesh(obj.data)
     faces_after = len(bm.faces)
+    # honest verdict: did the weld consume both rims into a manifold tunnel?
+    remaining_open = sum(1 for e in bm.edges
+                         if e.verts[0].index in want and e.verts[1].index in want
+                         and len(e.link_faces) == 1)
+    nonmanifold = sum(1 for e in bm.edges if len(e.link_faces) > 2)
     bpy.ops.object.mode_set(mode='OBJECT')
     push_undo(f"bridge {a} ↔ {b}")
-    return {"success": True, "owner": obj.name, "a": a, "b": b,
-            "edges_bridged": sel_edges, "faces_created": faces_after - faces_before,
-            "faces_total": faces_after,
-            "bridge": {"cuts": cuts, "smoothness": smoothness,
-                       "interpolation": interp, "profile": profile, "twist": twist}}
+    out = {"success": True, "owner": obj.name, "a": a, "b": b,
+           "edges_bridged": sel_edges, "faces_created": faces_after - faces_before,
+           "faces_total": faces_after,
+           "bridge": {"cuts": cuts, "smoothness": smoothness, "twist": twist}}
+    if remaining_open or nonmanifold:
+        out["warnings"] = [
+            f"weld left {remaining_open} rim edge(s) open / {nonmanifold} non-manifold "
+            f"edge(s) — the rims may have mismatched vertex counts or opposite winding; "
+            f"try twist= to re-pair, or match the two hole vertex counts."]
+    return out
 
 
 def select_in_sphere(params):

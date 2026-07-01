@@ -4,6 +4,53 @@ from server._core import mcp, call_blender, _status
 from server import polyhaven
 
 
+def set_frame(frame: int = None, step: int = None, start: int = None,
+              end: int = None, label: str = "") -> str:
+    """G196 — move the scene's current frame (the timeline the physics/animation
+    evaluation reads). A cloth/soft-body/particle sim only advances as frames step from
+    the cache start, so this is the primitive that lets a headless bake run.
+    frame: jump to absolute frame N. step: advance N frames (negative to rewind).
+    start/end: set the playback range a subsequent bake_physics runs over."""
+    params = {}
+    if frame is not None:
+        params["frame"] = frame
+    if step is not None:
+        params["step"] = step
+    if start is not None:
+        params["start"] = start
+    if end is not None:
+        params["end"] = end
+    result = call_blender("set_frame", params, label=label)
+    if result.get("success"):
+        main = (f"frame {result['current_frame']} "
+                f"(range {result['frame_start']}–{result['frame_end']})")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def bake_physics(frames: int = None, start: int = None, timeout: float = 300,
+                 label: str = "") -> str:
+    """G196 — bake every point-cache physics sim in the scene (cloth / soft-body /
+    particles) and leave the scene on the settled last frame. This is what actually RUNS
+    a simulation from the server; without it a cloth modifier just sits at its rest shape.
+    frames: simulate N frames from `start`. start: first frame (defaults to frame_start).
+    Reads of the settled mesh use the usual `feel` ops (apply the modifier to bake the
+    deformed vertices into the mesh data)."""
+    params = {}
+    if frames is not None:
+        params["frames"] = frames
+    if start is not None:
+        params["start"] = start
+    result = call_blender("bake_physics", params, label=label, timeout=timeout)
+    if result.get("success"):
+        main = (f"baked physics {result['frame_start']}→{result['frame_end']} "
+                f"({result['baked_frames']} frames); scene on frame {result['current_frame']}")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 def aim_object(name: str = "", subject: str = "", label: str = "") -> str:
     """G79 — re-aim an existing object's -Z axis at a named subject's centre (cameras,
     spotlights, area lights, or any object you want to 'look at' something). By name, no

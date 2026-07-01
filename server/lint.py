@@ -108,15 +108,19 @@ def audit_asset(group: str, tri_budget: int = 5000) -> str:
                           {"group": _targets(group), "tri_budget": tri_budget})
     if not result.get("success"):
         return result.get("error", "failed")
+    ti = result.get("total_instances")
     head = (f"audit: {result['object_count']} object(s), {result['total_tris']} tris total"
+            f"{f', {ti} instances' if ti else ''}"
             f" — {'PASS' if result['passed'] else 'ISSUES'}")
     lines = [head]
     for r in result["reports"]:
         screen = f" @ {r['screen_pct']}% frame" if r["screen_pct"] is not None else ""
+        inst = (f" · {r['instances']} instances (from '{r['instance_source']}')"
+                if r.get("instances") else "")
         if r["clean"]:
-            lines.append(f"  ✓ {r['object']}: {r['tris']} tris{screen}")
+            lines.append(f"  ✓ {r['object']}: {r['tris']} tris{inst}{screen}")
         else:
-            lines.append(f"  ⚠ {r['object']}: {r['tris']} tris{screen} — " + "; ".join(r["issues"]))
+            lines.append(f"  ⚠ {r['object']}: {r['tris']} tris{inst}{screen} — " + "; ".join(r["issues"]))
     excl = result.get("excluded_non_mesh") or []
     if excl:
         lines.append(f"  (skipped {len(excl)} non-mesh: {', '.join(excl)})")

@@ -206,6 +206,22 @@ def add_text(params):
         bpy.data.objects.remove(obj, do_unlink=True)
         return {"error": f"text body '{body}' produced no geometry (unprintable glyphs?)"}
 
+    # G198: curve→mesh conversion leaves the extruded caps as SEPARATE shells from the
+    # side walls — coincident-but-unmerged verts, so each glyph arrives with 8–12 open
+    # boundaries and trips the watertight floor. Weld cap rims to wall rims right here so
+    # the primitive hands over a closed mesh instead of one that always needs the same
+    # one-line repair next.
+    import bmesh
+    me = obj.data
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    _before = len(bm.verts)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
+    bm.to_mesh(me)
+    bm.free()
+    me.update()
+    welded = _before - len(me.vertices)
+
     # Origin → geometry bounds centre, so obj.location IS the bbox centre (placement exact).
     bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
     bpy.context.view_layer.update()
@@ -224,6 +240,7 @@ def add_text(params):
     return {
         "success": True,
         "object_name": obj.name,
+        "welded_verts": welded,
         "dimensions": [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)],
         "world_bounds": {
             "x": [round(xmin, 4), round(xmax, 4)],
@@ -424,8 +441,138 @@ def add_grid(params):
     )
 
 
+def add_lattice(params):
+    """G189 — a LATTICE deform-cage primitive. Mints a real Lattice object (u×v×w control
+    points) sized to ENCLOSE a target's bounding box (or explicit width/depth/height), so a
+    LATTICE modifier finally has a cage to bind to. A low-res cage that warps a dense mesh
+    (and any instances on it) as one smooth, NON-destructive gesture — the standard way to
+    give a stiff form organic life. Bind it with modifier op=add type=LATTICE host=<mesh>
+    target=<this>, then push its points with transform op=lattice."""
+    name = params.get("name")
+    if not name:
+        return {"error": "'name' is required — give the lattice a meaningful name"}
+    if bpy.data.objects.get(name) is not None:
+        return {"error": f"Object '{name}' already exists — choose a different name"}
+    res_u = max(2, int(params.get("resolution_u", params.get("u", 4)) or 4))
+    res_v = max(2, int(params.get("resolution_v", params.get("v", 4)) or 4))
+    res_w = max(2, int(params.get("resolution_w", params.get("w", 4)) or 4))
+    margin = float(params.get("margin", 0.02) or 0.0)   # small default so it fully encloses
+
+    enclose = params.get("enclose") or params.get("target")
+    if enclose:
+        tobj = bpy.data.objects.get(enclose)
+        if tobj is None:
+            return {"error": f"enclose target '{enclose}' not found"}
+        xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(tobj)
+        cx, cy, cz = (xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2
+        dx, dy, dz = xmax - xmin, ymax - ymin, zmax - zmin
+    else:
+        dx = float(params.get("width", 1.0) or 1.0)
+        dy = float(params.get("depth", 1.0) or 1.0)
+        dz = float(params.get("height", 1.0) or 1.0)
+        try:
+            cx, cy, cz = resolve_placement(params.get("on"), (dx, dy, dz))
+        except ValueError as e:
+            return {"error": str(e)}
+
+    def _m(v):
+        return v * (1.0 + margin) if abs(v) > 1e-9 else 0.001
+    sx, sy, sz = _m(dx), _m(dy), _m(dz)
+
+    lat = bpy.data.lattices.new(name)
+    lat.points_u, lat.points_v, lat.points_w = res_u, res_v, res_w
+    obj = bpy.data.objects.new(name, lat)
+    bpy.context.scene.collection.objects.link(obj)
+    # A fresh lattice spans the unit cube (-0.5..0.5) locally, so scale == world extent.
+    obj.location = (cx, cy, cz)
+    obj.scale = (sx, sy, sz)
+    activate(obj)
+    bpy.context.view_layer.update()
+    return {
+        "success": True,
+        "object_name": obj.name,
+        "resolution": [res_u, res_v, res_w],
+        "encloses": enclose or None,
+        "dimensions": [round(sx, 4), round(sy, 4), round(sz, 4)],
+        "location": [round(cx, 4), round(cy, 4), round(cz, 4)],
+        "note": (f"lattice cage '{obj.name}' ready — bind a mesh with "
+                 f"modifier op=add type=LATTICE host=<mesh> target={obj.name}, then warp it "
+                 f"with transform op=lattice (push a slab of control points)."),
+    }
+
+
+def _lattice_slab(spec, res):
+    """Resolve a per-axis point selector into a set of indices (0..res-1). spec:
+    None/'all' → every index; int → that one; 'min'/'max'/'mid' → the ends/centre;
+    [lo,hi] → an inclusive index range."""
+    if spec is None or (isinstance(spec, str) and spec.lower() == "all"):
+        return set(range(res))
+    if isinstance(spec, str):
+        s = spec.lower()
+        if s == "min":
+            return {0}
+        if s == "max":
+            return {res - 1}
+        if s == "mid":
+            return {res // 2}
+        return set(range(res))
+    if isinstance(spec, (list, tuple)) and len(spec) == 2:
+        lo, hi = int(spec[0]), int(spec[1])
+        return set(range(max(0, lo), min(res - 1, hi) + 1))
+    try:
+        i = int(spec)
+        return {i % res}
+    except (TypeError, ValueError):
+        return set(range(res))
+
+
+def deform_lattice(params):
+    """G189 — push a SLAB of a lattice's control points by intent, warping every mesh bound
+    to it. u/v/w each pick which points along that axis move (all | min | max | mid | an
+    index | an [lo,hi] range). translate is a WORLD-space delta (m); scale multiplies the
+    slab's local coords about the lattice centre. Non-destructive: the bound mesh follows."""
+    name = params.get("target") or params.get("name")
+    obj = bpy.data.objects.get(name) if name else bpy.context.active_object
+    if obj is None or obj.type != 'LATTICE':
+        return {"error": f"'{name}' is not a lattice — mint one with add type=lattice"}
+    lat = obj.data
+    ru, rv, rw = lat.points_u, lat.points_v, lat.points_w
+    su = _lattice_slab(params.get("u"), ru)
+    sv = _lattice_slab(params.get("v"), rv)
+    sw = _lattice_slab(params.get("w"), rw)
+
+    translate = params.get("translate") or [0.0, 0.0, 0.0]
+    # world → local delta: the lattice's own scale maps local units to world.
+    esx, esy, esz = obj.scale
+    ltx = translate[0] / esx if abs(esx) > 1e-9 else 0.0
+    lty = translate[1] / esy if abs(esy) > 1e-9 else 0.0
+    ltz = translate[2] / esz if abs(esz) > 1e-9 else 0.0
+    scale = params.get("scale")
+
+    moved = 0
+    for wi in sw:
+        for vi in sv:
+            for ui in su:
+                idx = wi * ru * rv + vi * ru + ui
+                p = lat.points[idx]
+                co = p.co_deform.copy()
+                if scale:
+                    co.x *= scale[0]; co.y *= scale[1]; co.z *= scale[2]
+                co.x += ltx; co.y += lty; co.z += ltz
+                p.co_deform = co
+                moved += 1
+    lat.update_tag()
+    bpy.context.view_layer.update()
+    return {"success": True, "object_name": obj.name, "points_moved": moved,
+            "resolution": [ru, rv, rw],
+            "note": f"warped {moved} control point(s); any mesh with a LATTICE modifier "
+                    f"targeting '{obj.name}' now follows."}
+
+
 TOOLS = {
     "add_box":        add_box,
+    "add_lattice":    add_lattice,
+    "deform_lattice": deform_lattice,
     "add_text":       add_text,
     "add_grid":       add_grid,
     "add_primitives": add_primitives,

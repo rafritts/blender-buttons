@@ -146,16 +146,37 @@ def graft(params):
     bvhA, bvhB = BVHTree.FromBMesh(bmA), BVHTree.FromBMesh(bmB)
 
     # combined bbox + a margin so the blended fillet has room to bulge outward
+    import math
     allco = np.array([list(v.co) for v in bmA.verts] + [list(v.co) for v in bmB.verts])
     lo, hi = allco.min(0), allco.max(0)
-    margin = max(blend * 1.5, (hi - lo).max() / res * 2.0)
-    lo -= margin; hi += margin
-    xs = np.linspace(lo[0], hi[0], res)
-    ys = np.linspace(lo[1], hi[1], res)
-    zs = np.linspace(lo[2], hi[2], res)
+    extent0 = hi - lo
+    # G193: UNIFORM CELL SIZE, not a fixed per-axis count. `res` sets the sample count
+    # along the LARGEST extent; the other axes get proportional counts so every voxel is
+    # ~cubic. A fixed res on a tall-thin bbox (a limbed body ~1.44 m tall, ~0.3 m wide)
+    # made the Z cells 3–5× the X/Y cells, and the marching-tetrahedra surface cracked
+    # along that anisotropic blend seam (31 shells / open boundaries). Cubic cells fix it.
+    max_ext = float(extent0.max()) or 1.0
+    cell = max_ext / max(res - 1, 1)
+    margin = max(blend * 1.5, cell * 2.0)
+    lo = lo - margin; hi = hi + margin
+    extent = hi - lo
+
+    def _naxis(e):
+        return max(6, int(math.ceil(e / cell)) + 1)
+
+    nx, ny, nz = _naxis(extent[0]), _naxis(extent[1]), _naxis(extent[2])
+    # keep the grid tractable for the pure-python marcher: cap total sample count,
+    # growing the cell (coarser, still cubic) rather than distorting the aspect.
+    budget = 1_600_000
+    while nx * ny * nz > budget:
+        cell *= 1.15
+        nx, ny, nz = _naxis(extent[0]), _naxis(extent[1]), _naxis(extent[2])
+    xs = np.linspace(lo[0], hi[0], nx)
+    ys = np.linspace(lo[1], hi[1], ny)
+    zs = np.linspace(lo[2], hi[2], nz)
     X, Y, Z = np.meshgrid(xs, ys, zs, indexing="ij")
     pts = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])
-    G = _smin(_sdf_grid(bvhA, pts), _sdf_grid(bvhB, pts), blend).reshape(res, res, res)
+    G = _smin(_sdf_grid(bvhA, pts), _sdf_grid(bvhB, pts), blend).reshape(nx, ny, nz)
     bmA.free(); bmB.free()
 
     verts, tris = _marching_tets(G, xs, ys, zs)
@@ -181,7 +202,8 @@ def graft(params):
     obj.select_set(True)
     push_undo(f"graft {a_name}+{b_name} smin k={blend}")
     return {"success": True, "object": out_name, "verts": len(verts), "faces": len(tris),
-            "blend": round(blend, 5), "resolution": res, "watertight": open_seam == 0,
+            "blend": round(blend, 5), "resolution": res, "grid": [nx, ny, nz],
+            "cell_size": round(cell, 5), "watertight": open_seam == 0,
             "removed": removed, "warnings": warnings}
 
 

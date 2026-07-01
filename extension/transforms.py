@@ -249,14 +249,35 @@ def apply_transform(params):
     do_rotation = params.get("rotation", False)
     do_location = params.get("location", False)
 
+    warnings = []
     for o in objs:
+        # G194: capture the true world bbox BEFORE apply. transform_apply is world-
+        # invariant, so an actual change afterward is a bug worth surfacing.
+        before = world_bbox(o)
         activate(o)
         bpy.ops.object.transform_apply(
             location=do_location, rotation=do_rotation, scale=do_scale
         )
-    return {"success": True,
-            "applied_to": [o.name for o in objs],
-            "scale": do_scale, "rotation": do_rotation, "location": do_location}
+        # transform_apply rewrites the mesh but leaves obj.bound_box (a derived cache)
+        # STALE — so a status read straight after apply computed world_bbox from the
+        # pre-apply (upright) local AABB against the now-identity matrix and reported the
+        # tilt as GONE (a splayed leg read upright, width collapsed 0.245→0.190). Force
+        # the recompute so the baked geometry is what every downstream read sees.
+        if o.data is not None:
+            o.data.update()
+        bpy.context.view_layer.update()
+        after = world_bbox(o)
+        if max(abs(a - b) for a, b in zip(before, after)) > 1e-4:
+            warnings.append(
+                f"{o.name}: world bbox moved on apply ({[round(v,4) for v in before]} → "
+                f"{[round(v,4) for v in after]}) — apply should be world-invariant; "
+                f"the object may carry a modifier or negative scale that shifts on bake.")
+    out = {"success": True,
+           "applied_to": [o.name for o in objs],
+           "scale": do_scale, "rotation": do_rotation, "location": do_location}
+    if warnings:
+        out["warnings"] = warnings
+    return out
 
 
 def rotate_object(params):

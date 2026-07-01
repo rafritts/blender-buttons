@@ -11,12 +11,12 @@ from server._core import mcp
 from server import queries, scene as _scene, designs
 from ._common import tag, unknown
 
-_OPS = ["tree", "world", "atmosphere", "new"]
+_OPS = ["tree", "world", "atmosphere", "new", "frame", "bake_physics"]
 
 
 @mcp.tool(name="scene")
 def scene(
-    op: Literal["tree", "world", "atmosphere", "new"],
+    op: Literal["tree", "world", "atmosphere", "new", "frame", "bake_physics"],
     # tree
     filter: tag(str, "[tree] name-substring filter") = "",
     type: tag(str, "[tree] type filter, e.g. MESH") = "",
@@ -36,6 +36,12 @@ def scene(
     clear: tag(bool, "[atmosphere] True = remove the medium (clear air)") = False,
     # new
     empty: tag(bool, "[new] True = a truly empty scene") = False,
+    # frame / bake_physics (G196)
+    frame: tag(int, "[frame] jump to absolute frame N") = None,
+    step: tag(int, "[frame] advance N frames (negative to rewind)") = None,
+    start: tag(int, "[frame/bake_physics] first frame of the playback range / bake") = None,
+    end: tag(int, "[frame] last frame of the playback range") = None,
+    frames: tag(int, "[bake_physics] number of frames to simulate from start") = None,
     label: str = "",
 ) -> str:
     """
@@ -50,6 +56,11 @@ def scene(
                clear=True to remove). A bright shadow-casting spot/sun then shafts
                through it for free.
       new    — start a fresh scene         (empty=True for a truly empty one)
+      frame  — move the timeline playhead   (frame=N absolute | step=±N; start/end set
+               the playback range) — physics/animation evaluate as frames advance
+      bake_physics — RUN the sim: bake every cloth/soft-body/particle point cache and
+               leave the scene on the settled last frame (frames=N, start=F). Pair with
+               modifier op=add type=CLOTH pin_group=… / type=COLLISION.
 
     (Render/output/color settings are the `render` verb; render quality lives there
     too. Per-object tabs are `modifier` / `material` / `object`.)
@@ -63,4 +74,8 @@ def scene(
         return _scene.set_atmosphere(density, color, hex, absorption, anisotropy, clear, label)
     if o == "new":
         return designs.new_scene(empty)
+    if o == "frame":
+        return _scene.set_frame(frame, step, start, end, label)
+    if o == "bake_physics":
+        return _scene.bake_physics(frames, start, label=label)
     return unknown("scene", "op", op, _OPS)

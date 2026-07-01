@@ -10,21 +10,35 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
                  mirror_object: str = "", precision: int = None,
                  rest_source: str = "", factor: float = None, iterations: int = None,
                  vertex_group: str = "", count: int = None, label: str = "",
-                 host: str = "") -> str:
+                 host: str = "", thickness: float = None,
+                 angle_limit: float = None, pin_group: str = "") -> str:
     """
     Add a modifier to the active object.
     type: SUBSURF | BEVEL | SOLIDIFY | MIRROR | ARRAY | SCREW | SHRINKWRAP
-          | MESH_DEFORM | ARMATURE | LATTICE | CORRECTIVE_SMOOTH
+          | MESH_DEFORM | ARMATURE | LATTICE | CURVE | CORRECTIVE_SMOOTH
+          | CLOTH | COLLISION
     levels: subdivision levels (SUBSURF)  |  width/segments: bevel params
+    thickness: SOLIDIFY wall thickness in meters (settable at add time — the effective
+      world thickness + an unapplied-scale warning come back in the status).
+    angle_limit: BEVEL angle limit in degrees (settable at add time).
+    CLOTH / COLLISION — the physics pair for draping a garment (G196):
+      CLOTH     : makes this mesh a cloth sim. pin_group = the vertex group it hangs
+                  from (else gravity drops the whole thing) — mint it with
+                  pose op=assign_weight first. Run the sim with scene op=bake_physics.
+      COLLISION : add to the BODY a garment rests on so the cloth collides instead of
+                  passing through. No dials.
+    pin_group: CLOTH pinning vertex group (the seam/waistband held in place).
     ARRAY — repeat the mesh in a line: count = number of copies; the spacing is set by
       offset (meters — a CONSTANT gap along `axis`, the intent-space "links 0.11 m
       apart") OR factor (a RELATIVE offset = multiple of the bbox along `axis`); axis
       picks the run direction (default X). Default with neither: copies touch end-to-end
       (relative 1.0 along X). Constant wins if both are given.
-    host: for the PARTNER modifiers (SHRINKWRAP/MESH_DEFORM/ARMATURE/LATTICE) the object
-      that RECEIVES the modifier — name it instead of relying on which object is active,
-      so the modifier never lands on the wrong part (and you never get a target==host
+    host: for the PARTNER modifiers (SHRINKWRAP/MESH_DEFORM/ARMATURE/LATTICE/CURVE) the
+      object that RECEIVES the modifier — name it instead of relying on which object is
+      active, so the modifier never lands on the wrong part (and you never get a target==host
       "assignment to itself" error). Defaults to the active object. Must differ from target.
+      A partner modifier whose target can't be bound REFUSES loudly (and leaves nothing
+      behind) — it never lands on the partner object by mistake.
     target: the partner object. Required for —
       SHRINKWRAP  : the surface to wrap onto.
       MESH_DEFORM : the cage mesh that drives the deform (added UNBOUND — then
@@ -33,6 +47,9 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
       ARMATURE    : the armature that deforms this mesh (needs vertex groups /
                     weights — see auto_weight / weight_to_bone).
       LATTICE     : the lattice cage that deforms this mesh.
+      CURVE       : the curve object whose shape the mesh is bent along (the
+                    ARRAY→CURVE chain-along-a-path pattern — put the mesh's long
+                    axis on `axis`, default X, to match the curve's direction).
     offset: SHRINKWRAP only — surface offset in meters (skin distance).
     wrap_method: SHRINKWRAP only —
                  NEAREST_SURFACEPOINT (default — snaps each vert to the closest target
@@ -85,6 +102,12 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
         params["count"] = count
     if host:
         params["host"] = host
+    if thickness is not None:
+        params["thickness"] = thickness
+    if angle_limit is not None:
+        params["angle_limit"] = angle_limit
+    if pin_group:
+        params["pin_group"] = pin_group
     result = call_blender("add_modifier", params, label=label)
     if result.get("success"):
         main = f"{result['modifier']} [{result.get('op_id','')}]"
@@ -273,7 +296,8 @@ def modify_modifier(target: str, modifier_name: str,
                     iterations: int = None,
                     show_viewport: bool = None, show_render: bool = None,
                     wrap_method: str = "", target_object: str = "",
-                    vertex_group: str = "", axis: str = "", label: str = "") -> str:
+                    vertex_group: str = "", axis: str = "", inputs: dict = None,
+                    label: str = "") -> str:
     """
     Tweak properties on an existing modifier without rebuilding it.
     Use this to dial in shrinkwrap offset, bevel width, subsurf levels, etc.
@@ -281,6 +305,10 @@ def modify_modifier(target: str, modifier_name: str,
     target: object name. modifier_name: name of the modifier on that object.
     Each numeric param is optional — pass only the ones you want to change.
     angle_limit is in degrees (BEVEL). target_object re-points SHRINKWRAP/ARRAY to a different object.
+    inputs: {socket-name: value} for a Geometry-Nodes (NODES) modifier — the SAME dial map
+      add_asset takes, now editable live (G191): raise a scatter's Density, toggle Realize
+      Instances, switch a Distribution Method, without a remove+re-add. Validated against the
+      modifier's live socket list; unrecognised names come back as skipped.
     ARRAY — count = copies; offset (meters, constant gap) OR factor (relative ×bbox)
       set the spacing along axis (X|Y|Z, default X). Constant wins if both given.
     wrap_method (SHRINKWRAP): NEAREST_SURFACEPOINT | PROJECT | NEAREST_VERTEX | TARGET_PROJECT.
@@ -309,6 +337,8 @@ def modify_modifier(target: str, modifier_name: str,
         params["vertex_group"] = vertex_group
     if axis:
         params["axis"] = axis
+    if inputs:
+        params["inputs"] = inputs
     result = call_blender("modify_modifier", params, label=label)
     if result.get("success"):
         applied = result.get("applied", [])
