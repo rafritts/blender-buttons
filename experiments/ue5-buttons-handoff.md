@@ -54,16 +54,19 @@ response — a complete REPL. Subsystem access: `unreal.get_editor_subsystem(unr
    LAN-exposed; fine for dev, lock down for real use). A real server should replace
    `bAllowAnyRemoteFunctionCall=True` with a narrow `CustomAllowedRemoteFunctionCalls` list.
 
-## WSL2 → Windows-host networking
+## Topology (revised 2026-07-01): Claude on the Mac mini, UE on the Windows box
 
-RC HTTP binds 127.0.0.1 on the Windows side, so from default (NAT) WSL2 it is NOT
-reachable via localhost. Fixes, in order of preference:
-1. `.wslconfig`: `networkingMode=mirrored` (Win11) — localhost becomes genuinely shared.
-2. Otherwise find/set the RC web-server bind-address setting (in `RemoteControlSettings`,
-   same ini) and/or connect to the Windows host IP from WSL.
+Claude Code's home is the Mac mini (`restless@100.76.210.101`, Apple Silicon,
+`~/workspace/blender-buttons`); UE runs on the Windows gaming rig. Connection is
+cross-machine over Tailscale — NOT loopback — so RC HTTP's 127.0.0.1 bind on the
+Windows side is definitely unreachable as-is. Fixes, in order of preference:
+1. Find/set the RC web-server bind-address setting (`RemoteControlSettings`, same ini).
+2. Windows port proxy: `netsh interface portproxy add v4tov4 listenport=30010
+   connectaddress=127.0.0.1 connectport=30010` (+ firewall rule; scope to Tailscale IP).
+3. SSH tunnel from Mac → Windows (needs OpenSSH server on Windows).
 
-WSL interop can launch `UnrealEditor.exe` directly and edit project files via `/mnt/c/`,
-so the launch-script + config-edit workflow ports.
+No WSL needed in this topology. File edits on the Windows project (.uproject, ini) happen
+via whatever remote access exists (SSH/scp if OpenSSH is enabled, or by hand).
 
 ## Linux-specific damage report (moot on Windows/DX12, recorded for posterity)
 
