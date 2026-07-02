@@ -832,26 +832,26 @@ def duplicate_mirrored(params):
     if dup.data and dup.data.users == 1:
         dup.data.name = new_name
 
-    # G194: reflect the GEOMETRY in the dup's own local frame and KEEP its object
-    # transform, so the world result is exactly R·M·mesh — the true mirror image with
-    # the tilt intact. The old path assigned the negative-determinant matrix R·M to
-    # matrix_world and let transform_apply's decompose bake it; that decompose silently
-    # dropped an off-axis rotation (a leg splayed 4° about Y came back upright). Baking
-    # the reflection straight into the mesh never touches the rotation, so the tilt
-    # survives. For a non-mesh dup (no editable geometry) fall back to the matrix path.
+    # G194: reflect each vertex's WORLD position and bake it into the mesh with an
+    # IDENTITY object transform. The world result is exactly R·(M·v) — the true mirror
+    # image, tilt preserved — with no negative-determinant matrix decompose (the old path
+    # assigned R·M to matrix_world + transform_apply, and that decompose silently dropped
+    # an off-axis rotation: a leg splayed 4° about Y came back upright). World-space bake
+    # is unambiguous: geometry is provably correct, only the origin/rotation are baked.
     M = dup.matrix_world.copy()
     if dup.type == 'MESH' and dup.data is not None:
-        local_reflect = M.inverted() @ R @ M
-        dup.data.transform(local_reflect)
-        dup.data.update()
+        me = dup.data
+        for v in me.vertices:
+            v.co = R @ (M @ v.co)
+        me.update()
+        dup.matrix_world = mathutils.Matrix.Identity(4)
         # winding flipped by the reflection — recompute outward.
         activate(dup)
         bpy.ops.object.mode_set(mode='EDIT')
         bpy.ops.mesh.select_all(action='SELECT')
         bpy.ops.mesh.normals_make_consistent(inside=False)
         bpy.ops.object.mode_set(mode='OBJECT')
-        # Re-centre the origin on the reflected geometry (world geometry unchanged) so the
-        # object origin isn't left on the un-mirrored side.
+        # Re-centre the origin on the reflected geometry (world geometry unchanged).
         activate(dup)
         bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='MEDIAN')
     else:

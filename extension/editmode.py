@@ -2044,10 +2044,11 @@ def bridge_handles(params):
     # auto-detect misfires when both loops sit on the SAME shell — it fans self-crossing
     # faces and leaves both rims open (χ=0, 3 boundary loops, non-manifold). bmesh.ops.
     # bridge_loops pairs the two rims into a manifold tube, consuming both boundaries
-    # (genus +1) — the canonical two-hole handle.
+    # (genus +1) — the canonical two-hole handle. bmesh.ops.bridge_loops takes ONLY
+    # `edges` (the operator's use_pairs/twist/… kwargs don't exist on the bmesh op); it
+    # auto-pairs the two rims by proximity, which is what we want for coaxial holes.
     try:
-        res = bmesh.ops.bridge_loops(bm, edges=boundary_edges, use_pairs=False,
-                                     use_cyclic=False, use_merge=False, twist=twist)
+        res = bmesh.ops.bridge_loops(bm, edges=boundary_edges)
     except (RuntimeError, TypeError, ValueError) as ex:
         bpy.ops.object.mode_set(mode='OBJECT')
         return {"error": f"bridge failed: {ex}"}
@@ -2075,12 +2076,12 @@ def bridge_handles(params):
     out = {"success": True, "owner": obj.name, "a": a, "b": b,
            "edges_bridged": sel_edges, "faces_created": faces_after - faces_before,
            "faces_total": faces_after,
-           "bridge": {"cuts": cuts, "smoothness": smoothness, "twist": twist}}
+           "bridge": {"cuts": cuts, "smoothness": smoothness}}
     if remaining_open or nonmanifold:
         out["warnings"] = [
             f"weld left {remaining_open} rim edge(s) open / {nonmanifold} non-manifold "
-            f"edge(s) — the rims may have mismatched vertex counts or opposite winding; "
-            f"try twist= to re-pair, or match the two hole vertex counts."]
+            f"edge(s) — the two rims may have very different vertex counts or not sit "
+            f"across from each other; match their counts / check they're coaxial."]
     return out
 
 

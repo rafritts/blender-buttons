@@ -187,6 +187,16 @@ def graft(params):
     me = bpy.data.meshes.new(out_name)
     me.from_pydata(verts, [], tris)
     me.update()
+
+    # G193: marching-tetrahedra leaves debris on sharp features (coincident verts →
+    # zero-area faces, and the non-manifold edges those create). Weld + dissolve it so the
+    # shell is clean/manifold, not just crack-free. Cheap at these poly counts.
+    cb = bmesh.new(); cb.from_mesh(me)
+    bmesh.ops.remove_doubles(cb, verts=cb.verts, dist=1e-6)
+    bmesh.ops.dissolve_degenerate(cb, dist=1e-6, edges=cb.edges)
+    bmesh.ops.recalc_face_normals(cb, faces=cb.faces)
+    cb.to_mesh(me); cb.free(); me.update()
+
     obj = bpy.data.objects.new(out_name, me)
     bpy.context.scene.collection.objects.link(obj)
 
@@ -201,7 +211,8 @@ def graft(params):
     bpy.context.view_layer.objects.active = obj
     obj.select_set(True)
     push_undo(f"graft {a_name}+{b_name} smin k={blend}")
-    return {"success": True, "object": out_name, "verts": len(verts), "faces": len(tris),
+    return {"success": True, "object": out_name,
+            "verts": len(me.vertices), "faces": len(me.polygons),
             "blend": round(blend, 5), "resolution": res, "grid": [nx, ny, nz],
             "cell_size": round(cell, 5), "watertight": open_seam == 0,
             "removed": removed, "warnings": warnings}
