@@ -18,7 +18,7 @@ task-specific shortcut.
 
 ---
 
-## G203 — `file op=import` is a stranger to its own interlock
+## G208 — `file op=import` is a stranger to its own interlock
 
 `file op=import` mutates the world (adds objects) but does not stamp that mutation into
 the SPEC-15 clean baseline the way every other mutating verb does. Result: the very next
