@@ -72,6 +72,8 @@ def main():
         delta = np.linalg.norm(V, axis=1) - r0  # radial displacement
         print(f"{name}: bulge height max={delta[region_idx].max():.4f}  "
               f"lumpiness={roughness(delta, nbrs, region_idx):.6f}")
+    for name, V in [("input", V0), ("naive", V_naive), ("intrinsic", V_intr)]:
+        trimesh.Trimesh(V, mesh.faces, process=False).export(f"rung2_{name}.obj")
     resid = np.abs(edge_lengths(V_intr, E) - L_target) / L_target
     print(f"intrinsic length residual: mean={resid.mean():.4f} max={resid.max():.4f}")
     still = np.linalg.norm(V_intr[pin_idx] - V0[pin_idx], axis=1).max()

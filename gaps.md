@@ -18,5 +18,17 @@ task-specific shortcut.
 
 ---
 
-_No open gaps. Log the next one hit during a real build here, in the ID-series format and
-design-principle voice above._
+## G203 — `file op=import` is a stranger to its own interlock
+
+`file op=import` mutates the world (adds objects) but does not stamp that mutation into
+the SPEC-15 clean baseline the way every other mutating verb does. Result: the very next
+mutating op trips the external-mutation lock on the object the server itself just
+imported — "added: rung1_recovered" reported as if a human or script had done it. In an
+import-heavy session (lining up 10 OBJ exports) the lock fired on effectively every
+import→place pair, costing an `history op=acknowledge` round-trip each time and training
+the agent to reflex-acknowledge — which dulls the one alarm that must stay sharp (it
+ALSO fired correctly mid-session when the human really did move the character; that
+catch is the feature working). The general primitive: any mutation routed through the
+bridge is FIRST-PARTY — every world-mutating verb, `file` included, must update the
+baseline it will later be diffed against. An interlock that cries wolf on the server's
+own actions erodes exactly the trust it exists to protect.

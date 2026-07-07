@@ -102,6 +102,8 @@ def main():
 
     V_rec = solve_lengths(V_bad, E, L0, pin_idx, pin_pos, iters=400)
     L_rec = edge_lengths(V_rec, E)
+    for name, V in [("original", V0), ("mangled", V_bad), ("recovered", V_rec)]:
+        trimesh.Trimesh(V, mesh.faces, process=False).export(f"rung1_{name}.obj")
     print(f"recovered: mean|L-L0|/L0 = {np.mean(np.abs(L_rec - L0) / L0):.4f},  "
           f"max|L-L0|/L0 = {np.max(np.abs(L_rec - L0) / L0):.4f}")
     print(f"           procrustes RMSE vs original = {procrustes_rmse(V0, V_rec):.4f}"

@@ -23,10 +23,18 @@ inside the lengths-only language.
   bending free (isometric wrinkles are cost-zero), so the raw delta field is somewhat
   rougher than a naive normal push.
 - **rung3_crease** —
-  - A) Flat sheet folded to a tent **by only shortening flap diagonals** on the fold
-    line (target d·sin(φ/2)): achieved 98.9° vs 90° target (spread ±19°), rest of the
-    sheet stays flat (0.11°). Caveat: a flat sheet is a buckling critical point — the
-    solve needs a tiny symmetry-breaking seed to pick a fold direction.
+  - A) Flat sheet folded **by only shortening flap diagonals** on the fold line
+    (target d·sin(φ/2)). **The first attempt was a laundered failure**: fold-line
+    dihedral read 98.9° and off-fold read 0.11° — but the "tent" was a 10cm ridge
+    *wave* (crease + counter-bends beside it; the wing never lifted; true tent height
+    ~1.06m). The averaged flatness metric hid the two counter-bend rows; the viewport
+    exposed it instantly. Lesson: the solver finds *a* shape satisfying the lengths —
+    **which** basin it lands in depends on the seed, and scalar summaries can't tell
+    the basins apart.
+  - A2) Seeding the wing pre-rotated 45° about the fold line: true tent, height 1.086m
+    (expected ~1.06), fold dihedral 104.8° with **spread ±0.0**, wings flat to 0.04°.
+    Creases work; intentional folds need a topological seed (which way, roughly how
+    far), then the solver polishes it exactly.
   - B) Bulge with flap diagonals preserved as a bending regularizer: final **surface**
     roughness 0.0112 vs 0.0109 input / 0.0109 naive push — the wrinkle objection from
     rung 2 was mostly a metric artifact; the intrinsic result is as smooth as the
@@ -43,8 +51,10 @@ the shape of `buttons-deform-macro op=field`, and every number has provenance.
 
 - Real-mesh scale: solve time + stability at VRoid density (~50k verts); patch-local
   solve on a selection with a pinned boundary ring is the expected shape.
-- Buckling seeds for intentional folds on flat/symmetric regions (the solver needs to
-  be told which way to break).
-- Fold-angle precision (±19° spread) — likely wants a weighted/finer schedule.
+- Fold-angle precision (v2 lands 104.8° for a 90° target — uniform, so likely a fixable
+  bias in the d·sin(φ/2) mapping, not noise).
+- Seed policy for folds: v2 proves a coarse pre-rotation suffices; the op needs a
+  "which way / roughly how far" argument the agent can derive (a direction + angle),
+  never a per-vertex seed.
 - Blender-side integration: extension has numpy but no scipy — needs a hand-rolled CG
   or precomputed factorization strategy.

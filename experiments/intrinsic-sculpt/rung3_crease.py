@@ -68,12 +68,33 @@ def part_a_crease():
     V = solve_lengths(V_seed, E_all, target, pin_idx, V0[pin_idx], iters=600)
 
     folded = trimesh.Trimesh(V, mesh.faces, process=False)
+    folded.export("rung3_folded_sheet.obj")
+    make_grid().export("rung3_flat_sheet.obj")
     ang_fold = fold_angles(folded, on_fold)
     off_fold = ~on_fold & np.all(np.abs(V0[shared_edges][:, :, 0]) > 0.15, axis=1)
     ang_else = fold_angles(folded, off_fold)
     print(f"A) crease: fold-line dihedral mean={ang_fold.mean():.1f} deg "
           f"(target 90), spread ±{ang_fold.std():.1f}")
     print(f"   away from fold: mean bend {ang_else.mean():.2f} deg (should stay ~flat)")
+    print(f"   tent height (bbox z): {V[:, 2].max() - V[:, 2].min():.3f} m "
+          f"(true 90-deg tent on this sheet ~ 1.06 m)")
+
+    # v2: the tiny-bias seed lands in a ridge-wave local minimum (fold at the
+    # line, counter-bends beside it, wing never lifts). Seed the WING PRE-ROTATED
+    # 45 deg about the fold line instead — the solver only has to polish.
+    V_seed2 = V0.copy()
+    wing = V0[:, 0] > 0
+    th = np.radians(45)
+    V_seed2[wing, 2] = V0[wing, 0] * np.sin(th)
+    V_seed2[wing, 0] = V0[wing, 0] * np.cos(th)
+    V2 = solve_lengths(V_seed2, E_all, target, pin_idx, V0[pin_idx], iters=600)
+    folded2 = trimesh.Trimesh(V2, mesh.faces, process=False)
+    folded2.export("rung3_folded_sheet_v2.obj")
+    ang2 = fold_angles(folded2, on_fold)
+    ang2_else = fold_angles(folded2, off_fold)
+    print(f"A2) rotated seed: fold dihedral mean={ang2.mean():.1f} deg "
+          f"(target 90), spread ±{ang2.std():.1f}; away from fold {ang2_else.mean():.2f} deg")
+    print(f"    tent height (bbox z): {V2[:, 2].max() - V2[:, 2].min():.3f} m")
 
 
 def part_b_bulge_regularized():
@@ -95,6 +116,7 @@ def part_b_bulge_regularized():
     pin_idx = np.where(w == 0)[0]
     V = solve_lengths(V0, E_all, L_target, pin_idx, V0[pin_idx], iters=400)
 
+    trimesh.Trimesh(V, mesh.faces, process=False).export("rung3_bulge_bending.obj")
     r0 = np.linalg.norm(V0, axis=1)
     region_idx = np.where(w > 0.05)[0]
     delta = np.linalg.norm(V, axis=1) - r0
