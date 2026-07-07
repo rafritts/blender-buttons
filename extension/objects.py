@@ -398,12 +398,76 @@ def _dual_read(obj, core, params):
             "modifiers": modifier_stack(obj), "cage": cage, "evaluated": ev}
 
 
-def get_mesh_profile(params):
+def _combined_world_bmesh(objs):
+    """One world-space bmesh unioning several objects' EVALUATED geometry (modifiers
+    applied, transforms baked) — the substrate for a composite shape read over an
+    assembly (G207). Copies faces (so section-slicing works) plus any loose edges (so a
+    wire/edge-only part stays gap-free). Caller owns it and must .free(). None if the set
+    yields no geometry."""
+    import bmesh
+    from .common import eval_world_bmesh
+    combined = bmesh.new()
+    any_geo = False
+    for o in objs:
+        sub = eval_world_bmesh(o)
+        if sub is None:
+            continue
+        vmap = {v: combined.verts.new(v.co) for v in sub.verts}
+        for f in sub.faces:
+            try:
+                combined.faces.new([vmap[v] for v in f.verts])
+            except (ValueError, KeyError):
+                pass                       # duplicate/degenerate face — skip
+        for e in sub.edges:
+            if not e.link_faces:           # loose edge (no face) — preserve the wire
+                try:
+                    combined.edges.new((vmap[e.verts[0]], vmap[e.verts[1]]))
+                except (ValueError, KeyError):
+                    pass
+        sub.free()
+        any_geo = True
+    if not any_geo:
+        combined.free()
+        return None
+    combined.verts.ensure_lookup_table()
+    combined.edges.ensure_lookup_table()
+    combined.faces.ensure_lookup_table()
+    return combined
+
+
+def _shape_read(core, params):
+    """Front-door for the shape reads (profile / silhouette / section). Resolves target=
+    to one or MANY meshes. ONE mesh → the cage/evaluated dual read (unchanged). A
+    comma-list or collection name → the COMPOSITE read: every part unioned into one
+    world-space bmesh and projected as a SINGLE shape, so an assembly's overall
+    silhouette/profile/section is legible without a destructive join (G207 — 'the pieces
+    are each correct' is not 'the whole reads well')."""
+    from .common import resolve_targets
     tgt = params.get("target")
-    obj = bpy.data.objects.get(tgt) if tgt else bpy.context.active_object
-    if obj is None or obj.type != 'MESH':
-        return {"error": f"Object '{tgt}' not found" if tgt else "No active mesh object"}
-    return _dual_read(obj, _profile_core, params)
+    objs, err = resolve_targets(tgt)
+    if err:
+        return {"error": err}
+    objs = [o for o in objs if o.type == 'MESH']
+    if not objs:
+        return {"error": "no mesh object" + (f" in '{tgt}'" if tgt else " (nothing active)")}
+    if len(objs) == 1:
+        return _dual_read(objs[0], core, params)
+    bm = _combined_world_bmesh(objs)
+    if bm is None:
+        return {"error": "no projectable geometry in the target set"}
+    try:
+        result = core(bm, params)
+    finally:
+        bm.free()
+    if not result.get("success"):
+        return result
+    return {"success": True, "composite": True, "n_objects": len(objs),
+            "object": ", ".join(o.name for o in objs),
+            "modifiers": [], "cage": result, "evaluated": None}
+
+
+def get_mesh_profile(params):
+    return _shape_read(_profile_core, params)
 
 
 def _profile_core(bm, params):
@@ -533,12 +597,10 @@ def get_silhouette(params):
     axis:      view axis to look ALONG (X|Y|Z). Default X = the side view (Y-depth ×
                Z-height plane). The silhouette is the other two axes.
     res:       grid resolution on the wider plane axis (default 32, 4..120).
-    selection: True = only the live selection's verts (default whole mesh)."""
-    tgt = params.get("target")
-    obj = bpy.data.objects.get(tgt) if tgt else bpy.context.active_object
-    if obj is None or obj.type != 'MESH':
-        return {"error": f"Object '{tgt}' not found" if tgt else "No active mesh object"}
-    return _dual_read(obj, _silhouette_core, params)
+    selection: True = only the live selection's verts (default whole mesh).
+    target:    one mesh, OR a comma-list / collection name → the COMPOSITE silhouette of
+               the whole assembly, unioned and projected as one shape (G207)."""
+    return _shape_read(_silhouette_core, params)
 
 
 def _silhouette_core(bm, params):
@@ -651,12 +713,10 @@ def get_section(params):
 
     axis:     slice axis (X|Y|Z, default Z).
     sections: number of evenly spaced slices (default 12).
-    min, max: optional world-space window on the axis."""
-    tgt = params.get("target")
-    obj = bpy.data.objects.get(tgt) if tgt else bpy.context.active_object
-    if obj is None or obj.type != 'MESH':
-        return {"error": f"Object '{tgt}' not found" if tgt else "No active mesh object"}
-    return _dual_read(obj, _section_core, params)
+    min, max: optional world-space window on the axis.
+    target:   one mesh, OR a comma-list / collection name → the COMPOSITE section sweep
+              over the whole assembly, unioned (G207)."""
+    return _shape_read(_section_core, params)
 
 
 def _section_core(src, params):

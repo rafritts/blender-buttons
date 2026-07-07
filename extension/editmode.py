@@ -1894,6 +1894,35 @@ def merge_by_distance(params):
             "verts_after": after, "merged": before - after}
 
 
+def symmetrize(params):
+    """Make the active mesh bilaterally symmetric across an axis plane through its origin —
+    the Mesh ▸ Symmetrize op (G205). One half is mirrored onto the other and welded at the
+    seam, so a one-sided single-mesh edit (a pulled cheekbone, an asymmetric brow) is
+    reflected TRUE in a single call, and a mesh that drifted off-symmetric is re-trued.
+    This is how single-mesh organic shaping stays bilateral: shape one side freely with any
+    vertex/sculpt op, then symmetrize — no need for a per-op mirror flag or a half-mesh
+    MIRROR modifier. axis X|Y|Z (X = the usual left-right face plane); keep '+'|'-' picks
+    which half is the SOURCE that gets copied across."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    axis = str(params.get("axis", "X")).upper()
+    if axis not in ("X", "Y", "Z"):
+        return {"error": f"axis must be X|Y|Z, got {axis!r}"}
+    keep = str(params.get("keep", "+")).strip()
+    sign = "NEGATIVE" if keep.startswith("-") else "POSITIVE"
+    direction = f"{sign}_{axis}"
+    threshold = float(params.get("threshold", 1e-4))
+    before = len(bmesh.from_edit_mesh(obj.data).verts)
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.symmetrize(direction=direction, threshold=threshold)
+    after = len(bmesh.from_edit_mesh(obj.data).verts)
+    push_undo(f"symmetrize {direction}")
+    return {"success": True, "direction": direction, "axis": axis,
+            "kept": f"{sign.lower()} {axis}", "verts_before": before, "verts_after": after}
+
+
 def recalc_normals(params):
     """Recalculate face normals consistently — the Mesh ▸ Normals ▸ Recalculate Outside
     fix (Shift-N), exposed as a primitive so a flipped-normal mesh (a boolean result whose
@@ -2701,6 +2730,7 @@ TOOLS = {
     "mark_sharp":         mark_sharp,
     "set_edge_crease":    set_edge_crease,
     "merge_by_distance":  merge_by_distance,
+    "symmetrize":         symmetrize,
     "recalc_normals":     recalc_normals,
     "select_in_sphere":   select_in_sphere,
     "select_by_radius":   select_by_radius,

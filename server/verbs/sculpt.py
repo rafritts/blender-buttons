@@ -58,7 +58,8 @@ def sculpt(
     strength: tag(float, "[gravity] metres the free (bottom) end falls") = 0.02,
     pin: tag(float, "[gravity] 0..1 top fraction frozen as the attachment") = 0.25,
     falloff: tag(str, "brush falloff SMOOTH|SHARP|…") = "SMOOTH",
-    subdivide: tag(bool, "add resolution under the brush first") = False,
+    subdivide: tag(bool, "force extra resolution under the brush first (a coarse footprint "
+                         "auto-densifies anyway — G206; this adds a pass on top)") = False,
     label: str = "",
 ) -> str:
     """

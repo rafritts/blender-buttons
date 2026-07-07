@@ -314,11 +314,17 @@ def render_dual(result: dict, core_fmt) -> str:
     cage = result.get("cage", {})
     ev = result.get("evaluated")
     modline = fmt_modifiers(result.get("modifiers") or [])
+    # G207: a composite read over an assembly — name the union up front so the map is
+    # never mistaken for one object's outline.
+    comp = ""
+    if result.get("composite"):
+        comp = (f"◆ COMPOSITE — union of {result.get('n_objects')} objects: "
+                f"{result.get('object')}\n")
     if ev is None:
         body = core_fmt(cage)
         if modline:                       # modifiers present but don't alter geometry
             body = modline + "  [cage = evaluated]\n" + body
-        return body + _status(result)
+        return comp + body + _status(result)
     lines = []
     if modline:
         lines.append(modline)

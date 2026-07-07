@@ -417,11 +417,14 @@ def _empty_clip():
 
 
 def _true_penetration_mm(a_name, b_name):
-    """The REAL max vertex-penetration depth between two meshes, recomputed every report:
-    for each sampled vert of one inside the other (signed by the nearest-face normal, the
-    method `feel op=clearance` uses), the distance to that surface. This replaces
-    check_contacts' interior-sample proxy, which over-reported grazes as tens of mm and
-    didn't track a lift (feedback P0.2). Returns mm (0 = no real crossing)."""
+    """The REAL max vertex-penetration depth between two meshes, recomputed every report,
+    built on introspect._signed_distance — the SAME signed nearest-surface primitive
+    `feel op=clearance` uses (a bbox gate, then RAY-PARITY inside-test for a closed solid),
+    so the always-on floor and clearance can never disagree (G204). The old local
+    normal-sign test (a single nearest-face dot) misclassified grazes against curved /
+    non-convex shells as deep crossings — it could report a penetration deeper than the
+    whole mesh is thick (a 174mm 'clip' on a ~10mm hair root). Parity is robust there.
+    Returns mm (0 = no real crossing)."""
     from . import introspect
     a = bpy.data.objects.get(a_name)
     b = bpy.data.objects.get(b_name)
@@ -433,13 +436,10 @@ def _true_penetration_mm(a_name, b_name):
         return 0.0
     worst = 0.0
     for src, dst in ((pa, pb), (pb, pa)):
-        bvh = dst["bvh"]
         for v in src["verts"]:
-            loc, normal, _idx, dist = bvh.find_nearest(v)
-            if loc is None:
-                continue
-            if (v - loc).dot(normal) < 0.0 and dist > worst:   # v is inside dst
-                worst = dist
+            sd = introspect._signed_distance(v, dst)
+            if sd is not None and sd < 0.0 and -sd > worst:   # v is inside dst
+                worst = -sd
     return round(worst * 1000, 1)
 
 

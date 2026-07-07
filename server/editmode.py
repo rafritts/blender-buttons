@@ -1201,3 +1201,29 @@ def recalc_normals(inside: bool = False, flip: bool = False,
     else:
         main = result.get("error", "failed")
     return main + _status(result)
+
+
+def symmetrize(axis: str = "X", keep: str = "+", threshold: float = 1e-4,
+               target: str = "", label: str = "") -> str:
+    """
+    Make the active mesh bilaterally symmetric across an axis plane through its origin —
+    the Mesh ▸ Symmetrize primitive (G205). One half is mirrored onto the other and welded
+    at the seam. This is how a SINGLE-MESH organic edit stays bilateral: shape one side
+    freely (move_verts / proportional_move / sculpt), then symmetrize to reflect it true —
+    no per-op mirror flag, no cutting the mesh to a half for a MIRROR modifier.
+
+    axis:      X | Y | Z — the mirror plane's normal (X = the usual left-right face plane).
+    keep:      '+' | '-' — which half is the SOURCE copied across (default '+' = +axis side).
+    threshold: seam-weld distance in meters (default 1e-4).
+    target:    optional object name — auto-selects it, enters edit mode, exits after.
+    """
+    result = call_blender("symmetrize",
+                          {"axis": axis, "keep": keep, "threshold": threshold,
+                           "target": target}, label=label)
+    if result.get("success"):
+        main = (f"symmetrized across {result['axis']} (kept {result['kept']} half) — "
+                f"{result.get('verts_before')}→{result.get('verts_after')} verts "
+                f"[{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)

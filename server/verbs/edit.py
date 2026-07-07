@@ -18,7 +18,7 @@ from server._core import mcp
 from server import editmode, finishes, introspect, modifiers
 from ._common import tag, unknown, teach
 
-_OPS = ["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
+_OPS = ["extrude", "bevel", "loop_cut", "merge", "symmetrize", "delete", "separate",
         "mark_sharp", "crease", "inflate", "jitter", "noise_displace", "proportional_move",
         "round", "bend", "smooth_edges", "trace",
         "boolean", "subdivide", "bridge",
@@ -27,7 +27,7 @@ _OPS = ["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
 
 @mcp.tool(name="edit")
 def edit(
-    op: Literal["extrude", "bevel", "loop_cut", "merge", "delete", "separate",
+    op: Literal["extrude", "bevel", "loop_cut", "merge", "symmetrize", "delete", "separate",
                 "mark_sharp", "crease", "inflate", "jitter", "noise_displace",
                 "proportional_move", "round", "bend", "smooth_edges", "trace",
                 "boolean", "subdivide",
@@ -76,9 +76,10 @@ def edit(
     inside: tag(bool, "[recalc_normals] recalc to face INWARD (default False=outward)") = False,
     flip: tag(bool, "[recalc_normals] additionally flip every face normal after recalc") = False,
     subdivide_smooth: tag(float, "[subdivide] 0=flat (denser cage) … ~1=round toward limit surface") = 0.0,
-    # merge / delete / sharp / crease
-    threshold: tag(float, "[merge] merge-by-distance threshold (m)") = 0.001,
+    # merge / symmetrize / delete / sharp / crease
+    threshold: tag(float, "[merge] merge-by-distance threshold (m); [symmetrize] seam-weld distance") = 0.001,
     selected_only: tag(bool, "[merge] merge only within the selection") = False,
+    keep: tag(str, "[symmetrize] which half is the SOURCE mirrored onto the other: '+' | '-' along axis") = "+",
     mode: tag(str, "[delete] VERT|EDGE|FACE|ONLY_FACE|EDGE_FACE") = "VERT",
     clear: tag(bool, "[mark_sharp] clear instead of mark") = False,
     weight: tag(float, "[crease] crease weight 0..1") = 1.0,
@@ -154,6 +155,12 @@ def edit(
       subdivide   — densify the SELECTED patch locally — sculptable resolution where
                     you select, no global loops, no shape-key block  (cuts, subdivide_smooth)
       merge       — merge by distance    (threshold, selected_only)
+      symmetrize  — make the mesh bilaterally symmetric across an axis plane through its
+                    origin: one half mirrored onto the other and welded. How a SINGLE-MESH
+                    organic edit stays bilateral — shape one side freely (move_verts /
+                    proportional_move / sculpt), then symmetrize to reflect it true, with no
+                    per-op mirror flag and no half-mesh MIRROR modifier. (axis=X|Y|Z plane
+                    normal, keep='+'|'-' source half, threshold=seam weld)
       delete      — delete geometry      (mode=VERT|EDGE|FACE|ONLY_FACE|EDGE_FACE)
       separate    — split selection into a new object   (new_name)
       mark_sharp  — mark/clear sharp edges               (clear)
@@ -228,6 +235,8 @@ def edit(
         return editmode.subdivide_selection(cuts, subdivide_smooth, label, target)
     if o == "merge":
         return editmode.merge_by_distance(threshold, selected_only, label, target)
+    if o == "symmetrize":
+        return editmode.symmetrize(axis, keep, threshold, target, label)
     if o == "delete":
         return editmode.delete_geometry(mode, label, target)
     if o == "separate":

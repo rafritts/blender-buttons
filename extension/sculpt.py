@@ -154,20 +154,34 @@ def _verts_in_radius(bm, obj, center_world, radius):
 
 
 def _maybe_subdivide(bm, obj, center_world, radius, want):
-    """Locally subdivide edges whose midpoint is within radius. Returns count."""
-    if not want:
-        return 0
+    """Densify edges under the brush so the stroke has mesh to grip. Subdivides when
+    subdivide=True is requested, AND — G206 — AUTO-densifies when the footprint is too
+    coarse to carry the stroke (fewer than _LOW_AFFECTED_WARN verts inside the radius): a
+    brush should HOLD enough mesh for its detail rather than degrade to a 1-vert no-op that
+    also trips the byte-identical detector. Bounded passes (a 32×16 sphere at a 2cm brush
+    needs a couple). Returns the number of edges subdivided (0 = mesh already dense enough)."""
     mat = obj.matrix_world
     r2 = radius * radius
-    edges = []
-    for e in bm.edges:
-        midw = (mat @ e.verts[0].co + mat @ e.verts[1].co) * 0.5
-        if (midw - center_world).length_squared < r2:
-            edges.append(e)
-    if not edges:
-        return 0
-    bmesh.ops.subdivide_edges(bm, edges=edges, cuts=1, use_grid_fill=True)
-    return len(edges)
+
+    def _verts_in():
+        return sum(1 for v in bm.verts
+                   if ((mat @ v.co) - center_world).length_squared < r2)
+
+    total = 0
+    for i in range(4):                       # backstop against runaway subdivision
+        n_in = _verts_in()
+        # Pass 0 honours an explicit subdivide=True even when already dense; after that,
+        # only keep going while the footprint is too coarse to represent the stroke.
+        if not (i == 0 and want) and n_in >= _LOW_AFFECTED_WARN:
+            break
+        edges = [e for e in bm.edges
+                 if ((mat @ e.verts[0].co + mat @ e.verts[1].co) * 0.5
+                     - center_world).length_squared < r2]
+        if not edges:
+            break
+        bmesh.ops.subdivide_edges(bm, edges=edges, cuts=1, use_grid_fill=True)
+        total += len(edges)
+    return total
 
 
 def _world_to_local_dir(obj, world_dir):

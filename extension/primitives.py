@@ -503,27 +503,48 @@ def add_lattice(params):
 
 def _lattice_slab(spec, res):
     """Resolve a per-axis point selector into a set of indices (0..res-1). spec:
-    None/'all' → every index; int → that one; 'min'/'max'/'mid' → the ends/centre;
-    [lo,hi] → an inclusive index range."""
-    if spec is None or (isinstance(spec, str) and spec.lower() == "all"):
+    None/'all' → every index; 'min'/'max'/'mid' → the ends/centre; an integer index
+    (int OR its string form '2', negatives wrap) → that one layer; an [lo,hi] inclusive
+    range (list/tuple OR its string form '[1,3]' / '1,3'). An unrecognized selector
+    RAISES ValueError — a filter must bind or refuse, never silently degrade to
+    'select everything' (G203)."""
+    if spec is None:
         return set(range(res))
+    # Range as an actual list/tuple.
+    if isinstance(spec, (list, tuple)) and len(spec) == 2:
+        lo, hi = int(spec[0]), int(spec[1])
+        return set(range(max(0, lo), min(res - 1, hi) + 1))
+    # Integer index arriving as an int (not a string).
+    if isinstance(spec, int) and not isinstance(spec, bool):
+        return {spec % res}
     if isinstance(spec, str):
-        s = spec.lower()
+        s = spec.strip().lower()
+        if s == "all":
+            return set(range(res))
         if s == "min":
             return {0}
         if s == "max":
             return {res - 1}
         if s == "mid":
             return {res // 2}
-        return set(range(res))
-    if isinstance(spec, (list, tuple)) and len(spec) == 2:
-        lo, hi = int(spec[0]), int(spec[1])
-        return set(range(max(0, lo), min(res - 1, hi) + 1))
-    try:
-        i = int(spec)
-        return {i % res}
-    except (TypeError, ValueError):
-        return set(range(res))
+        # Range as a string: '[1,3]' or '1,3'.
+        inner = s.strip("[]() ")
+        if "," in inner or ":" in inner:
+            parts = [p for p in inner.replace(":", ",").split(",") if p.strip() != ""]
+            if len(parts) == 2:
+                try:
+                    lo, hi = int(parts[0]), int(parts[1])
+                    return set(range(max(0, lo), min(res - 1, hi) + 1))
+                except ValueError:
+                    pass
+        # Single index as a string: '2', '-1'.
+        try:
+            return {int(inner) % res}
+        except ValueError:
+            pass
+    raise ValueError(
+        f"unrecognized lattice selector {spec!r} — use all | min | max | mid | "
+        f"an index 0..{res - 1} (negatives wrap) | an [lo,hi] range")
 
 
 def deform_lattice(params):
@@ -537,9 +558,12 @@ def deform_lattice(params):
         return {"error": f"'{name}' is not a lattice — mint one with add type=lattice"}
     lat = obj.data
     ru, rv, rw = lat.points_u, lat.points_v, lat.points_w
-    su = _lattice_slab(params.get("u"), ru)
-    sv = _lattice_slab(params.get("v"), rv)
-    sw = _lattice_slab(params.get("w"), rw)
+    try:
+        su = _lattice_slab(params.get("u"), ru)
+        sv = _lattice_slab(params.get("v"), rv)
+        sw = _lattice_slab(params.get("w"), rw)
+    except ValueError as e:
+        return {"error": str(e)}
 
     translate = params.get("translate") or [0.0, 0.0, 0.0]
     # world → local delta: the lattice's own scale maps local units to world.
