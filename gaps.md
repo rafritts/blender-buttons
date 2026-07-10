@@ -85,3 +85,56 @@ Instances) if you need editable geometry." Fix: `op=apply` must detect an
 instance-emitting NODES modifier and set its Realize Instances socket (or append a
 realize step) before applying, and the add_asset note must stop promising apply
 realizes when it doesn't.
+
+## G208 — two `inflate`s, two secret unit systems, one balloon
+
+`edit op=inflate amount=` is meters. `sculpt brush=inflate amount=` is a raw brush
+strength where 0.5 threw a vert 0.455m — 91× the brush radius — across a 15cm scene
+(the over-large-displacement warning fired only AFTER the mutation; an undo repaired
+it). The working value turned out to be ~0.001, i.e. meters-ish after all, just
+attenuated by falloff. Same verb name, same argument name, incompatible scales, and
+nothing in the schema says which system a given brush speaks. The general primitive:
+every displacement dial on the surface should be denominated in METERS (the unit the
+whole rest of the surface speaks), and a stroke that would move any vert further than
+~2× the brush radius should refuse BEFORE mutating, not warn after.
+
+## G209 — the select verbs strand their own selection for `feel op=handle`
+
+Every select op stores the selection and drops back to OBJECT mode; `feel op=handle
+source=selection` then refuses with "must be in edit mode with a vertex selection."
+The escape hatch (object op=mode mode=EDIT, then mint) works because the selection
+survived all along — the refusal is about MODE, not about missing data. A verb that
+consumes "the live selection" should re-enter edit mode on the selection's owner
+itself, exactly like every edit verb's target= does. One-line fix, one fewer
+mode-dance every time a handle is minted from a measured selection.
+
+## G210 — handles die on any topology change, even far from their verts
+
+`sculpt subdivide=true` under a drip stroke orphaned the very handle the stroke was
+aimed at ("vert count changed 5→14 — re-derive or discard"), forcing a re-derivation
+dance (boundary ∩ in_sphere ∩ z-band) for every subsequent touch of the same feature.
+Blender vertex groups already survive subdivision — new verts inherit membership —
+so the tracked verts still existed; only the handle's vert-count checksum invalidated
+them. The general primitive: a handle should survive topology edits that don't delete
+its tracked verts, and an op that subdivides at a handle should re-mint that handle
+as part of its own contract.
+
+## G211 — `edit op=bend` bends around the long axis by default, warns after
+
+Bending a cylinder sprinkle bent around its own length ("barely changes shape — a
+perpendicular axis usually wants this") and still mutated, costing an undo; the axis=
+dial that fixes it isn't documented for bend (schema tags it loop_cut/trace only) and
+was found by guessing. If the op can already DETECT the degenerate long-axis case well
+enough to warn, it should refuse before mutating (or default to a perpendicular axis),
+and the schema should admit bend takes axis=.
+
+## G212 — no way to address "the rim at angle θ" in one read
+
+`feel op=radial` casts at bbox-centre HEIGHT, so on a dome-with-rim it lands mid-wall
+(z=0.040) when the target was the boundary edge below (z=0.025); brushing there bulged
+the wall and left the rim unmoved (bbox floor never dropped — caught by reading bounds,
+not by any warning). The working address took three composed calls per spot: select
+op=boundary ∩ in_sphere(cast) ∩ z-band. That composition is the system working, but
+the read "the OPENING'S edge at clock angle θ" is a first-class question on any rimmed
+form (cup lips, sleeve cuffs, icing edges) — radial wants a crossing=rim/boundary mode
+that lands ON the nearest boundary loop instead of the wall above it.
