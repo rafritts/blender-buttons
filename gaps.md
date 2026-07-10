@@ -40,4 +40,15 @@ G222–G224 (found in the same sweep + a left-pinky look drill) fixed and live-v
 
 ---
 
-_No open gaps._
+## G225 — GN modifier menu/enum inputs silently don't latch, and the readback confirms the lie
+
+**Verb:** `modifier op=add_asset` / `op=modify` with `inputs={…}` (and the `collection=` param) on a Geometry-Nodes modifier — hit driving the native **Scatter on Surface** asset.
+
+**Friction (donut dogfood, 2026-07-10):** Setting a **menu/enum** node input is reported applied but never reaches the live modifier. `add_asset` with `collection=Sprinkles` echoed `set: {'Instance Type': 'Collection', …}` and the input dump read back `Instance Type (menu: Object|Collection = Collection)` and `Density Method (menu: … = Density)` — yet Blender kept evaluating `Instance Type = Object` (empty source → **0 instances scattered**) and `Density Method = Amount`. Nothing landed on the donut. Only the human, eyes on the native N-panel, caught it and flipped Instance Type→Collection by hand; the collection scatter then worked immediately.
+
+**Why it's a gap (not operator error):** the agent had NO trustworthy read to catch this. The input dump / echo is generated from the value the tool *tried to write*, not the modifier's effective state — so a verification read **confirms a write that didn't happen** (unfalsifiable-but-wrong). Non-menu inputs (Int `Amount`, Float `Density`, Bool, Vector) *do* latch, so the failure is specific to menu/enum sockets and invisible from every server read. The agent burned ~a dozen calls (probe duplicate→apply cycles, a full remove + re-add) chasing a phantom binding because the tool insisted it was already bound. Compounding it, the `emits: N instance(s)` heuristic read 0 then 1000 (the `Amount` default) — also decoupled from the true evaluated count (a same-Density probe earlier realized 260).
+
+**Fix direction:**
+1. Write menu/enum GN inputs through the representation that actually latches (menu sockets carry an int index / string identifier — the current path sets a value Blender ignores) and force a depsgraph update so the modifier re-evaluates.
+2. Make the input **readback reflect the modifier's EFFECTIVE evaluated state**, not the intended write — so `modifier op=list` / the input dump can be trusted to catch a failed set. The honest read is the deeper fix: a write that fails must be *visible* to the agent, not papered over by echoing intent.
+3. Report a **true evaluated instance count** for scatter/instancer GN modifiers (depsgraph realize-count), not a pre-eval guess off `Amount`.
