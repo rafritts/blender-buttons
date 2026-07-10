@@ -640,30 +640,42 @@ def select_between(params):
 
 def list_components(params):
     """G185 — enumerate the verts in the CURRENT selection with stable labels (their mesh
-    vertex index), world position, and valence, so the agent can then address them by index
-    (select op=by_index) instead of binary-searching coordinate bands. The "list what's
-    here, let me pick by name" primitive: narrow with a band first, then list, then refine.
+    vertex index) and valence, so the agent can then address them by index (select
+    op=by_index) instead of binary-searching coordinate bands. The "list what's here, let
+    me pick by name" primitive: narrow with a band first, then list, then refine.
+
+    Coordinate-starved by default (SPEC-21 §6.2): positions come as Δs from the selection's
+    centroid — enough to see the arrangement and pick — and raw world XYZ sits behind
+    world_xyz=True, the debug escape hatch off the default path.
 
     Labels are mesh vertex indices — stable across selection/read calls, but a topology op
     (loop_cut / extrude / delete / merge) renumbers verts, so re-list after any such edit."""
     import bmesh
+    from mathutils import Vector
     obj = bpy.context.active_object
     if obj is None or obj.mode != 'EDIT':
         return {"error": "Must be in edit mode with an active object"}
     cap = int(params.get("max_verts", 60) or 60)
+    world_xyz = bool(params.get("world_xyz"))
     bm = bmesh.from_edit_mesh(obj.data)
     bm.verts.ensure_lookup_table()
     mw = obj.matrix_world
     sel = [v for v in bm.verts if v.select]
     sel.sort(key=lambda v: v.index)
+    ctr = Vector((0.0, 0.0, 0.0))
+    if sel and not world_xyz:
+        for v in sel:
+            ctr += mw @ v.co
+        ctr /= len(sel)
     items = []
     for v in sel[:cap]:
-        co = mw @ v.co
+        co = (mw @ v.co) - ctr
         items.append({"i": v.index,
                       "co": [round(co.x, 4), round(co.y, 4), round(co.z, 4)],
                       "valence": len(v.link_edges)})
     return {"success": True, "total": len(sel), "shown": len(items),
-            "capped": len(sel) > cap, "verts": items}
+            "capped": len(sel) > cap,
+            "frame": "world" if world_xyz else "centroid", "verts": items}
 
 
 def select_by_index(params):

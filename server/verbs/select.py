@@ -64,6 +64,10 @@ def select(
                   "candidate ids / handle / vgroup names") = "",
     subtract: tag(str, "[claim] region algebra — REMOVE these from the result "
                        "(same forms as add)") = "",
+    # list
+    debug: tag(bool, "[list] dump raw world XYZ instead of Δs from the selection "
+                     "centroid — the coordinate escape hatch, off the default path "
+                     "(frame transforms are the server's job)") = False,
     # in_sphere
     radius: tag(float, "[in_sphere] sphere radius (m)") = 0.0,
     handle: tag(str, "[in_sphere/by_radius] center on a named handle's live point "
@@ -98,11 +102,13 @@ def select(
       between     — verts in an axis band         (axis, lo, hi, action, extend).
                     action=INTERSECT keeps only already-selected verts inside the band.
       list        — ENUMERATE the current selection's verts with stable labels (mesh
-                    vertex index), world position + valence (max_verts caps it). The
-                    "list what's here" read for when a band is too coarse: narrow with
-                    between, list to see exactly which verts landed, then pick the right
-                    ones by index. Labels survive reads but a topology edit (loop_cut/
-                    extrude/delete) renumbers — re-list after editing.
+                    vertex index), Δ-from-centroid position + valence (max_verts caps
+                    it). The "list what's here" read for when a band is too coarse:
+                    narrow with between, list to see exactly which verts landed, then
+                    pick the right ones by index. debug=true restores raw world XYZ —
+                    the escape hatch, off the default path. Labels survive reads but a
+                    topology edit (loop_cut/extrude/delete) renumbers — re-list after
+                    editing. For per-vert reads inside ONE face, prefer look at=f<id>.
       by_index    — select verts by their index labels (indices=[...] from op=list),
                     action SELECT|DESELECT|INTERSECT, extend. Address "those two verts"
                     directly instead of dead-reckoning a coordinate slab around them.
@@ -167,7 +173,8 @@ def select(
                                        world_lo, world_hi, eps)
     if o == "list":
         # max_verts shares the flood default (20000); a small cap fits an enumeration.
-        return editmode.list_components(target, max_verts if max_verts != 20000 else 60)
+        return editmode.list_components(target, max_verts if max_verts != 20000 else 60,
+                                        debug)
     if o == "by_index":
         return editmode.select_by_index(indices or [], action, extend, target)
     if o == "group":

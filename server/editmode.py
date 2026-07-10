@@ -780,15 +780,21 @@ def select_between(axis: str = "Z", lo: float = 0.0, hi: float = 1.0,
 
 
 @mcp.tool()
-def list_components(target: str = "", max_verts: int = 60) -> str:
+def list_components(target: str = "", max_verts: int = 60, world_xyz: bool = False) -> str:
     """G185 — enumerate the verts in the current selection with stable labels (mesh vertex
-    index), world position, and valence. Narrow with a band, then list to see exactly which
-    verts are there, then pick them with select op=by_index — no coordinate-slab guessing."""
-    result = call_blender("list_components", {"target": target, "max_verts": max_verts})
+    index) and valence; positions are Δs from the selection centroid (coordinate-starved,
+    SPEC-21 §6.2). world_xyz=True restores raw world coords — the debug escape hatch, off
+    the default path. Narrow with a band, then list, then pick with select op=by_index."""
+    result = call_blender("list_components", {"target": target, "max_verts": max_verts,
+                                              "world_xyz": world_xyz})
     if result.get("success"):
-        lines = [f"  v{v['i']}: ({v['co'][0]}, {v['co'][1]}, {v['co'][2]})  valence {v['valence']}"
+        world = result.get("frame") == "world"
+        pre = "" if world else "Δ"
+        lines = [f"  v{v['i']}: {pre}({v['co'][0]}, {v['co'][1]}, {v['co'][2]})  valence {v['valence']}"
                  for v in result["verts"]]
         head = f"{result['total']} vert(s) selected"
+        head += (" — world XYZ (debug)" if world else
+                 " — Δ from the selection centroid (world XYZ: debug=true)")
         if result["capped"]:
             head += f" (showing first {result['shown']} — raise max_verts to see more)"
         main = head + (("\n" + "\n".join(lines)) if lines else "")

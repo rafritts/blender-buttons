@@ -344,6 +344,10 @@ error legibly where not.
   session):** `look` is a new verb and owns the loop; `feel` is relegated to
   diagnostics and wtf moments (§6.0).
 - BFS-ring linearization details for non-disk patches; loop detection thresholds.
+  **Linearization decided (phase 4):** BFS distance is well-defined on any
+  face-adjacency graph, so non-disk patches need nothing special; a multi-shell
+  window restarts BFS per shell at the unvisited face nearest the window centre
+  (`shell 2 · ring 0: …`). Loop thresholds stay open.
 - Window invalidation policy under heavy topology edits mid-descent.
 - Candidate-generator tuning (crease angle, protrusion scale) and the definition of
   the coverage metric. **Coverage decided (phase 3):** the line reports BOTH

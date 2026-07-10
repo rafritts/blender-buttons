@@ -18,6 +18,24 @@ def _fmt_window(res: dict) -> str:
     root = " (root)" if w.get("root") else ""
     lines.append(f"── look: {w.get('id')}  {w.get('label')}{root} "
                  f"{'─' * max(1, 46 - len(str(w.get('label'))))}")
+    fv = w.get("face_view")
+    if fv:
+        # single-face vert view (§6.2) — the only place vert coords appear,
+        # and only as Δs from the face centre (world axes)
+        lines.append(f"  window:  face {fv['face']} · {w.get('n_verts')} verts · "
+                     f"{fv['area']} · normal {fv['normal']}")
+        lines.append("  verts (local frame — Δ from the face centre along world "
+                     "axes; shares = face-incidence):")
+        for v in fv["verts"]:
+            lines.append(f"    {v['id']:<6} {v['at']:<34} shares {v['shares']} faces")
+        lines.append("  edges: " + " · ".join(fv["edges"]))
+        idx = ", ".join(v["id"][1:] for v in fv["verts"])
+        lines.append(f"  act: select op=by_index indices=[{idx}] (any subset) · "
+                     f"look up to widen")
+        stack = w.get("stack") or []
+        nav = " ▸ ".join(stack)
+        lines.append(f"  stack: {nav} · back: look up")
+        return "\n".join(lines)
     size = "×".join(w.get("size", []))
     shells = w.get("shells_in_window", 1)
     shell_s = f"{shells} shell{'s' if shells != 1 else ''} in window"
@@ -56,7 +74,13 @@ def _fmt_window(res: dict) -> str:
                          f"{c['n_verts']} verts{extra}{twin}")
     if w.get("coverage"):
         lines.append(f"  coverage: {w['coverage']}")
-    if w.get("bottom_level"):
+    frs = w.get("face_rings") or []
+    if frs:
+        lines.append("  faces (BFS rings out from the window centre — vert view: "
+                     "look at=f<id>):")
+        for ln in frs:
+            lines.append(f"    {ln}")
+    elif w.get("bottom_level"):
         lines.append("  bottom-level window (≤40 faces)")
     stack = w.get("stack") or []
     nav = " ▸ ".join(stack)
@@ -70,7 +94,9 @@ def look(
     target: tag(str, "open the ROOT window on this mesh (replaces the stack)") = "",
     at: tag(str, "DESCEND within the current window: a landmark id (L2), its "
                  "position token (top-right), 'tail' (the grouped minor landmarks), "
-                 "or a bare position token to zoom a region with no landmark") = "",
+                 "a bare position token to zoom a region with no landmark, or a "
+                 "face id (f12) from the ring enumeration — the single-face vert "
+                 "view") = "",
     up: tag(bool, "pop back to the parent window") = False,
 ) -> str:
     """
@@ -93,6 +119,13 @@ def look(
     handle (omit name= to just select). The coverage line says how much of the
     window the offer reaches — the rest needs hand selection. Candidates are
     ephemeral (per window); claimed handles persist in the .blend.
+
+    Coordinate starvation (§6.2): faces are the currency. A bottom-level window
+    (≤40 faces) enumerates them as BFS rings out from the window centre, areas
+    only. `look at=f<id>` opens the single-face vert view — the ONLY place vert
+    coordinates appear, as Δs from the face centre along world axes, each vert
+    with its face-incidence ("shares 8 faces" = a pole). World XYZ never crosses
+    the wire; frame transforms are the server's job.
 
     Windows invalidate on topology edits (the error says how to re-open — not
     your fault). For precise measurement, relational forensics, or when a window

@@ -82,6 +82,26 @@ def _fmt_area(m2):
     return f"{m2:.2f}m²"
 
 
+def _fmt_delta(m):
+    """Signed length for local-frame offsets; sub-report-precision reads as 0."""
+    if abs(m) < 5e-5:
+        return "0"
+    return ("+" if m > 0 else "−") + _fmt_len(abs(m))
+
+
+def _normal_token(n):
+    """A face normal as a world-axis word ('+Z', '−X leaning +Y') — which way
+    the face points, without shipping the vector."""
+    axes = "XYZ"
+    order = sorted(range(3), key=lambda i: -abs(n[i]))
+    a = order[0]
+    tok = ("+" if n[a] >= 0 else "−") + axes[a]
+    if abs(n[a]) >= 0.92:
+        return tok
+    b = order[1]
+    return f"{tok} leaning {'+' if n[b] >= 0 else '−'}{axes[b]}"
+
+
 # ── geometry passes (all world-space, all O(window)) ─────────────────────────
 
 def _face_data(obj, bm, face_ids):
@@ -611,6 +631,75 @@ def _make_landmarks(obj, bm, face_set, fdata, bbox, vert_ids, comps):
     return named, tail_desc, tail_faces, len(comps)
 
 
+# ── coordinate starvation: faces as the currency (§6.2) ─────────────────────
+
+def _face_rings(bm, face_set, fdata):
+    """Bottom-level face enumeration: BFS rings out from the window-centre face
+    (the face nearest the area-weighted centroid) — the order grow walks and an
+    eye scans. Non-disk patches need nothing special (BFS distance is defined
+    on any face-adjacency graph); a multi-shell window restarts BFS per shell
+    at the unvisited face nearest the window centre, rings renumbering with it.
+    Returns shells → rings → [(face id, area)]."""
+    total_area = sum(a for _, a in fdata.values()) or 1e-12
+    ctr = Vector((0, 0, 0))
+    for c, a in fdata.values():
+        ctr += c * a
+    ctr /= total_area
+    unvisited = set(face_set)
+    shells = []
+    while unvisited:
+        seed = min(unvisited, key=lambda fi: (fdata[fi][0] - ctr).length)
+        unvisited.discard(seed)
+        cur = {seed}
+        rings = []
+        while cur:
+            rings.append([(fi, fdata[fi][1]) for fi in sorted(cur)])
+            nxt = set()
+            for fi in cur:
+                for e in bm.faces[fi].edges:
+                    for nf in e.link_faces:
+                        if nf.index in unvisited:
+                            unvisited.discard(nf.index)
+                            nxt.add(nf.index)
+            cur = nxt
+        shells.append(rings)
+    return shells
+
+
+def _face_view_data(obj, bm, fi):
+    """The single-face vert view (§6.2) — the ONLY place vert coordinates
+    appear, and only in the face's local frame: origin = face centre, axes =
+    world. Each vert carries its face-incidence count (the whole mesh's, not
+    the window's) — a pole announces itself as 'shares 8 faces'. Edges come
+    as lengths, in loop order. Returns (view dict, world bbox)."""
+    f = bm.faces[fi]
+    mw = obj.matrix_world
+    scale = mw.median_scale
+    ctr_w = mw @ f.calc_center_median()
+    nrm = mw.to_3x3() @ f.normal
+    if nrm.length > 1e-12:
+        nrm.normalize()
+    inf = float("inf")
+    bb = [inf, inf, inf, -inf, -inf, -inf]
+    verts = []
+    edges = []
+    for l in f.loops:
+        v = l.vert
+        co = mw @ v.co
+        for k in range(3):
+            if co[k] < bb[k]: bb[k] = co[k]
+            if co[k] > bb[k + 3]: bb[k + 3] = co[k]
+        d = co - ctr_w
+        verts.append({"i": v.index, "d": (d.x, d.y, d.z),
+                      "shares": len(v.link_faces)})
+        nv = l.link_loop_next.vert
+        edges.append((v.index, nv.index,
+                      ((mw @ v.co) - (mw @ nv.co)).length))
+    return ({"face": fi, "area": f.calc_area() * scale * scale,
+             "normal": (nrm.x, nrm.y, nrm.z), "verts": verts, "edges": edges},
+            tuple(bb))
+
+
 # ── window construction / bookkeeping ────────────────────────────────────────
 
 def _new_window(obj, face_ids, parent_id, label):
@@ -630,6 +719,8 @@ def _new_window(obj, face_ids, parent_id, label):
             obj, bm, face_set, fdata, bbox, verts, comps)
         candidates, coverage = _make_candidates(
             obj, bm, face_set, fdata, bbox, comps, named)
+        face_rings = (_face_rings(bm, face_set, fdata)
+                      if len(face_set) <= _FACE_LIST_CAP else None)
         _COUNTER[0] += 1
         wid = f"w{_COUNTER[0]}"
         win = {
@@ -641,6 +732,7 @@ def _new_window(obj, face_ids, parent_id, label):
             "landmarks": named, "tail": tail_desc,
             "tail_face_ids": sorted(tail_faces),
             "candidates": candidates, "coverage": coverage,
+            "face_rings": face_rings,
             "root": face_ids is None,
         }
         if face_ids is None:
@@ -720,7 +812,8 @@ def _faces_in_region(fdata, bbox, token):
 
 def _present(win):
     """The structured reply the server-side verb formats. Coordinate-starved:
-    tokens, extents, areas, counts — no XYZ."""
+    tokens, extents, areas, counts — no XYZ, except the single-face vert view
+    (§6.2), where coords appear in the face's LOCAL frame only."""
     x0, y0, z0, x1, y1, z1 = win["bbox"]
     lms = []
     for lm in win["landmarks"]:
@@ -773,6 +866,42 @@ def _present(win):
         out["coverage"] = ("no candidates — the window segments into nothing at "
                            "this scale; select by hand (op=flood / by_axis / "
                            "pick + grow)")
+    fv = win.get("face_view")
+    if fv:
+        out["face_view"] = {
+            "face": f"f{fv['face']}",
+            "area": _fmt_area(fv["area"]),
+            "normal": _normal_token(fv["normal"]),
+            "verts": [{"id": f"v{v['i']}",
+                       "d": [round(x, 5) for x in v["d"]],
+                       "at": f"Δ({_fmt_delta(v['d'][0])}, {_fmt_delta(v['d'][1])}, "
+                             f"{_fmt_delta(v['d'][2])})",
+                       "shares": v["shares"]} for v in fv["verts"]],
+            "edges": [f"v{a}–v{b} {_fmt_len(ln)}" for a, b, ln in fv["edges"]],
+        }
+    fr = win.get("face_rings")
+    if fr and not fv:
+        # pre-composed ring lines: a ring of near-uniform areas (within 10% of
+        # the mean) compresses to "f8 f11 f13 f17  ≈2.1mm² each"
+        ring_lines = []
+        multi = len(fr) > 1
+        for si, rings in enumerate(fr, 1):
+            for ri, faces in enumerate(rings):
+                prefix = f"shell {si} · " if multi else ""
+                if len(faces) > 1:
+                    areas = [a for _, a in faces]
+                    mean = sum(areas) / len(areas)
+                    if all(abs(a - mean) <= 0.1 * mean for a in areas):
+                        ids = " ".join(f"f{fid}" for fid, _ in faces)
+                        body = f"{ids}  ≈{_fmt_area(mean)} each"
+                    else:
+                        body = " · ".join(f"f{fid} {_fmt_area(a)}"
+                                          for fid, a in faces)
+                else:
+                    fid, a = faces[0]
+                    body = f"f{fid} {_fmt_area(a)}"
+                ring_lines.append(f"{prefix}ring {ri}: {body}")
+        out["face_rings"] = ring_lines
     if win["root"]:
         out["symmetric_x"] = win.get("symmetric_x", False)
     return out
@@ -827,7 +956,7 @@ def look_window(params):
     if not at:
         return {"success": True, "window": _present(cur), "moved": "none"}
 
-    # descend: L# / position token / the grouped tail / spatial fallback
+    # descend: f<id> / L# / position token / the grouped tail / spatial fallback
     bm, owned = _get_bm(obj)
     try:
         bm.faces.ensure_lookup_table()
@@ -835,6 +964,32 @@ def look_window(params):
         chosen = None
         label = None
         atl = at.lower()
+        # single-face vert view (§6.2): f<id> from the ring enumeration
+        if atl.startswith("f") and atl[1:].isdigit():
+            fi = int(atl[1:])
+            if fi not in parent_faces:
+                return {"error": f"f{fi} is not a face of window {cur['id']} "
+                                 f"({cur['n_faces']} faces). Face ids come from "
+                                 f"the window's ring enumeration — bottom-level "
+                                 f"windows (≤{_FACE_LIST_CAP} faces) list them; "
+                                 f"descend until the rings appear."}
+            face_view, fv_bbox = _face_view_data(obj, bm, fi)
+            _COUNTER[0] += 1
+            wid = f"w{_COUNTER[0]}"
+            win = {
+                "id": wid, "object": obj.name,
+                "label": f"{cur['label']} ▸ f{fi}",
+                "face_ids": [fi], "sig": _sig(obj),
+                "parent": cur["id"], "bbox": fv_bbox,
+                "n_faces": 1, "n_verts": len(face_view["verts"]),
+                "shells_in_window": 1,
+                "landmarks": [], "tail": None, "tail_face_ids": [],
+                "candidates": [], "coverage": None, "face_rings": None,
+                "root": False, "face_view": face_view,
+            }
+            _WINDOWS[wid] = win
+            _STACK.append(wid)
+            return {"success": True, "window": _present(win), "moved": "down"}
         for lm in cur["landmarks"]:
             if lm["id"].lower() == atl or lm["token"] == atl:
                 chosen = set(lm["faces"])
