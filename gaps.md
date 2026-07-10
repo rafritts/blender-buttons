@@ -57,3 +57,31 @@ with no warning. Whatever ships, the revolved-vessel technique's `amp=<depth>` l
 match it.
 
 (Live workaround verified: `field_mode=add amp=<meters>` cut the gadroons correctly.)
+
+## G223 — claimed vgroup candidates are silently window-clipped
+
+Drilling to a VRoid fingertip window and claiming its offered `J_Bip_L_Little1/2/3`
+vgroup candidates yielded 27 verts — but the finger is an 81-vert shell, and the full
+vgroup union is 162 verts. The offer lists each candidate's *in-window* portion with no
+signal that the vgroup extends beyond the window, so claiming a **semantic** candidate
+(a named rig part) quietly mints a handle on a fragment of it. The claim narration's
+shell-coverage line ("27 of 81 verts of shell #14") was the only tell — it rescued this
+build, but the trap should not exist.
+
+General framing: a window clips **perception**, but a vgroup is a whole **entity** — an
+offer that names an entity should either cover it fully or say it's showing a fragment
+("24 of 162 verts in window; claim takes all 162 / claim takes the fragment"). Related
+friction from the same drill: re-pointing an existing handle at the live selection has no
+first-class path (a bare `claim name=` refuses; the workaround is the self-union dance
+`claim add=<handle> name=<handle>`).
+
+## G224 — look's orient line stops short of character handedness
+
+`look` reports `front=−Y · bilateral across X`, and its position tokens are world-axis
+("left" = −X). Asked for the character's **left** hand, the agent must derive that
+character-left = +X = window-"right" — or, as happened live, descend into the wrong arm
+and be corrected by rig vgroup names (`J_Bip_R_*`). The server already knows the answer:
+`feel op=topology method=facing` computes the signed frame. The root window's orient line
+should finish the sentence — "front=−Y ⇒ subject's left = +X (window right)" — so "the
+character's left X" translates to a token without a wasted descent. Position tokens
+staying world-axis is fine; the missing piece is the one-line translation.
