@@ -406,6 +406,9 @@ NON_UNDOABLE_TOOLS = NO_LOG_TOOLS | {
     "list_handles", "resolve_handle", "accept_handle",
     # topology sense (SPEC-04) — read-only structural query
     "get_topology",
+    # SPEC-21 §6: landmark LOD windows — a pure read; the window stack it moves
+    # is attention state, not scene state (no geometry, no undo step).
+    "look_window",
     # multi-feel (SPEC-07 Phase 4) — feel_map is a pure raycast read (mints nothing);
     # feel_assembly DOES mint boundary handles, so it stays mutating (logged + undoable)
     # and is NOT listed here. feel_relate (G16) is a pure handle-pair measurement.
@@ -450,6 +453,8 @@ NO_STATUS_TOOLS = {
     "feel_telemetry",
     # generic addon bridge reads — their own payload IS the answer; status would be noise.
     "addon_list", "addon_inspect",
+    # SPEC-21 §6: the look verb's window reply IS the perception payload.
+    "look_window",
 }
 
 

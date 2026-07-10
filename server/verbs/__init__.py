@@ -18,6 +18,7 @@ from . import (  # noqa: F401
     add,
     obj,
     edit,
+    look,
     select,
     transform,
     modifier,
@@ -48,7 +49,7 @@ from . import (  # noqa: F401
 # The complete MCP surface after the collapse. Every name here is a verb module's
 # registered tool name; everything NOT here is pruned.
 VERB_NAMES = {
-    "add", "object", "edit", "select", "transform", "modifier", "material",
+    "add", "object", "edit", "look", "select", "transform", "modifier", "material",
     "sculpt", "pose", "scene", "view", "render", "history", "file", "feel",
     "validate", "collab", "addon", "connect", "uv",
     # SPEC-20 macro verbs

@@ -48,6 +48,7 @@ from . import (
     uv,
     validation,
     viewport,
+    windows,
 )
 
 # Modules order doesn't matter for dispatch, but later entries overwrite earlier
@@ -88,6 +89,7 @@ _TOOL_MODULES = (
     uv,          # SPEC-18: uv_unwrap (parametric/auto projections)
     validation,  # SPEC-16: validate_* ops (expect / intended / stats / run)
     addons,      # generic addon/operator bridge (addon_list / addon_inspect / addon_run)
+    windows,     # SPEC-21 §6: landmark LOD windows (the look verb's engine)
 )
 
 TOOLS = {}
