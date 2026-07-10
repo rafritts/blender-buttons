@@ -96,9 +96,11 @@ The same philosophy is being projected onto Unreal Engine 5 in a sister project
 
 ## North star
 
-An agent that can model a **stylized anime-grade character** — sculpt, retopo, UV,
-rig, weights, hair — over a multi-hour session, directed by a human who owns taste but
-can't hand-model. The donut tutorial is the smoke test, not the destination.
+An agent that can model a **stylized anime-grade character** — Genshin / Guilty Gear
+Strive tier — over a multi-hour session: sculpt, retopo, UV, rig, weights, hair,
+directed by a human who owns taste but can't hand-model. It isn't there yet; every gap
+closed during real modeling is a step. The donut tutorial is the smoke test, not the
+destination.
 
 ## The verb surface
 
