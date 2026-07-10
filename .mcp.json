@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "blender-buttons": {
-      "command": "/home/restless/workspace/blender-buttons/.venv/bin/python",
-      "args": ["/home/restless/workspace/blender-buttons/server/main.py"]
+      "command": ".venv/bin/python",
+      "args": ["server/main.py"]
     }
   }
 }

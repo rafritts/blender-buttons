@@ -8,7 +8,7 @@
        replacing it, so two calls can grab two regions before one delete.
 
 Usage: flatpak run --filesystem=home org.blender.Blender --background \
-         --python /home/restless/workspace/blender-buttons/tests/e2e_addendumC.py
+         --python /path/to/blender-buttons/tests/e2e_addendumC.py
 """
 import os
 import sys

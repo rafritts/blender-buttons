@@ -1,9 +1,0 @@
-approval_policy = "never"
-sandbox_mode = "danger-full-access"
-
-[mcp_servers.blender-buttons]
-command = ".venv/bin/python"
-args = ["server/main.py"]
-cwd = "/home/restless/workspace/blender-buttons"
-startup_timeout_sec = 20
-tool_timeout_sec = 60
