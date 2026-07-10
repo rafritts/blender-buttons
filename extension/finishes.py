@@ -945,8 +945,8 @@ def modify_modifier(params):
             if mod.node_group is None:
                 return {"error": f"NODES modifier '{mod_name}' has no node group to set inputs on"}
             sockets = _gn_input_sockets(mod.node_group)
-            menu_opts = _menu_options(mod.node_group)
-            set_inputs, unknown = _set_gn_inputs(mod, sockets, inputs, menu_opts)
+            menu_maps = _menu_maps(mod, sockets)
+            set_inputs, unknown = _set_gn_inputs(mod, sockets, inputs, menu_maps)
             mod.id_data.update_tag()
             bpy.context.view_layer.update()
             for name, v in set_inputs.items():
@@ -955,7 +955,7 @@ def modify_modifier(params):
                 skipped.extend(unknown)
             out = {"success": True, "target": target, "modifier": mod.name,
                    "type": mod.type, "applied": applied, "skipped": skipped,
-                   "inputs_available": _describe_inputs(mod, sockets, menu_opts)}
+                   "inputs_available": _describe_inputs(mod, sockets, menu_maps)}
             if unknown:
                 out.setdefault("notes", []).append(
                     f"unrecognised input(s) {unknown} — settable inputs: {list(sockets)}")
@@ -1580,7 +1580,41 @@ def _menu_options(ng):
     return opts
 
 
-def _describe_inputs(mod, sockets, menu_opts):
+def _menu_value_map(mod, ident):
+    """B7 — AUTHORITATIVE {option_name: int_value} for a NODES-modifier menu socket, read
+    from the socket IDProperty's UI enum items. The int a menu socket stores is Blender's
+    per-item VALUE, which is NOT the node-graph declaration order: Scatter on Surface stores
+    Instance Type Object=1/Collection=0 and Density Method Density=1/Amount=0 — both REVERSED
+    from the order `_menu_options` walks. Writing the walk index therefore selects the wrong
+    option (the live donut bug: collection= wrote index 1 = Object → empty source → 0
+    instances). This map is what the N-panel itself writes, so it round-trips with the GUI.
+    Empty {} if the UI items are unreadable (older build → caller falls back to walk order)."""
+    try:
+        items = mod.id_properties_ui(ident).as_dict().get("items") or []
+        # each item tuple is (identifier, name, description, icon, value)
+        return {it[1]: it[4] for it in items}
+    except Exception:
+        return {}
+
+
+def _menu_maps(mod, sockets):
+    """{menu_socket_identifier: {option_name: int_value}} for every menu socket on `mod`,
+    preferring the authoritative id_properties_ui values (_menu_value_map) and falling back
+    to node-graph declaration order (name→index) only when those are unreadable."""
+    walk = _menu_options(mod.node_group)
+    out = {}
+    for _name, (ident, stype) in sockets.items():
+        if stype != 'NodeSocketMenu':
+            continue
+        vm = _menu_value_map(mod, ident)
+        if not vm:
+            vm = {nm: i for i, nm in enumerate(walk.get(ident, []))}
+        if vm:
+            out[ident] = vm
+    return out
+
+
+def _describe_inputs(mod, sockets, menu_maps):
     """G204 — legible list of a NODES modifier's inputs: name, type, current value, and —
     for menu sockets — the options BY NAME. Replaces the old bare name list so magic ints
     are never a blind sweep. Returns a list of one-line strings."""
@@ -1592,9 +1626,11 @@ def _describe_inputs(mod, sockets, menu_opts):
         except Exception:
             cur = None
         if stype == 'NodeSocketMenu':
-            items = menu_opts.get(ident, [])
-            curname = items[cur] if isinstance(cur, int) and 0 <= cur < len(items) else cur
-            opts = "|".join(items) if items else "?"
+            vm = menu_maps.get(ident, {})
+            # B7: resolve the stored int back to a name via the AUTHORITATIVE value map,
+            # not by list index — so a menu reads out the option the modifier truly evaluates.
+            curname = next((nm for nm, v in vm.items() if v == cur), cur)
+            opts = "|".join(vm.keys()) if vm else "?"
             out.append(f"{name} (menu: {opts} = {curname})")
         elif stype in ('NodeSocketObject', 'NodeSocketCollection'):
             out.append(f"{name} ({short} = {getattr(cur, 'name', cur)})")
@@ -1622,12 +1658,17 @@ def _evaluated_instance_count(obj):
         return None
 
 
-def _set_gn_inputs(mod, sockets, inputs, menu_opts=None):
+def _set_gn_inputs(mod, sockets, inputs, menu_maps=None):
     """Set {socket-name: value} on a NODES modifier by socket IDENTIFIER, matching names
     case-insensitively. Collection/Object-typed sockets take a datablock NAME; MENU sockets
-    (G204) take the option NAME (resolved to its int index via menu_opts). Shared by
-    add_asset (create-time) and modify (live-edit, G191). Returns (set_inputs, unknown)."""
-    menu_opts = menu_opts or {}
+    (G204) take the option NAME (resolved to its stored int VALUE via menu_maps — B7). Shared
+    by add_asset (create-time) and modify (live-edit, G191).
+
+    B7: `set_inputs` reports the EFFECTIVE value read back from the modifier, not the value we
+    asked for — a write that silently fails to latch (e.g. a bad menu mapping) surfaces as a
+    mismatch note instead of a phantom success the readback would otherwise launder.
+    Returns (set_inputs, unknown)."""
+    menu_maps = menu_maps or {}
     set_inputs, unknown = {}, []
     for key, val in (inputs or {}).items():
         match = next((n for n in sockets if n == key), None) \
@@ -1636,23 +1677,44 @@ def _set_gn_inputs(mod, sockets, inputs, menu_opts=None):
             unknown.append(key)
             continue
         ident, stype = sockets[match]
+        want = inputs[key]
         if stype == 'NodeSocketCollection':
             val = bpy.data.collections.get(val)
         elif stype == 'NodeSocketObject':
             val = bpy.data.objects.get(val)
         elif stype == 'NodeSocketMenu' and isinstance(val, str):
-            # G204: resolve the display NAME → int index against this socket's enum items.
-            items = menu_opts.get(ident, [])
-            idx = next((i for i, nm in enumerate(items) if nm.lower() == val.strip().lower()), None)
-            if idx is None:
-                unknown.append(f"{key} (menu value '{val}' not one of {items or '?'})")
+            # B7: resolve the display NAME → the stored int VALUE (id_properties_ui), NOT the
+            # node-graph list index — the two disagree on reversed menus and the index silently
+            # selects the wrong option.
+            vm = menu_maps.get(ident, {})
+            hit = next((v for nm, v in vm.items() if nm.lower() == val.strip().lower()), None)
+            if hit is None:
+                unknown.append(f"{key} (menu value '{val}' not one of {list(vm) or '?'})")
                 continue
-            val = idx
+            val = hit
         try:
             mod[ident] = val
-            set_inputs[match] = inputs[key]
         except Exception as e:
             unknown.append(f"{key} (set failed: {e})")
+            continue
+        # B7: verify the write landed by reading the modifier's effective state back, and
+        # report THAT (not the requested value). A silent no-op becomes visible.
+        try:
+            eff = mod[ident]
+        except Exception:
+            eff = None
+        if stype == 'NodeSocketMenu':
+            vm = menu_maps.get(ident, {})
+            set_inputs[match] = next((nm for nm, v in vm.items() if v == eff), eff)
+            if eff != val:
+                unknown.append(f"{key} (write did not latch: asked '{want}', "
+                               f"effective '{set_inputs[match]}')")
+        elif stype in ('NodeSocketCollection', 'NodeSocketObject'):
+            set_inputs[match] = getattr(eff, "name", None)
+            if eff is None and want:
+                unknown.append(f"{key} (datablock '{want}' not found / not set)")
+        else:
+            set_inputs[match] = eff
     return set_inputs, unknown
 
 
@@ -1685,7 +1747,7 @@ def add_asset_modifier(params):
     mod.node_group = ng
 
     sockets = _gn_input_sockets(ng)
-    menu_opts = _menu_options(ng)
+    menu_maps = _menu_maps(mod, sockets)
     set_inputs = {}
     unknown_inputs = []
 
@@ -1700,7 +1762,7 @@ def add_asset_modifier(params):
         if coll_socket is None:
             obj.modifiers.remove(mod)
             return {"error": f"'{asset}' has no Collection input to assign collection='{coll_name}'",
-                    "inputs_available": _describe_inputs(mod, sockets, menu_opts)}
+                    "inputs_available": _describe_inputs(mod, sockets, menu_maps)}
         mod[sockets[coll_socket][0]] = coll
         set_inputs[coll_socket] = coll_name
         # G205: the Collection socket is GATED by an instance-source menu (Scatter on
@@ -1708,19 +1770,23 @@ def add_asset_modifier(params):
         # ignored, a silent no-op). Flip the menu whose options include 'Collection' to
         # 'Collection', so collection= actually instances from it — unless the caller set
         # that menu explicitly in inputs=.
+        # B7: write the option's stored VALUE from menu_maps, not its walk index — Instance
+        # Type stores Collection=0, so the old index-1 write selected Object (the live no-op).
         explicit = {str(k).strip().lower() for k in (params.get("inputs") or {})}
         for mname, (mident, mtype) in sockets.items():
             if mtype != 'NodeSocketMenu' or mname.lower() in explicit:
                 continue
-            items = menu_opts.get(mident, [])
-            gate = next((i for i, nm in enumerate(items) if nm.lower() == "collection"), None)
+            vm = menu_maps.get(mident, {})
+            gate = next((v for nm, v in vm.items() if nm.lower() == "collection"), None)
             if gate is not None:
                 mod[mident] = gate
-                set_inputs[mname] = "Collection"
+                # report the EFFECTIVE option name read back, not a hardcoded label
+                eff = mod[mident]
+                set_inputs[mname] = next((nm for nm, v in vm.items() if v == eff), eff)
                 break
 
     # inputs={name: value} → set by identifier; match socket name case-insensitively.
-    got, unknown_inputs2 = _set_gn_inputs(mod, sockets, params.get("inputs"), menu_opts)
+    got, unknown_inputs2 = _set_gn_inputs(mod, sockets, params.get("inputs"), menu_maps)
     set_inputs.update(got)
     unknown_inputs.extend(unknown_inputs2)
 
@@ -1733,7 +1799,7 @@ def add_asset_modifier(params):
         "modifier": mod.name,
         "asset": ng.name,
         "type": "NODES",
-        "inputs_available": _describe_inputs(mod, sockets, menu_opts),
+        "inputs_available": _describe_inputs(mod, sockets, menu_maps),
     }
     if set_inputs:
         result["inputs_set"] = set_inputs
