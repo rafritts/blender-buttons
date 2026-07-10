@@ -36,6 +36,11 @@ SUITES = [
     "e2e_g131_visibility.py",
     "e2e_g100_coverage.py",
     "e2e_g136_g141_gapfixes.py",
+    # bead-of-icing gap batch (G203-G216) — the donut-dogfood autopsy fixes
+    "e2e_g203_g216_deform.py",
+    "e2e_g204_g207_scatter.py",
+    "e2e_g209_g212_handles.py",
+    "e2e_g214_bud.py",
 ]
 
 

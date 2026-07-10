@@ -20,7 +20,7 @@ from ._common import tag, unknown, teach
 
 _OPS = ["extrude", "bevel", "loop_cut", "merge", "symmetrize", "delete", "separate",
         "mark_sharp", "crease", "inflate", "jitter", "noise_displace", "proportional_move",
-        "round", "bend", "smooth_edges", "trace",
+        "proportional_scale", "round", "bend", "smooth_edges", "trace",
         "boolean", "subdivide", "bridge",
         "relax", "slide", "poke", "inset", "grid_fill", "recalc_normals"]
 
@@ -29,8 +29,8 @@ _OPS = ["extrude", "bevel", "loop_cut", "merge", "symmetrize", "delete", "separa
 def edit(
     op: Literal["extrude", "bevel", "loop_cut", "merge", "symmetrize", "delete", "separate",
                 "mark_sharp", "crease", "inflate", "jitter", "noise_displace",
-                "proportional_move", "round", "bend", "smooth_edges", "trace",
-                "boolean", "subdivide",
+                "proportional_move", "proportional_scale", "round", "bend", "smooth_edges",
+                "trace", "boolean", "subdivide",
                 "bridge", "relax", "slide",
                 "poke", "inset", "grid_fill", "recalc_normals"],
     target: tag(str, "mesh object to edit (empty=active)") = "",
@@ -59,11 +59,14 @@ def edit(
     z: tag(float, "[extrude/proportional_move] explicit Z amount (m)") = 0.0,
     # bevel
     width: tag(float, "[bevel/round/smooth_edges] bevel width (m)") = 0.0,
-    factor: tag(float, "[bevel] bevel amount as a factor (alt to width)") = 0.05,
+    factor: tag(float, "[bevel] bevel amount as a factor (alt to width; unset→0.05); "
+                       "[proportional_scale] scale at the handle verts (<1 gathers/narrows, "
+                       ">1 swells); radius-edge verts stay 1.0, lerped by falloff") = 1.0,
     segments: tag(int, "[bevel/round/smooth_edges] bevel segments") = 1,
     affect: tag(str, "[bevel] EDGES | VERTICES") = "EDGES",
     # loop_cut / axis-based
-    axis: tag(str, "[loop_cut/trace] axis X|Y|Z") = "Z",
+    axis: tag(str, "[loop_cut/trace/bend] axis X|Y|Z (bend: the axis to bend AROUND; "
+                   "refused if it's the object's own long axis — pick a perpendicular one)") = "Z",
     cuts: tag(int, "[loop_cut/subdivide] number of cuts to add") = 1,
     seed_at: tag(float, "[loop_cut] world coord on `axis` to aim the loop at one cross-section "
                         "(only edges straddling that plane are cut) — seeds a spanning ring on "
@@ -91,10 +94,10 @@ def edit(
     feature_size: tag(float, "[noise_displace] noise feature size (bigger = broader lumps)") = 0.5,
     detail: tag(int, "[noise_displace] extra noise octaves on top of the big lumps") = 2,
     direction: tag(str, "[noise_displace] push axis NORMAL|X|Y|Z") = "NORMAL",
-    radius: tag(float, "[proportional_move] falloff radius (m)") = 0.01,
-    falloff: tag(str, "[proportional_move] SMOOTH|SHARP|…") = "SMOOTH",
-    connected: tag(bool, "[proportional_move] geodesic (along-edges) falloff — won't drag a disconnected shell") = False,
-    freeze: tag(str, "[proportional_move] handle whose verts are held rigid (and wall off the falloff)") = "",
+    radius: tag(float, "[proportional_move/proportional_scale] falloff radius (m)") = 0.01,
+    falloff: tag(str, "[proportional_move/proportional_scale] SMOOTH|SHARP|…") = "SMOOTH",
+    connected: tag(bool, "[proportional_move/proportional_scale] geodesic (along-edges) falloff — won't drag a disconnected shell") = False,
+    freeze: tag(str, "[proportional_move/proportional_scale] handle whose verts are held rigid (and wall off the falloff)") = "",
     # separate
     new_name: tag(str, "[separate] name for the split-off object") = "",
     # round_corners
@@ -174,6 +177,10 @@ def edit(
                     detail, direction, apply)
       proportional_move — soft move with falloff (directional + radius, falloff;
                     connected=geodesic falloff, freeze=hold a handle rigid)
+      proportional_scale — soft SCALE with falloff: gather/swell the selection toward its
+                    own centroid, dragging neighbours by the same falloff. A drip narrows
+                    toward its tip — that's a scale, not a translate. (factor<1 gathers,
+                    >1 swells; radius, falloff, connected=geodesic, freeze)
       round       — round named corners    (corners=[...], radius→width, segments)
       bend        — bend the object into an arc  (angle, axis, apply). Pivots about
                     the object ORIGIN and is SYMMETRIC about it — a bar centred on its
@@ -226,7 +233,10 @@ def edit(
         return editmode.extrude(out, inward, up, down, left, right, forward, back,
                                 until_contact, until_length, x, y, z, label, target)
     if o == "bevel":
-        return editmode.bevel(width, factor, segments, affect, label, target)
+        # factor's shared default is 1.0 (neutral for proportional_scale); bevel's own
+        # legacy default is 0.05, restored here when the caller left factor unset.
+        return editmode.bevel(width, 0.05 if factor == 1.0 else factor,
+                              segments, affect, label, target)
     if o == "loop_cut":
         return editmode.loop_cut(axis, cuts, label, target, seed_at, only_selected)
     if o == "recalc_normals":
@@ -256,6 +266,9 @@ def edit(
         return editmode.proportional_move(out, inward, up, down, left, right,
                                           forward, back, x, y, z, radius, falloff,
                                           connected, freeze, label, target)
+    if o == "proportional_scale":
+        return editmode.proportional_scale(factor, radius, falloff, connected, freeze,
+                                           label, target)
     if o == "round":
         return finishes.round_corners(target, corners or [], width or 0.02, segments, label)
     if o == "bend":

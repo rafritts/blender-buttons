@@ -187,12 +187,25 @@ def mint_from_active_selection(name="", vertex_parent=False):
     obj = bpy.context.active_object
     if obj is None or obj.type != 'MESH':
         return {"error": "active object is not a mesh — select a mesh and enter edit mode"}
+    # G209: the select ops store the selection on obj.data and drop back to OBJECT mode,
+    # so the data is here — the old refusal was purely about MODE. Re-enter edit on the
+    # selection's owner ourselves (exactly like every edit verb's target=) instead of
+    # bouncing the caller through a manual object op=mode dance.
+    entered_edit = False
     if obj.mode != 'EDIT':
-        return {"error": "must be in edit mode with a vertex selection to mint a handle"}
+        if bpy.context.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+        bpy.ops.object.mode_set(mode='EDIT')
+        entered_edit = True
 
     bm = bmesh.from_edit_mesh(obj.data)
     sel = [v for v in bm.verts if v.select]
     if not sel:
+        if entered_edit:
+            bpy.ops.object.mode_set(mode='OBJECT')
         return {"error": "no vertices selected — select the geometry to anchor first"}
 
     mw = obj.matrix_world
@@ -255,6 +268,11 @@ def mint_from_active_selection(name="", vertex_parent=False):
             bpy.context.view_layer.update()
         except Exception:
             pass
+
+    # G209: if we re-entered edit mode ourselves, restore the OBJECT-mode state the
+    # caller was in (a mint from a live edit session stays in edit, as before).
+    if entered_edit and obj.mode == 'EDIT':
+        bpy.ops.object.mode_set(mode='OBJECT')
 
     return {
         "success": True,
@@ -524,10 +542,12 @@ def _validate(empty):
         return {"state": "orphaned", "reason": "vertex group gone or empty",
                 "point": None, "vert_count": 0, "deform": 0.0, "place": 0.0}
     n = len(cos)
-    if n != mint_n:
-        return {"state": "orphaned",
-                "reason": f"vert count changed {mint_n}→{n} (verts added or deleted)",
-                "point": None, "vert_count": n, "deform": 0.0, "place": 0.0}
+    # G210: a vert-count change does NOT orphan a handle. Blender vertex groups survive
+    # subdivision (new verts inherit membership), so the tracked region still resolves a
+    # live point — the handle stays USABLE. Only a fully-emptied vgroup (above) is death.
+    # A count change is flagged as drift below (state=dirty), not killed, so a handle
+    # survives a subdivide under its own stroke.
+    count_changed = (n != mint_n)
 
     centroid = _centroid(cos)
 
@@ -566,10 +586,14 @@ def _validate(empty):
         used_fid = False
 
     drift = max(deform, place)
-    out = {"state": "dirty" if drift > DRIFT_EPS else "clean",
+    state_word = "dirty" if (drift > DRIFT_EPS or count_changed) else "clean"
+    out = {"state": state_word,
            "point": [round(c, 5) for c in centroid], "vert_count": n,
            "normal": _avg_normal(nrms), "deform": round(deform, 5),
            "place": round(place, 5), "fiducial": used_fid}
+    if count_changed:
+        out["reason"] = (f"vert count {mint_n}→{n} (topology edit; vgroup membership "
+                         f"survived — handle still resolves, accept to re-baseline)")
     if out["state"] == "dirty":
         out["attribution"] = _attribution(empty)
     return out

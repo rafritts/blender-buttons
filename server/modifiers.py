@@ -133,12 +133,19 @@ def add_asset_modifier(asset: str, host: str = "", name: str = "",
     name:       modifier name (defaults to the asset name).
     collection: assign this collection to the asset's Collection input — e.g. the
                 instance source for "Scatter on Surface" (multi-prototype sprinkles).
+                Also FLIPS the gating instance-source menu to 'Collection' for you
+                (else the socket is a silent no-op — G205).
     inputs:     {socket-name: value} for the exposed dials (e.g. {"Density": 250,
-                "Seed": 3}). Set by socket identifier; the result lists every settable
-                input name. Object/Collection-typed inputs take the datablock name.
+                "Seed": 3}). MENU sockets take the option NAME the panel shows
+                ({"Instance Type": "Collection"}) — resolved to its int for you (G204).
+                Object/Collection-typed inputs take the datablock name. The result's
+                `inputs:` block lists every input with its type, current value, and —
+                for menus — the options by name.
 
-    Note: native GN scatter/instances emit INSTANCES-on-points, not separate objects;
-    use `modifier op=apply` (Realize Instances) if you need editable geometry.
+    The result reports the evaluated INSTANCE COUNT (0 = nothing emitted — check
+    Density/gate, G206). Native GN scatter/instances emit INSTANCES-on-points, not
+    separate objects; `modifier op=apply` realizes them into editable mesh (it flips
+    Realize Instances before baking, G207).
     """
     params = {"asset": asset}
     if host:       params["host"] = host
@@ -148,10 +155,12 @@ def add_asset_modifier(asset: str, host: str = "", name: str = "",
     result = call_blender("add_asset_modifier", params, label=label)
     if result.get("success"):
         main = f"{result['modifier']} ({result['asset']}, NODES)"
+        if result.get("evaluated_instances") is not None:
+            main += f"\n  emits: {result['evaluated_instances']} instance(s)"
         if result.get("inputs_set"):
             main += f"\n  set: {result['inputs_set']}"
         if result.get("inputs_available"):
-            main += f"\n  inputs: {result['inputs_available']}"
+            main += "\n  inputs:\n    " + "\n    ".join(result['inputs_available'])
         for n in result.get("notes", []):
             main += f"\n  {n}"
     else:
@@ -440,6 +449,11 @@ def apply_modifiers(name: str = "") -> str:
         applied = result.get("applied", [])
         main = (f"Applied {len(applied)} modifier(s) on '{result['object']}': {applied}"
                 if applied else f"No modifiers on '{result['object']}'")
+        for r in result.get("realized_instances", []):
+            main += (f"\n  realized {r['instances']} instance(s) from '{r['modifier']}' "
+                     f"(set Realize Instances before baking)")
+        for w in result.get("warnings", []):
+            main += f"\n  ⚠ {w}"
         if result.get("degenerate_dissolved"):
             main += (f"\n  cleaned {result['degenerate_dissolved']} zero-area sliver face(s) "
                      f"the bevel left at an NGON cap")

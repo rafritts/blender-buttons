@@ -117,7 +117,7 @@ EDIT_MODE_TOOLS = {
     "bevel", "extrude", "loop_cut", "subdivide_selection", "set_component_mode", "select_all",
     "select_by_axis", "select_between", "list_components", "select_by_index", "grow_selection", "move_vertices",
     "scale_vertices", "delete_geometry", "separate_selection", "jitter_vertices",
-    "random_select", "proportional_move", "inflate_selection", "mark_sharp",
+    "random_select", "proportional_move", "proportional_scale", "inflate_selection", "mark_sharp",
     "set_edge_crease", "merge_by_distance", "symmetrize", "select_in_sphere", "select_by_radius", "split_by_part",
     "get_rings", "select_ring", "select_rings", "scale_rings", "taper_end", "taper_section",
     "shape_profile", "flute", "field",
@@ -134,7 +134,7 @@ EDIT_MODE_TOOLS = {
 # strokes write to the active key too, so they're in here despite not being EDIT.
 SHAPE_KEY_SHADOW_TOOLS = {
     "move_vertices", "scale_vertices", "snap_loop", "proportional_move",
-    "inflate_selection",
+    "proportional_scale", "inflate_selection",
     "jitter_vertices", "bevel", "extrude", "extrude_along_curve", "scale_rings",
     "subdivide_selection", "relax_selection", "slide_selection",
     "poke_faces", "inset_faces", "grid_fill",
@@ -156,7 +156,7 @@ SHAPE_KEY_SHADOW_TOOLS = {
 NOOP_CHECK_TOOLS = {
     # edit-mode geometry writers
     "move_vertices", "scale_vertices", "snap_loop", "proportional_move",
-    "inflate_selection", "jitter_vertices", "bevel", "extrude",
+    "proportional_scale", "inflate_selection", "jitter_vertices", "bevel", "extrude",
     "extrude_along_curve", "scale_rings", "subdivide_selection",
     "relax_selection", "slide_selection", "poke_faces", "inset_faces",
     "grid_fill", "taper_end", "taper_section", "shape_profile", "flute", "field",
@@ -210,7 +210,7 @@ PLACEMENT_TOOLS = {
 # SUBSUMES the old G77 placement self-report (auto_proximity_note), so that separate
 # emission is retired here — validate is now the single relational authority, with
 # intent-suppression the raw note never had.
-VALIDATE_AFTER = NOOP_CHECK_TOOLS | PLACEMENT_TOOLS
+VALIDATE_AFTER = NOOP_CHECK_TOOLS | PLACEMENT_TOOLS | {"bud"}
 
 # G105/G118/G134: ops that can change CONNECTIVITY (add/remove geometry, weld, cut, fill)
 # — the only ones where a topology degrade (new boundary loop, non-manifold edge, broken

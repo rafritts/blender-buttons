@@ -625,7 +625,31 @@ def radial_landmark(params):
     normal = None
     crossings_n = None
     snapped_side = None
-    if radius > 0 and not crossing:
+    if crossing in ("rim", "boundary"):
+        # G212: land ON the mesh's open BOUNDARY loop (the opening's edge) at the requested
+        # clock angle — not on the wall above it. A horizontal cast at bbox-centre height
+        # strikes the wall of a dome-with-rim mid-way up; the boundary edge sits LOWER, at
+        # its own height. Pick the open-boundary vert whose azimuth in the ring plane is
+        # nearest `angle`, so "the opening's edge at 4 o'clock" is one read on any rimmed
+        # form (cup lips, sleeve cuffs, icing edges).
+        if obj is None or obj.type != 'MESH':
+            return {"error": "crossing=rim needs a mesh anchor (got a handle/empty)"}
+        bpts = _boundary_points(obj)
+        if not bpts:
+            return {"error": "crossing=rim: the anchor has no OPEN boundary loop (it's a "
+                             "closed surface) — use crossing=outer/inner or radius="}
+        best = None
+        best_d = None
+        for wp, wn in bpts:
+            rel = wp - center
+            az = math.degrees(math.atan2(rel.dot(right), rel.dot(up))) % 360.0
+            dang = abs((az - angle + 180.0) % 360.0 - 180.0)
+            if best_d is None or dang < best_d:
+                best_d = dang
+                best = (wp, wn)
+        p, normal = best
+        radius = round((Vector(p) - center).length, 5)
+    elif radius > 0 and not crossing:
         # explicit-radius mode (back-compat): place at the named distance, optional snap.
         p = center + radius * direction
         if params.get("snap", True) and obj is not None and obj.type == 'MESH':
@@ -665,6 +689,8 @@ def radial_landmark(params):
            "normal": [round(c, 4) for c in (normal or Vector((0.0, 0.0, 1.0)))],
            "angle": angle, "radius": radius, "axis": axis,
            "crossing": (crossing or ("outer" if crossings_n is not None else "radius"))}
+    if crossing in ("rim", "boundary"):
+        res["crossing"] = "rim"
     if snapped_side is not None:
         res["snapped_side"] = snapped_side
     if crossings_n is not None:
@@ -672,6 +698,30 @@ def radial_landmark(params):
     if obj is not None:
         res["region"] = region_words(world_bbox(obj), p)
     return handles.mint_point_from_result(params, res)
+
+
+def _boundary_points(obj):
+    """G212 — world (point, normal) for every vertex on an OPEN boundary loop of obj (a
+    vert touching an edge that borders exactly one face). The rim of a dome / cup / open
+    shell. Empty for a closed surface."""
+    import bmesh
+    from mathutils import Vector
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.normal_update()
+    mw = obj.matrix_world
+    nmat = mw.to_3x3()
+    verts = set()
+    for e in bm.edges:
+        if len(e.link_faces) == 1:
+            verts.add(e.verts[0])
+            verts.add(e.verts[1])
+    out = []
+    for v in verts:
+        wn = nmat @ v.normal
+        out.append((mw @ v.co, wn.normalized() if wn.length > 1e-9 else Vector((0.0, 0.0, 1.0))))
+    bm.free()
+    return out
 
 
 def _ray_crossings(obj, origin, direction, max_dist):

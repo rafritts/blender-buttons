@@ -16,7 +16,7 @@ from ._common import tag, unknown, teach
 
 @mcp.tool(name="buttons-blend-macro")
 def buttons_blend_macro(
-    op: Literal["graft", "stitch"],
+    op: Literal["graft", "stitch", "bud"],
     a: tag(str, "[graft/stitch] first OBJECT/patch to merge") = "",
     b: tag(str, "[graft/stitch] second OBJECT/patch to merge") = "",
     mode: tag(str, "[graft] union mode (smin)") = "smin",
@@ -24,6 +24,15 @@ def buttons_blend_macro(
     resolution: tag(int, "[graft] marching-tetrahedra samples along the LONGEST axis; cells are kept ~cubic so a tall-thin bbox doesn't crack (default 48; higher = finer, slower)") = 0,
     keep: tag(bool, "[graft/stitch] keep the two source objects (default False = the merge replaces them)") = False,
     name: tag(str, "[graft/stitch] name for the merged result") = "",
+    # bud (G214) — grow a closed mass fused at a point, host identity preserved
+    host: tag(str, "[bud] the object the bead fuses INTO (kept, with its name/materials/modifiers)") = "",
+    at: tag(list, "[bud] [x,y,z] world anchor where the neck fuses (from feel op=radial crossing=rim / aim / place)") = None,
+    handle: tag(str, "[bud] alternatively, a named handle whose live point is the anchor") = "",
+    diameter: tag(float, "[bud] bead width (m)") = 0.01,
+    hang: tag(float, "[bud] how far the body hangs past the neck (m; default = diameter)") = None,
+    neck: tag(float, "[bud] neck width where it meets the host (m; < diameter ⇒ teardrop; default diameter/2)") = None,
+    direction: tag(str, "[bud] hang direction: down (default, gravity) | up | left | right | forward | back") = "down",
+    solver: tag(str, "[bud] boolean solver EXACT (default, clean on a closed host) | FLOAT") = "EXACT",
     label: str = "",
 ) -> str:
     """
@@ -38,6 +47,13 @@ def buttons_blend_macro(
       stitch — weld two surface patches that SHARE a boundary into one watertight quilt
                (matched sampling + boundary weld → a C0 seam, no crack). Refuses if the
                seams aren't coincident — align + match sampling first.  (a, b, name, keep)
+      bud    — grow a CLOSED teardrop mass fused to a host at a point, PRESERVING the
+               host's identity (name, materials, modifiers). The volume author graft
+               can't be — graft makes a NEW object and drops the host's materials +
+               modifiers (the icing's Scatter sprinkles). A bead of icing dripping off a
+               rim, a rivet, a wart, a water drop. Anchor with at=[x,y,z] (from feel
+               op=radial crossing=rim) or handle=. (host, at/handle, diameter, hang,
+               neck, direction, solver)
 
     NATIVE COUSINS (R1):
       • graft ≈ Blender 5.0's native **SDF Geometry-Nodes** chain: Mesh to SDF Grid →
@@ -55,6 +71,8 @@ def buttons_blend_macro(
                    "buttons-blend-macro op=graft a=thumb b=palm blend=0.02"),
         "stitch": (bool(a and b), "a and b (two patches sharing a boundary)",
                    "buttons-blend-macro op=stitch a=cheek b=brow"),
+        "bud":    (bool(host and (at or handle)), "host and at=[x,y,z] (or handle=)",
+                   "buttons-blend-macro op=bud host=Icing at=[0.04,0,0.02] diameter=0.008 hang=0.012"),
     })
     if bad:
         return bad
@@ -62,4 +80,6 @@ def buttons_blend_macro(
         return compose.graft(a, b, mode, blend, resolution, name, keep, label)
     if o == "stitch":
         return compose.stitch(a, b, name, keep, label)
-    return unknown("buttons-blend-macro", "op", op, ["graft", "stitch"])
+    if o == "bud":
+        return compose.bud(host, at, handle, diameter, hang, neck, direction, solver, label)
+    return unknown("buttons-blend-macro", "op", op, ["graft", "stitch", "bud"])

@@ -124,6 +124,25 @@ def _affected_warning(verts_affected, subdivided, brush_name):
 # flags a catastrophic one so the agent sees it in the status block instead of finding
 # out three ops later.
 _RUNAWAY_RADIUS_MULT = 3.0
+# G208: a stroke that would move any vert more than this many brush-radii is refused
+# BEFORE it mutates — a wrong-magnitude `amount` (over-large by an order of magnitude) is
+# almost never intent, and a refuse-before is legible where a warn-after has already
+# ballooned the mesh. Distinct from the 3× post-hoc echo, which stays for the grey zone.
+_RUNAWAY_REFUSE_MULT = 2.0
+
+
+def _runaway_refusal(predicted, radius, brush_name, hint="amount"):
+    """G208 — refuse a displacement brush BEFORE mutating when its predicted maximum move
+    exceeds 2× the brush radius. Returns an error dict, or None to proceed."""
+    if radius and predicted > _RUNAWAY_REFUSE_MULT * radius:
+        cap = round(_RUNAWAY_REFUSE_MULT * radius, 4)
+        return {"error": (
+            f"{brush_name} would move a vert up to {round(predicted, 4)} m — over "
+            f"{int(_RUNAWAY_REFUSE_MULT)}× the brush radius ({round(radius, 4)} m). Refused "
+            f"before mutating: that's almost certainly a wrong-magnitude {hint} (every dial "
+            f"here is METERS). Keep it under {cap} m, or widen radius= to match the reach "
+            f"you intend.")}
+    return None
 
 
 def _displacement_report(max_disp, radius, brush_name):
@@ -138,9 +157,13 @@ def _displacement_report(max_disp, radius, brush_name):
     return md, None
 
 
-def _verts_in_radius(bm, obj, center_world, radius):
-    """Return [(vert, t)] for verts within world-space `radius` of `center_world`.
-    t = distance/radius in [0, 1] — pass straight to _falloff_weight."""
+def _verts_in_radius(bm, obj, center_world, radius, connected=False):
+    """Return [(vert, t)] for verts within `radius` of `center_world`; t = dist/radius in
+    [0, 1] for _falloff_weight. Euclidean by default; connected=True (G215) scopes by
+    GEODESIC distance along the surface from the nearest vert, so a brush on a thin shell
+    walks ONE wall instead of ballooning through space to grab the opposing wall."""
+    if connected:
+        return _verts_in_radius_geodesic(bm, obj, center_world, radius)
     mat = obj.matrix_world
     r2 = radius * radius
     hits = []
@@ -153,30 +176,105 @@ def _verts_in_radius(bm, obj, center_world, radius):
     return hits
 
 
-def _maybe_subdivide(bm, obj, center_world, radius, want):
-    """Densify edges under the brush so the stroke has mesh to grip. Subdivides when
-    subdivide=True is requested, AND — G206 — AUTO-densifies when the footprint is too
-    coarse to carry the stroke (fewer than _LOW_AFFECTED_WARN verts inside the radius): a
-    brush should HOLD enough mesh for its detail rather than degrade to a 1-vert no-op that
-    also trips the byte-identical detector. Bounded passes (a 32×16 sphere at a 2cm brush
-    needs a couple). Returns the number of edges subdivided (0 = mesh already dense enough)."""
+def _verts_in_radius_geodesic(bm, obj, center_world, radius):
+    """G215 — scope by geodesic (along-surface) distance from the surface vert nearest the
+    brush centre, in WORLD-space edge lengths (scale-correct). A thin clad shell's two
+    walls share no short edge path, so the flood never crosses to the back face."""
+    import heapq
+    mat = obj.matrix_world
+    bm.verts.ensure_lookup_table()
+    seed = None
+    best = None
+    for v in bm.verts:
+        d2 = ((mat @ v.co) - center_world).length_squared
+        if best is None or d2 < best:
+            best = d2
+            seed = v
+    if seed is None or best ** 0.5 > radius:
+        return []
+    dist = {seed.index: 0.0}
+    heap = [(0.0, seed.index)]
+    while heap:
+        d, vi = heapq.heappop(heap)
+        if d > dist.get(vi, radius):
+            continue
+        if d >= radius:
+            continue
+        v = bm.verts[vi]
+        wv = mat @ v.co
+        for e in v.link_edges:
+            w = e.other_vert(v)
+            nd = d + (wv - (mat @ w.co)).length
+            if nd < dist.get(w.index, radius):
+                dist[w.index] = nd
+                heapq.heappush(heap, (nd, w.index))
+    return [(bm.verts[vi], d / radius) for vi, d in dist.items()]
+
+
+def _two_wall_warning(obj, hits, connected):
+    """G215 — cheap detector for a euclidean footprint that spans a thin shell's two
+    opposing walls. Reference = the normal of the hit NEAREST the brush centre (the wall
+    the brush sits on); any hit whose normal strongly OPPOSES it (dot < -0.3, i.e. >107°
+    apart) is the far/back wall — a split a single smoothly-curved wall can't produce
+    within a small radius. Robust to a 50/50 balance the mean would cancel to noise.
+    Returns a warning steering to connected=true, or None (silent when geodesic/sparse)."""
+    if connected or len(hits) < 6:
+        return None
+    mat3 = obj.matrix_world.to_3x3()
+    ns = []
+    for v, t in hits:
+        wn = mat3 @ v.normal
+        if wn.length:
+            ns.append((t, wn.normalized()))
+    if len(ns) < 6:
+        return None
+    ref = min(ns, key=lambda p: p[0])[1]     # normal of the closest-to-centre hit
+    opposed = sum(1 for _, n in ns if n.dot(ref) < -0.3)
+    if opposed >= 2:
+        return ("brush footprint spans two opposing surfaces (a thin shell's front and "
+                "back wall) — the euclidean radius grabbed both, so this stroke can shred "
+                "the shell (validate will flag the self-intersections). Re-run with "
+                "connected=true to scope geodesically along one wall.")
+    return None
+
+
+def _maybe_subdivide(bm, obj, center_world, radius, want, detail=None):
+    """Densify edges under the brush so the stroke has mesh to grip and can EXPRESS its
+    falloff curve. Auto-densifies (G213) until no edge whose midpoint is inside the
+    footprint is longer than `detail` (a target edge length in world meters, default
+    radius/4) — iterate to the target, not one blind pass, so a coarse footprint can't
+    sample a smooth falloff at 2-3 verts. subdivide=True forces at least one pass even
+    when already fine. Bounded passes. Returns the number of edges subdivided."""
     mat = obj.matrix_world
     r2 = radius * radius
+    if detail is None or detail <= 0:
+        detail = radius / 4.0
 
-    def _verts_in():
-        return sum(1 for v in bm.verts
-                   if ((mat @ v.co) - center_world).length_squared < r2)
+    def _footprint_edges(long_only):
+        out = []
+        for e in bm.edges:
+            a = mat @ e.verts[0].co
+            b = mat @ e.verts[1].co
+            # In the footprint if EITHER endpoint or the midpoint is within the radius —
+            # endpoint-inclusion is what lets a huge edge radiating from the brush centre
+            # (whose midpoint sits outside a small radius) still get densified, so detail
+            # converges INWARD toward the centre pass by pass.
+            near = ((a - center_world).length_squared < r2
+                    or (b - center_world).length_squared < r2
+                    or ((a + b) * 0.5 - center_world).length_squared < r2)
+            if not near:
+                continue
+            if long_only and (a - b).length <= detail:
+                continue
+            out.append(e)
+        return out
 
     total = 0
-    for i in range(4):                       # backstop against runaway subdivision
-        n_in = _verts_in()
-        # Pass 0 honours an explicit subdivide=True even when already dense; after that,
-        # only keep going while the footprint is too coarse to represent the stroke.
-        if not (i == 0 and want) and n_in >= _LOW_AFFECTED_WARN:
-            break
-        edges = [e for e in bm.edges
-                 if ((mat @ e.verts[0].co + mat @ e.verts[1].co) * 0.5
-                     - center_world).length_squared < r2]
+    for i in range(8):                       # backstop against runaway subdivision
+        edges = _footprint_edges(long_only=True)
+        if i == 0 and want and not edges:
+            # explicit request, footprint already fine-grained: one uniform pass on top.
+            edges = _footprint_edges(long_only=False)
         if not edges:
             break
         bmesh.ops.subdivide_edges(bm, edges=edges, cuts=1, use_grid_fill=True)
@@ -243,10 +341,12 @@ def sculpt_grab(params):
         return {"error": "give a destination: 'to' [x,y,z] world point, OR direction "
                          "words (out=, up=, left=… in meters)"}
 
+    connected = bool(params.get("connected", False))
     bm = _enter_edit(obj)
-    subdivided = _maybe_subdivide(bm, obj, center, radius, params.get("subdivide", False))
+    subdivided = _maybe_subdivide(bm, obj, center, radius, params.get("subdivide", False),
+                                  params.get("detail"))
     bm.normal_update()
-    hits = _verts_in_radius(bm, obj, center, radius)
+    hits = _verts_in_radius(bm, obj, center, radius, connected)
 
     frame = None
     if has_to:
@@ -260,19 +360,25 @@ def sculpt_grab(params):
         if derr:
             _exit_edit(obj)
             return derr
+    refusal = _runaway_refusal(offset_world.length, radius, "sculpt_grab", "offset")
+    if refusal:
+        _exit_edit(obj)
+        return refusal
     offset_local = _world_to_local_dir(obj, offset_world)
 
     for v, t in hits:
         v.co += offset_local * _falloff_weight(t, falloff)
+    two_wall = _two_wall_warning(obj, hits, connected)   # before _exit_edit frees the bmesh
     _exit_edit(obj)
     push_undo(f"sculpt_grab {obj.name}")
     md, runaway = _displacement_report(offset_world.length, radius, "sculpt_grab")
     result = {"success": True, "verts_affected": len(hits),
               "offset_world": [round(c, 4) for c in offset_world],
-              "max_displacement": md, "subdivided_edges": subdivided}
+              "max_displacement": md, "subdivided_edges": subdivided, "connected": connected}
     if frame:
         result["frame"] = frame
-    warn = runaway or _affected_warning(len(hits), subdivided, "sculpt_grab")
+    warn = (runaway or two_wall
+            or _affected_warning(len(hits), subdivided, "sculpt_grab"))
     if warn:
         result["warning"] = warn
     return result
@@ -287,28 +393,48 @@ def sculpt_inflate(params):
     if err:
         return err
     amount = float(params.get("amount", 0.01))
+    connected = bool(params.get("connected", False))
+    # G208: refuse before mutating — `amount` is METERS along the normal; a value over
+    # 2× the radius is a wrong-magnitude dial, not intent.
+    refusal = _runaway_refusal(abs(amount), radius, "sculpt_inflate")
+    if refusal:
+        return refusal
+
+    # G208: denominate in true world meters — divide the local normal delta by the
+    # object's per-axis scale, exactly like edit op=inflate, so a scaled host doesn't
+    # silently amplify the move.
+    scale = obj.scale
+    sx = abs(scale.x) or 1.0
+    sy = abs(scale.y) or 1.0
+    sz = abs(scale.z) or 1.0
 
     bm = _enter_edit(obj)
-    subdivided = _maybe_subdivide(bm, obj, center, radius, params.get("subdivide", False))
+    subdivided = _maybe_subdivide(bm, obj, center, radius, params.get("subdivide", False),
+                                  params.get("detail"))
     bm.normal_update()
-    hits = _verts_in_radius(bm, obj, center, radius)
+    hits = _verts_in_radius(bm, obj, center, radius, connected)
     moved = 0
     max_disp = 0.0
     for v, t in hits:
         n = v.normal
         if n.length == 0:
             continue
-        disp = abs(amount * _falloff_weight(t, falloff))
-        v.co += n * (amount * _falloff_weight(t, falloff))
+        w = _falloff_weight(t, falloff)
+        v.co.x += n.x * amount * w / sx
+        v.co.y += n.y * amount * w / sy
+        v.co.z += n.z * amount * w / sz
         moved += 1
+        disp = abs(amount * w)
         if disp > max_disp:
             max_disp = disp
+    two_wall = _two_wall_warning(obj, hits, connected)   # before _exit_edit frees the bmesh
     _exit_edit(obj)
     push_undo(f"sculpt_inflate {amount}")
     md, runaway = _displacement_report(max_disp, radius, "sculpt_inflate")
     result = {"success": True, "verts_affected": moved, "amount": amount,
-              "max_displacement": md, "subdivided_edges": subdivided}
-    warn = runaway or _affected_warning(moved, subdivided, "sculpt_inflate")
+              "max_displacement": md, "subdivided_edges": subdivided, "connected": connected}
+    warn = (runaway or two_wall
+            or _affected_warning(moved, subdivided, "sculpt_inflate"))
     if warn:
         result["warning"] = warn
     return result
@@ -326,11 +452,16 @@ def sculpt_draw(params):
     if err:
         return err
     amount = float(params.get("amount", 0.01))
+    connected = bool(params.get("connected", False))
+    refusal = _runaway_refusal(abs(amount), radius, "sculpt_draw")
+    if refusal:
+        return refusal
 
     bm = _enter_edit(obj)
-    subdivided = _maybe_subdivide(bm, obj, center, radius, params.get("subdivide", False))
+    subdivided = _maybe_subdivide(bm, obj, center, radius, params.get("subdivide", False),
+                                  params.get("detail"))
     bm.normal_update()
-    hits = _verts_in_radius(bm, obj, center, radius)
+    hits = _verts_in_radius(bm, obj, center, radius, connected)
 
     override = params.get("normal")
     if isinstance(override, list) and len(override) == 3:
@@ -348,13 +479,15 @@ def sculpt_draw(params):
 
     for v, t in hits:
         v.co += offset_local * _falloff_weight(t, falloff)
+    two_wall = _two_wall_warning(obj, hits, connected)   # before _exit_edit frees the bmesh
     _exit_edit(obj)
     push_undo(f"sculpt_draw {amount}")
     md, runaway = _displacement_report(abs(amount), radius, "sculpt_draw")
     result = {"success": True, "verts_affected": len(hits), "amount": amount,
               "avg_normal_world": [round(c, 4) for c in avg_n_world],
-              "max_displacement": md, "subdivided_edges": subdivided}
-    warn = runaway or _affected_warning(len(hits), subdivided, "sculpt_draw")
+              "max_displacement": md, "subdivided_edges": subdivided, "connected": connected}
+    warn = (runaway or two_wall
+            or _affected_warning(len(hits), subdivided, "sculpt_draw"))
     if warn:
         result["warning"] = warn
     return result
@@ -369,14 +502,18 @@ def sculpt_smooth(params):
     if err:
         return err
     iterations = max(1, int(params.get("iterations", 1)))
+    connected = bool(params.get("connected", False))
 
     bm = _enter_edit(obj)
-    subdivided = _maybe_subdivide(bm, obj, center, radius, params.get("subdivide", False))
+    subdivided = _maybe_subdivide(bm, obj, center, radius, params.get("subdivide", False),
+                                  params.get("detail"))
 
     last_hits = 0
+    last_hit_list = []
     for _ in range(iterations):
-        hits = _verts_in_radius(bm, obj, center, radius)
+        hits = _verts_in_radius(bm, obj, center, radius, connected)
         last_hits = len(hits)
+        last_hit_list = hits
         new_positions = []
         for v, t in hits:
             if not v.link_edges:
@@ -393,11 +530,14 @@ def sculpt_smooth(params):
         for v, p in new_positions:
             v.co = p
 
+    two_wall = _two_wall_warning(obj, last_hit_list, connected)  # before _exit_edit
     _exit_edit(obj)
     push_undo(f"sculpt_smooth iter={iterations}")
     result = {"success": True, "iterations": iterations,
-              "verts_per_pass": last_hits, "subdivided_edges": subdivided}
-    warn = _affected_warning(last_hits, subdivided, "sculpt_smooth")
+              "verts_per_pass": last_hits, "subdivided_edges": subdivided,
+              "connected": connected}
+    warn = (two_wall
+            or _affected_warning(last_hits, subdivided, "sculpt_smooth"))
     if warn:
         result["warning"] = warn
     return result
@@ -415,10 +555,15 @@ def sculpt_crease(params):
     if err:
         return err
     amount = float(params.get("amount", 0.005))
+    connected = bool(params.get("connected", False))
+    refusal = _runaway_refusal(abs(amount), radius, "sculpt_crease")
+    if refusal:
+        return refusal
 
     bm = _enter_edit(obj)
-    subdivided = _maybe_subdivide(bm, obj, center, radius, params.get("subdivide", False))
-    hits = _verts_in_radius(bm, obj, center, radius)
+    subdivided = _maybe_subdivide(bm, obj, center, radius, params.get("subdivide", False),
+                                  params.get("detail"))
+    hits = _verts_in_radius(bm, obj, center, radius, connected)
     mat = obj.matrix_world
 
     for v, t in hits:
@@ -428,12 +573,14 @@ def sculpt_crease(params):
         offset_world = toward.normalized() * (amount * _falloff_weight(t, falloff))
         v.co += _world_to_local_dir(obj, offset_world)
 
+    two_wall = _two_wall_warning(obj, hits, connected)   # before _exit_edit frees the bmesh
     _exit_edit(obj)
     push_undo(f"sculpt_crease {amount}")
     md, runaway = _displacement_report(abs(amount), radius, "sculpt_crease")
     result = {"success": True, "verts_affected": len(hits), "amount": amount,
-              "max_displacement": md, "subdivided_edges": subdivided}
-    warn = runaway or _affected_warning(len(hits), subdivided, "sculpt_crease")
+              "max_displacement": md, "subdivided_edges": subdivided, "connected": connected}
+    warn = (runaway or two_wall
+            or _affected_warning(len(hits), subdivided, "sculpt_crease"))
     if warn:
         result["warning"] = warn
     return result
@@ -452,11 +599,16 @@ def sculpt_pinch(params):
     if err:
         return err
     amount = float(params.get("amount", 0.005))
+    connected = bool(params.get("connected", False))
+    refusal = _runaway_refusal(abs(amount), radius, "sculpt_pinch")
+    if refusal:
+        return refusal
 
     bm = _enter_edit(obj)
-    subdivided = _maybe_subdivide(bm, obj, center, radius, params.get("subdivide", False))
+    subdivided = _maybe_subdivide(bm, obj, center, radius, params.get("subdivide", False),
+                                  params.get("detail"))
     bm.normal_update()
-    hits = _verts_in_radius(bm, obj, center, radius)
+    hits = _verts_in_radius(bm, obj, center, radius, connected)
     mat = obj.matrix_world
     mat3 = mat.to_3x3()
 
@@ -475,12 +627,14 @@ def sculpt_pinch(params):
         offset_world = in_plane.normalized() * (amount * _falloff_weight(t, falloff))
         v.co += _world_to_local_dir(obj, offset_world)
 
+    two_wall = _two_wall_warning(obj, hits, connected)   # before _exit_edit frees the bmesh
     _exit_edit(obj)
     push_undo(f"sculpt_pinch {amount}")
     md, runaway = _displacement_report(abs(amount), radius, "sculpt_pinch")
     result = {"success": True, "verts_affected": len(hits), "amount": amount,
-              "max_displacement": md, "subdivided_edges": subdivided}
-    warn = runaway or _affected_warning(len(hits), subdivided, "sculpt_pinch")
+              "max_displacement": md, "subdivided_edges": subdivided, "connected": connected}
+    warn = (runaway or two_wall
+            or _affected_warning(len(hits), subdivided, "sculpt_pinch"))
     if warn:
         result["warning"] = warn
     return result
@@ -500,11 +654,13 @@ def sculpt_flatten(params):
         return err
     amount = float(params.get("amount", 1.0))
     amount = max(-1.0, min(1.0, amount))
+    connected = bool(params.get("connected", False))
 
     bm = _enter_edit(obj)
-    subdivided = _maybe_subdivide(bm, obj, center, radius, params.get("subdivide", False))
+    subdivided = _maybe_subdivide(bm, obj, center, radius, params.get("subdivide", False),
+                                  params.get("detail"))
     bm.normal_update()
-    hits = _verts_in_radius(bm, obj, center, radius)
+    hits = _verts_in_radius(bm, obj, center, radius, connected)
 
     override = params.get("plane_normal")
     if isinstance(override, list) and len(override) == 3:
@@ -527,12 +683,14 @@ def sculpt_flatten(params):
         offset_world = plane_n * (-d * amount * _falloff_weight(t, falloff))
         v.co += _world_to_local_dir(obj, offset_world)
 
+    two_wall = _two_wall_warning(obj, hits, connected)   # before _exit_edit frees the bmesh
     _exit_edit(obj)
     push_undo(f"sculpt_flatten {amount}")
     result = {"success": True, "verts_affected": len(hits), "amount": amount,
               "plane_normal_world": [round(c, 4) for c in plane_n],
-              "subdivided_edges": subdivided}
-    warn = _affected_warning(len(hits), subdivided, "sculpt_flatten")
+              "subdivided_edges": subdivided, "connected": connected}
+    warn = (two_wall
+            or _affected_warning(len(hits), subdivided, "sculpt_flatten"))
     if warn:
         result["warning"] = warn
     return result
@@ -575,6 +733,7 @@ def sculpt_gravity(params):
         return {"error": f"Invalid falloff '{falloff}'. Use one of {sorted(_FALLOFFS)}"}
     strength = float(params.get("strength", params.get("amount", 0.02)))
     pin = max(0.0, min(0.95, float(params.get("pin", 0.25))))
+    connected = bool(params.get("connected", False))
 
     bm = _enter_edit(obj)
     subdivided = 0
@@ -584,8 +743,13 @@ def sculpt_gravity(params):
         if radius <= 0:
             _exit_edit(obj)
             return {"error": "'radius' must be > 0 when 'at' is given"}
-        subdivided = _maybe_subdivide(bm, obj, center, radius, params.get("subdivide", False))
-        hits = _verts_in_radius(bm, obj, center, radius)
+        refusal = _runaway_refusal(abs(strength), radius, "sculpt_gravity", "strength")
+        if refusal:
+            _exit_edit(obj)
+            return refusal
+        subdivided = _maybe_subdivide(bm, obj, center, radius, params.get("subdivide", False),
+                                      params.get("detail"))
+        hits = _verts_in_radius(bm, obj, center, radius, connected)
     else:
         hits = [(v, 0.0) for v in bm.verts]
 

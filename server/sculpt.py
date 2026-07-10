@@ -37,6 +37,7 @@ def sculpt_grab(target: str, at_x: float, at_y: float, at_z: float, radius: floa
                 up: float = 0.0, down: float = 0.0, left: float = 0.0, right: float = 0.0,
                 forward: float = 0.0, back: float = 0.0,
                 falloff: str = "SMOOTH", subdivide: bool = False,
+                detail: Optional[float] = None, connected: bool = False,
                 label: str = "") -> str:
     """Pull a region of `target` by an offset. Verts at the brush center
     (at_x, at_y, at_z) move the full offset; verts at the radius edge don't move;
@@ -61,6 +62,7 @@ def sculpt_grab(target: str, at_x: float, at_y: float, at_z: float, radius: floa
         "radius": radius, "falloff": falloff, "subdivide": subdivide,
         "out": out, "inward": inward, "up": up, "down": down, "left": left,
         "right": right, "forward": forward, "back": back,
+        "detail": detail, "connected": connected,
     }
     if to_x is not None and to_y is not None and to_z is not None:
         params["to"] = [to_x, to_y, to_z]
@@ -73,6 +75,7 @@ def sculpt_gravity(target: str, at_x: Optional[float] = None, at_y: Optional[flo
                    at_z: Optional[float] = None, radius: Optional[float] = None,
                    strength: float = 0.02, pin: float = 0.25,
                    falloff: str = "SMOOTH", subdivide: bool = False,
+                   detail: Optional[float] = None, connected: bool = False,
                    label: str = "") -> str:
     """Drape a region of `target` under GRAVITY — the lead region-parametric deformer.
 
@@ -90,7 +93,8 @@ def sculpt_gravity(target: str, at_x: Optional[float] = None, at_y: Optional[flo
     falloff:  radial falloff at the sphere edge (scoped mode). SMOOTH|LINEAR|…
     """
     params = {"target": target, "strength": strength, "pin": pin,
-              "falloff": falloff, "subdivide": subdivide}
+              "falloff": falloff, "subdivide": subdivide,
+              "detail": detail, "connected": connected}
     if at_x is not None and at_y is not None and at_z is not None:
         params["at"] = [at_x, at_y, at_z]
         if radius is not None:
@@ -102,17 +106,24 @@ def sculpt_gravity(target: str, at_x: Optional[float] = None, at_y: Optional[flo
 @mcp.tool()
 def sculpt_inflate(target: str, at_x: float, at_y: float, at_z: float, radius: float,
                    amount: float, falloff: str = "SMOOTH", subdivide: bool = False,
+                   detail: Optional[float] = None, connected: bool = False,
                    label: str = "") -> str:
     """Push verts along their OWN normals — organic bulge or deflate.
 
     amount: meters along each vert's normal. Positive = outward (bulge),
             negative = inward (deflate). Differs from sculpt_draw because each
             vert moves along its own surface normal, so curved areas bulge
-            outward in their natural direction.
+            outward in their natural direction. Over 2× the radius is refused
+            before mutating (wrong-magnitude guard, G208).
+    detail: target edge length (m) the footprint is densified to before the stroke
+            (default radius/4) so the falloff can actually appear (G213).
+    connected: scope geodesically along the surface, not a euclidean sphere — on a
+            thin shell this walks ONE wall instead of grabbing both (G215).
     """
     result = call_blender("sculpt_inflate", {
         "target": target, "at": [at_x, at_y, at_z], "radius": radius,
         "amount": amount, "falloff": falloff, "subdivide": subdivide,
+        "detail": detail, "connected": connected,
     }, label=label)
     return _sculpt_result("inflate", result) + _status(result)
 
@@ -121,7 +132,8 @@ def sculpt_inflate(target: str, at_x: float, at_y: float, at_z: float, radius: f
 def sculpt_draw(target: str, at_x: float, at_y: float, at_z: float, radius: float,
                 amount: float, normal_x: float = 0.0, normal_y: float = 0.0,
                 normal_z: float = 0.0, falloff: str = "SMOOTH",
-                subdivide: bool = False, label: str = "") -> str:
+                subdivide: bool = False, detail: Optional[float] = None,
+                connected: bool = False, label: str = "") -> str:
     """Push verts along a SINGLE averaged normal — uniform-direction ridge or dent.
 
     amount: meters along the averaged normal. Signed.
@@ -132,7 +144,8 @@ def sculpt_draw(target: str, at_x: float, at_y: float, at_z: float, radius: floa
     """
     normal = [normal_x, normal_y, normal_z] if any([normal_x, normal_y, normal_z]) else None
     params = {"target": target, "at": [at_x, at_y, at_z], "radius": radius,
-              "amount": amount, "falloff": falloff, "subdivide": subdivide}
+              "amount": amount, "falloff": falloff, "subdivide": subdivide,
+              "detail": detail, "connected": connected}
     if normal is not None:
         params["normal"] = normal
     result = call_blender("sculpt_draw", params, label=label)
@@ -142,15 +155,18 @@ def sculpt_draw(target: str, at_x: float, at_y: float, at_z: float, radius: floa
 @mcp.tool()
 def sculpt_smooth(target: str, at_x: float, at_y: float, at_z: float, radius: float,
                   iterations: int = 1, falloff: str = "SMOOTH",
-                  subdivide: bool = False, label: str = "") -> str:
+                  subdivide: bool = False, detail: Optional[float] = None,
+                  connected: bool = False, label: str = "") -> str:
     """Laplacian relax — pull each vert toward the centroid of its neighbors.
 
     iterations: how many smoothing passes. More iterations = more relaxation.
                 There's no `amount` parameter — strength is iterations × falloff.
+    detail/connected: densify to a target edge length (G213) / scope geodesically (G215).
     """
     result = call_blender("sculpt_smooth", {
         "target": target, "at": [at_x, at_y, at_z], "radius": radius,
         "iterations": iterations, "falloff": falloff, "subdivide": subdivide,
+        "detail": detail, "connected": connected,
     }, label=label)
     return _sculpt_result("smooth", result) + _status(result)
 
@@ -158,6 +174,7 @@ def sculpt_smooth(target: str, at_x: float, at_y: float, at_z: float, radius: fl
 @mcp.tool()
 def sculpt_crease(target: str, at_x: float, at_y: float, at_z: float, radius: float,
                   amount: float, falloff: str = "SHARP", subdivide: bool = False,
+                  detail: Optional[float] = None, connected: bool = False,
                   label: str = "") -> str:
     """Pull verts toward the brush center — sharp folds, valleys, seams.
 
@@ -170,6 +187,7 @@ def sculpt_crease(target: str, at_x: float, at_y: float, at_z: float, radius: fl
     result = call_blender("sculpt_crease", {
         "target": target, "at": [at_x, at_y, at_z], "radius": radius,
         "amount": amount, "falloff": falloff, "subdivide": subdivide,
+        "detail": detail, "connected": connected,
     }, label=label)
     return _sculpt_result("crease", result) + _status(result)
 
@@ -177,6 +195,7 @@ def sculpt_crease(target: str, at_x: float, at_y: float, at_z: float, radius: fl
 @mcp.tool()
 def sculpt_pinch(target: str, at_x: float, at_y: float, at_z: float, radius: float,
                  amount: float, falloff: str = "SMOOTH", subdivide: bool = False,
+                 detail: Optional[float] = None, connected: bool = False,
                  label: str = "") -> str:
     """Pull verts radially inward in their TANGENT PLANE — tightens without raising.
 
@@ -190,6 +209,7 @@ def sculpt_pinch(target: str, at_x: float, at_y: float, at_z: float, radius: flo
     result = call_blender("sculpt_pinch", {
         "target": target, "at": [at_x, at_y, at_z], "radius": radius,
         "amount": amount, "falloff": falloff, "subdivide": subdivide,
+        "detail": detail, "connected": connected,
     }, label=label)
     return _sculpt_result("pinch", result) + _status(result)
 
@@ -200,6 +220,7 @@ def sculpt_flatten(target: str, at_x: float, at_y: float, at_z: float, radius: f
                    plane_normal_x: float = 0.0, plane_normal_y: float = 0.0,
                    plane_normal_z: float = 0.0,
                    falloff: str = "SMOOTH", subdivide: bool = False,
+                   detail: Optional[float] = None, connected: bool = False,
                    label: str = "") -> str:
     """Project verts toward an average plane through the brush center — smooth out bumps.
 
@@ -213,7 +234,8 @@ def sculpt_flatten(target: str, at_x: float, at_y: float, at_z: float, radius: f
     plane = [plane_normal_x, plane_normal_y, plane_normal_z] \
         if any([plane_normal_x, plane_normal_y, plane_normal_z]) else None
     params = {"target": target, "at": [at_x, at_y, at_z], "radius": radius,
-              "amount": amount, "falloff": falloff, "subdivide": subdivide}
+              "amount": amount, "falloff": falloff, "subdivide": subdivide,
+              "detail": detail, "connected": connected}
     if plane is not None:
         params["plane_normal"] = plane
     result = call_blender("sculpt_flatten", params, label=label)

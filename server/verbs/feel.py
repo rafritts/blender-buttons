@@ -98,10 +98,11 @@ def feel(
     snap: tag(bool, "[place/radial] ray-snap the offset point onto the surface (default True)") = True,
     anchor: tag(str, "[radial] round object (bbox centre = ring centre) or handle (its point+plane)") = "",
     angle: tag(float, "[radial] clock angle in degrees CLOCKWISE from 12 o'clock (0=top, 90=3 o'clock)") = 0.0,
-    crossing: tag(str, "[radial] which wall to land on for a ring/holed anchor: 'outer' (the rim — "
-                       "default when radius=0) or 'inner' (the hole wall). Casts from the centre "
-                       "outward and resolves the real radius, so radius=0 no longer collapses to "
-                       "the empty bbox centre (G102/G128). Omit + give radius= to place at a fixed distance.") = "",
+    crossing: tag(str, "[radial] where to land at the clock angle: 'outer' (furthest wall crossing) "
+                       "or 'inner' (the hole wall) — casts horizontally from the centre and resolves "
+                       "the real radius (G102/G128); OR 'rim'/'boundary' to land ON the mesh's OPEN "
+                       "boundary loop at that angle (a dome/cup/sleeve edge — which sits LOWER than the "
+                       "wall a horizontal cast hits, G212). Omit + give radius= for a fixed distance.") = "",
     snap_side: tag(str, "[radial] on a THIN flat disk, land on the 'top' or 'bottom' face "
                         "deterministically (a radius-snap otherwise flips between the two parallel "
                         "faces by angle); the result reports which face it chose (G199)") = "",

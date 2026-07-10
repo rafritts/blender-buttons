@@ -35,6 +35,33 @@ def graft(a="", b="", mode="smin", blend=0.0, resolution=0, name="", keep=False,
     return body
 
 
+def bud(host="", at=None, handle="", diameter=0.01, hang=None, neck=None,
+        direction="down", solver="EXACT", label=""):
+    """Grow a CLOSED teardrop mass fused to `host` at a point, preserving the host's
+    identity (name, materials, modifiers) — the volume author graft can't be (new object,
+    dropped materials/modifiers). A bead of icing dripping from a rim, a rivet, a drop."""
+    params = {"host": host, "diameter": diameter, "direction": direction, "solver": solver}
+    if isinstance(at, (list, tuple)) and len(at) == 3:
+        params["at"] = list(at)
+    if handle:
+        params["handle"] = handle
+    if hang is not None:
+        params["hang"] = hang
+    if neck is not None:
+        params["neck"] = neck
+    result = call_blender("bud", params, label=label)
+    if not result.get("success"):
+        return result.get("error", "bud failed")
+    keep_id = ("identity kept ✓" if result.get("materials_preserved")
+               and result.get("modifiers_preserved") else "⚠ identity changed")
+    body = (f"budded a {result['diameter']}m bead (hang {result['hang']}m, neck "
+            f"{result['neck']}m) onto '{result['host']}' — {keep_id}, host dims now "
+            f"{result.get('dims_after')}, welded {result.get('welded_verts', 0)} verts")
+    for w in result.get("notes", []):
+        body += f"\n  ⚠ {w}"
+    return body
+
+
 def stitch(a="", b="", name="", keep=False, label=""):
     """Weld two surface patches that share a boundary into one watertight quilt: match the
     boundary sampling, then merge the shared rim → a C0 seam with no crack/T-junction (the

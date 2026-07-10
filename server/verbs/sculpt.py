@@ -59,7 +59,13 @@ def sculpt(
     pin: tag(float, "[gravity] 0..1 top fraction frozen as the attachment") = 0.25,
     falloff: tag(str, "brush falloff SMOOTH|SHARP|…") = "SMOOTH",
     subdivide: tag(bool, "force extra resolution under the brush first (a coarse footprint "
-                         "auto-densifies anyway — G206; this adds a pass on top)") = False,
+                         "auto-densifies to detail= anyway — G213; this adds a pass on top)") = False,
+    detail: tag(float, "target edge length (m) the footprint is densified to before the "
+                       "stroke (default radius/4) so the falloff can actually appear on a "
+                       "coarse mesh (G213)") = None,
+    connected: tag(bool, "scope GEODESICALLY along the surface instead of a euclidean "
+                         "sphere — on a thin shell this walks ONE wall instead of grabbing "
+                         "the opposing wall and shredding it (G215)") = False,
     label: str = "",
 ) -> str:
     """
@@ -111,7 +117,8 @@ def sculpt(
     # gravity is region-parametric, not a stroke: it allows no point (whole mesh).
     if b == "gravity":
         return note + _s.sculpt_gravity(target, at_x, at_y, at_z, radius,
-                                        strength, pin, falloff, subdivide, label)
+                                        strength, pin, falloff, subdivide,
+                                        detail, connected, label)
     if at_x is None or at_y is None or at_z is None:
         return "sculpt: need a brush point — pass at=selection or handle=<name>"
     if radius is None:
@@ -119,27 +126,28 @@ def sculpt(
     if b == "grab":
         result = _s.sculpt_grab(target, at_x, at_y, at_z, radius, None, None, None,
                                 out, inward, up, down, left, right, forward, back,
-                                falloff, subdivide, label)
+                                falloff, subdivide, detail, connected, label)
     elif b == "draw":
         result = _s.sculpt_draw(target, at_x, at_y, at_z, radius, amount,
-                                normal_x, normal_y, normal_z, falloff, subdivide, label)
+                                normal_x, normal_y, normal_z, falloff, subdivide,
+                                detail, connected, label)
     elif b == "inflate":
         result = _s.sculpt_inflate(target, at_x, at_y, at_z, radius, amount,
-                                   falloff, subdivide, label)
+                                   falloff, subdivide, detail, connected, label)
     elif b == "smooth":
         result = _s.sculpt_smooth(target, at_x, at_y, at_z, radius, iterations,
-                                  falloff, subdivide, label)
+                                  falloff, subdivide, detail, connected, label)
     elif b == "crease":
         result = _s.sculpt_crease(target, at_x, at_y, at_z, radius, amount,
                                   falloff if falloff != "SMOOTH" else "SHARP",
-                                  subdivide, label)
+                                  subdivide, detail, connected, label)
     elif b == "pinch":
         result = _s.sculpt_pinch(target, at_x, at_y, at_z, radius, amount,
-                                 falloff, subdivide, label)
+                                 falloff, subdivide, detail, connected, label)
     elif b == "flatten":
         result = _s.sculpt_flatten(target, at_x, at_y, at_z, radius, amount,
                                    plane_normal_x, plane_normal_y, plane_normal_z,
-                                   falloff, subdivide, label)
+                                   falloff, subdivide, detail, connected, label)
     else:
         where = _ELSEWHERE.get(b)
         if where:

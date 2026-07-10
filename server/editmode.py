@@ -304,6 +304,38 @@ def proportional_move(out: float = 0.0, inward: float = 0.0,
     return main + _status(result)
 
 
+def proportional_scale(factor: float = 1.0, radius: float = 0.01, falloff: str = "SMOOTH",
+                       connected: bool = False, freeze: str = "",
+                       label: str = "", target: str = "") -> str:
+    """
+    Scale the selected verts toward/away from their own centroid WITH FALLOFF — the
+    proportional-editing scale (G216). A drip GATHERS (the surface narrows toward the
+    hanging tip); that's a soft scale, not a translate, and proportional_move can't do it.
+
+    factor:  scale at the handle verts. <1 gathers/pulls in (0.6 = to 60%), >1 swells.
+             Verts at the radius edge stay 1.0; between, the per-vert factor lerps by falloff.
+    radius:  falloff radius in meters (default 1cm).
+    falloff: SMOOTH (default) | LINEAR | SPHERE | SHARP | ROOT | CONSTANT.
+    connected: geodesic (along-edges) falloff — won't gather a disconnected shell (G60).
+    freeze:  a handle name whose verts are held rigid (and wall off a geodesic flood).
+    target:  optional mesh — enters edit mode on it first (acts on its live selection),
+             exits after. Empty = the active mesh.
+    """
+    result = call_blender("proportional_scale", {
+        "factor": factor, "radius": radius, "falloff": falloff,
+        "connected": connected, "freeze": freeze, "target": target,
+    }, label=label)
+    if result.get("success"):
+        mode = " geodesic" if result.get("connected") else ""
+        frz = f" froze {result['frozen']}" if result.get("frozen") else ""
+        main = (f"scaled {result['handles']} handles ×{result['factor']}, dragged "
+                f"{result['affected']} verts{mode}{frz} r={result['radius']}m "
+                f"{result['falloff']} [{result.get('op_id', '')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 @mcp.tool()
 def random_select(fraction: float = 0.2, seed: int = 0, label: str = "") -> str:
     """

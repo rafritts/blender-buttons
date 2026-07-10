@@ -163,7 +163,7 @@ def _append_blend(path, name_filter, link):
                "faces": len(ob.data.polygons),
                "edges": len(ob.data.edges)}
               for ob in appended if ob.type == 'MESH']
-    return {"imported": [ob.name for ob in appended], "meshes": meshes,
+    return {"success": True, "imported": [ob.name for ob in appended], "meshes": meshes,
             "path": path, "mode": "link" if link else "append"}
 
 
@@ -202,7 +202,7 @@ def import_mesh(params):
                            "verts": len(ob.data.vertices),
                            "faces": len(ob.data.polygons),
                            "edges": len(ob.data.edges)})
-    return {"imported": new, "meshes": meshes, "path": path}
+    return {"success": True, "imported": new, "meshes": meshes, "path": path}
 
 
 def set_frame(params):

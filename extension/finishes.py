@@ -181,17 +181,31 @@ def bend(params):
     if bpy.context.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
 
-    bent = []
-    notes = []
+    # G211: refuse BEFORE mutating when the bend axis IS an object's own dominant long
+    # axis — bending around the length pivots in a plane that barely changes the shape
+    # (the degenerate case that used to mutate then warn after, costing an undo). Checked
+    # for every target up front so a batch refuses cleanly before touching any of them.
+    # The 1.1× guard skips near-cube objects, where no axis is meaningfully "the length".
     for o in objs:
         if o.type != 'MESH':
             continue
         xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(o)
         dims = (xmax - xmin, ymax - ymin, zmax - zmin)
         long_axis = "XYZ"[dims.index(max(dims))]
-        if long_axis == axis:
-            notes.append(f"'{o.name}': bending around its own long axis ({axis}) "
-                         "barely changes shape — a perpendicular axis usually wants this")
+        dominant = max(dims) > 1.1 * sorted(dims)[-2]
+        if long_axis == axis and dominant:
+            perp = [a for a in "XYZ" if a != axis]
+            return {"error": (
+                f"bend refused before mutating: axis={axis} is '{o.name}'s own long axis "
+                f"({long_axis}), so the bend pivots around the length and barely changes "
+                f"the shape. Bend around a PERPENDICULAR axis to curl the length into an "
+                f"arc — try axis={perp[0]} or axis={perp[1]}.")}
+
+    bent = []
+    notes = []
+    for o in objs:
+        if o.type != 'MESH':
+            continue
         activate(o)
         mod = o.modifiers.new(name="Bend", type='SIMPLE_DEFORM')
         mod.deform_method = 'BEND'
@@ -931,7 +945,8 @@ def modify_modifier(params):
             if mod.node_group is None:
                 return {"error": f"NODES modifier '{mod_name}' has no node group to set inputs on"}
             sockets = _gn_input_sockets(mod.node_group)
-            set_inputs, unknown = _set_gn_inputs(mod, sockets, inputs)
+            menu_opts = _menu_options(mod.node_group)
+            set_inputs, unknown = _set_gn_inputs(mod, sockets, inputs, menu_opts)
             mod.id_data.update_tag()
             bpy.context.view_layer.update()
             for name, v in set_inputs.items():
@@ -940,7 +955,7 @@ def modify_modifier(params):
                 skipped.extend(unknown)
             out = {"success": True, "target": target, "modifier": mod.name,
                    "type": mod.type, "applied": applied, "skipped": skipped,
-                   "inputs_available": list(sockets)}
+                   "inputs_available": _describe_inputs(mod, sockets, menu_opts)}
             if unknown:
                 out.setdefault("notes", []).append(
                     f"unrecognised input(s) {unknown} — settable inputs: {list(sockets)}")
@@ -1163,11 +1178,43 @@ def apply_modifiers(params):
         return {"success": True, "applied": [], "object": obj.name}
     had_bevel = any(m.type == 'BEVEL' for m in obj.modifiers)
     applied = []
+    realized = []
+    warnings = []
     for mod_name in mod_names:
-        if any(m.name == mod_name for m in obj.modifiers):
-            bpy.ops.object.modifier_apply(modifier=mod_name)
-            applied.append(mod_name)
+        m = next((x for x in obj.modifiers if x.name == mod_name), None)
+        if m is None:
+            continue
+        # G207: a NODES modifier whose output is instances-on-points (Realize Instances
+        # off, the default) silently DROPS them on apply — the mesh comes back without the
+        # scatter. Flip its 'Realize Instances' input True first so they bake into editable
+        # geometry; if the group has no such input, leave it LIVE rather than lose it.
+        if m.type == 'NODES' and m.node_group is not None:
+            n_inst = _evaluated_instance_count(obj)
+            if n_inst:
+                socks = _gn_input_sockets(m.node_group)
+                ri = next((ident for nm, (ident, _st) in socks.items()
+                           if nm.strip().lower() == "realize instances"), None)
+                if ri is not None:
+                    try:
+                        m[ri] = True
+                        m.id_data.update_tag()
+                        bpy.context.view_layer.update()
+                        realized.append({"modifier": mod_name, "instances": n_inst})
+                    except Exception as e:
+                        warnings.append(f"could not set Realize Instances on '{mod_name}': {e}")
+                else:
+                    warnings.append(
+                        f"'{mod_name}' emits {n_inst} instance(s) but its node group has no "
+                        "'Realize Instances' input — LEFT LIVE (applying would drop them). "
+                        "Add a Realize Instances node in the group, then apply.")
+                    continue
+        bpy.ops.object.modifier_apply(modifier=mod_name)
+        applied.append(mod_name)
     out = {"success": True, "applied": applied, "object": obj.name}
+    if realized:
+        out["realized_instances"] = realized
+    if warnings:
+        out["warnings"] = warnings
     # G167: a BEVEL applied next to an NGON cap drops ~one zero-area sliver face per
     # segment — a hard validate defect with no suppression path. Clean the slivers the
     # apply just produced (merge-by-distance + dissolve-degenerate) and report the count,
@@ -1510,10 +1557,77 @@ def _gn_input_sockets(ng):
     return out
 
 
-def _set_gn_inputs(mod, sockets, inputs):
+def _menu_options(ng):
+    """G204 — {menu_socket_identifier: [item_name, ...]} for every NodeSocketMenu input,
+    read by walking each menu socket from the Group Input node to the Menu Switch node it
+    drives (whose enum_definition holds the item NAMES). The int stored in the modifier's
+    IDProperty is the INDEX into this list — the mapping nothing else on the surface
+    exposes, so the agent can set/read menu sockets by the same name a human sees."""
+    opts = {}
+    for node in ng.nodes:
+        if node.type != 'GROUP_INPUT':
+            continue
+        for out_sock in node.outputs:
+            for link in out_sock.links:
+                tgt = link.to_node
+                if tgt.bl_idname == 'GeometryNodeMenuSwitch':
+                    try:
+                        items = [it.name for it in tgt.enum_definition.enum_items]
+                    except Exception:
+                        continue
+                    if items and out_sock.identifier not in opts:
+                        opts[out_sock.identifier] = items
+    return opts
+
+
+def _describe_inputs(mod, sockets, menu_opts):
+    """G204 — legible list of a NODES modifier's inputs: name, type, current value, and —
+    for menu sockets — the options BY NAME. Replaces the old bare name list so magic ints
+    are never a blind sweep. Returns a list of one-line strings."""
+    out = []
+    for name, (ident, stype) in sockets.items():
+        short = stype.replace("NodeSocket", "") or "?"
+        try:
+            cur = mod[ident]
+        except Exception:
+            cur = None
+        if stype == 'NodeSocketMenu':
+            items = menu_opts.get(ident, [])
+            curname = items[cur] if isinstance(cur, int) and 0 <= cur < len(items) else cur
+            opts = "|".join(items) if items else "?"
+            out.append(f"{name} (menu: {opts} = {curname})")
+        elif stype in ('NodeSocketObject', 'NodeSocketCollection'):
+            out.append(f"{name} ({short} = {getattr(cur, 'name', cur)})")
+        else:
+            if isinstance(cur, float):
+                cur = round(cur, 4)
+            elif hasattr(cur, "__len__") and not isinstance(cur, str):
+                cur = [round(c, 4) if isinstance(c, float) else c for c in cur]
+            out.append(f"{name} ({short} = {cur})")
+    return out
+
+
+def _evaluated_instance_count(obj):
+    """G206 — number of instances `obj`'s modifier stack currently emits, read from the
+    evaluated depsgraph (the ground truth a Scatter/Instance modifier otherwise hides).
+    None if the read fails."""
+    try:
+        dg = bpy.context.evaluated_depsgraph_get()
+        n = 0
+        for inst in dg.object_instances:
+            if inst.is_instance and inst.parent is not None and inst.parent.original == obj:
+                n += 1
+        return n
+    except Exception:
+        return None
+
+
+def _set_gn_inputs(mod, sockets, inputs, menu_opts=None):
     """Set {socket-name: value} on a NODES modifier by socket IDENTIFIER, matching names
-    case-insensitively. Collection/Object-typed sockets take a datablock NAME. Shared by
+    case-insensitively. Collection/Object-typed sockets take a datablock NAME; MENU sockets
+    (G204) take the option NAME (resolved to its int index via menu_opts). Shared by
     add_asset (create-time) and modify (live-edit, G191). Returns (set_inputs, unknown)."""
+    menu_opts = menu_opts or {}
     set_inputs, unknown = {}, []
     for key, val in (inputs or {}).items():
         match = next((n for n in sockets if n == key), None) \
@@ -1526,6 +1640,14 @@ def _set_gn_inputs(mod, sockets, inputs):
             val = bpy.data.collections.get(val)
         elif stype == 'NodeSocketObject':
             val = bpy.data.objects.get(val)
+        elif stype == 'NodeSocketMenu' and isinstance(val, str):
+            # G204: resolve the display NAME → int index against this socket's enum items.
+            items = menu_opts.get(ident, [])
+            idx = next((i for i, nm in enumerate(items) if nm.lower() == val.strip().lower()), None)
+            if idx is None:
+                unknown.append(f"{key} (menu value '{val}' not one of {items or '?'})")
+                continue
+            val = idx
         try:
             mod[ident] = val
             set_inputs[match] = inputs[key]
@@ -1563,6 +1685,7 @@ def add_asset_modifier(params):
     mod.node_group = ng
 
     sockets = _gn_input_sockets(ng)
+    menu_opts = _menu_options(ng)
     set_inputs = {}
     unknown_inputs = []
 
@@ -1577,12 +1700,27 @@ def add_asset_modifier(params):
         if coll_socket is None:
             obj.modifiers.remove(mod)
             return {"error": f"'{asset}' has no Collection input to assign collection='{coll_name}'",
-                    "inputs_available": list(sockets)}
+                    "inputs_available": _describe_inputs(mod, sockets, menu_opts)}
         mod[sockets[coll_socket][0]] = coll
         set_inputs[coll_socket] = coll_name
+        # G205: the Collection socket is GATED by an instance-source menu (Scatter on
+        # Surface's "Instance Type" defaults to 'Object' → the Collection input is
+        # ignored, a silent no-op). Flip the menu whose options include 'Collection' to
+        # 'Collection', so collection= actually instances from it — unless the caller set
+        # that menu explicitly in inputs=.
+        explicit = {str(k).strip().lower() for k in (params.get("inputs") or {})}
+        for mname, (mident, mtype) in sockets.items():
+            if mtype != 'NodeSocketMenu' or mname.lower() in explicit:
+                continue
+            items = menu_opts.get(mident, [])
+            gate = next((i for i, nm in enumerate(items) if nm.lower() == "collection"), None)
+            if gate is not None:
+                mod[mident] = gate
+                set_inputs[mname] = "Collection"
+                break
 
     # inputs={name: value} → set by identifier; match socket name case-insensitively.
-    got, unknown_inputs2 = _set_gn_inputs(mod, sockets, params.get("inputs"))
+    got, unknown_inputs2 = _set_gn_inputs(mod, sockets, params.get("inputs"), menu_opts)
     set_inputs.update(got)
     unknown_inputs.extend(unknown_inputs2)
 
@@ -1595,16 +1733,179 @@ def add_asset_modifier(params):
         "modifier": mod.name,
         "asset": ng.name,
         "type": "NODES",
-        "inputs_available": list(sockets),
+        "inputs_available": _describe_inputs(mod, sockets, menu_opts),
     }
     if set_inputs:
         result["inputs_set"] = set_inputs
     if unknown_inputs:
         result.setdefault("notes", []).append(
             f"unrecognised input(s) {unknown_inputs} — settable inputs: {list(sockets)}")
+    # G206: report the evaluated instance count so a zero-emission config is legible
+    # instantly instead of being extracted by duplicate→realize→apply→count.
+    n_inst = _evaluated_instance_count(obj)
+    if n_inst is not None:
+        result["evaluated_instances"] = n_inst
+        if n_inst == 0:
+            result.setdefault("notes", []).append(
+                "⚠ this modifier currently emits 0 instances — nothing will show. Common "
+                "causes: Density (1/m² default) floors to 0 at tutorial scale (raise it); "
+                "the instance-source gate/collection is unset; or Viewport Visibility is 0.")
+    # G207: instances are realized by op=apply ONLY when the group has a Realize
+    # Instances control (Scatter on Surface does) — apply now sets it. State it honestly.
     result.setdefault("notes", []).append(
         "native GN scatter/instances emit INSTANCES-on-points, not separate objects; "
-        "add `modifier op=apply` (Realize Instances) if you need editable geometry.")
+        "modifier op=apply realizes them into editable mesh (it flips Realize Instances "
+        "for you before baking).")
+    return result
+
+
+def _build_bead_mesh(diameter, hang, neck):
+    """G214 — a closed TEARDROP bmesh: an icosphere (radius=diameter/2) whose top narrows
+    to `neck` and whose body is stretched downward (local -Z) by `hang`. Local +Z is the
+    NECK (the fuse-to-host end); the round body hangs toward local -Z. Returns a new Mesh."""
+    import bmesh
+    r = diameter / 2.0
+    bm = bmesh.new()
+    try:
+        bmesh.ops.create_icosphere(bm, subdivisions=3, radius=r)
+    except TypeError:                       # older bmesh: diameter= instead of radius=
+        bmesh.ops.create_icosphere(bm, subdivisions=3, diameter=r * 2.0)
+    neck_ratio = max(0.05, min(1.0, (neck if neck > 0 else diameter * 0.5) / diameter))
+    stretch = (2.0 * r + max(0.0, hang)) / (2.0 * r)
+    for v in bm.verts:
+        f = (v.co.z + r) / (2.0 * r)        # 0 at bottom … 1 at the neck (top)
+        taper = neck_ratio + (1.0 - neck_ratio) * (1.0 - f)
+        v.co.x *= taper
+        v.co.y *= taper
+        v.co.z = r - (r - v.co.z) * stretch  # top stays at +r; bottom → -(r+hang)
+    me = bpy.data.meshes.new("bud_bead")
+    bm.to_mesh(me)
+    bm.free()
+    return me
+
+
+def bud(params):
+    """G214 — grow a CLOSED teardrop mass fused to a host at a point, PRESERVING the host's
+    identity (name, materials, modifier stack). The volume author that `graft` couldn't be
+    (it makes a new object and drops the host's materials + modifiers) and displacement
+    can't be (no mass to add): a bead of icing dripping from a rim, a rivet, a wart, a drop.
+
+    host:      the object the bud fuses INTO (kept, with all its identity).
+    at:        [x, y, z] world anchor where the neck fuses (from feel op=radial crossing=rim
+               / aim / place, or a handle's live point).
+    handle:    alternatively, a named handle whose live point is the anchor.
+    diameter:  bead width (m).
+    hang:      how far the body hangs past the neck along the hang direction (m; default=diameter).
+    neck:      neck width where it meets the host (m; < diameter ⇒ teardrop; default diameter/2).
+    direction: hang direction — down (world -Z, default = gravity) | up | left | right |
+               forward | back.
+    solver:    EXACT (default, clean on a closed host) | FLOAT (5.x fast solver).
+    """
+    from mathutils import Vector
+    host_name = params.get("host") or params.get("target")
+    host = bpy.data.objects.get(host_name) if host_name else bpy.context.active_object
+    if host is None or host.type != 'MESH':
+        return {"error": f"bud host '{host_name}' not found or not a mesh"}
+
+    at = params.get("at")
+    hnd = (params.get("handle") or "").strip()
+    if isinstance(at, (list, tuple)) and len(at) == 3:
+        apex = Vector((float(at[0]), float(at[1]), float(at[2])))
+    elif hnd:
+        from . import handles as H
+        e = H._find_handle(hnd)
+        if e is None:
+            return {"error": f"bud handle '{hnd}' not found"}
+        v = H._validate(e)
+        if v.get("point") is None:
+            return {"error": f"bud handle '{hnd}' is unresolvable"}
+        apex = Vector(tuple(v["point"]))
+    else:
+        return {"error": "bud needs at=[x,y,z] or handle=<name> for the fusion anchor"}
+
+    diameter = float(params.get("diameter", 0.01))
+    if diameter <= 0:
+        return {"error": "diameter must be > 0"}
+    hang = float(params.get("hang", diameter))
+    neck = float(params.get("neck", diameter * 0.5))
+    solver = (params.get("solver") or "EXACT").upper()
+    if solver == "FAST":
+        solver = "FLOAT"
+    if solver not in ("EXACT", "FLOAT"):
+        return {"error": "solver must be EXACT or FLOAT"}
+
+    dirs = {"down": Vector((0, 0, -1)), "up": Vector((0, 0, 1)),
+            "left": Vector((-1, 0, 0)), "right": Vector((1, 0, 0)),
+            "forward": Vector((0, -1, 0)), "back": Vector((0, 1, 0))}
+    hd = dirs.get((params.get("direction") or "down").strip().lower(), Vector((0, 0, -1)))
+
+    # Build the teardrop, orient its neck (local +Z) OPPOSITE the hang, and seat the neck
+    # at the anchor pushed slightly INTO the host (opposite hang) so the union has overlap.
+    me = _build_bead_mesh(diameter, hang, neck)
+    bead = bpy.data.objects.new("bud_bead", me)
+    bpy.context.scene.collection.objects.link(bead)
+    r = diameter / 2.0
+    tgt = (-hd).normalized()                                  # where local +Z should point
+    rot = Vector((0.0, 0.0, 1.0)).rotation_difference(tgt)
+    bead.rotation_euler = rot.to_euler()
+    embed = 0.3 * diameter
+    neck_top_world = apex - hd * embed                        # push the neck into the host
+    bead.location = neck_top_world - (rot @ Vector((0.0, 0.0, r)))
+    # Carry the host's material slots onto the bead so the UNION maps them 1:1 (no spurious
+    # empty slot) and the bead inherits the host's look — a drip IS the icing's material.
+    for m in host.data.materials:
+        bead.data.materials.append(m)
+    bpy.context.view_layer.update()
+
+    mat_count = len(host.data.materials)
+    mod_count = len(host.modifiers)
+    open_host = _has_open_boundary_obj(host)
+
+    mod = host.modifiers.new(name="bud_union", type='BOOLEAN')
+    mod.operation = 'UNION'
+    mod.object = bead
+    if hasattr(mod, "solver"):
+        mod.solver = solver
+    # Apply as the FIRST modifier so only the union bakes into the base mesh — any other
+    # host modifier (Solidify, the icing's Scatter sprinkles) stays LIVE above it. Applying
+    # a non-first modifier bakes the whole stack up to it, double-applying the rest. This is
+    # how bud preserves the modifier stack graft destroyed.
+    try:
+        host.modifiers.move(len(host.modifiers) - 1, 0)
+    except Exception:
+        pass
+    activate(host)
+    try:
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+        err = None
+    except Exception as e:
+        err = str(e)
+        try:
+            host.modifiers.remove(mod)
+        except Exception:
+            pass
+    bpy.data.objects.remove(bead, do_unlink=True)
+    if err:
+        return {"error": f"bud union failed: {err} — try solver=FLOAT, or a larger overlap"}
+
+    welded = _weld_clean(host)
+    _recalc_normals_outside(host)
+    xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(host)
+    push_undo(f"bud {diameter}m on {host.name}")
+    result = {
+        "success": True, "status_focus": host.name, "host": host.name,
+        "diameter": diameter, "hang": hang, "neck": neck, "solver": solver,
+        "welded_verts": welded,
+        "materials_preserved": len(host.data.materials) == mat_count,
+        "modifiers_preserved": len(host.modifiers) == mod_count,
+        "dims_after": [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)],
+    }
+    if open_host:
+        result.setdefault("notes", []).append(
+            "host base mesh is OPEN (e.g. a clad shell) — a UNION can leave a membrane/"
+            "non-manifold seam at the fuse; validate will report it. To drip onto a "
+            "SOLIDIFIED icing shell, apply its Solidify first so the bud fuses to the "
+            "closed wall.")
     return result
 
 
@@ -1624,4 +1925,5 @@ TOOLS = {
     "apply_modifiers": apply_modifiers,
     "convert_to_mesh": convert_to_mesh,
     "boolean":         boolean,
+    "bud":             bud,
 }
