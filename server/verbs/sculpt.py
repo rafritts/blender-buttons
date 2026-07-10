@@ -34,8 +34,10 @@ def sculpt(
                  "surface-snapped centroid (the measured, no-coordinate default; "
                  "SPEC-09).") = "",
     handle: tag(str, "brush at a named handle's live point (recomputed)") = "",
-    # amount (draw/inflate/crease/pinch/flatten)
-    amount: tag(float, "[draw/inflate/crease/pinch/flatten] strength") = 1.0,
+    # amount — the family's one magnitude word (SPEC-21 §3)
+    amount: tag(float, "the brush magnitude: [draw/inflate/crease/pinch/flatten] "
+                       "strength (default 1.0); [gravity] metres the free end falls "
+                       "(default 0.02)") = None,
     # grab displacement — relative directions (m)
     out: tag(float, "[grab] drag outward (m)") = 0.0,
     inward: tag(float, "[grab] drag inward (m)") = 0.0,
@@ -55,7 +57,8 @@ def sculpt(
     # smooth
     iterations: tag(int, "[smooth] relax iterations") = 1,
     # gravity (region-parametric drape)
-    strength: tag(float, "[gravity] metres the free (bottom) end falls") = 0.02,
+    strength: tag(float, "[gravity] LEGACY alias for amount= (metres the free end "
+                         "falls) — prefer amount") = 0.02,
     pin: tag(float, "[gravity] 0..1 top fraction frozen as the attachment") = 0.25,
     falloff: tag(str, "brush falloff SMOOTH|SHARP|…") = "SMOOTH",
     subdivide: tag(bool, "force extra resolution under the brush first (a coarse footprint "
@@ -82,9 +85,9 @@ def sculpt(
       pinch   — pull verts together         (amount)
       flatten — flatten toward a plane      (amount, plane_normal_x/y/z)
       gravity — DRAPE a soft form: pin the top, let the lower mass fall →
-                a hanging/teardrop shape by construction (strength, pin). Scope
-                with at=selection/handle + radius, or omit the point to drape the
-                whole mesh.
+                a hanging/teardrop shape by construction (amount = metres the
+                free end falls, pin). Scope with at=selection/handle + radius,
+                or omit the point to drape the whole mesh.
 
     falloff: SMOOTH|SHARP|… subdivide=True adds resolution under the brush first.
 
@@ -94,6 +97,11 @@ def sculpt(
     guidance). Pass either of those to `brush=` and you'll be pointed back here.
     """
     b = brush.lower().strip()
+    # SPEC-21 §3: one magnitude word (`amount`) across the family, with per-member
+    # defaults. gravity's is metres (0.02); the strength brushes' is 1.0. `strength`
+    # survives as gravity's legacy alias when amount isn't given.
+    if amount is None:
+        amount = strength if b == "gravity" else 1.0
     note = ""
     at_x = at_y = at_z = None
     if at.strip().lower() == "selection":
@@ -117,7 +125,7 @@ def sculpt(
     # gravity is region-parametric, not a stroke: it allows no point (whole mesh).
     if b == "gravity":
         return note + _s.sculpt_gravity(target, at_x, at_y, at_z, radius,
-                                        strength, pin, falloff, subdivide,
+                                        amount, pin, falloff, subdivide,
                                         detail, connected, label)
     if at_x is None or at_y is None or at_z is None:
         return "sculpt: need a brush point — pass at=selection or handle=<name>"

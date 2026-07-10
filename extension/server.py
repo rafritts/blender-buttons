@@ -103,8 +103,20 @@ _SELECTION_TOOLS = {
     "set_component_mode", "select_all", "select_by_axis", "select_between",
     "list_components", "select_by_index",
     "select_by_vgroup", "select_by_material", "grow_selection", "flood_to_crease",
-    "random_select", "select_in_sphere", "select_boundary", "select_limb",
+    "random_select", "pick_element", "select_in_sphere", "select_boundary", "select_limb",
     "select_ring", "select_rings", "verify_selection", "select_object",
+}
+
+# SPEC-21 §6.3 (G220): every mutating select answers in one voice — count PLUS a
+# one-line description of the grabbed region (patches, extent, position, island
+# identity, open-rim flag) — attached here centrally so Look/Select/Verify collapse
+# into the call that made the selection. Discovery listings (name='' greps) and
+# read-only selection reads are excluded; they don't change the selection.
+SELECT_NARRATE_TOOLS = {
+    "select_all", "select_by_axis", "select_between", "select_by_index",
+    "select_by_vgroup", "select_by_material", "grow_selection", "flood_to_crease",
+    "random_select", "pick_element", "select_in_sphere", "select_by_radius",
+    "select_boundary", "select_limb", "select_ring", "select_rings",
 }
 LOCK_EXEMPT_TOOLS = (
     state.NON_UNDOABLE_TOOLS | _SELECTION_TOOLS |
@@ -117,7 +129,7 @@ EDIT_MODE_TOOLS = {
     "bevel", "extrude", "loop_cut", "subdivide_selection", "set_component_mode", "select_all",
     "select_by_axis", "select_between", "list_components", "select_by_index", "grow_selection", "move_vertices",
     "scale_vertices", "delete_geometry", "separate_selection", "jitter_vertices",
-    "random_select", "proportional_move", "proportional_scale", "inflate_selection", "mark_sharp",
+    "random_select", "pick_element", "proportional_move", "proportional_scale", "inflate_selection", "mark_sharp",
     "set_edge_crease", "merge_by_distance", "symmetrize", "select_in_sphere", "select_by_radius", "split_by_part",
     "get_rings", "select_ring", "select_rings", "scale_rings", "taper_end", "taper_section",
     "shape_profile", "flute", "field",
@@ -496,6 +508,20 @@ def execute_command(command):
 
     try:
         result = fn(params)
+        # SPEC-21 §6.3 (G220): narrate what got grabbed, while still in edit mode.
+        # Discovery greps (vgroup/material name='' listings) return their own payload
+        # and change nothing, so they stay silent. A narration bug must never break
+        # the select itself — hence the inner guard.
+        if (tool in SELECT_NARRATE_TOOLS and isinstance(result, dict)
+                and result.get("success")
+                and "groups" not in result and "slots" not in result):
+            try:
+                from . import perception
+                rep = perception.describe_selection(bpy.context.active_object)
+                if rep:
+                    result["selection_report"] = rep["line"]
+            except Exception:
+                pass
     except Exception as e:
         result = {"error": str(e)}
     finally:

@@ -46,56 +46,11 @@ ring (a local bridge, no global boolean), or at minimum DETECT the discarded-ope
 (result Δverts ≪ bead verts) and refuse+restore instead of reporting success. A macro
 whose failure mode is "success" is worse than no macro.
 
-## G219 — grow/flood answer "GROW xN" with zero counts; a correct no-op is indistinguishable from a malfunction
-
-REWRITTEN 2026-07-10 (same session): the first version of this entry diagnosed
-"split-brain selection stores" — that diagnosis was FALSE, and the false diagnosis is
-itself the evidence for the real gap. What happened on the VRoid body: a 16-vert seed
-would not grow (`op=grow steps=4` → "GROW x4", count frozen) while a nearby 208-vert
-seed grew fine. The truth — spotted by the HUMAN watching the viewport, not by the
-agent reading the returns — is that the 16 verts were a FINGERNAIL: a closed 2mm-thick
-island shell (this Body is 65 separate shells — every finger and every nail its own
-component), and Select More on a saturated component correctly adds nothing. Grow
-worked perfectly every time. But its return says only "GROW xN" — no before→after
-count, no reason — so a correct no-op, a real malfunction, and a wrong-store fantasy
-all read identically, and the agent burned ~10 calls testing modes and seed types, then
-committed a wrong root-cause to this file. The general fix, two halves: (1) expansion
-ops report before → after and, when Δ=0, SAY WHY it can't expand ("selection is a
-closed component — 16 verts, its own shell"); (2) selection reads should surface
-component identity as a legible fact ("your selection = exactly shell #41 of 65") —
-on real game meshes (nails, teeth, eyes, buttons) "the thing you grabbed is an island"
-is the single most decision-relevant property a selection has. Sibling of G220: both
-are selects answering with a checksum instead of ground truth.
-
-## G220 — a selection is answered with a count (or nothing), never with what got grabbed
-
-Same session: `select op=by_axis` from object mode returned only "ok
-(threshold_world=-0.6667)" — not even a count; the same op in edit mode returned
-"selected=208" — a count but no shape; `op=grow` returned neither. To learn WHAT was
-selected I had to spend extra calls every time: `op=current` (bbox), `op=list` (vert
-dump), `feel op=silhouette selection=true` (the read that finally showed the finger was
-a clean 7cm rod, not a bleed into the palm). The right 92 verts and a disastrous 92
-verts return the same integer. The general fix: every mutating select answers in the
-same voice as auto-status — count PLUS a one-line legible description of the grabbed
-region (connected patches, extent, centroid, boundary-crossing flag), so Look/Select/
-Verify collapse into the one call that made the selection. A count is not ground truth;
-it's a checksum with no reference value.
-
-## G221 — no way to "yolo click": pick ONE arbitrary element within a scope
-
-The human's cheapest selection primitive doesn't exist in the verb surface: point at a
-thing and click, not caring which face lands under the cursor. "Select a random face on
-the finger → hold Ctrl+Numpad+" is the entire human workflow for grabbing a part; the
-agent's equivalent today is deriving a seed from coordinate listings (facing → extreme →
-cluster-sort → by_index), ~10 calls to manufacture one click. `select op=random` is the
-wrong shape: it takes a FRACTION of the whole mesh, not "one element on THIS." The
-general primitive: `pick` — one arbitrary vert/edge/face within a named scope (an
-object, a vertex group / minted region, a handle's neighborhood, the current selection,
-an axis band), deterministic under a seed so a transcript replays. Pairs with grow/flood
-to reproduce the human loop: pick a face on the part → expand until saturation, narrated
-(G219) — click, hold, watch. The point is not randomness; it's PERMISSION TO NOT CARE
-which element it lands on — dead-reckoning precision the task never needed is pure
-waste today.
+_G219–G221 (the VRoid semantic-selection autopsy) shipped in SPEC-21 phase 1 and were
+verified headless (`tests/e2e_spec21_phase1.py`): every mutating select narrates the
+grabbed region (count, patches, extent, position, island identity, open rim);
+grow/shrink/flood report before → after with a WHY on Δ=0; `select op=pick` is the
+seeded yolo click. Live re-verify on the VRoid scene pending the next dogfood session._
 
 ## G218 — declared intents die with the addon process; they are scene facts
 

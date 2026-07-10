@@ -199,6 +199,11 @@ def _status(result: dict) -> str:
     # happened. Surfaced ahead of the block like the bind/shape-key warnings.
     for note in (result.get("notes") or []):
         bind += "\n⚠ " + note
+    # SPEC-21 §6.3 (G220): the selection narration — every mutating select answers
+    # with what got grabbed (count, patches, extent, position, island identity),
+    # so the verify read is free instead of a paid extra call.
+    if result.get("selection_report"):
+        bind += "\n" + result["selection_report"]
     # SPEC-16: the two forced senses, surfaced ahead of the status block so they're
     # never lost. `feel` (what you just changed — perception, no verdict) then
     # `validate` (what's broken — the always-on correctness floor, report-by-exception).

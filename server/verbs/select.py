@@ -11,15 +11,15 @@ from server import editmode, objects, rings, queries, handles
 from ._common import tag, unknown
 
 _OPS = ["all", "none", "object", "by_axis", "between", "list", "by_index", "group", "material",
-        "boundary", "limb", "grow", "shrink", "flood", "random", "in_sphere", "by_radius",
-        "ring", "rings", "component_mode", "current"]
+        "boundary", "limb", "grow", "shrink", "flood", "pick", "random", "in_sphere",
+        "by_radius", "ring", "rings", "component_mode", "current"]
 
 
 @mcp.tool(name="select")
 def select(
     op: Literal["all", "none", "object", "by_axis", "between", "list", "by_index", "group",
-                "material", "boundary", "limb", "grow", "shrink", "flood", "random", "in_sphere",
-                "by_radius", "ring", "rings", "component_mode", "current"],
+                "material", "boundary", "limb", "grow", "shrink", "flood", "pick", "random",
+                "in_sphere", "by_radius", "ring", "rings", "component_mode", "current"],
     # object selection
     name: tag(str, "[object] object name to select; [group] vertex-group name substring; [material] material-name substring (case-insensitive, unions all matches; empty = LIST every vgroup/material slot)") = "",
     # generic
@@ -48,9 +48,14 @@ def select(
     # flood (grow-to-crease)
     angle: tag(float, "[flood] crease threshold (deg) the flood halts at (default 25; lower = subtler creases stop it)") = 25.0,
     max_verts: tag(int, "[flood] safety cap; hitting it means the region didn't close at a crease; [list] cap on verts enumerated (default 60)") = 20000,
-    # random
+    # random / pick
     fraction: tag(float, "[random] fraction 0..1 to select") = 0.2,
-    seed: tag(int, "[random] random seed") = 0,
+    seed: tag(int, "[random/pick] random seed — same seed reproduces the same choice") = 0,
+    # pick
+    kind: tag(str, "[pick] what one element to pick: FACE (default) | VERT | EDGE") = "FACE",
+    within: tag(str, "[pick] scope — a vertex-group / minted-handle name substring "
+                     "(case-insensitive; handles' backing vgroups match). Empty = the "
+                     "current selection if any, else the whole mesh") = "",
     # in_sphere
     radius: tag(float, "[in_sphere] sphere radius (m)") = 0.0,
     handle: tag(str, "[in_sphere/by_radius] center on a named handle's live point "
@@ -71,7 +76,10 @@ def select(
     min_weight: tag(float, "[group] a vert counts as in the group only if its weight there exceeds this (0 = any non-zero; raise to shed faint seam bleed)") = 0.0,
 ) -> str:
     """
-    Make a selection — the **Select** menu. `op` selects:
+    Make a selection — the **Select** menu. Every mutating select answers with a
+    one-line narration of what got grabbed (count, connected patches, extent,
+    position, island identity, open-rim flag) — trust it over a separate verify
+    read. `op` selects:
 
       all         — select everything       (action=SELECT|DESELECT|INVERT|TOGGLE)
       none        — deselect everything
@@ -104,12 +112,17 @@ def select(
       limb        — a whole protrusion (sleeve/limb/finger), anchored to the mesh's
                     OWN topology — selects out to its base ring (the armhole), no
                     coordinates. delete it to remove the limb cleanly.  (which, extend)
-      grow        — grow the selection             (steps)
+      grow        — grow the selection one topology step per step (steps). Reports
+                    before → after; a Δ=0 says WHY (a saturated island can't grow).
       shrink      — shrink the selection           (steps)
       flood       — region-coherent grow: flood from the seed selection out to the
                     feature's natural edge, halting at creases (dihedral ≥ angle) and
                     mesh boundaries — snaps to a form instead of a guessed box
                     (angle, max_verts). Confirm with feel op=verify.
+      pick        — the YOLO CLICK: select ONE arbitrary element without caring
+                    which (kind=FACE|VERT|EDGE, within=<vgroup/handle substring;
+                    empty = current selection, else whole mesh>, seed). The human
+                    "click a face, hold Ctrl+Numpad+" — pair with grow/flood.
       random      — a random fraction              (fraction, seed)
       in_sphere   — verts inside a sphere   (handle=<name>, radius, action, extend)
                     — extend=True unions onto the current selection.
@@ -156,6 +169,8 @@ def select(
         return editmode.grow_selection("SHRINK", steps, target)
     if o == "flood":
         return editmode.flood_to_crease(angle, max_verts)
+    if o == "pick":
+        return editmode.pick(kind, within, seed, target)
     if o == "random":
         return editmode.random_select(fraction, seed)
     if o == "in_sphere":

@@ -123,7 +123,11 @@ def select_all(action: str = "SELECT", target: str = "") -> str:
     target: optional object name — auto-selects it, enters edit mode, exits after.
     """
     result = call_blender("select_all", {"action": action, "target": target})
-    main = "ok" if result.get("success") else result.get("error", "failed")
+    if result.get("success"):
+        n = result.get("selected_count")
+        main = f"ok ({action.lower()}: {n} verts selected)" if n is not None else "ok"
+    else:
+        main = result.get("error", "failed")
     return main + _status(result)
 
 
@@ -147,7 +151,8 @@ def select_by_axis(axis: str = "Z", factor: float = 0.5, comparison: str = "GREA
                                               "comparison": comparison, "action": action,
                                               "extend": extend, "target": target})
     if result.get("success"):
-        main = f"ok (threshold_world={result.get('threshold_world')})"
+        main = (f"ok (threshold_world={result.get('threshold_world')}, "
+                f"selected={result.get('selected_count')})")
     else:
         main = result.get("error", "failed")
     return main + _status(result)
@@ -347,6 +352,30 @@ def random_select(fraction: float = 0.2, seed: int = 0, label: str = "") -> str:
     result = call_blender("random_select", {"fraction": fraction, "seed": seed}, label=label)
     if result.get("success"):
         main = f"kept {result['kept']}/{result['from']} verts (seed={result['seed']})"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def pick(kind: str = "FACE", within: str = "", seed: int = 0, target: str = "") -> str:
+    """G221 — the yolo click: select ONE arbitrary face/vert/edge within a scope,
+    deterministic under `seed`. within: vgroup/handle-name substring (empty = the
+    current selection if any, else the whole mesh). Pairs with grow: pick a face on
+    the part, then grow to saturation — click, hold, watch."""
+    result = call_blender("pick_element",
+                          {"kind": kind, "within": within, "seed": seed,
+                           "target": target})
+    if result.get("success"):
+        measure = ""
+        if result.get("area_mm2") is not None:
+            measure = f", {result['area_mm2']}mm²"
+        elif result.get("length_mm") is not None:
+            measure = f", {result['length_mm']}mm long"
+        elif result.get("valence") is not None:
+            measure = f", valence {result['valence']}"
+        main = (f"picked {result['kind'].lower()} (1 of {result['candidates']} in "
+                f"{result['scope']}) — at {result['at']}{measure} "
+                f"(seed={result['seed']})")
     else:
         main = result.get("error", "failed")
     return main + _status(result)
@@ -617,10 +646,18 @@ def grow_selection(direction: str = "GROW", steps: int = 1, target: str = "") ->
     steps: number of times to grow/shrink (default 1)
     target: optional object name — auto-selects it, enters edit mode, exits after.
     Must be in Edit Mode with something selected.
+    Answers with before → after counts; a Δ=0 says WHY (e.g. the selection already
+    fills its own island — expansion can't cross between shells).
     """
     result = call_blender("grow_selection", {"direction": direction, "steps": steps,
                                              "target": target})
-    main = f"{direction} x{steps}" if result.get("success") else result.get("error", "failed")
+    if result.get("success"):
+        main = (f"{direction} x{steps}: {result.get('before')} → "
+                f"{result.get('after')} verts")
+        if result.get("why_unchanged"):
+            main += f"\n  Δ=0 — {result['why_unchanged']}"
+    else:
+        main = result.get("error", "failed")
     return main + _status(result)
 
 
@@ -636,6 +673,8 @@ def flood_to_crease(angle: float = 25.0, max_verts: int = 20000) -> str:
             f"(crease ≥{result['angle_deg']}°)")
     if result.get("capped"):
         main += f"\n  ⚠ {result['note']}"
+    if result.get("why_unchanged"):
+        main += f"\n  Δ=0 — {result['why_unchanged']}"
     return main + _status(result)
 
 

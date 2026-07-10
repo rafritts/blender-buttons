@@ -522,9 +522,15 @@ def extrude_along_curve(params):
 
 
 def select_all(params):
+    import bmesh
     action = params.get("action", "SELECT").upper()
     bpy.ops.mesh.select_all(action=action)
-    return {"success": True}
+    out = {"success": True, "action": action}
+    obj = bpy.context.active_object
+    if obj is not None and obj.type == 'MESH' and obj.mode == 'EDIT':
+        bm = bmesh.from_edit_mesh(obj.data)
+        out["selected_count"] = sum(1 for v in bm.verts if v.select)
+    return out
 
 
 def select_by_axis(params):
@@ -993,15 +999,28 @@ def set_component_mode(params):
 
 
 def grow_selection(params):
+    """G219 — expansion answers with before → after, and on Δ=0 says WHY. 'GROW xN'
+    with no counts made a correct no-op (a saturated island), a real malfunction,
+    and a wrong-store fantasy read identically — and cost a committed misdiagnosis."""
+    import bmesh
     direction = params.get("direction", "GROW").upper()
     steps = params.get("steps", 1)
     obj = bpy.context.active_object
     if obj is None or obj.mode != 'EDIT':
         return {"error": "Must be in edit mode"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    before = sum(1 for v in bm.verts if v.select)
     op = bpy.ops.mesh.select_more if direction == "GROW" else bpy.ops.mesh.select_less
     for _ in range(max(1, steps)):
         op()
-    return {"success": True, "direction": direction, "steps": steps}
+    bm = bmesh.from_edit_mesh(obj.data)
+    after = sum(1 for v in bm.verts if v.select)
+    out = {"success": True, "direction": direction, "steps": steps,
+           "before": before, "after": after}
+    if after == before:
+        from .perception import expansion_noop_reason
+        out["why_unchanged"] = expansion_noop_reason(bm, direction)
+    return out
 
 
 def flood_to_crease(params):
@@ -1066,6 +1085,15 @@ def flood_to_crease(params):
         out["note"] = (f"hit the {max_verts}-vert cap — the region did NOT close at a "
                        f"crease; lower `angle` so a subtler crease halts the flood, or "
                        f"the feature has no enclosing crease at this threshold")
+    elif len(visited) == len(seed):
+        # G219 — a flood that added nothing must say why: either the seed is a whole
+        # island (nothing to cross to) or every way out is a crease/boundary wall.
+        from .perception import expansion_noop_reason
+        why = expansion_noop_reason(bm, "GROW")
+        if "saturated" not in why and "whole mesh" not in why and "nothing is" not in why:
+            why = (f"every edge out of the seed is a crease ≥{round(math.degrees(thr), 1)}° "
+                   f"or a mesh boundary — the seed already fills its crease-bounded region")
+        out["why_unchanged"] = why
     return out
 
 
@@ -1777,6 +1805,118 @@ def random_select(params):
     bmesh.update_edit_mesh(obj.data)
     push_undo(f"random_select {fraction}")
     return {"success": True, "kept": keep_count, "from": len(selected), "seed": seed}
+
+
+def pick_element(params):
+    """G221 — the yolo click. Select ONE arbitrary element within a scope, without
+    caring which one: the human's cheapest selection primitive ("click a face on the
+    finger, hold Ctrl+Numpad+"). Its essence is PERMISSION TO NOT CARE which element
+    it lands on — dead-reckoning a seed from coordinate listings is pure waste.
+
+    kind:   FACE (default) | VERT | EDGE — what one element to pick.
+    within: scope, a vertex-group / minted-handle name substring (case-insensitive;
+            handles' backing vgroups match too). Empty = the CURRENT selection if one
+            exists (pick inside what you just narrowed), else the whole mesh.
+    seed:   RNG seed — the same seed picks the same element, so transcripts replay.
+
+    Replaces the selection with exactly that element (component mode switched to
+    `kind`), ready for grow/flood to expand from. Reports the element starved of
+    coordinates: position words + area/length/valence, never world XYZ."""
+    import bmesh
+    import random as _random
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode with an active object"}
+    kind = (params.get("kind") or "FACE").upper()
+    if kind not in ("FACE", "VERT", "EDGE"):
+        return {"error": f"pick: kind must be FACE | VERT | EDGE (got '{kind}')"}
+    seed = int(params.get("seed", 0) or 0)
+    within = (params.get("within") or "").strip()
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    bm.edges.ensure_lookup_table()
+    bm.faces.ensure_lookup_table()
+
+    scope = None            # None = whole mesh; else a vert-index set
+    if within:
+        needle = within.lower()
+        matched = [vg for vg in obj.vertex_groups if needle in vg.name.lower()]
+        if not matched:
+            return {"error": f"pick: no vertex group / handle matching '{within}'. "
+                             f"Available ({len(obj.vertex_groups)}): "
+                             f"{[vg.name for vg in obj.vertex_groups]}"}
+        deform = bm.verts.layers.deform.verify()
+        gidx = {vg.index for vg in matched}
+        scope = {v.index for v in bm.verts
+                 if any(gi in v[deform] and v[deform][gi] > 0.0 for gi in gidx)}
+        scope_desc = "group(s) " + ", ".join(vg.name for vg in matched)
+        if not scope:
+            return {"error": f"pick: {scope_desc} contain no verts on this mesh"}
+    else:
+        cur = {v.index for v in bm.verts if v.select}
+        if cur:
+            scope = cur
+            scope_desc = f"the current selection ({len(cur)} verts)"
+        else:
+            scope_desc = "the whole mesh"
+
+    if kind == "FACE":
+        cands = bm.faces if scope is None else \
+            [f for f in bm.faces if all(v.index in scope for v in f.verts)]
+    elif kind == "EDGE":
+        cands = bm.edges if scope is None else \
+            [e for e in bm.edges if all(v.index in scope for v in e.verts)]
+    else:
+        cands = bm.verts if scope is None else \
+            [v for v in bm.verts if v.index in scope]
+    cands = sorted(cands, key=lambda el: el.index)
+    if not cands:
+        return {"error": f"pick: no whole {kind.lower()} lies within {scope_desc} — "
+                         f"a sparse scope may contain no full face/edge; try kind=VERT"}
+    choice = cands[_random.Random(seed).randrange(len(cands))]
+
+    # Replace the selection with exactly this element, in its component mode.
+    bpy.context.tool_settings.mesh_select_mode = {
+        'VERT': (True, False, False), 'EDGE': (False, True, False),
+        'FACE': (False, False, True)}[kind]
+    for f in bm.faces:
+        f.select = False
+    for e in bm.edges:
+        e.select = False
+    for v in bm.verts:
+        v.select = False
+    verts = [choice] if kind == "VERT" else list(choice.verts)
+    for v in verts:
+        v.select = True
+    bm.select_flush(True)
+    bmesh.update_edit_mesh(obj.data)
+
+    # Coordinate-starved facts (SPEC-21 §6.2): position words + a scalar, no XYZ.
+    from .common import region_words
+    mw = obj.matrix_world
+    cos = [mw @ v.co for v in verts]
+    centroid = sum(cos, Vector((0, 0, 0))) / len(cos)
+    inf = float("inf")
+    b = [inf, inf, inf, -inf, -inf, -inf]
+    for v in bm.verts:
+        co = mw @ v.co
+        b[0] = min(b[0], co.x); b[1] = min(b[1], co.y); b[2] = min(b[2], co.z)
+        b[3] = max(b[3], co.x); b[4] = max(b[4], co.y); b[5] = max(b[5], co.z)
+    out = {"success": True, "kind": kind, "picked_index": choice.index,
+           "candidates": len(cands), "seed": seed, "scope": scope_desc,
+           "at": region_words((b[0], b[1], b[2], b[3], b[4], b[5]), centroid)}
+    if kind == "FACE":
+        area = 0.0
+        for i in range(1, len(cos) - 1):
+            area += ((cos[i] - cos[0]).cross(cos[i + 1] - cos[0])).length / 2.0
+        out["area_mm2"] = round(area * 1e6, 2)
+    elif kind == "EDGE":
+        out["length_mm"] = round((cos[1] - cos[0]).length * 1000, 2)
+    else:
+        out["valence"] = len(choice.link_edges)
+    push_undo(f"pick {kind.lower()} #{choice.index}")
+    return out
 
 
 def jitter_vertices(params):
@@ -2861,6 +3001,7 @@ TOOLS = {
     "separate_selection": separate_selection,
     "jitter_vertices":    jitter_vertices,
     "random_select":      random_select,
+    "pick_element":       pick_element,
     "proportional_move":  proportional_move,
     "proportional_scale": proportional_scale,
     "inflate_selection":  inflate_selection,
