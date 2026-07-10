@@ -30,5 +30,30 @@ intents are scene facts) closed in SPEC-21 phase 5: the registry already persist
 the .blend (G125) but an addon reinstall reset the module without a scene load — grounding
 is now lazy, so the first registry access after a reload re-reads `scene["bb_intents"]`
 and the tripwires re-arm. G219–G221 (the VRoid semantic-selection autopsy) shipped in
-SPEC-21 phase 1. Live re-verify of the whole SPEC-21 surface on the VRoid scene pending
-the next dogfood session._
+SPEC-21 phase 1. Live re-verify (2026-07-10, VRoid scene + fresh goblet): look→descend→claim
+narrates and mints on real imported geometry (vgroup candidates included, coverage honest);
+`edit op=spin` revolves live (the seam safety-weld caught a 32-way on-axis apex collapse the
+headless test never exercised); trace-vs-authored-profile round-trips; `validate op=expect
+check=open_boundary` declares and quiets; history undo restored a destroyed form byte-true.
+One new gap found in the sweep: G222._
+
+---
+
+## G222 — zero-centered field presets are destructive under multiply-mode channels
+
+Following `guidance://techniques/revolved-vessel` **verbatim** — `edit op=field
+channel=radial preset=lobes freq=12 amp=0.05` on a goblet bowl — collapsed the band to a
+spike: `lobes` emits `amp·cos(freq·θ)` (zero-centered, F∈[−0.05, 0.05]) and
+`channel=radial` defaults `field_mode=multiply`, so every radius was multiplied by ≈0 (and
+half by a *negative*), yielding 857 self-intersections in one call. The op did exactly what
+it was told, and what it was told is what the server's own technique doc prescribes.
+
+General framing: a preset knows its own **zero-line**. Zero-centered presets (lobes, sine,
+bell) composed with a multiply-identity channel (identity = 1) should either (a) emit
+`1 + F` under multiply so `amp` reads as relative depth, (b) default that combination to
+`add`, or (c) refuse with the correction spelled out. Any of those keeps the agent in
+intent-space ("12 lobes, 2mm deep"); today's silent collapse hands back a destroyed form
+with no warning. Whatever ships, the revolved-vessel technique's `amp=<depth>` line must
+match it.
+
+(Live workaround verified: `field_mode=add amp=<meters>` cut the gadroons correctly.)
