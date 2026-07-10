@@ -26,6 +26,12 @@ _ALLOWED_FUNCS = {
 }
 _CONSTS = {"pi", "tau", "e"}
 
+# Presets whose rest value is 0, not the multiply-identity 1 (G222). Composed with
+# a multiply channel they scale every radius by ≈0 and collapse the form, so on
+# `radial` these DEFAULT to `add` (amp = absolute depth); taper/power/smoothstep
+# rest at 1 and keep the multiply default (amp = relative scale).
+_ZERO_BASED_PRESETS = {"lobes", "sine", "bell"}
+
 
 def _validate_expr_ast(node, allowed_names):
     """Walk an expression AST, rejecting anything outside a tight whitelist.
@@ -419,7 +425,17 @@ def field(params):
         f_range = [float(np.min(F)), float(np.max(F))]
 
     # ── map F → world displacement through the channel ──
-    eff_mode = field_mode or ("multiply" if channel == "radial" else "add")
+    # G222: a zero-centered preset rests at 0, but multiply's identity is 1 — the
+    # two composed multiply every radius by ≈0 and destroy the form. So on radial,
+    # zero-based presets default to `add` (amp = absolute depth in metres) instead
+    # of the usual multiply default.
+    zero_based = bool(preset) and preset in _ZERO_BASED_PRESETS
+    if field_mode:
+        eff_mode = field_mode
+    elif channel == "radial":
+        eff_mode = "add" if zero_based else "multiply"
+    else:
+        eff_mode = "add"
     sx = float(params.get("sigma_x", 1.0) or 1.0)
     sy = float(params.get("sigma_y", 1.0) or 1.0)
     Pnew = P.copy()
@@ -427,8 +443,18 @@ def field(params):
     if channel == "radial":
         live = r > 1e-9
         if eff_mode == "multiply":
-            cun = cu * F * sx
-            cvn = cv * F * sy
+            Fr = F
+            if zero_based:
+                # explicit multiply on a zero-centered preset (G222): read amp as
+                # RELATIVE depth so radius scales by (1 + F) rather than collapsing
+                # to ≈0·r. Never silently destroys the form.
+                Fr = 1.0 + F
+                warnings.append(
+                    f"preset '{preset}' rests at 0 but multiply's identity is 1 — "
+                    f"reading amp as RELATIVE depth (radius × (1 + F)); pass "
+                    f"field_mode=add to read amp as absolute metres instead")
+            cun = cu * Fr * sx
+            cvn = cv * Fr * sy
         else:
             if eff_mode == "set":
                 rr = F

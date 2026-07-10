@@ -121,8 +121,10 @@ def edit(
     about: tag(str, "[field] radial pivot: axis (ship) | spine (deferred)") = "axis",
     channel: tag(str, "[field/loft] how F displaces: radial | normal | axis:<X|Y|Z|long|u|v> "
                       "| twist | vector (loft default: normal)") = "radial",
-    field_mode: tag(str, "[field/loft] add | multiply | set. radial: multiply default, set "
-                         "writes the radius; axis:<dir>: add default, set writes the coord "
+    field_mode: tag(str, "[field/loft] add | multiply | set. radial: multiply default, EXCEPT "
+                         "zero-centered presets (lobes/sine/bell) default to add so amp reads "
+                         "as absolute depth in m (they rest at 0, not multiply's identity 1); "
+                         "set writes the radius; axis:<dir>: add default, set writes the coord "
                          "ALONG dir from the group origin; offset channels default add") = "",
     per_component: tag(bool, "[field] parameterize + apply independently per connected "
                              "sub-shell") = False,

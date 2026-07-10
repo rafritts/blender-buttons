@@ -385,6 +385,10 @@ def _make_candidates(obj, bm, face_set, fdata, bbox, comps, landmarks):
     # vgroup patches — non-handle vertex groups with whole faces in the window
     # (vert-only smears stay reachable via select op=group; a patch offer means
     # "this is a coherent face region"). HANDLE_ groups are already claimed.
+    # A vgroup is a whole ENTITY (a named rig part), but the window only shows its
+    # in-window faces; claiming must take the ENTIRE group, not the window fragment
+    # (G223). So the claim payload is the full object-wide membership, and the
+    # offer reports the in-window count whenever the group spills past the window.
     from .handles import VGROUP_PREFIX
     real_groups = {vg.index: vg.name for vg in obj.vertex_groups
                    if not vg.name.startswith(VGROUP_PREFIX)}
@@ -394,8 +398,8 @@ def _make_candidates(obj, bm, face_set, fdata, bbox, comps, landmarks):
         except Exception:
             deform = None
         if deform is not None:
-            vert_groups = {}                       # vert index -> {group indices}
-            group_verts = {}                       # group index -> {vert indices}
+            vert_groups = {}                       # vert index -> {group indices} (in-window)
+            group_verts = {}                       # group index -> {vert indices}  (in-window)
             for fi in face_set:
                 for v in bm.faces[fi].verts:
                     if v.index in vert_groups:
@@ -415,11 +419,26 @@ def _make_candidates(obj, bm, face_set, fdata, bbox, comps, landmarks):
                     common &= vert_groups.get(v.index, set())
                 for gi in common:
                     faces_by_group.setdefault(gi, []).append(fi)
-            for gi, fs in sorted(faces_by_group.items(),
-                                 key=lambda kv: (-len(kv[1]), kv[0]))[:_KIND_CAPS["vgroup"]]:
-                raw.append({"kind": "vgroup", "faces": fs,
-                            "label": real_groups[gi],
-                            "verts": sorted(group_verts.get(gi, ()))})
+            chosen = sorted(faces_by_group.items(),
+                            key=lambda kv: (-len(kv[1]), kv[0]))[:_KIND_CAPS["vgroup"]]
+            if chosen:
+                # full object-wide membership for the groups we're about to offer —
+                # one pass over every vert so the claim payload is the whole entity,
+                # not just the fragment the window happens to frame.
+                full_verts = {gi: set() for gi, _ in chosen}
+                for v in bm.verts:
+                    for gi, w in v[deform].items():
+                        if w > 0.0 and gi in full_verts:
+                            full_verts[gi].add(v.index)
+                for gi, fs in chosen:
+                    full = sorted(full_verts.get(gi, ()))
+                    in_win = len(group_verts.get(gi, ()))
+                    c = {"kind": "vgroup", "faces": fs,
+                         "label": real_groups[gi],
+                         "verts": full or sorted(group_verts.get(gi, ()))}
+                    if len(c["verts"]) > in_win:
+                        c["in_window_verts"] = in_win
+                    raw.append(c)
 
     # drop whole-window echoes; fill verts; measure
     kept = []
@@ -838,6 +857,8 @@ def _present(win):
              "extent": _fmt_len(c["extent"])}
         if c.get("label"):
             d["label"] = c["label"]
+        if c.get("in_window_verts") is not None:
+            d["in_window_verts"] = c["in_window_verts"]
         if c.get("perimeter"):
             d["perimeter"] = _fmt_len(c["perimeter"])
         if c.get("twin"):

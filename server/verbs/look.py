@@ -42,7 +42,14 @@ def _fmt_window(res: dict) -> str:
     lines.append(f"  window:  {w.get('n_faces')} faces / {w.get('n_verts')} verts · "
                  f"{size} · {shell_s}")
     if w.get("root"):
-        sym = "bilateral across X" if w.get("symmetric_x") else "no X symmetry detected"
+        if w.get("symmetric_x"):
+            # front=−Y, up=+Z ⇒ subject-right = front×up = −X (G224). Position
+            # tokens stay world-axis, so finish the sentence: translate the
+            # character's handedness to the token the agent will actually type.
+            sym = ("bilateral across X ⇒ subject's left = +X (window right), "
+                   "subject's right = −X (window left)")
+        else:
+            sym = "no X symmetry detected"
         lines.append(f"  orient:  up=+Z · front=−Y · {sym}")
     lms = w.get("landmarks") or []
     if lms:
@@ -68,6 +75,11 @@ def _fmt_window(res: dict) -> str:
         for c in cands:
             kind = c["kind"] + (f" '{c['label']}'" if c.get("label") else "")
             extra = f", rim {c['perimeter']}" if c.get("perimeter") else ""
+            if c.get("in_window_verts") is not None:
+                # G223: the vgroup spills past the window — n_verts is the WHOLE
+                # entity (what a claim takes); flag how little is shown here.
+                extra += (f" — whole vgroup; only {c['in_window_verts']} of "
+                          f"{c['n_verts']} verts in this window, claim takes all")
             twin = f"   (mirror twin: {c['twin']})" if c.get("twin") else ""
             lines.append(f"    {c['id']:<3} {kind:<18} {c['token']:<18} "
                          f"{c['extent']:>7}  {c['n_faces']} faces / "

@@ -33,8 +33,11 @@ type the silhouette as numbers. A goblet from a cylinder is one call:
   scale — preset_b 0 collapses to a point, >1 flares a bell lip).
 - **Flutes / gadroons** (radius vs *azimuth*, not height): `edit op=field
   channel=radial preset=lobes freq=<count> amp=<depth>` — negative-feel grooves =
-  concave flutes, outward lobes = gadroons. Scope it to a band first (select the rings)
-  for band-local fluting.
+  concave flutes, outward lobes = gadroons. `amp` is the depth in **metres**: a
+  zero-centered preset (lobes/sine/bell) on `radial` defaults to `field_mode=add`,
+  so `amp=0.002` cuts a 2 mm flute. (Forcing `field_mode=multiply` instead reads
+  `amp` as a *relative* ±fraction of the radius.) Scope it to a band first (select
+  the rings) for band-local fluting.
 - **One ring**: shape_profile with a single-ring pair, or select the ring and scale.
 
 **Verify after each shaping pass:** `edit op=trace` (the measured cross-section
