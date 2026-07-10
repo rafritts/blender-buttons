@@ -46,6 +46,38 @@ ring (a local bridge, no global boolean), or at minimum DETECT the discarded-ope
 (result Δverts ≪ bead verts) and refuse+restore instead of reporting success. A macro
 whose failure mode is "success" is worse than no macro.
 
+## G219 — two selection stores: grow/flood silently no-op on seeds they can't see
+
+Live on a VRoid body (semantic-selection dogfood, 2026-07-10): a fingertip seed minted
+by `select op=by_index` would not grow — `op=grow steps=4` answered "GROW x4" while the
+count sat at 16 before and after, in OBJECT mode *and* in EDIT mode; `op=flood` at least
+reported its own no-op ("flooded 16 seed → 16 verts"). The IDENTICAL region seeded by an
+edit-mode `by_axis`+`between INTERSECT` chain grew perfectly (208→250). So selections
+live in two stores (mesh datablock vs live bmesh): the status block, `op=list`, and
+handle-minting read one; the expansion walkers read the other; and ops written into the
+store the walkers don't read succeed *visually* while being invisible *topologically*.
+Also part of the same split-brain: edit-mode ops (`by_axis`, `grow`) run from OBJECT mode
+without auto-entering edit despite `target=`'s promise, and quietly work on the sync'd
+copy — until one doesn't. The general fix: ONE selection store per mesh as far as every
+op is concerned — every select op flushes/syncs so any op's output is any other op's
+valid input, regardless of mode; and an expansion op that adds zero verts must SAY SO
+("grew 0 — seed may be an island or unsynced"), never bare-announce "GROW xN". Same law
+as G217: a mutation whose failure mode is "success" is worse than no mutation.
+
+## G220 — a selection is answered with a count (or nothing), never with what got grabbed
+
+Same session: `select op=by_axis` from object mode returned only "ok
+(threshold_world=-0.6667)" — not even a count; the same op in edit mode returned
+"selected=208" — a count but no shape; `op=grow` returned neither. To learn WHAT was
+selected I had to spend extra calls every time: `op=current` (bbox), `op=list` (vert
+dump), `feel op=silhouette selection=true` (the read that finally showed the finger was
+a clean 7cm rod, not a bleed into the palm). The right 92 verts and a disastrous 92
+verts return the same integer. The general fix: every mutating select answers in the
+same voice as auto-status — count PLUS a one-line legible description of the grabbed
+region (connected patches, extent, centroid, boundary-crossing flag), so Look/Select/
+Verify collapse into the one call that made the selection. A count is not ground truth;
+it's a checksum with no reference value.
+
 ## G218 — declared intents die with the addon process; they are scene facts
 
 Reinstalling the addon (the standard deploy step) wiped the intent registry: the
