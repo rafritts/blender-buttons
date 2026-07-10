@@ -21,10 +21,12 @@ Five decisions, each a corollary of the first:
 4. **Macros are retired as a category** — each is promoted to a native-named operation
    or demoted to a *technique* (prose over primitives). The test: if correct execution
    requires a perception read between steps, it cannot be a tool.
-5. **Landmark LOD windows + offered selections** — the centerpiece. Perception becomes
-   a recursive, self-similar descent through salience windows; selections are
-   pre-computed candidates the agent *claims* rather than predicates it compiles;
-   world coordinates never cross the wire.
+5. **Landmark LOD windows + offered selections** — the centerpiece, and *the loop*:
+   look → descend → claim → modify is the agent's primary interface at all times, not
+   a feature beside the old one. Perception becomes a recursive, self-similar descent
+   through salience windows; selections are pre-computed candidates the agent *claims*
+   rather than predicates it compiles; world coordinates never cross the wire. `feel`
+   is relegated to diagnostics.
 
 ---
 
@@ -169,6 +171,14 @@ where the human gets two primitives for free — *point at what you see* and *wa
 while you hold* — plus an implicit third: persistent attention (where I'm looking, at
 what scale).
 
+**This loop is THE interface, not an addition.** Windows, landmarks, and claims are
+how the agent works at all times — every modeling session runs on look → descend →
+claim → modify. `feel` is demoted to a **diagnostic instrument**: precise measurement,
+relational forensics (distance/gap/contacts/clearance, §6.4), fit/verify reads, and
+"wtf" moments when the window view and the agent's expectation disagree. Reaching for
+`feel` mid-build should be the exception that signals something is off — the way a
+human drops into the N-panel or a measuring add-on only when eyeballing has failed.
+
 ### 6.1 Windows and descent
 
 **The server can never know what the mesh is.** It reports *salience*, never
@@ -275,6 +285,8 @@ error legibly where not.
 - `select`'s 21 predicate ops and `feel`'s read menu — demoted from interface to
   plumbing under look/descend/claim/pick; predicates remain first-class as the custom
   escape hatch.
+- `feel` as the primary perception verb — demoted to diagnostics (§6.0): measurement,
+  relational forensics, verify/fit, and wtf moments. The loop's eyes are `look`.
 - World-coordinate dumps — behind a debug flag.
 - Gaps **G219, G220, G221** are absorbed by §6.3 (their standalone fixes remain
   worthwhile incremental steps — see §9 phase 1). **G217**'s fix direction is
@@ -309,8 +321,9 @@ error legibly where not.
 
 ## 10. Open questions
 
-- Is `look` a new verb or the evolution of `feel op=all`? (Leaning new verb: `feel`
-  keeps measurement/relational reads; `look` owns windows/landmarks/offers.)
+- ~~Is `look` a new verb or the evolution of `feel op=all`?~~ **Decided (sign-off
+  session):** `look` is a new verb and owns the loop; `feel` is relegated to
+  diagnostics and wtf moments (§6.0).
 - BFS-ring linearization details for non-disk patches; loop detection thresholds.
 - Window invalidation policy under heavy topology edits mid-descent.
 - Candidate-generator tuning (crease angle, protrusion scale) and the definition of
