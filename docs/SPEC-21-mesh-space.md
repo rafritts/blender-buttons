@@ -269,7 +269,25 @@ expressed in the **nearest common ancestor's** frame. `feel`'s relational reads
 (distance, gap, contacts, clearance) survive unchanged as exactly this — the
 between-windows sense. The validate floor is untouched by this spec.
 
-### 6.5 Persistence and invalidation
+### 6.5 The loop is a contract (guidance requirement)
+
+Once implemented, `GUIDANCE_FOR_LLMS.md` must call the loop out **explicitly and
+first**: agents should *expect* to work as look → descend → claim → modify — it is
+the normal mode of operation, not an advanced feature to discover.
+
+And the contract cuts both ways: **if the loop is broken, the agent is exonerated.**
+A window that misses a landmark, an offer list without the right candidate, a
+narration that misleads, a descent that dead-ends — these are server defects, never
+operator error. The guidance must say so in as many words, and prescribe the response:
+log the gap (gaps.md discipline), use the declared escape hatches (custom predicates,
+`feel` diagnostics), and continue — do NOT silently grind back into coordinate space,
+do NOT contort to compensate, and do NOT treat the failure as your own. This is the
+blind-dogfood principle with teeth: a loop the agent must work around is a defect in
+the loop. (The VRoid fingernail incident is the cautionary tale — an agent hallucinated
+a root cause partly because it assumed the fault was in its own usage rather than in
+the tool's silence.)
+
+### 6.6 Persistence and invalidation
 
 The selection persists into modify (Look → Select → Modify → *more* Modify), exactly
 as today's edit-mode ops act on the live selection; claimed handles persist in the
@@ -316,8 +334,9 @@ error legibly where not.
 3. **Offered selections + claiming** (ephemeral handles, region algebra, twins,
    coverage line).
 4. **Coordinate starvation**: local-frame vert views, world-XYZ behind debug.
-5. **Macro disposition + techniques shelf** (§4, §5) and the form-analysis-first
-   guidance rewrite.
+5. **Macro disposition + techniques shelf** (§4, §5) and the guidance rewrite:
+   form-analysis-first, the loop taught explicitly as the expected way of working,
+   and the exoneration clause (§6.5) in as many words.
 
 ## 10. Open questions
 
