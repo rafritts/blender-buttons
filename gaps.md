@@ -18,7 +18,7 @@ task-specific shortcut.
 
 ---
 
-## G208 — `file op=import` is a stranger to its own interlock
+## G203 — `file op=import` is a stranger to its own interlock
 
 `file op=import` mutates the world (adds objects) but does not stamp that mutation into
 the SPEC-15 clean baseline the way every other mutating verb does. Result: the very next
@@ -138,3 +138,61 @@ op=boundary ∩ in_sphere(cast) ∩ z-band. That composition is the system worki
 the read "the OPENING'S edge at clock angle θ" is a first-class question on any rimmed
 form (cup lips, sleeve cuffs, icing edges) — radial wants a crossing=rim/boundary mode
 that lands ON the nearest boundary loop instead of the wall above it.
+
+## G213 — brushes displace whatever verts happen to exist; nothing guarantees the falloff is expressible
+
+A bead-sized brush (r=6mm) on the icing skirt found **6 verts** in its footprint —
+`inflate` then produced a faceted welt, `proportional_move`'s SMOOTH falloff was sampled
+at **2 points per side** (the curve cannot appear: three full-strength verts landed at
+one depth → a flat-bottomed tent), and the wall quads stretched into 12–18mm slivers
+beside 3mm neighbors. `subdivide=True` is one midpoint pass per stroke (6→20→68→245
+verts took three strokes), and on a boundary edge it mints **valence-2** verts — edge
+splits that add zero shapeable surface. Native sculpt solves this with dyntopo/multires:
+the brush *guarantees* its own resolution. The general primitive: a brush op should
+densify the footprint to a stated `detail=` edge length (default derived from radius,
+~radius/4) BEFORE displacing — iterate to the target, not one blind pass — so every
+stroke can express its falloff curve. The existing "only moved N verts" warning names
+the symptom; the tool should close it itself.
+
+## G214 — a hanging mass has no author: displacement can't make volume, and graft can't eat an open shell
+
+The intent "a bead of icing dripping from the rim" is volume authorship at a boundary —
+and every path fails structurally, not by tuning. `inflate` at a hem pushes along
+boundary-vert normals: the tip drifted **sideways** (+1.9mm out of the wall plane, zero
+added hang) because a hem has no underside verts to swell — the bulge-below-the-neck of
+a drip is geometry that doesn't exist yet. `proportional_move` is a rigid delta with
+falloff: no gather, no bulge. `gravity` (the advertised teardrop brush) moved the right
+direction but yielded a 5-vert spike. The volume path, `buttons-blend-macro op=graft`,
+requires CLOSED masses — while `buttons-shell-macro op=clad`, the tool that builds
+exactly these shells, outputs OPEN ones by construction: the two purpose-built macros
+cannot compose. Grafting an 8mm bead sphere onto the open icing anyway skinned BOTH
+faces of the shell (+2.5mm/side), returned 65k verts with 6 boundary loops (three
+degenerate 1-vert holes, one new 9mm gash), and — being a new object — dropped the
+host's material and its Scatter-on-Surface modifier (the sprinkles). The general
+primitive: **bud** — grow a closed mass fused at a surface/boundary point, parameterized
+by dimensions (diameter, hang, neck), that welds into an open host locally and preserves
+the host's identity (name, materials, modifiers). Or teach graft winding-number/
+pseudo-normal signing + local-region remeshing so open shells are first-class.
+
+## G215 — brush scope is a euclidean sphere; on a thin shell it grabs both walls and shreds them
+
+The icing is a 3mm-thick clad shell. Any brush radius over ~3mm therefore scoops verts
+from BOTH walls, whose normals oppose — three inflate strokes left **4 self-intersections**
+(validate caught them; the brush never knew). The agent can't shrink the radius below
+the feature size to compensate: a 6mm bead needs a 6mm brush. `edit op=proportional_move
+connected=true` already has the right answer — geodesic scope, walk the surface from the
+hit point instead of ballooning through space. The general primitive: sculpt brushes on
+a mesh with a nearby back-face (shell thickness < radius) should scope geodesically from
+the hit-point surface by default, or at least detect the two-normal-population case and
+warn BEFORE mutating.
+
+## G216 — proportional falloff exists only for translation
+
+A drip gathers — the surface narrows toward the hanging tip. That's a proportional
+SCALE (shrink toward a center with falloff), and it doesn't exist: `proportional_move`
+only translates (one rigid delta), `transform op=scale_verts` has no falloff, so the
+only tools left are the sculpt brushes G213/G215 disqualify on this mesh. Native
+proportional editing applies to move/scale/rotate alike. The general primitive: the
+falloff machinery of proportional_move should also drive scale (and rotate) —
+`proportional_scale factor= radius= connected=` — so soft gather/taper/twist deforms
+are expressible on coarse meshes without sculpt-mode density.
