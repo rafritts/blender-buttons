@@ -1,42 +1,159 @@
 # blender-buttons
 
-An MCP server that lets an agent drive Blender by **intent, not coordinates**. It
-perceives (`feel`), measures, validates, and mutates through **~15 verbs** — the same
-menus a human uses (add, edit, select, transform, modifier, material, sculpt, pose,
-scene, view, render, file, history) plus a perception verb (`feel`) and an always-on
-correctness floor (`validate`). You place things *relationally* — on, between, left_of,
-snap, at a named handle — and the server holds the coordinates so the model can hold
-names and relationships.
+**An MCP server that lets an AI agent drive Blender by intent, not coordinates.**
 
-It targets **Blender 5.x** (verified against 5.1).
+<!-- hero demo GIF goes here — see bugs.md B5 -->
 
-> **New here?** Read [`GUIDANCE_FOR_LLMS.md`](GUIDANCE_FOR_LLMS.md) before you model
-> anything, and see [`recipes/donut/donut.md`](recipes/donut/donut.md) for a verified
-> end-to-end build written entirely in these verbs. The project's thesis and design
-> principles live in [`project-vision.md`](project-vision.md).
+LLMs are bad at 3D coordinates. Not slightly bad — structurally bad. Ask one to carry
+`(x, y, z)` across fifty tool calls and compute offsets in working memory, and a
+16-part chair hides the problem while a hundred-part character exposes it: drift,
+guesswork, parts floating a centimeter off their mates.
 
-## What makes it different
+blender-buttons' answer is to stop asking. The agent speaks **dimensions**
+(`width=0.04`) and **relationships** (`on={"between": ["a","b"]}`, `snap`, a named
+handle) — the server holds the coordinates so the model can hold **names and
+relationships**. Around that core: a perception verb (`feel`) so the agent reads the
+scene instead of imagining it, and an always-on `validate` floor so it can't build on
+broken geometry without noticing.
 
-Three ideas do the work:
+Targets **Blender 5.x** (verified against 5.1). MIT.
 
-- **Intent-space, not coordinate-space.** LLMs (and humans) collapse when they carry
-  `(x, y, z)` across calls and compute offsets in working memory. So every verb takes
-  *dimensions* (`width=0.04`) and *relational anchors* (`on={"between": ["a","b"]}`,
-  `snap_to`, a handle addressed by name). The typed-coordinate escape hatches are gone by
-  design — if you can't reach a spot relationally, mint a handle there and address it.
+> **New here?** [`GUIDANCE_FOR_LLMS.md`](GUIDANCE_FOR_LLMS.md) is the field manual
+> (served to agents as the `guidance://llms` MCP resource), and
+> [`recipes/donut/donut.md`](recipes/donut/donut.md) is a verified end-to-end build.
+> The thesis lives in [`project-vision.md`](project-vision.md).
 
-- **Derive, don't divine (THE ONE RULE).** Your sense of where things are is a
-  hypothesis, never ground truth. A number computed from something the server just handed
-  you (a status-block bound, a `feel` read) or from a dimension you authored is legitimate
-  arithmetic. A number *fabricated* from intuition — "nudge it ~0.02, looks about right" —
-  is the sin. The test is **provenance**: for every number you type, you can name the
-  measured or authored value it descends from.
+## What a build looks like
 
-- **Two forced senses.** Every mutating call comes back with a `feel` note (what you just
-  changed — your eyes, no verdict) and a `validate` result (what's broken — z-fighting,
-  non-manifold, flipped normals, degenerate geometry). The correctness floor is always on
-  and unsilenceable; intended overlaps must be *declared* (`validate op=expect`), never
-  ignored.
+The classic donut tutorial, in the server's own verbs — no `(x, y, z)` typed anywhere:
+
+```
+add type=torus name=Donut major_radius=0.03 minor_radius=0.013
+select op=by_axis target=Donut axis=Z factor=0.5 comparison=GREATER      # upper half
+buttons-shell-macro op=clad name=Donut region=selection thickness=0.003 new_name=Icing
+modifier op=add_asset target=Icing asset="Scatter on Surface" collection=Sprinkles
+```
+
+Every mutating call answers with ground truth the agent didn't ask for:
+
+```
+── blender status ──────────────────────────────
+  active:      Icing (MESH)
+  dims:        [0.088, 0.088, 0.014]
+  bounds:      x=[-0.044, 0.044]  y=[-0.044, 0.044]  z=[-0.002, 0.012]
+  ...
+validate: clean — no defects, no undeclared clips
+```
+
+The agent reads those bounds, derives the next number from them, and keeps going. A
+whole stacked assembly can be built as arithmetic on previous status blocks — zero
+screenshots, zero placement corrections.
+
+## Three ideas do the work
+
+**1. Intent-space, not coordinate-space.** Every verb takes dimensions and relational
+anchors. The typed-coordinate escape hatches are gone *by design* — if you can't reach
+a spot relationally, you mint a handle there and address it by name forever after.
+
+**2. THE ONE RULE — derive, don't divine.** The poison was never the coordinate; it's
+the *source*. A number computed from something the server just handed you (a
+status-block bound, a `feel` read) or from a dimension you authored is legitimate
+arithmetic. A number fabricated from intuition — "nudge it ~0.02, looks about right" —
+is the sin. The test is **provenance**: for every number the agent types, it can name
+the measured or authored value it descends from. "It felt right" is not a provenance.
+
+**3. Two forced senses — the agent doesn't get to close its eyes.** Every mutation
+returns a `feel` note (what you just changed — eyes, no verdict) and a `validate`
+result (what's broken — z-fighting, non-manifold edges, flipped normals, degenerate
+faces). The correctness floor is unsilenceable. Intended overlaps — hair under a
+scalp, a tenon in its mortise — must be *declared* (`validate op=expect` with a
+reason); there is no "ignore," only "I intend this," and the declaration becomes a
+tripwire if the overlap later drifts.
+
+## How it's developed: the gap engine
+
+This repo is built by the agent that uses it, against real modeling sessions — a
+donut, a hand, a pocketwatch, a character blockout. The process:
+
+1. The agent models something real and hits a wall — an intent it can't express, a
+   read it can't take, a silent failure.
+2. The wall goes into [`gaps.md`](gaps.md) as a numbered gap (**G#**), framed as a
+   *general* primitive — never "add a bangs builder," always "what's the general
+   operation underneath?"
+3. The fix ships, gets verified live against a scene, and the entry is **deleted**.
+   Numbers are never reused; the counter recently passed **G212**.
+
+Two rules keep the loop honest. Every fix must be a **general primitive** that
+composes across any task — if a proposed tool can't be described without naming a body
+part or a domain object, it's too specific. And the dogfood is kept **blind**: the
+modeling agent gets no cheat-sheet beyond what the server itself teaches on connect
+(its `instructions` + the `guidance://llms` resource). A server that only works
+because the operator memorized it is not a finished server — *the server must teach
+itself, and that is the thing under test.*
+
+The same philosophy is being projected onto Unreal Engine 5 in a sister project
+(`ue-buttons`).
+
+## North star
+
+An agent that can model a **stylized anime-grade character** — sculpt, retopo, UV,
+rig, weights, hair — over a multi-hour session, directed by a human who owns taste but
+can't hand-model. The donut tutorial is the smoke test, not the destination.
+
+## The verb surface
+
+Every verb is one MCP tool taking an `op=` discriminator; **each verb's schema
+enumerates every op and its args**, so the surface is self-describing. `tools/list`
+returns ~26 schemas, not hundreds of flat tools.
+
+| Verb | The menu it is |
+|------|----------------|
+| `add` | Add menu — box / cylinder / sphere / torus / curve / light / camera / … with dimensions + relational `on=` placement |
+| `object` | Object Mode — select, rename, duplicate, join, group, delete |
+| `edit` | Edit Mode / Mesh menu — loop-cut, extrude, bevel, ring shaping, noise-displace, smooth |
+| `select` | Select menu — by axis, between, by radius, boundary, rings, grow/shrink, INTERSECT |
+| `transform` | move / rotate / scale / resize / snap / mirror / array |
+| `modifier` | Modifier Properties — add/apply, incl. `op=add_asset` for the native GN modifiers (Scatter on Surface, Array-Circular, …) |
+| `material` | Material Properties / shading — solid colors, PBR-folder import, Principled values |
+| `sculpt` | Sculpt Mode brushes |
+| `pose` | Pose Mode / armature — rigging, weights, binding, shape keys |
+| `scene` | Outliner + scene-level Properties |
+| `view` | Viewport View menu + camera viewpoint — rig, framing/exposure checks, active camera |
+| `render` | Render menu |
+| `history` | Undo / Redo + the operation log |
+| `file` | File menu — `.blend` persistence |
+| `feel` | **The sense** — profile / section / anchor / verify / overlaps / contacts / facing / resting / aim, plus measurements |
+| `validate` | **The always-on correctness floor** — and `op=expect` to declare an intended overlap |
+| `connect` | Choose which Blender instance this session drives (list / attach / launch) |
+| `collab` | Shared-state collaboration surface |
+| `addon` | Drive any installed Blender addon/extension by name |
+| `uv` | UV unwrap & texture-space mapping |
+
+Six composite **macros** bundle multi-step operations behind one call, each tagged
+with its native-Blender cousin:
+
+| Macro | Purpose |
+|-------|---------|
+| `buttons-shell-macro` | Shell builders — e.g. `clad` mints an offset shell hugging a selected region (icing, armor, panels) |
+| `buttons-blend-macro` | Algebraic mass/patch merge (boolean + smooth-union family) |
+| `buttons-deform-macro` | Formula / sweep deforms |
+| `buttons-lathe-macro` | Surface-of-revolution / ring-family builders |
+| `buttons-connector-macro` | Swept, geometry-bound connectors |
+| `buttons-npr-macro` | Non-photoreal look macros |
+
+The depth — the battle-tested loops for *finding geometry* and *building forms* —
+lives in [`GUIDANCE_FOR_LLMS.md`](GUIDANCE_FOR_LLMS.md), served verbatim as the
+`guidance://llms` MCP resource. Agents are told to read it before improvising any
+multi-step task.
+
+## Auto-status
+
+Every state-modifying verb appends the `── blender status ──` block shown above to its
+return string — mode, active object, world bounds, rotation, edit-mode selection
+counts — so the agent never calls a "get status" tool after an op. It's ground truth
+for that call; when an op acts on a name-addressed object that isn't the
+viewport-active one, the block labels the bounds `acted_on:` so the numbers are never
+ambiguous. Read-only reads (`feel`, `history`, scene trees) don't append it.
 
 ## Architecture
 
@@ -55,9 +172,9 @@ Blender 5.x
 
 The MCP server is a thin wrapper: it routes each verb to a flat helper, which sends a
 newline-delimited JSON command over the socket. All logic runs **inside Blender on the
-main thread** via a queue; the addon enforces this so Blender's API is never called from a
-background thread. Several Blender instances can run at once, each on its own port from
-`8765` up; a session attaches to one (use the `connect` verb to list/attach/launch).
+main thread** via a queue, so Blender's API is never touched from a background thread.
+Several Blender instances can run at once, each on its own port from `8765` up; a
+session attaches to one (the `connect` verb lists / attaches / launches).
 
 ## Install & connect
 
@@ -95,89 +212,15 @@ MCP-compatible harness. Set up the venv once with [`uv`](https://docs.astral.sh/
 > several verbs (e.g. `modifier op=add_asset "Scatter on Surface"`) depend on the
 > Geometry-Nodes Essentials assets that only ship in 5.x.
 
-## The verb surface
-
-Every verb is one MCP tool. It takes an `op=` (or `type=`) discriminator that selects the
-operation, and a flat set of args — **the verb's own schema enumerates every op and the
-args each one uses**, so the surface is self-describing. `tools/list` returns ~26 schemas,
-not hundreds of flat tools.
-
-| Verb | The menu it is |
-|------|----------------|
-| `add` | Add menu — box / cylinder / sphere / torus / curve / light / camera / … with dimensions + relational `on=` placement |
-| `object` | Object Mode — select, rename, duplicate, join, group, delete |
-| `edit` | Edit Mode / Mesh menu — loop-cut, extrude, bevel, ring shaping, noise-displace, smooth |
-| `select` | Select menu — by axis, between, by radius, boundary, rings, grow/shrink, INTERSECT |
-| `transform` | move / rotate / scale / resize / snap / mirror / array |
-| `modifier` | Modifier Properties — add/apply, incl. `op=add_asset` for the native GN modifiers (Scatter on Surface, Array-Circular, …) |
-| `material` | Material Properties / shading — solid colors, PBR-folder import, Principled values |
-| `sculpt` | Sculpt Mode brushes |
-| `pose` | Pose Mode / armature — rigging, weights, binding, shape keys |
-| `scene` | Outliner + scene-level Properties |
-| `view` | Viewport View menu + camera viewpoint — rig, framing/exposure checks, active camera |
-| `render` | Render menu |
-| `history` | Undo / Redo + the operation log |
-| `file` | File menu — `.blend` persistence |
-| `feel` | **The sense** — profile / section / anchor / verify / overlaps / contacts / facing / resting / aim, plus measurements |
-| `validate` | **The always-on correctness floor** — and `op=expect` to declare an intended overlap |
-| `connect` | Choose which Blender instance this session drives (list / attach / launch) |
-| `collab` | Shared-state collaboration surface |
-| `addon` | Drive any installed Blender addon/extension by name |
-| `uv` | UV unwrap & texture-space mapping |
-
-Six composite **macros** bundle multi-step operations behind one call, each tagged with
-its native-Blender cousin:
-
-| Macro | Purpose |
-|-------|---------|
-| `buttons-shell-macro` | Shell builders — e.g. `clad` mints an offset shell hugging a selected region (icing, armor, panels) |
-| `buttons-blend-macro` | Algebraic mass/patch merge (boolean + smooth-union family) |
-| `buttons-deform-macro` | Formula / sweep deforms |
-| `buttons-lathe-macro` | Surface-of-revolution / ring-family builders |
-| `buttons-connector-macro` | Swept, geometry-bound connectors |
-| `buttons-npr-macro` | Non-photoreal look macros |
-
-The depth — the battle-tested loops for *finding geometry* and *building forms* — lives in
-the `guidance://llms` MCP resource (served verbatim from `GUIDANCE_FOR_LLMS.md`). Read it
-before improvising any multi-step task.
-
-## Auto-status
-
-Every state-modifying verb appends a `── blender status ──` block to its return string, so
-you never call a "get status" tool manually after an op — it fires automatically and is
-**ground truth for that call**. Trust its world bounds over anything you remember.
-
-```
-── blender status ──────────────────────────────
-  active:      Donut (MESH)
-  selected:    ['Donut']
-  dims:        [0.086, 0.086, 0.021]     (world bbox, rotation-aware)
-  bounds:      x=[-0.043, 0.043]  y=[-0.043, 0.043]  z=[-0.0104, 0.0106]
-  rot_deg:     [0.0, 0.0, 0.0]
-  last_action: {id, label, tool}
-  render:      BLENDER_EEVEE  view=AgX look=None exp=0.0 gamma=1.0
-  ── edit ──                              ← only in Edit Mode
-  component:   FACE
-  selected:    {verts, edges, faces}  /  total: {verts, edges, faces}
-  sel_z:       [min_z, max_z]
-  sel_bounds:  x=[..]  y=[..]  z=[..]
-  lr_balance:  0.0cm from X-center        ← the mesh's own left/right split
-────────────────────────────────────────────────
-```
-
-When an op acts on a name-addressed object that isn't the viewport-active one, the block
-labels the bounds `acted_on:` and shows the lagging `vp_active:` so the numbers are never
-ambiguous. Read-only reads (`feel`, `history`, scene trees, screenshots) don't append it.
-
 ## Showcase — the donut
 
 [`recipes/donut/donut.md`](recipes/donut/donut.md) is a verified transcript-recipe —
 every number ran — that builds the classic Blender-tutorial donut end to end in these
-verbs: a torus dough body, an offset **icing shell** (`buttons-shell-macro op=clad`) with a
-draped organic drip rim, multi-color **sprinkles** via the native *Scatter on Surface* GN
-modifier, PBR materials, a relationally-rigged light and camera, and a final render tuned
-by reads (`view op=check_framing` / `check_exposure`) rather than trial renders. It doubles
-as the best worked example of the whole verb surface.
+verbs: a torus dough body, an offset **icing shell** (`buttons-shell-macro op=clad`)
+with a draped organic drip rim, multi-color **sprinkles** via the native *Scatter on
+Surface* GN modifier, PBR materials, a relationally-rigged light and camera, and a
+final render tuned by reads (`view op=check_framing` / `check_exposure`) rather than
+trial renders. It doubles as the best worked example of the whole verb surface.
 
 ## Repo layout
 
@@ -187,9 +230,10 @@ extension/         Blender addon — socket server + bmesh/bpy operations (bundl
 recipes/           Verified end-to-end build recipes (donut, hand)
 docs/              Specs (SPEC-##)
 tests/             Headless e2e suites (need a live/background Blender)
-GUIDANCE_FOR_LLMS.md   The depth — read before modeling (served as guidance://llms)
+GUIDANCE_FOR_LLMS.md   The field manual — read before modeling (served as guidance://llms)
 project-vision.md      Thesis, design principles, north star
-gaps.md                Tool-surface friction log — the engine of the project
+gaps.md                The gap engine — tool-surface friction log
+bugs.md                Repo defects (docs, packaging, hygiene)
 build_extension.sh     Builds blender_buttons.zip from extension/
 ```
 
