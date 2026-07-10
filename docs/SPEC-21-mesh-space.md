@@ -1,6 +1,6 @@
 # SPEC-21 — Mesh Space: the three-headspace constitution, landmark LOD windows, and selections that offer themselves
 
-**Status: DRAFT — awaiting sign-off.**
+**Status: IMPLEMENTED — phases 1–5 shipped (2026-07-10); live dogfood re-verify pending.**
 Origin: design session 2026-07-10 (human + agent), grounded in two live dogfood runs —
 the donut inflate retest (G208–G218) and the VRoid semantic-selection test
 (G219–G221). This spec supersedes the *interface* philosophy of SPEC-02/-04/-06/-09

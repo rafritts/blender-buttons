@@ -53,6 +53,30 @@ _ALL_CHECKS = _INTENT_FREE + (_CLIPPING, _OPEN_BOUNDARY)
 # Hair↔Body intended does NOT also blind a later Hair↔Hat clip.
 _intents = []
 
+# G218: declarations are SCENE facts, not process facts. G125 already writes the registry
+# into the .blend (scene["bb_intents"]) and clear_intents() re-grounds on scene LOAD — but
+# an addon reinstall/reload resets this module (fresh _intents = []) with no scene load, so
+# every declaration vanished and the tripwires silently disarmed. This flag makes grounding
+# LAZY: the first registry access after a module (re)load pulls the scene's stored registry
+# back in. Registration-time loading is impossible (bpy.context is restricted there).
+_grounded = False
+
+
+def _ensure_grounded():
+    global _grounded
+    if _grounded:
+        return
+    _grounded = True
+    try:
+        sc = bpy.context.scene
+        raw = sc.get("bb_intents") if sc is not None else None
+        if raw and not _intents:
+            data = json.loads(raw)
+            if isinstance(data, list):
+                _intents.extend(data)
+    except Exception:
+        pass
+
 
 def _pair_key(check, a, b):
     return (check, frozenset((a, b)))
@@ -82,6 +106,7 @@ def _token_matches(token, objname):
 def _intent_for_pair(check, x, y):
     """Fuzzy match a live penetrating pair (x,y) against the registry, honouring the
     collection-membership tokens above. Used when classifying findings (not for dedup)."""
+    _ensure_grounded()
     for e in _intents:
         if e["check"] != check:
             continue
@@ -94,6 +119,7 @@ def _intent_for_pair(check, x, y):
 def _boundary_intent(objname):
     """A declared OPEN-BOUNDARY intent covering objname (G129) — exact name or a
     collection token. Single-object: stored with a==b==the part/collection."""
+    _ensure_grounded()
     for e in _intents:
         if e["check"] == _OPEN_BOUNDARY and _token_matches(e["a"], objname):
             return e
@@ -103,6 +129,7 @@ def _boundary_intent(objname):
 def _prune_dead_intents():
     """Auto-GC declarations whose object (or collection) no longer exists, so deleting a
     declared part never leaves a permanent un-clearable VANISHED tripwire (feedback P1.5)."""
+    _ensure_grounded()
     changed = False
     for e in list(_intents):
         for tok in (e["a"], e["b"]):
@@ -120,6 +147,7 @@ def add_intent(a, b, reason, check=_CLIPPING, source="agent", max_depth=None):
 
     For check=open_boundary (G129) it's a SINGLE part/collection — b defaults to a — and
     declaring it intended arms a SEAL tripwire (if the part later closes, that's a finding)."""
+    _ensure_grounded()
     if check == _OPEN_BOUNDARY and not b:
         b = a
     if not a or not b:
@@ -154,6 +182,7 @@ def add_intent(a, b, reason, check=_CLIPPING, source="agent", max_depth=None):
 def revoke_intent(a, b, check=_CLIPPING):
     """Drop a declared intent — re-arming the finding (the human overruling: 'that clip
     is a bug, fix it'). Honest no-op error if it wasn't declared."""
+    _ensure_grounded()
     e = _find_intent(check, a, b)
     if e is None:
         return {"error": f"no declared {check} intent for {a}↔{b}"}
@@ -165,6 +194,7 @@ def revoke_intent(a, b, check=_CLIPPING):
 
 def list_intents():
     """The live registry — every declared assertion with its current status."""
+    _ensure_grounded()
     return [dict(e) for e in _intents]
 
 
@@ -183,8 +213,9 @@ def clear_intents():
     """Called on scene load (state.reset_history_state). The declarations describe a scene,
     so RE-GROUND from the loaded .blend's own stored registry (G125 — survive a reopen)
     rather than always dropping them; a fresh/empty scene just starts clean."""
-    global _drift
+    global _drift, _grounded
     _drift = 0.0
+    _grounded = True
     _intents.clear()
     try:
         sc = bpy.context.scene
@@ -211,7 +242,7 @@ _DRIFT_HIGH = {            # structural rearrangers — a lot can shift unseen
     "bake_shape_keys_to_basis", "separate_selection",
 }
 _DRIFT_MED = {             # local topology edits
-    "extrude", "extrude_along_curve", "inset_faces", "loop_cut", "subdivide_selection",
+    "extrude", "spin", "extrude_along_curve", "inset_faces", "loop_cut", "subdivide_selection",
     "poke_faces", "grid_fill", "bridge_handles", "delete_geometry", "field", "flute",
     "taper_end", "taper_section", "shape_profile", "relax_selection", "slide_selection",
     "merge_by_distance", "bevel", "round_corners", "smooth_edges",

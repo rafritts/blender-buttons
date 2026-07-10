@@ -100,7 +100,7 @@ def add(
         grid       — width, depth, x_subdivisions, y_subdivisions  (a flat subdivided
                      PLANE: a width×depth rectangle of verts already wired into quad
                      topology. Native Add > Mesh > Grid. The sheet you VACUUM-FORM: lay it
-                     down, then pull it onto a mould with buttons-deform-macro op=loft
+                     down, then pull it onto a mould with edit op=loft
                      (keyed cross-sections) or op=field (one function) — the grid is the
                      hot plastic, the mould is authored. Vary the mould down the sheet or
                      it forms a flat ribbon.)

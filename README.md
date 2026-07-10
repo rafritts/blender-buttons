@@ -12,9 +12,10 @@ guesswork, parts floating a centimeter off their mates.
 blender-buttons' answer is to stop asking. The agent speaks **dimensions**
 (`width=0.04`) and **relationships** (`on={"between": ["a","b"]}`, `snap`, a named
 handle) — the server holds the coordinates so the model can hold **names and
-relationships**. Around that core: a perception verb (`feel`) so the agent reads the
-scene instead of imagining it, and an always-on `validate` floor so it can't build on
-broken geometry without noticing.
+relationships**. Around that core: a perception loop (`look` → descend → claim →
+modify, with `feel` as the measuring instrument) so the agent reads the scene instead
+of imagining it, and an always-on `validate` floor so it can't build on broken
+geometry without noticing.
 
 Targets **Blender 5.x** (verified against 5.1). MIT.
 
@@ -29,9 +30,9 @@ The classic donut tutorial, in the server's own verbs — no `(x, y, z)` typed a
 
 ```
 add type=torus name=Donut major_radius=0.03 minor_radius=0.013
-select op=by_axis target=Donut axis=Z factor=0.5 comparison=GREATER      # upper half
-buttons-shell-macro op=clad name=Donut region=selection thickness=0.003 new_name=Icing
-modifier op=add_asset target=Icing asset="Scatter on Surface" collection=Sprinkles
+look target=Donut                              # a salience window: landmarks + offered selections
+select op=claim candidate=c2 name=icing_zone   # claim the offered upper region — now a named handle
+modifier op=add_asset target=Donut asset="Scatter on Surface" collection=Sprinkles
 ```
 
 Every mutating call answers with ground truth the agent didn't ask for:
@@ -81,7 +82,7 @@ donut, a hand, a pocketwatch, a character blockout. The process:
    *general* primitive — never "add a bangs builder," always "what's the general
    operation underneath?"
 3. The fix ships, gets verified live against a scene, and the entry is **deleted**.
-   Numbers are never reused; the counter recently passed **G212**.
+   Numbers are never reused; the counter recently passed **G221**.
 
 Two rules keep the loop honest. Every fix must be a **general primitive** that
 composes across any task — if a proposed tool can't be described without naming a body
@@ -106,14 +107,15 @@ destination.
 
 Every verb is one MCP tool taking an `op=` discriminator; **each verb's schema
 enumerates every op and its args**, so the surface is self-describing. `tools/list`
-returns ~26 schemas, not hundreds of flat tools.
+returns 21 schemas, not hundreds of flat tools.
 
 | Verb | The menu it is |
 |------|----------------|
+| `look` | **The loop's eyes** — landmark LOD windows: `look target=` opens a salience window, `at=` descends, windows offer claimable selections |
 | `add` | Add menu — box / cylinder / sphere / torus / curve / light / camera / … with dimensions + relational `on=` placement |
 | `object` | Object Mode — select, rename, duplicate, join, group, delete |
-| `edit` | Edit Mode / Mesh menu — loop-cut, extrude, bevel, ring shaping, noise-displace, smooth |
-| `select` | Select menu — by axis, between, by radius, boundary, rings, grow/shrink, INTERSECT |
+| `edit` | Edit Mode / Mesh menu — loop-cut, extrude, bevel, spin, bridge, boolean, plus the formula deformers (`field`/`loft`/`shape_profile`) |
+| `select` | Select menu — claim offered candidates, pick, by axis/between/radius, boundary, rings, grow/shrink, INTERSECT |
 | `transform` | move / rotate / scale / resize / snap / mirror / array |
 | `modifier` | Modifier Properties — add/apply, incl. `op=add_asset` for the native GN modifiers (Scatter on Surface, Array-Circular, …) |
 | `material` | Material Properties / shading — solid colors, PBR-folder import, Principled values |
@@ -124,27 +126,21 @@ returns ~26 schemas, not hundreds of flat tools.
 | `render` | Render menu |
 | `history` | Undo / Redo + the operation log |
 | `file` | File menu — `.blend` persistence |
-| `feel` | **The sense** — profile / section / anchor / verify / overlaps / contacts / facing / resting / aim, plus measurements |
+| `feel` | **The measuring instrument** — profile / section / anchor / verify / overlaps / contacts / facing / resting / aim; diagnostics beside the `look` loop |
 | `validate` | **The always-on correctness floor** — and `op=expect` to declare an intended overlap |
 | `connect` | Choose which Blender instance this session drives (list / attach / launch) |
 | `collab` | Shared-state collaboration surface |
 | `addon` | Drive any installed Blender addon/extension by name |
 | `uv` | UV unwrap & texture-space mapping |
 
-Six composite **macros** bundle multi-step operations behind one call, each tagged
-with its native-Blender cousin:
+There are no macro verbs. Multi-step methods — shells, drips, ring welds, revolved
+vessels, smooth unions — are **techniques**: short method docs in native Blender
+vocabulary, served on demand as `guidance://techniques/…` resources ([`techniques/`](techniques/)).
+A macro compiles the adaptation between steps into code, where it can't happen; a
+technique leaves it to the agent, live, with perception reads between steps (SPEC-21).
 
-| Macro | Purpose |
-|-------|---------|
-| `buttons-shell-macro` | Shell builders — e.g. `clad` mints an offset shell hugging a selected region (icing, armor, panels) |
-| `buttons-blend-macro` | Algebraic mass/patch merge (boolean + smooth-union family) |
-| `buttons-deform-macro` | Formula / sweep deforms |
-| `buttons-lathe-macro` | Surface-of-revolution / ring-family builders |
-| `buttons-connector-macro` | Swept, geometry-bound connectors |
-| `buttons-npr-macro` | Non-photoreal look macros |
-
-The depth — the battle-tested loops for *finding geometry* and *building forms* —
-lives in [`GUIDANCE_FOR_LLMS.md`](GUIDANCE_FOR_LLMS.md), served verbatim as the
+The depth — the loop, the reads, the failure modes — lives in
+[`GUIDANCE_FOR_LLMS.md`](GUIDANCE_FOR_LLMS.md), served verbatim as the
 `guidance://llms` MCP resource. Agents are told to read it before improvising any
 multi-step task.
 
@@ -161,7 +157,7 @@ ambiguous. Read-only reads (`feel`, `history`, scene trees) don't append it.
 
 ```
 Agent / LLM harness
-      │  MCP over stdio (JSON-RPC)  —  ~15 verbs, each dispatched by op=
+      │  MCP over stdio (JSON-RPC)  —  21 verbs, each dispatched by op=
       ▼
 server/main.py          ← FastMCP server; the verb layer (server/verbs/)
       │  TCP socket, localhost:8765+, newline-delimited JSON
@@ -218,8 +214,8 @@ MCP-compatible harness. Set up the venv once with [`uv`](https://docs.astral.sh/
 
 [`recipes/donut/donut.md`](recipes/donut/donut.md) is a verified transcript-recipe —
 every number ran — that builds the classic Blender-tutorial donut end to end in these
-verbs: a torus dough body, an offset **icing shell** (`buttons-shell-macro op=clad`)
-with a draped organic drip rim, multi-color **sprinkles** via the native *Scatter on
+verbs: a torus dough body, an offset **icing shell** (now the
+[shell technique](techniques/shell.md)) with a draped organic drip rim, multi-color **sprinkles** via the native *Scatter on
 Surface* GN modifier, PBR materials, a relationally-rigged light and camera, and a
 final render tuned by reads (`view op=check_framing` / `check_exposure`) rather than
 trial renders. It doubles as the best worked example of the whole verb surface.
@@ -229,7 +225,8 @@ trial renders. It doubles as the best worked example of the whole verb surface.
 ```
 server/            MCP server — verb layer (server/verbs/) over flat helpers
 extension/         Blender addon — socket server + bmesh/bpy operations (bundled by build)
-recipes/           Verified end-to-end build recipes (donut, hand)
+recipes/           Verified end-to-end build recipes (donut, hand) — a recipe promises a RESULT
+techniques/        Named multi-step methods in native vocabulary (guidance://techniques) — an APPROACH
 docs/              Specs (SPEC-##)
 tests/             Headless e2e suites (need a live/background Blender)
 GUIDANCE_FOR_LLMS.md   The field manual — read before modeling (served as guidance://llms)

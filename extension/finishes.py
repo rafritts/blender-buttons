@@ -497,7 +497,7 @@ def add_modifier(params):
             return {"error": (f"SHRINKWRAP target must be a DIFFERENT object than the host "
                               f"'{obj.name}' — name the surface to wrap ONTO via target=, and "
                               f"the object that receives the modifier via host= (or make it "
-                              f"active). For draping a new shell over a form, prefer buttons-shell-macro op=clad.")}
+                              f"active). For a new shell that follows a form, build it natively: duplicate the surface region and add a Solidify (guidance://techniques/shell).")}
         try:
             mod.target = tgt
         except Exception as e:
@@ -1470,7 +1470,7 @@ def boolean(params):
         result.setdefault("notes", []).append(
             f"boolean operand(s) {', '.join(open_notes)} are NOT watertight (open boundary "
             f"edges) — EXACT can leave internal membranes / non-manifold edges here. Cap the "
-            f"operand(s) (buttons-shell-macro op=hollow open=none, or fill the rim) before the boolean, or "
+            f"operand(s) (give it walls with a Solidify, or fill the rim with edit op=grid_fill) before the boolean, or "
             f"check the result with feel op=topology. (The topology-delta floor will flag new "
             f"non-manifold edges this op leaves.)")
     if apply_error is not None:
@@ -1759,156 +1759,6 @@ def add_asset_modifier(params):
     return result
 
 
-def _build_bead_mesh(diameter, hang, neck):
-    """G214 — a closed TEARDROP bmesh: an icosphere (radius=diameter/2) whose top narrows
-    to `neck` and whose body is stretched downward (local -Z) by `hang`. Local +Z is the
-    NECK (the fuse-to-host end); the round body hangs toward local -Z. Returns a new Mesh."""
-    import bmesh
-    r = diameter / 2.0
-    bm = bmesh.new()
-    try:
-        bmesh.ops.create_icosphere(bm, subdivisions=3, radius=r)
-    except TypeError:                       # older bmesh: diameter= instead of radius=
-        bmesh.ops.create_icosphere(bm, subdivisions=3, diameter=r * 2.0)
-    neck_ratio = max(0.05, min(1.0, (neck if neck > 0 else diameter * 0.5) / diameter))
-    stretch = (2.0 * r + max(0.0, hang)) / (2.0 * r)
-    for v in bm.verts:
-        f = (v.co.z + r) / (2.0 * r)        # 0 at bottom … 1 at the neck (top)
-        taper = neck_ratio + (1.0 - neck_ratio) * (1.0 - f)
-        v.co.x *= taper
-        v.co.y *= taper
-        v.co.z = r - (r - v.co.z) * stretch  # top stays at +r; bottom → -(r+hang)
-    me = bpy.data.meshes.new("bud_bead")
-    bm.to_mesh(me)
-    bm.free()
-    return me
-
-
-def bud(params):
-    """G214 — grow a CLOSED teardrop mass fused to a host at a point, PRESERVING the host's
-    identity (name, materials, modifier stack). The volume author that `graft` couldn't be
-    (it makes a new object and drops the host's materials + modifiers) and displacement
-    can't be (no mass to add): a bead of icing dripping from a rim, a rivet, a wart, a drop.
-
-    host:      the object the bud fuses INTO (kept, with all its identity).
-    at:        [x, y, z] world anchor where the neck fuses (from feel op=radial crossing=rim
-               / aim / place, or a handle's live point).
-    handle:    alternatively, a named handle whose live point is the anchor.
-    diameter:  bead width (m).
-    hang:      how far the body hangs past the neck along the hang direction (m; default=diameter).
-    neck:      neck width where it meets the host (m; < diameter ⇒ teardrop; default diameter/2).
-    direction: hang direction — down (world -Z, default = gravity) | up | left | right |
-               forward | back.
-    solver:    EXACT (default, clean on a closed host) | FLOAT (5.x fast solver).
-    """
-    from mathutils import Vector
-    host_name = params.get("host") or params.get("target")
-    host = bpy.data.objects.get(host_name) if host_name else bpy.context.active_object
-    if host is None or host.type != 'MESH':
-        return {"error": f"bud host '{host_name}' not found or not a mesh"}
-
-    at = params.get("at")
-    hnd = (params.get("handle") or "").strip()
-    if isinstance(at, (list, tuple)) and len(at) == 3:
-        apex = Vector((float(at[0]), float(at[1]), float(at[2])))
-    elif hnd:
-        from . import handles as H
-        e = H._find_handle(hnd)
-        if e is None:
-            return {"error": f"bud handle '{hnd}' not found"}
-        v = H._validate(e)
-        if v.get("point") is None:
-            return {"error": f"bud handle '{hnd}' is unresolvable"}
-        apex = Vector(tuple(v["point"]))
-    else:
-        return {"error": "bud needs at=[x,y,z] or handle=<name> for the fusion anchor"}
-
-    diameter = float(params.get("diameter", 0.01))
-    if diameter <= 0:
-        return {"error": "diameter must be > 0"}
-    hang = float(params.get("hang", diameter))
-    neck = float(params.get("neck", diameter * 0.5))
-    solver = (params.get("solver") or "EXACT").upper()
-    if solver == "FAST":
-        solver = "FLOAT"
-    if solver not in ("EXACT", "FLOAT"):
-        return {"error": "solver must be EXACT or FLOAT"}
-
-    dirs = {"down": Vector((0, 0, -1)), "up": Vector((0, 0, 1)),
-            "left": Vector((-1, 0, 0)), "right": Vector((1, 0, 0)),
-            "forward": Vector((0, -1, 0)), "back": Vector((0, 1, 0))}
-    hd = dirs.get((params.get("direction") or "down").strip().lower(), Vector((0, 0, -1)))
-
-    # Build the teardrop, orient its neck (local +Z) OPPOSITE the hang, and seat the neck
-    # at the anchor pushed slightly INTO the host (opposite hang) so the union has overlap.
-    me = _build_bead_mesh(diameter, hang, neck)
-    bead = bpy.data.objects.new("bud_bead", me)
-    bpy.context.scene.collection.objects.link(bead)
-    r = diameter / 2.0
-    tgt = (-hd).normalized()                                  # where local +Z should point
-    rot = Vector((0.0, 0.0, 1.0)).rotation_difference(tgt)
-    bead.rotation_euler = rot.to_euler()
-    embed = 0.3 * diameter
-    neck_top_world = apex - hd * embed                        # push the neck into the host
-    bead.location = neck_top_world - (rot @ Vector((0.0, 0.0, r)))
-    # Carry the host's material slots onto the bead so the UNION maps them 1:1 (no spurious
-    # empty slot) and the bead inherits the host's look — a drip IS the icing's material.
-    for m in host.data.materials:
-        bead.data.materials.append(m)
-    bpy.context.view_layer.update()
-
-    mat_count = len(host.data.materials)
-    mod_count = len(host.modifiers)
-    open_host = _has_open_boundary_obj(host)
-
-    mod = host.modifiers.new(name="bud_union", type='BOOLEAN')
-    mod.operation = 'UNION'
-    mod.object = bead
-    if hasattr(mod, "solver"):
-        mod.solver = solver
-    # Apply as the FIRST modifier so only the union bakes into the base mesh — any other
-    # host modifier (Solidify, the icing's Scatter sprinkles) stays LIVE above it. Applying
-    # a non-first modifier bakes the whole stack up to it, double-applying the rest. This is
-    # how bud preserves the modifier stack graft destroyed.
-    try:
-        host.modifiers.move(len(host.modifiers) - 1, 0)
-    except Exception:
-        pass
-    activate(host)
-    try:
-        bpy.ops.object.modifier_apply(modifier=mod.name)
-        err = None
-    except Exception as e:
-        err = str(e)
-        try:
-            host.modifiers.remove(mod)
-        except Exception:
-            pass
-    bpy.data.objects.remove(bead, do_unlink=True)
-    if err:
-        return {"error": f"bud union failed: {err} — try solver=FLOAT, or a larger overlap"}
-
-    welded = _weld_clean(host)
-    _recalc_normals_outside(host)
-    xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(host)
-    push_undo(f"bud {diameter}m on {host.name}")
-    result = {
-        "success": True, "status_focus": host.name, "host": host.name,
-        "diameter": diameter, "hang": hang, "neck": neck, "solver": solver,
-        "welded_verts": welded,
-        "materials_preserved": len(host.data.materials) == mat_count,
-        "modifiers_preserved": len(host.modifiers) == mod_count,
-        "dims_after": [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)],
-    }
-    if open_host:
-        result.setdefault("notes", []).append(
-            "host base mesh is OPEN (e.g. a clad shell) — a UNION can leave a membrane/"
-            "non-manifold seam at the fuse; validate will report it. To drip onto a "
-            "SOLIDIFIED icing shell, apply its Solidify first so the bud fuses to the "
-            "closed wall.")
-    return result
-
-
 TOOLS = {
     "smooth_edges":    smooth_edges,
     "round_corners":   round_corners,
@@ -1925,5 +1775,4 @@ TOOLS = {
     "apply_modifiers": apply_modifiers,
     "convert_to_mesh": convert_to_mesh,
     "boolean":         boolean,
-    "bud":             bud,
 }

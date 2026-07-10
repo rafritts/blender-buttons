@@ -2047,6 +2047,70 @@ def inflate_selection(params):
     return {"success": True, "verts_inflated": moved, "amount": amount}
 
 
+def spin(params):
+    """Native Spin (bpy.ops.mesh.spin) — revolve the selected PROFILE around a world axis
+    through the object's origin: the surface-of-revolution author (SPEC-21 §4 exposes it
+    natively; a goblet is a profile polyline spun 360° about Z).
+
+    axis:  world axis to revolve AROUND — X | Y | Z (the axis line passes through the
+           object's origin).
+    angle: degrees of revolution (default 360 = a full turn).
+    steps: cross-sections around the revolution (default 24).
+
+    A full 360° revolve closes the seam (5.x spin shares the start ring; a residual
+    merge-by-distance at 1e-5 m is kept as a safety net) and recalcs normals outward,
+    so the result is watertight where the profile allows it. Topology change → refused
+    on a shape-keyed mesh (it would corrupt the keys)."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    if obj.data.shape_keys is not None:
+        return {"error": f"'{obj.name}' has shape keys — spin changes topology, which "
+                         f"corrupts every key. Bake keys first (bake_shape_keys_to_basis) "
+                         f"or spin a key-free copy."}
+    axis_name = (params.get("axis") or "Z").upper()
+    if axis_name not in ("X", "Y", "Z"):
+        return {"error": f"axis must be X, Y or Z (got '{axis_name}')"}
+    angle = float(params.get("angle") or 360.0)
+    steps = max(2, int(params.get("steps") or 24))
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    n_sel = sum(1 for v in bm.verts if v.select)
+    if n_sel == 0:
+        return {"error": "No vertices selected — select the profile to revolve first "
+                         "(the open polyline/edge run that traces the silhouette)"}
+    verts_before = len(bm.verts)
+
+    # mesh.spin takes GLOBAL center/axis; the axis line runs through the object's origin.
+    center = obj.matrix_world.translation
+    axis_vec = Vector((0.0, 0.0, 0.0))
+    setattr(axis_vec, axis_name.lower(), 1.0)
+    full_turn = abs(abs(angle) - 360.0) < 1e-6
+    bpy.ops.mesh.spin(steps=steps, dupli=False, angle=math.radians(angle),
+                      center=center, axis=axis_vec)
+
+    welded = 0
+    if full_turn:
+        # the start and end profile rings coincide — weld the seam, then face outward
+        bpy.ops.mesh.select_all(action='SELECT')
+        bm = bmesh.from_edit_mesh(obj.data)
+        before_weld = len(bm.verts)
+        bpy.ops.mesh.remove_doubles(threshold=1e-5)
+        bpy.ops.mesh.normals_make_consistent(inside=False)
+        bm = bmesh.from_edit_mesh(obj.data)
+        welded = before_weld - len(bm.verts)
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    bmesh.update_edit_mesh(obj.data)
+    push_undo(f"spin {axis_name} {angle}° ×{steps}")
+    return {"success": True, "profile_verts": n_sel, "steps": steps,
+            "angle": angle, "axis": axis_name,
+            "verts_before": verts_before, "verts_after": len(bm.verts),
+            "faces_after": len(bm.faces), "seam_welded": welded,
+            "full_turn": full_turn}
+
+
 _DELETE_TYPES = {"VERT", "EDGE", "FACE", "ONLY_FACE", "EDGE_FACE"}
 
 
@@ -2992,6 +3056,7 @@ TOOLS = {
     "select_limb":        select_limb,
     "bevel":              bevel,
     "extrude":            extrude,
+    "spin":               spin,
     "extrude_along_curve": extrude_along_curve,
     "loop_cut":           loop_cut,
     "subdivide_selection": subdivide_selection,

@@ -2,6 +2,32 @@ from server._core import mcp, call_blender, _status
 
 
 @mcp.tool()
+def spin(axis: str = "Z", angle: float = 360.0, steps: int = 24,
+         label: str = "", target: str = "") -> str:
+    """
+    Native Spin — revolve the selected PROFILE around a world axis through the object's
+    origin (the surface-of-revolution author: goblet, vase, plate, wheel).
+    axis: X | Y | Z — the axis line to revolve around (through the object's origin).
+    angle: degrees of revolution (360 = full turn, seam auto-welded + normals recalced).
+    steps: cross-sections around the revolution.
+    target: optional object name — enters edit mode on it first, exits after.
+    """
+    result = call_blender("spin", {"axis": axis, "angle": angle, "steps": steps,
+                                   "target": target}, label=label)
+    if result.get("success"):
+        main = (f"spun the {result['profile_verts']}-vert profile {result['angle']}° about "
+                f"{result['axis']} in {result['steps']} steps → {result['verts_after']} verts / "
+                f"{result['faces_after']} faces")
+        if result.get("full_turn"):
+            w = result.get("seam_welded", 0)
+            main += (f" (seam welded {w} verts, normals out)" if w
+                     else " (seam closed, normals out)")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+@mcp.tool()
 def bevel(width: float = 0.0, factor: float = 0.05, segments: int = 1, affect: str = "EDGES",
           label: str = "", target: str = "") -> str:
     """

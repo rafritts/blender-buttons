@@ -1,4 +1,4 @@
-"""SPEC-13 / G99 — server facade for the field deformer (buttons-deform-macro op=field).
+"""SPEC-13 / G99 — server facade for the field deformer (edit op=field).
 
 Thin pass-through to the Blender-side `field` engine (extension/fields.py), mirroring how
 rings.* ops are split server⇄extension. All the math lives on the Blender side; this just
@@ -74,7 +74,7 @@ def loft(axis, moulds, interp, channel, field_mode, label, target, mould_grid=No
     moulds down the sheet is what gives a real (double-curved) shell — a uniform array
     collapses to a ribbon, which the engine flags. The moulds can be hand-authored profile
     dicts (`moulds=`) OR a raw 2D control grid of numbers (`mould_grid=`), which expands to an
-    evenly-keyed mould array. See the buttons-deform-macro op=loft docstring for the full
+    evenly-keyed mould array. See the edit verb docstring (op=loft) for the full
     language."""
     if mould_grid:
         if moulds:

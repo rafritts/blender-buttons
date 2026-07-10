@@ -1,27 +1,27 @@
 """edit — Edit Mode / the Mesh menu (SPEC-05).
 
 Mesh-editing operations on the active object's geometry (its current selection):
-extrude, bevel, loop cut, merge, delete, mark sharp, bend, boolean, … `op` selects
-the operation. The flat handlers manage entering Edit Mode on `target`.
+extrude, bevel, loop cut, merge, delete, mark sharp, bend, boolean, spin, … `op`
+selects the operation. The flat handlers manage entering Edit Mode on `target`.
 
-SPEC-20: the composite MACROS that used to live here (graft/stitch, field/band/
-extrude_along_curve, the taper/lathe/flute ring family, the connector family) moved to
-purpose-named buttons-<purpose>-macro verbs (buttons-blend-macro, buttons-deform-macro,
-buttons-lathe-macro, buttons-connector-macro). What stays here is native Blender mesh ops
-made drivable (extrude/bevel/loop_cut/subdivide/boolean/bridge/inset/poke/…) plus the
-selection-region smoothers relax/slide.
+SPEC-21 §4 retired the macro verbs; what survives here is native Blender mesh ops made
+drivable (extrude/bevel/loop_cut/subdivide/boolean/bridge/spin/inset/poke/…) plus the
+general deformers Blender has no word for — `field`/`loft` (an explicit per-vertex
+formula / mould array over the selection) and `shape_profile` (absolute ring radii along
+an axis). The multi-step methods the macros used to compile (shells, drips, connectors,
+flutes) are TECHNIQUES now — prose over these primitives: see guidance://techniques.
 """
 
 from typing import Literal
 
 from server._core import mcp
-from server import editmode, finishes, introspect, modifiers
+from server import editmode, fields, finishes, introspect, modifiers, rings
 from ._common import tag, unknown, teach
 
 _OPS = ["extrude", "bevel", "loop_cut", "merge", "symmetrize", "delete", "separate",
         "mark_sharp", "crease", "inflate", "jitter", "noise_displace", "proportional_move",
         "proportional_scale", "round", "bend", "smooth_edges", "trace",
-        "boolean", "subdivide", "bridge",
+        "boolean", "subdivide", "bridge", "spin", "shape_profile", "field", "loft",
         "relax", "slide", "poke", "inset", "grid_fill", "recalc_normals"]
 
 
@@ -31,7 +31,7 @@ def edit(
                 "mark_sharp", "crease", "inflate", "jitter", "noise_displace",
                 "proportional_move", "proportional_scale", "round", "bend", "smooth_edges",
                 "trace", "boolean", "subdivide",
-                "bridge", "relax", "slide",
+                "bridge", "spin", "shape_profile", "field", "loft", "relax", "slide",
                 "poke", "inset", "grid_fill", "recalc_normals"],
     target: tag(str, "mesh object to edit (empty=active)") = "",
     # bridge — weld two boundary handles (SPEC-07 Phase 5 / G10)
@@ -65,8 +65,10 @@ def edit(
     segments: tag(int, "[bevel/round/smooth_edges] bevel segments") = 1,
     affect: tag(str, "[bevel] EDGES | VERTICES") = "EDGES",
     # loop_cut / axis-based
-    axis: tag(str, "[loop_cut/trace/bend] axis X|Y|Z (bend: the axis to bend AROUND; "
-                   "refused if it's the object's own long axis — pick a perpendicular one)") = "Z",
+    axis: tag(str, "[loop_cut/trace/bend/spin/shape_profile/field/loft] axis X|Y|Z (bend: the "
+                   "axis to bend AROUND — refused if it's the object's own long axis, pick a "
+                   "perpendicular one; spin: the axis to REVOLVE around, through the object's "
+                   "origin; shape_profile/field/loft: the lathe/parameterization axis)") = "Z",
     cuts: tag(int, "[loop_cut/subdivide] number of cuts to add") = 1,
     seed_at: tag(float, "[loop_cut] world coord on `axis` to aim the loop at one cross-section "
                         "(only edges straddling that plane are cut) — seeds a spanning ring on "
@@ -88,7 +90,7 @@ def edit(
     weight: tag(float, "[crease] crease weight 0..1") = 1.0,
     # inflate / jitter / noise_displace / proportional
     amount: tag(float, "[inflate/jitter/noise_displace] displacement amount (m); noise wants ~0.03–0.1") = 0.003,
-    seed: tag(int, "[jitter] random seed") = 0,
+    seed: tag(int, "[jitter/field] random seed (field: the rnd/crnd vars)") = 0,
     only_positive: tag(bool, "[jitter] jitter outward only") = False,
     # noise_displace (coherent organic surface break-up)
     feature_size: tag(float, "[noise_displace] noise feature size (bigger = broader lumps)") = 0.5,
@@ -102,13 +104,59 @@ def edit(
     new_name: tag(str, "[separate] name for the split-off object") = "",
     # round_corners
     corners: tag(list, "[round] named corners to round") = None,
-    # bend
-    angle: tag(float, "[bend] bend angle (deg)") = 0.0,
+    # bend / spin
+    angle: tag(float, "[bend/spin] angle in degrees — bend arc / spin revolution (spin: "
+                      "unset ⇒ a full 360°, seam auto-welded)") = 0.0,
     apply: tag(bool, "[bend] apply the bend modifier") = True,
     # smooth_edges
     angle_limit: tag(float, "[smooth_edges] shade-smooth angle limit (deg)") = 30.0,
-    # trace_profile
-    sections: tag(int, "[trace] number of cross-sections along the span") = 24,
+    # trace_profile / spin
+    sections: tag(int, "[trace] cross-sections along the span; [spin] steps around the "
+                       "revolution") = 24,
+    # shape_profile (absolute-radius lathe) + field (control-point function source)
+    points: tag(list, "[shape_profile] control points [[ring_index, radius_m], …] — rings "
+                      "between interpolate, outside untouched; [field] control-point curve "
+                      "[[t,val],…] (one function source)") = None,
+    # field — explicit per-vertex p'=F(vars(p)) over the selection (SPEC-13)
+    about: tag(str, "[field] radial pivot: axis (ship) | spine (deferred)") = "axis",
+    channel: tag(str, "[field/loft] how F displaces: radial | normal | axis:<X|Y|Z|long|u|v> "
+                      "| twist | vector (loft default: normal)") = "radial",
+    field_mode: tag(str, "[field/loft] add | multiply | set. radial: multiply default, set "
+                         "writes the radius; axis:<dir>: add default, set writes the coord "
+                         "ALONG dir from the group origin; offset channels default add") = "",
+    per_component: tag(bool, "[field] parameterize + apply independently per connected "
+                             "sub-shell") = False,
+    frame: tag(str, "[field] channel=vector basis: world | local | tangent_normal") = "world",
+    preset: tag(str, "[field] taper|power|smoothstep|bell|sine|lobes (one function source; "
+                     "lobes = radius vs azimuth — flutes/gadroons)") = "",
+    preset_a: tag(float, "[field] preset endpoint value at t=0 (taper/power/smoothstep)") = 1.0,
+    preset_b: tag(float, "[field] preset endpoint value at t=1 (taper/power/smoothstep)") = 1.0,
+    k: tag(float, "[field] power preset exponent (k>1 late bulge, k<1 early)") = 1.0,
+    amp: tag(float, "[field] amplitude (bell/sine/lobes)") = 1.0,
+    freq: tag(float, "[field] frequency: cycles over t (sine) / lobes around theta (lobes)") = 1.0,
+    center: tag(float, "[field] bell center in t (0..1)") = 0.5,
+    bell_width: tag(float, "[field] bell gaussian width in t") = 0.2,
+    phase: tag(float, "[field] sine preset/expr phase (radians)") = 0.0,
+    expr: tag(str, "[field] sandboxed scalar expression over the var namespace") = "",
+    expr_x: tag(str, "[field] channel=vector X-component expression") = "",
+    expr_y: tag(str, "[field] channel=vector Y-component expression") = "",
+    expr_z: tag(str, "[field] channel=vector Z-component expression") = "",
+    sigma_x: tag(float, "[field] radial anisotropy on the U cross-axis (keeps ellipses "
+                        "elliptical)") = 1.0,
+    sigma_y: tag(float, "[field] radial anisotropy on the V cross-axis") = 1.0,
+    clamp_min: tag(float, "[field/loft] lower bound on F (None=unbounded)") = None,
+    clamp_max: tag(float, "[field/loft] upper bound on F (None=unbounded)") = None,
+    # loft — vacuum-form a sheet onto an array of keyed cross-section moulds
+    moulds: tag(list, "[loft] array of keyed cross-section moulds: [{\"at\":0..1,\"points\":"
+                      "[[u,val],…]}, …] — one mould per line, interpolated down the sheet "
+                      "(vary them or it collapses to a ribbon)") = None,
+    mould_grid: tag(list, "[loft] a 2D control grid [[v,…],…] AS the mould — rows are "
+                          "cross-sections keyed evenly down the line-axis, cols are values "
+                          "across u; sugar for an evenly-keyed `moulds` array. Use moulds OR "
+                          "mould_grid, not both") = None,
+    interp: tag(str, "[field/loft] curve interpolation, applied to BOTH loft axes: linear | "
+                     "smooth | cubic | monotone (PCHIP — passes every key, no "
+                     "overshoot)") = "smooth",
     # boolean
     cutter: tag(str, "[boolean] cutter object") = "",
     bool_op: tag(str, "[boolean] DIFFERENCE|UNION|INTERSECT") = "DIFFERENCE",
@@ -138,10 +186,9 @@ def edit(
     no-op detector flags the byte-identical result). Issue dependent edit ops sequentially,
     one per message. Independent edits on DIFFERENT meshes are fine to batch.
 
-    (Composite MACROS moved to buttons-<purpose>-macro verbs — SPEC-20: graft/stitch →
-    buttons-blend-macro; field/band/extrude_along_curve → buttons-deform-macro; taper_end/
-    taper_section/shape_profile/flute/scale_rings → buttons-lathe-macro; connect/reshape/
-    resample/strands → buttons-connector-macro.)
+    (SPEC-21 §4: the multi-step methods the retired macros compiled — shells, drips,
+    connectors, flutes, smooth unions — are TECHNIQUES now, prose over these primitives:
+    read guidance://techniques and apply them with perception reads between steps.)
 
       extrude     — push the selection out (out/inward/up/down/left/right/forward/back
                     meters, or until_contact=obj / until_length)
@@ -200,6 +247,39 @@ def edit(
                     bow, profile=outward bulge, interpolation=linear|path|surface), and
                     twist to align rims that face apart (kills the spiral).
                     (a, b, bridge_cuts, smoothness, interpolation, profile, twist)
+      spin        — NATIVE SPIN: revolve the selected PROFILE around a world axis
+                    through the object's origin — the surface-of-revolution author
+                    (goblet, plate, wheel: trace the silhouette as an edge run, spin it).
+                    A full 360° welds the seam and recalcs normals outward.
+                    (axis, angle=360, sections=steps around the turn)
+      shape_profile — set the ring radii of an EXISTING surface of revolution in
+                    ABSOLUTE meters, interpolating between control points (axis,
+                    points=[[ring,radius],…]). Seam-safe and idempotent — authors the
+                    silhouette directly (the per-ring select→scale loop Blender leaves
+                    manual). A taper/flare is a 2-point profile.
+      field       — the FIELD DEFORMER (SPEC-13): apply an explicit per-vertex function
+                    p'=F(vars(p)) over the SELECTION. vars are measured from the selected
+                    geometry (t/u/v along the frame, r/theta in the cross-plane, arc-length
+                    s/L per strand, normal, x/y/z local, rnd/crnd). F is a preset (taper|
+                    power|smoothstep|bell|sine|lobes — lobes modulates radius vs azimuth:
+                    flutes/gadroons), a control-point curve (points+interp), or a sandboxed
+                    expr. Output displaces through channel (field_mode add|multiply|set).
+                    Smooth F ⇒ smooth surface. The signature use is VACUUM FORMING: a flat
+                    `add type=grid` sheet is the hot plastic, F is the mould, field pulls
+                    every vert onto it. ONE function applied to every line can only
+                    extrude a single-curvature RIBBON — for a real shell vary the mould
+                    down the grid (op=loft). `feel op=fit` is this op's analytic INVERSE
+                    (read surface → formula → edit coefficients → apply here).
+      loft        — vacuum-form the sheet onto an ARRAY of moulds (the classic CAD loft:
+                    cross-sections interpolated down a spine; the moulds are AUTHORED
+                    numbers, not scene geometry). moulds=[{"at":0..1,"points":[[u,val],…]},
+                    …] keys each cross-section down the line-axis; the sheet curves in
+                    BOTH directions → a real shell. Displaces along the sheet normal by
+                    default. SHORTHAND: mould_grid=[[v,…],…] — a raw 2D grid of numbers
+                    (rows = evenly-keyed cross-sections, cols = values across u). `interp`
+                    governs BOTH axes; for landings that must not dip below the base plane
+                    use interp=monotone or clamp_min/clamp_max. Warns if the moulds don't
+                    differ (ribbon, not a shell).
       relax       — RELAX the selection: even out vertex spacing over the form WITHOUT
                     changing its shape (smooth + reproject onto the pre-relax surface).
                     Moves verts ALONG the surface — fixes stretched/bunched quads.
@@ -226,6 +306,18 @@ def edit(
                     "edit op=boolean target=block cutter=drill bool_op=DIFFERENCE"),
         "round":   (bool(corners), "corners=[...] (named corners to round)",
                     "edit op=round target=panel corners=[c1,c2] width=0.02"),
+        "shape_profile": (bool(points), "points=[[ring_index, radius_m], ...]",
+                    "edit op=shape_profile axis=Z points=[[0,0.05],[11,0.009],[22,0.06]]"),
+        "field":   (sum([bool(preset), bool(points),
+                         bool(expr or expr_x or expr_y or expr_z)]) == 1,
+                    "EXACTLY one function source: preset=<name> | points=[[t,val],…] | expr=\"…\"",
+                    "edit op=field axis=Z channel=radial field_mode=multiply preset=smoothstep "
+                    "preset_a=1.0 preset_b=0.6"),
+        "loft":    (bool(moulds or mould_grid),
+                    "moulds=[{at,points},…] OR mould_grid=[[v,…],…] — cross-section moulds as "
+                    "profile dicts or an evenly-keyed control grid",
+                    "edit op=loft target=sheet moulds=[{\"at\":0,\"points\":[[0,0],[0.5,0.03],"
+                    "[1,0]]},{\"at\":1,\"points\":[[0,0],[0.5,0.12],[1,0]]}]"),
     })
     if bad:
         return bad
@@ -282,6 +374,22 @@ def edit(
     if o == "bridge":
         return editmode.bridge(a, b, label, bridge_cuts, smoothness,
                                interpolation, profile, twist)
+    if o == "spin":
+        return editmode.spin(axis, angle or 360.0, sections, label, target)
+    if o == "shape_profile":
+        return rings.shape_profile(axis, points or [], label, target)
+    if o == "field":
+        return fields.field(axis, about, channel, field_mode, per_component,
+                            preset, preset_a, preset_b, k, amp, freq, center,
+                            bell_width, phase, points or [], interp, expr,
+                            expr_x, expr_y, expr_z, sigma_x, sigma_y, seed,
+                            clamp_min, clamp_max, label, target)
+    if o == "loft":
+        # vacuum forming: the field default channel (radial) is wrong here — loft pushes
+        # along the sheet normal unless the caller asks for something else explicitly.
+        return fields.loft(axis, moulds or [], interp,
+                           channel if channel and channel != "radial" else "normal",
+                           field_mode, label, target, mould_grid, clamp_min, clamp_max)
     if o == "relax":
         return editmode.relax_selection(iterations, strength, reproject, label, target)
     if o == "slide":

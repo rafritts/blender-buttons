@@ -66,7 +66,7 @@ def _one_quadric(f):
     out.append(f"  captured {cap_s} of height · residual {rmm}mm "
                f"(max {f.get('residual_max_mm')}mm) · coverage {f.get('coverage')} · "
                f"tol {tmm}mm — {verdict}")
-    out.append(f"  ↻ apply (edit the coefficients first): buttons-deform-macro op=field axis=auto "
+    out.append(f"  ↻ apply (edit the coefficients first): edit op=field axis=auto "
                f"channel={f.get('apply_channel', 'axis:v')} field_mode=add expr=\"{f.get('expr')}\"")
     return "\n".join(out)
 
@@ -88,7 +88,7 @@ def _one_bspline(f):
     out.append(f"  captured {cap_s} of height · residual {rmm}mm "
                f"(max {f.get('residual_max_mm')}mm) · tol {tmm}mm — {verdict}")
     out.append("  ⤷ instantiate with as_surface=<name> (then re-fit to verify); shares control "
-               "rows with a neighbour for a continuous seam (buttons-blend-macro op=stitch, Phase 3)")
+               "rows with a neighbour for a continuous seam (join + edit op=merge welds the coincident boundary — guidance://techniques/smooth-union)")
     return "\n".join(out)
 
 
@@ -109,7 +109,7 @@ def _one_superquadric(f):
     out.append(f"  captured {cap_s} · residual {rmm}mm (max {f.get('residual_max_mm')}mm) · "
                f"coverage {f.get('coverage')} · tol {tmm}mm — {verdict}")
     out.append("  ⤷ instantiate with as_surface=<name> (closed blob mesh); merges with another "
-               "mass by smooth-min (buttons-blend-macro op=graft mode=smin, Phase 3)")
+               "mass via edit op=boolean bool_op=UNION; for a filleted seam see guidance://techniques/smooth-union")
     return "\n".join(out)
 
 

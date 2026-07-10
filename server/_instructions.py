@@ -11,10 +11,10 @@ server/resources.py); do not restate its full contents here.
 
 INSTRUCTIONS = """\
 blender-buttons turns Blender into a mesh-modelling surface you drive by INTENT, not
-coordinates. It perceives (`feel`), measures, and mutates through ~15 verbs (add, edit,
-feel, select, transform, object, modifier, material, pose, sculpt, render, view, scene,
-file, history). Each verb takes an `op=` that selects the operation; the verb's schema
-enumerates every op and the args each one uses.
+coordinates. It perceives (`look`, `feel`), measures, and mutates through ~21 verbs
+(look, add, edit, feel, select, transform, object, modifier, material, pose, sculpt,
+render, view, scene, file, history, …). Each verb takes an `op=` that selects the
+operation; the verb's schema enumerates every op and the args each one uses.
 
 Several Blender instances can run at once, each on its own port; this session attaches
 to ONE. With a single Blender open it's automatic — the first command attaches. If the
@@ -65,8 +65,9 @@ bbox; cast, then confirm with `feel`) — never as a fact you build on. Therefor
   • The status block from every mutating call is ground truth for THAT call — trust its
     world bounds over anything you remember or expected, and re-read (a fresh `feel` or a
     new mutating call) before acting on geometry you haven't touched in a while.
-  • To find a feature you lack numbers for, cast a WIDE `feel` net, verify its SHAPE,
-    confirm CAPTURE, then drill — cross-check more than one read before you act.
+  • To find a feature, `look` and descend — the windows carry the numbers so you never
+    do. When a read matters enough to mutate on, cross-check it (`feel op=verify`, a
+    second window, the select narration) before you act.
   • You build with two forced senses, neither optional. After each op you get a `feel`
     note (what you just changed — your eyes, no verdict) and a `validate` result (what's
     broken — z-fight / non-manifold / flipped normals / degenerate are never OK and
@@ -80,19 +81,34 @@ assembling parts — READ THE `guidance://llms` RESOURCE. It is battle-tested lo
 distilled from real builds. Inventing your own path to the goal is the known, expensive
 failure mode here; the loops exist precisely because winging it fails silently.
 
-The core loop, by name: feel -> select -> measure -> verify -> act.
-  feel op=profile / op=section  (judge the band from a read you can trust)
-  -> select op=between / by_axis with action=INTERSECT  (the mesh's own lr_balance splits
-     left from right — never type a centreline)
-  -> feel op=anchor  (surface-snapped apex point + outward normal; the normal is your
-     honesty check — wrong direction means the selection is wrong, not the tool)
-  -> feel op=verify  (did the selection actually CATCH the feature, or clip / bleed into a
-     neighbour?)  -> act at the handle/selection, never at a coordinate.
-`verify` certifies CAPTURE, not IDENTITY: if it passes but you are unsure you landed on
-the RIGHT feature, ask the human to eyeball it. Do not render to hunt for a feature —
-vision self-confirms and launders the mistake. The human is ALWAYS watching the live
-viewport and sees the mesh in real time, so rendering to SHOW your work or to CHECK it is
-redundant and wasteful — render ONLY when they explicitly ask for a saved image file.
+The core loop, by name: look -> descend -> claim -> modify. This is the NORMAL mode of
+operation at all times, not an advanced feature:
+  look target=<mesh>  (the root window: orientation + salience-ranked landmarks; the
+     server holds your attention — window stack, scale — between calls)
+  -> look at=<landmark|position token>  (descend: same breakdown, finer scale; zoom IS
+     the scale picker; look up pops)
+  -> select op=claim candidate=<id> name=<yours>  (windows OFFER pre-segmented
+     candidates; claiming one selects it and mints a durable named handle — that is
+     where YOUR semantics enters the scene)
+  -> modify  (edit/sculpt/transform act on the live selection / the named handle).
+Every mutating select NARRATES what it grabbed — read it against your intent. The
+coverage line is honesty: what the offers don't reach, select by predicate (between /
+flood / in_sphere, action=INTERSECT). `feel` is the DIAGNOSTIC instrument — precise
+measurement, relational forensics, op=verify, wtf moments — not the primary eyes.
+And the contract cuts both ways: if the loop is broken (a missing landmark, a wrong
+offer, a misleading narration), that is a SERVER DEFECT, never your error — say so,
+use the escape hatches, and do not grind back into coordinate space.
+
+BEFORE choosing tools for a new form, classify the form and pull the ONE matching
+technique from the `guidance://techniques` index (short, on-demand method docs: shells,
+revolved vessels, ring welds, drips, smooth unions, blockout, NPR). Techniques are
+approaches you adapt with reads between steps; recipes (repo `recipes/`) are verified
+end-to-end results.
+
+Do not render to hunt for a feature — vision self-confirms and launders the mistake.
+The human is ALWAYS watching the live viewport and sees the mesh in real time, so
+rendering to SHOW your work or to CHECK it is redundant and wasteful — render ONLY when
+they explicitly ask for a saved image file.
 
 A human is likely in the loop with you (HITL). Unless told otherwise, surface concerns,
 questions, matters of taste, and anywhere you need guidance or clarification — on a

@@ -309,7 +309,7 @@ def _frame_anchor(name):
 def _build_relational_path(raw):
     """G174 — grow a sweep centerline from a MEASURED anchor frame as vectors in its (n,u,v)
     basis, so no world coordinate is ever typed (origin measured, basis measured, the
-    multipliers are authored dimensions). The uniform application of buttons-deform-macro op=field's
+    multipliers are authored dimensions). The uniform application of edit op=field's
     measured-frame vector language to the sweep family. Detected when raw is a list whose
     first entry is a dict carrying 'from'. Returns (abs_points, note, error); (None, None,
     None) when raw is NOT a relational path (caller falls through to literal points).

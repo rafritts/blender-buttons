@@ -1,4 +1,4 @@
-"""E2E for SPEC-13 / G99 — the field deformer (buttons-deform-macro op=field).
+"""E2E for SPEC-13 / G99 — the field deformer (edit op=field).
 
 Runs the WORKING-TREE extension headless. Covers the spec's acceptance criteria:
 

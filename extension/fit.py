@@ -425,7 +425,7 @@ def fit_quadric(np, P):
     model reads in coefficient-space.
 
     The frame is the field deformer's OWN AUTO frame (shared `_group_frame`) so the emitted
-    `expr` round-trips byte-for-byte through `buttons-deform-macro op=field`: u along L (field `z`), v along U
+    `expr` round-trips byte-for-byte through `edit op=field`: u along L (field `z`), v along U
     (field `x`), height along V = the minor/normal axis (field `y`)."""
     from .fields import _group_frame
     O, L, U, V = _group_frame(np, P, "AUTO")

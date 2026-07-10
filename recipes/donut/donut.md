@@ -4,6 +4,12 @@ A verified transcript-recipe (every number ran). Written in the server's own ver
 you execute it with little interpretation. The "donut tutorial" outcome: a pink-glazed,
 sprinkled, slightly-organic donut on a tabletop, lit and rendered.
 
+> **Errata (SPEC-21, 2026-07-10):** this transcript ran against the pre-SPEC-21 surface.
+> `buttons-shell-macro op=clad` (step 6) was retired with the macro verbs — build the
+> icing shell with the native sequence in `guidance://techniques/shell` (duplicate the
+> selected dome → delete the rest → inflate by the clearance → Solidify + Subsurf).
+> Every other call is current.
+
 ---
 
 ## Contract (read once — it disambiguates every step below)

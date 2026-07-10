@@ -19,7 +19,7 @@ def modifier(
     op: Literal["add", "add_asset", "modify", "move", "remove", "list", "apply"],
     target: tag(str, "object whose modifier stack to act on") = "",
     # add
-    type: tag(str, "[add] SUBSURF|MIRROR|SOLIDIFY|BEVEL|ARRAY|CURVE|CLOTH|COLLISION|…") = "",
+    type: tag(str, "[add] SUBSURF|MIRROR|SOLIDIFY|BEVEL|ARRAY|SCREW|SIMPLE_DEFORM|LATTICE|CURVE|SHRINKWRAP|CLOTH|COLLISION|… (any native modifier type id)") = "",
     # add_asset — bundled Geometry-Nodes Essentials node-group (Blender 5.0+)
     asset: tag(str, "[add_asset] Essentials node-group: 'Scatter on Surface' | 'Array' | "
                     "'Instance on Elements' | 'Randomize Instances' | 'Curve to Tube' | "
@@ -68,7 +68,8 @@ def modifier(
     """
     Modifiers — the **Modifier Properties** tab. `op` selects:
 
-      add    — add a modifier   (type=SUBSURF|MIRROR|SOLIDIFY|BEVEL|ARRAY|…, target,
+      add    — add a modifier   (type=SUBSURF|MIRROR|SOLIDIFY|BEVEL|ARRAY|SCREW|
+               SIMPLE_DEFORM|LATTICE|CURVE|… — any native type id, target,
                name, + the dials that type uses: levels/render_levels, width/segments,
                offset, axis/mirror_object, factor/iterations, …)
       add_asset — add a Geometry-Nodes modifier pointing at a BUNDLED Essentials

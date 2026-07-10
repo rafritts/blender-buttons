@@ -36,15 +36,13 @@ from . import (  # noqa: F401
     addon,
     connect,
     uv,
-    # SPEC-20 §3 — composite MACROS, grouped by PURPOSE under buttons-<purpose>-macro
-    # (provenance legible at the call site; each op carries an R1 native-cousin tag).
-    macro_shell,
-    macro_blend,
-    macro_deform,
-    macro_lathe,
-    macro_connector,
-    macro_npr,
 )
+# SPEC-21 §4 retired the SPEC-20 buttons-<purpose>-macro verbs: a macro compiles the
+# adaptation between steps into code, where it can't happen (G217 — a macro whose
+# failure mode is "success"). Their general survivors were re-homed under native-named
+# ops (edit op=field/loft/shape_profile/spin, material op=toon/outline); the multi-step
+# methods became TECHNIQUES (guidance://techniques) — prose over primitives, applied
+# live with perception reads between steps.
 
 # The complete MCP surface after the collapse. Every name here is a verb module's
 # registered tool name; everything NOT here is pruned.
@@ -52,9 +50,6 @@ VERB_NAMES = {
     "add", "object", "edit", "look", "select", "transform", "modifier", "material",
     "sculpt", "pose", "scene", "view", "render", "history", "file", "feel",
     "validate", "collab", "addon", "connect", "uv",
-    # SPEC-20 macro verbs
-    "buttons-shell-macro", "buttons-blend-macro", "buttons-deform-macro",
-    "buttons-lathe-macro", "buttons-connector-macro", "buttons-npr-macro",
 }
 
 
