@@ -6,5 +6,6 @@ dependencies = [
     "mcp[cli]",
 ]
 
-[project.scripts]
-blender-buttons = "server.main:mcp.run"
+# Launch path is `.venv/bin/python server/main.py` (see .mcp.json / README). No
+# [project.scripts] entry: without a [build-system] table uv treats this as an
+# unpackaged project, so an entry point would never be materialized (bugs.md B6).

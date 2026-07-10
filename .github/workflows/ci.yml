@@ -1,0 +1,41 @@
+name: CI
+
+# The e2e suite needs a live Blender, so it can't run here. This is a cheap
+# breakage gate (bugs.md B4): byte-compile both packages, import-sanity the
+# bpy-free server, and prove the addon zip still builds.
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync dependencies
+        run: uv sync
+
+      - name: Byte-compile server + extension
+        run: uv run python -m compileall -q server extension
+
+      - name: Import-sanity the server (bpy-free)
+        # The server drives Blender over a socket and never imports bpy, so its
+        # modules must import cleanly on a plain runner. The extension is bpy-bound
+        # and is only compile-checked above.
+        run: uv run python -c "import server.main"
+
+      - name: Build the addon zip
+        run: ./build_extension.sh

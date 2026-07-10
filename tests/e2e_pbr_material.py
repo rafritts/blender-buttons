@@ -19,7 +19,9 @@ from extension import textures   # noqa: E402
 from extension import state      # noqa: E402
 
 failures = []
-ASSET = "/home/restless/workspace/poliigon-lib/Poliigon_StoneQuartzite_8060/4K"
+# Point BB_PBR_ASSET_DIR at a PBR map folder (e.g. a Poliigon 4K export) to run the
+# node-wiring assertions; unset, every block below prints SKIP with this message.
+ASSET = os.environ.get("BB_PBR_ASSET_DIR", "")
 
 
 def check(label, cond, detail=""):
@@ -79,7 +81,7 @@ def linked_to(nt, node_type, bsdf_input):
 # ── 1. Full Poliigon set + displacement ──────────────────────────────────────
 print("[1] full Poliigon map set with displacement")
 if not os.path.isdir(ASSET):
-    print(f"  SKIP — Poliigon asset not found at {ASSET}")
+    print(f"  SKIP — set BB_PBR_ASSET_DIR to a PBR map folder (got {ASSET!r})")
 else:
     clean()
     cube = make_cube("Stone")
