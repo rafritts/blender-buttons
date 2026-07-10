@@ -346,7 +346,9 @@ error legibly where not.
 - BFS-ring linearization details for non-disk patches; loop detection thresholds.
 - Window invalidation policy under heavy topology edits mid-descent.
 - Candidate-generator tuning (crease angle, protrusion scale) and the definition of
-  the coverage metric.
+  the coverage metric. **Coverage decided (phase 3):** the line reports BOTH
+  face-count % and area-weighted % (a flat floor and a dense detail patch weigh
+  differently; anchor to neither). Generator knobs stay open for live calibration.
 - Token budget per window reply (the "context-rich, not flooding" line) — likely
   needs live calibration against real meshes.
 - Ephemeral-candidate lifetime rules for deterministic transcript replay.

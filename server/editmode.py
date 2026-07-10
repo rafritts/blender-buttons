@@ -381,6 +381,31 @@ def pick(kind: str = "FACE", within: str = "", seed: int = 0, target: str = "") 
     return main + _status(result)
 
 
+def claim(candidate: str = "", name: str = "", add: str = "", subtract: str = "") -> str:
+    """SPEC-21 §6.3 — claim an offered candidate from the current look window
+    (selects it; name= mints/updates a vgroup-backed handle — where the agent's
+    semantics becomes a scene fact). add=/subtract= are region algebra: union or
+    remove candidate ids / handle / vgroup names from the working set."""
+    result = call_blender("claim_candidate", {
+        "candidate": candidate, "as": name, "add": add, "subtract": subtract,
+    })
+    if result.get("success"):
+        main = f"claimed {result.get('source', '')}"
+        if result.get("algebra"):
+            main += f" {result['algebra']}"
+        main += f" → {result['selected']} verts selected"
+        if result.get("handle"):
+            verb = "updated" if result.get("handle_updated") else "minted"
+            main += f"; {verb} handle '{result['handle']}' (vgroup {result['vgroup']})"
+        if result.get("handle_error"):
+            main += f"\n  handle NOT minted: {result['handle_error']}"
+        if result.get("twin_prompt"):
+            main += f"\n  {result['twin_prompt']}"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 @mcp.tool()
 def jitter_vertices(amount: float = 0.005, axis: str = "NORMAL", seed: int = 0,
                     only_positive: bool = False, label: str = "", target: str = "") -> str:

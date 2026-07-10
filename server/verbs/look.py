@@ -43,6 +43,19 @@ def _fmt_window(res: dict) -> str:
                      "scale; descend by position token ('top-right') to zoom anyway")
     if w.get("tail"):
         lines.append(f"  tail (grouped, addressable as at=tail): {w['tail']}")
+    cands = w.get("candidates") or []
+    if cands:
+        lines.append("  offered (claim: select op=claim candidate=<id> name=<yours>; "
+                     "omit name to just select):")
+        for c in cands:
+            kind = c["kind"] + (f" '{c['label']}'" if c.get("label") else "")
+            extra = f", rim {c['perimeter']}" if c.get("perimeter") else ""
+            twin = f"   (mirror twin: {c['twin']})" if c.get("twin") else ""
+            lines.append(f"    {c['id']:<3} {kind:<18} {c['token']:<18} "
+                         f"{c['extent']:>7}  {c['n_faces']} faces / "
+                         f"{c['n_verts']} verts{extra}{twin}")
+    if w.get("coverage"):
+        lines.append(f"  coverage: {w['coverage']}")
     if w.get("bottom_level"):
         lines.append("  bottom-level window (≤40 faces)")
     stack = w.get("stack") or []
@@ -73,8 +86,13 @@ def look(
     — your attention persists between calls.
 
     Salience is not semantics: the server reports "two top protrusions"; you
-    bring "those are arms" — and record it when you claim a selection (select
-    candidate=… as=<name>). Landmarks are windows, not selections.
+    bring "those are arms". Every window also OFFERS candidates — pre-run
+    segmentations (islands, crease-bounded regions, protrusion cuts, boundary
+    loops, material/vgroup patches) you claim instead of hand-building:
+    `select op=claim candidate=c2 name=left_arm` selects it and mints a durable
+    handle (omit name= to just select). The coverage line says how much of the
+    window the offer reaches — the rest needs hand selection. Candidates are
+    ephemeral (per window); claimed handles persist in the .blend.
 
     Windows invalidate on topology edits (the error says how to re-open — not
     your fault). For precise measurement, relational forensics, or when a window

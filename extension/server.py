@@ -107,6 +107,9 @@ _SELECTION_TOOLS = {
     "select_by_vgroup", "select_by_material", "grow_selection", "flood_to_crease",
     "random_select", "pick_element", "select_in_sphere", "select_boundary", "select_limb",
     "select_ring", "select_rings", "verify_selection", "select_object",
+    # SPEC-21 §6.3 — claiming selects (and writes handle-registry vgroups: metadata,
+    # not geometry); it's how the agent re-grounds, so it stays lock-exempt like pick.
+    "claim_candidate",
 }
 
 # SPEC-21 §6.3 (G220): every mutating select answers in one voice — count PLUS a

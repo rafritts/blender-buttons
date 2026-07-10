@@ -11,17 +11,18 @@ from server import editmode, objects, rings, queries, handles
 from ._common import tag, unknown
 
 _OPS = ["all", "none", "object", "by_axis", "between", "list", "by_index", "group", "material",
-        "boundary", "limb", "grow", "shrink", "flood", "pick", "random", "in_sphere",
+        "boundary", "limb", "grow", "shrink", "flood", "pick", "claim", "random", "in_sphere",
         "by_radius", "ring", "rings", "component_mode", "current"]
 
 
 @mcp.tool(name="select")
 def select(
     op: Literal["all", "none", "object", "by_axis", "between", "list", "by_index", "group",
-                "material", "boundary", "limb", "grow", "shrink", "flood", "pick", "random",
-                "in_sphere", "by_radius", "ring", "rings", "component_mode", "current"],
+                "material", "boundary", "limb", "grow", "shrink", "flood", "pick", "claim",
+                "random", "in_sphere", "by_radius", "ring", "rings", "component_mode",
+                "current"],
     # object selection
-    name: tag(str, "[object] object name to select; [group] vertex-group name substring; [material] material-name substring (case-insensitive, unions all matches; empty = LIST every vgroup/material slot)") = "",
+    name: tag(str, "[object] object name to select; [group] vertex-group name substring; [material] material-name substring (case-insensitive, unions all matches; empty = LIST every vgroup/material slot); [claim] christen the claimed region — mints a vgroup-backed handle (or re-points an existing handle of that name); omit to select without minting") = "",
     # generic
     action: tag(str, "[all/by_axis/between/boundary/in_sphere/ring/rings] SELECT|DESELECT|INVERT|TOGGLE; on by_axis/between/in_sphere also INTERSECT (keep only verts BOTH already selected AND matching — 'frontmost ∩ chest-band' in one call instead of a deselect dance)") = "SELECT",
     extend: tag(bool, "[by_axis/between/in_sphere] True = ADD to current selection (union regions across calls) instead of replacing") = False,
@@ -56,6 +57,13 @@ def select(
     within: tag(str, "[pick] scope — a vertex-group / minted-handle name substring "
                      "(case-insensitive; handles' backing vgroups match). Empty = the "
                      "current selection if any, else the whole mesh") = "",
+    # claim
+    candidate: tag(str, "[claim] offered candidate id from the current look window "
+                        "(c1, c2, …); empty = start from the current selection") = "",
+    add: tag(str, "[claim] region algebra — UNION these into the result: comma-separated "
+                  "candidate ids / handle / vgroup names") = "",
+    subtract: tag(str, "[claim] region algebra — REMOVE these from the result "
+                       "(same forms as add)") = "",
     # in_sphere
     radius: tag(float, "[in_sphere] sphere radius (m)") = 0.0,
     handle: tag(str, "[in_sphere/by_radius] center on a named handle's live point "
@@ -123,6 +131,13 @@ def select(
                     which (kind=FACE|VERT|EDGE, within=<vgroup/handle substring;
                     empty = current selection, else whole mesh>, seed). The human
                     "click a face, hold Ctrl+Numpad+" — pair with grow/flood.
+      claim       — CLAIM an offered candidate from the current look window
+                    (candidate=c2). Selects it; name= christens it as a durable
+                    vgroup-backed handle ("that protrusion is the left_arm") —
+                    naming an existing handle re-points it, so a region assembles
+                    across windows. add=/subtract= = region algebra (candidate
+                    ids / handle / vgroup names): "rim minus drip_zone" is one
+                    call. Omit candidate= to run algebra on the current selection.
       random      — a random fraction              (fraction, seed)
       in_sphere   — verts inside a sphere   (handle=<name>, radius, action, extend)
                     — extend=True unions onto the current selection.
@@ -171,6 +186,8 @@ def select(
         return editmode.flood_to_crease(angle, max_verts)
     if o == "pick":
         return editmode.pick(kind, within, seed, target)
+    if o == "claim":
+        return editmode.claim(candidate, name, add, subtract)
     if o == "random":
         return editmode.random_select(fraction, seed)
     if o == "in_sphere":

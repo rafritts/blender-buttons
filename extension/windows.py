@@ -36,6 +36,13 @@ _MAX_LANDMARKS = 7
 # Bottom-level threshold: at or below this many faces a window enumerates its
 # faces (BFS rings, areas only — §6.2), and single-face descent unlocks verts.
 _FACE_LIST_CAP = 40
+# Offer curation (§6.3): how many candidates a window offers before the coverage
+# line reports the rest as segmented-but-not-offered. Anti-flooding, not silence.
+_MAX_CANDIDATES = 12
+_KIND_CAPS = {"region": 8, "loop": 4, "material": 4, "vgroup": 4}
+# Crease threshold for the region segmenter — matches flood_to_crease's default,
+# so an offered region IS what a flood from inside it would grab.
+_CREASE_DEG = 25.0
 
 
 def reset():
@@ -236,9 +243,239 @@ def _symmetric_x(obj, bm):
     return checked >= 10 and matched / checked >= 0.95
 
 
+def _pair_twins(items, kind_key, win_ext):
+    """Mark mirror twins across the object's X: same kind, centroids mirrored
+    within 5% of the window extent, off the midline. Pairing is EXCLUSIVE and
+    mutual — an already-twinned item never re-pairs, so no A→C / B→C chains."""
+    for i, a in enumerate(items):
+        if a.get("twin"):
+            continue
+        for b_ in items[i + 1:]:
+            if b_.get("twin") or a[kind_key] != b_[kind_key]:
+                continue
+            ca, cb = a["centroid"], b_["centroid"]
+            if (abs(ca.x + cb.x) < 0.05 * win_ext
+                    and abs(ca.y - cb.y) < 0.05 * win_ext
+                    and abs(ca.z - cb.z) < 0.05 * win_ext
+                    and abs(ca.x) > 0.02 * win_ext):
+                a["twin"] = b_["id"]
+                b_["twin"] = a["id"]
+                break
+
+
+# ── candidate generation: selections offer themselves (§6.3) ─────────────────
+
+def _crease_regions(bm, face_set, angle_deg=_CREASE_DEG):
+    """Crease-bounded flood regions: partition the window's faces into patches
+    whose interior edges are all smooth (dihedral < angle) and manifold. Each
+    region is exactly what flood_to_crease would grab from a seed inside it —
+    the offer pre-runs the segmenter so the agent picks from a list instead of
+    hunting seeds."""
+    thresh = math.radians(angle_deg)
+    parent = {fi: fi for fi in face_set}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for e in bm.edges:
+        lf = e.link_faces
+        if len(lf) != 2:            # boundary / non-manifold = barrier
+            continue
+        a, b = lf[0].index, lf[1].index
+        if a not in parent or b not in parent:
+            continue
+        try:
+            if e.calc_face_angle() >= thresh:   # crease = barrier
+                continue
+        except ValueError:
+            continue                # degenerate edge = barrier
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+    comps = {}
+    for fi in face_set:
+        comps.setdefault(find(fi), []).append(fi)
+    return sorted(comps.values(), key=lambda fs: (-len(fs), fs[0]))
+
+
+def _make_candidates(obj, bm, face_set, fdata, bbox, comps, landmarks):
+    """Pre-run the cheap segmenters over the window and offer the results as
+    claimable candidates (§6.3): islands (saturating grow per shell), crease-
+    bounded flood regions, protrusion cuts, boundary loops, material/vgroup
+    patches. Ephemeral — they live on the window, discarded with it. Returns
+    (offered candidate dicts, coverage dict). Verts are the claim payload;
+    faces feed the coverage-honesty line."""
+    win_ext = math.sqrt((bbox[3] - bbox[0]) ** 2 + (bbox[4] - bbox[1]) ** 2
+                        + (bbox[5] - bbox[2]) ** 2) or 1e-9
+    total_area = sum(a for _, a in fdata.values()) or 1e-12
+    whole = len(face_set)
+    raw = []
+
+    # islands — one candidate per shell (the autorun "click + Ctrl+Numpad+ to
+    # saturation"). A single-shell window offers nothing here: the window itself
+    # is that region.
+    if len(comps) > 1:
+        for fs in comps:
+            raw.append({"kind": "island", "faces": fs})
+
+    # crease-bounded flood regions — skip a lone region (== the whole window).
+    # Facet shards: when a mesh's faceting angle exceeds the crease threshold,
+    # every facet reads as its own "region" — honest, but offering single faces
+    # among real multi-face regions is anchoring noise. 1-face regions survive
+    # only when the segmentation is ALL single faces (a plain cube's six sides
+    # are 1-face regions, and they ARE the offer).
+    regions = _crease_regions(bm, face_set)
+    if len(regions) > 1:
+        if len(regions[0]) > 1:
+            regions = [fs for fs in regions if len(fs) > 1]
+        for fs in regions[:_KIND_CAPS["region"]]:
+            raw.append({"kind": "region", "faces": fs})
+
+    # protrusion cuts — the landmark pass already clustered them
+    for lm in landmarks:
+        if lm["channel"] == "protrusion":
+            raw.append({"kind": "protrusion", "faces": list(lm["faces"])})
+
+    # boundary loops — the claim payload is the LOOP VERTS (a ring, ready for
+    # bridge/extrude); the adjacent faces stand in for coverage accounting. The
+    # centroid is the RING's, not its faces' — a one-quad-tall tube's wall faces
+    # touch both rims, which would smear both loops onto the same centre.
+    mw = obj.matrix_world
+    for lp in _boundary_loops_in(bm, face_set)[:_KIND_CAPS["loop"]]:
+        raw.append({"kind": "loop", "faces": lp["faces"],
+                    "verts": sorted(lp["verts"]), "perimeter": lp["perimeter"],
+                    "centroid_w": mw @ lp["centroid"]})
+
+    # material patches — the faces of each slot present in the window. For fused
+    # garments the material IS the part's handle (select op=material rationale).
+    if len(obj.material_slots) > 1:
+        by_mat = {}
+        for fi in face_set:
+            by_mat.setdefault(bm.faces[fi].material_index, []).append(fi)
+        if len(by_mat) > 1:
+            for mi, fs in sorted(by_mat.items(),
+                                 key=lambda kv: (-len(kv[1]), kv[0]))[:_KIND_CAPS["material"]]:
+                slot = obj.material_slots[mi] if mi < len(obj.material_slots) else None
+                label = slot.material.name if (slot and slot.material) else f"slot {mi}"
+                raw.append({"kind": "material", "faces": fs, "label": label})
+
+    # vgroup patches — non-handle vertex groups with whole faces in the window
+    # (vert-only smears stay reachable via select op=group; a patch offer means
+    # "this is a coherent face region"). HANDLE_ groups are already claimed.
+    from .handles import VGROUP_PREFIX
+    real_groups = {vg.index: vg.name for vg in obj.vertex_groups
+                   if not vg.name.startswith(VGROUP_PREFIX)}
+    if real_groups:
+        try:
+            deform = bm.verts.layers.deform.active
+        except Exception:
+            deform = None
+        if deform is not None:
+            vert_groups = {}                       # vert index -> {group indices}
+            group_verts = {}                       # group index -> {vert indices}
+            for fi in face_set:
+                for v in bm.faces[fi].verts:
+                    if v.index in vert_groups:
+                        continue
+                    gis = {gi for gi, w in v[deform].items()
+                           if w > 0.0 and gi in real_groups}
+                    vert_groups[v.index] = gis
+                    for gi in gis:
+                        group_verts.setdefault(gi, set()).add(v.index)
+            faces_by_group = {}
+            for fi in face_set:
+                vs = bm.faces[fi].verts
+                common = set(vert_groups.get(vs[0].index, ()))
+                for v in vs[1:]:
+                    if not common:
+                        break
+                    common &= vert_groups.get(v.index, set())
+                for gi in common:
+                    faces_by_group.setdefault(gi, []).append(fi)
+            for gi, fs in sorted(faces_by_group.items(),
+                                 key=lambda kv: (-len(kv[1]), kv[0]))[:_KIND_CAPS["vgroup"]]:
+                raw.append({"kind": "vgroup", "faces": fs,
+                            "label": real_groups[gi],
+                            "verts": sorted(group_verts.get(gi, ()))})
+
+    # drop whole-window echoes; fill verts; measure
+    kept = []
+    for c in raw:
+        if len(c["faces"]) >= whole:
+            continue
+        if not c["faces"]:
+            continue
+        if "verts" not in c:
+            vs = set()
+            for fi in c["faces"]:
+                vs.update(v.index for v in bm.faces[fi].verts)
+            c["verts"] = sorted(vs)
+        ext, ctr, area = _extent_of(fdata, c["faces"])
+        if "centroid_w" in c:
+            ctr = c.pop("centroid_w")
+            ext = c["perimeter"] / math.pi     # ≈ diameter — the rim's own scale
+        c.update(extent=ext, centroid=ctr, area=area)
+        kept.append(c)
+
+    # dedup near-identical face sets across generators, keeping the higher-
+    # priority kind (an island that is also one flood region, a material patch
+    # that is exactly a side): both ways ≥90% overlap = the same patch offered
+    # twice. Loops always survive — their claim payload (the ring) is different
+    # even when their faces match a region's.
+    prio = {"island": 0, "protrusion": 1, "region": 2, "loop": 3,
+            "material": 4, "vgroup": 5}
+    kept.sort(key=lambda c: (prio[c["kind"]], -c["area"], c["faces"][0]))
+    offered = []
+    for c in kept:
+        fs = set(c["faces"])
+        if c["kind"] != "loop" and any(
+                k["kind"] != "loop"
+                and len(fs & k["_fs"]) >= 0.9 * len(fs)
+                and len(fs & k["_fs"]) >= 0.9 * len(k["_fs"])
+                for k in offered):
+            continue
+        c["_fs"] = fs
+        offered.append(c)
+    dropped = max(0, len(offered) - _MAX_CANDIDATES)
+    offered = offered[:_MAX_CANDIDATES]
+    for c in offered:
+        del c["_fs"]
+
+    # ids + position tokens (deduped like landmarks') + mirror twins
+    used = {}
+    for k, c in enumerate(offered, 1):
+        c["id"] = f"c{k}"
+        tok = region_words(bbox, c["centroid"])
+        if tok in used:
+            used[tok] += 1
+            tok = f"{tok}·{used[tok]}"
+        else:
+            used[tok] = 1
+        c["token"] = tok
+    _pair_twins(offered, "kind", win_ext)
+
+    # coverage honesty (anti-anchoring): what fraction of the window the offer
+    # actually reaches — by face count AND by area (a big flat floor and a dense
+    # detail patch weigh differently; report both, anchor to neither).
+    covered = set()
+    for c in offered:
+        covered.update(c["faces"])
+    covered &= face_set
+    coverage = {
+        "n": len(offered),
+        "face_pct": round(100.0 * len(covered) / whole) if whole else 0,
+        "area_pct": round(100.0 * sum(fdata[fi][1] for fi in covered) / total_area),
+        "dropped": dropped,
+    }
+    return offered, coverage
+
+
 # ── landmark generation: one algorithm, every scale ──────────────────────────
 
-def _make_landmarks(obj, bm, face_set, fdata, bbox, vert_ids):
+def _make_landmarks(obj, bm, face_set, fdata, bbox, vert_ids, comps):
     """The salience pass (§6.1). Channels: island / protrusion / dense / pole /
     rim. Returns (ranked landmark dicts, tail description, tail_face_ids,
     shells_in_window)."""
@@ -248,7 +485,6 @@ def _make_landmarks(obj, bm, face_set, fdata, bbox, vert_ids):
     raw = []
 
     # islands — a separate piece is the loudest possible fact about a window
-    comps = _face_components(bm, face_set)
     if len(comps) > 1:
         for fs in comps:
             ext, ctr, area = _extent_of(fdata, fs)
@@ -355,17 +591,7 @@ def _make_landmarks(obj, bm, face_set, fdata, bbox, vert_ids):
         lm["token"] = tok
 
     # mirror twins (only meaningful when the object is bilateral — root caches it)
-    for i, a in enumerate(named):
-        for b_ in named[i + 1:]:
-            if a["channel"] != b_["channel"]:
-                continue
-            ca, cb = a["centroid"], b_["centroid"]
-            if (abs(ca.x + cb.x) < 0.05 * win_ext
-                    and abs(ca.y - cb.y) < 0.05 * win_ext
-                    and abs(ca.z - cb.z) < 0.05 * win_ext
-                    and abs(ca.x) > 0.02 * win_ext):
-                a.setdefault("twin", b_["id"])
-                b_.setdefault("twin", a["id"])
+    _pair_twins(named, "channel", win_ext)
 
     # tail: grouped, never dropped silently — and still addressable as one unit
     tail_desc = None
@@ -399,8 +625,11 @@ def _new_window(obj, face_ids, parent_id, label):
         if not face_set:
             return None, "window would be empty (no faces in scope)"
         fdata, bbox, verts = _face_data(obj, bm, face_set)
+        comps = _face_components(bm, face_set)
         named, tail_desc, tail_faces, n_comps = _make_landmarks(
-            obj, bm, face_set, fdata, bbox, verts)
+            obj, bm, face_set, fdata, bbox, verts, comps)
+        candidates, coverage = _make_candidates(
+            obj, bm, face_set, fdata, bbox, comps, named)
         _COUNTER[0] += 1
         wid = f"w{_COUNTER[0]}"
         win = {
@@ -411,6 +640,7 @@ def _new_window(obj, face_ids, parent_id, label):
             "shells_in_window": n_comps,
             "landmarks": named, "tail": tail_desc,
             "tail_face_ids": sorted(tail_faces),
+            "candidates": candidates, "coverage": coverage,
             "root": face_ids is None,
         }
         if face_ids is None:
@@ -508,15 +738,41 @@ def _present(win):
         w = _WINDOWS.get(wid)
         if w:
             stack.append(f"{wid}:{w['label']}")
+    cands = []
+    for c in win.get("candidates", ()):
+        d = {"id": c["id"], "kind": c["kind"], "token": c["token"],
+             "n_faces": len(c["faces"]), "n_verts": len(c["verts"]),
+             "extent": _fmt_len(c["extent"])}
+        if c.get("label"):
+            d["label"] = c["label"]
+        if c.get("perimeter"):
+            d["perimeter"] = _fmt_len(c["perimeter"])
+        if c.get("twin"):
+            d["twin"] = c["twin"]
+        cands.append(d)
     out = {
         "id": win["id"], "label": win["label"], "object": win["object"],
         "n_faces": win["n_faces"], "n_verts": win["n_verts"],
         "size": [_fmt_len(x1 - x0), _fmt_len(y1 - y0), _fmt_len(z1 - z0)],
         "shells_in_window": win["shells_in_window"],
         "landmarks": lms, "tail": win["tail"], "root": win["root"],
+        "candidates": cands,
         "stack": stack,
         "bottom_level": win["n_faces"] <= _FACE_LIST_CAP,
     }
+    cov = win.get("coverage")
+    if cands and cov:
+        line = (f"{cov['n']} candidate{'s cover' if cov['n'] != 1 else ' covers'} "
+                f"{cov['face_pct']}% of this window's faces ({cov['area_pct']}% "
+                f"of its area) — {100 - cov['face_pct']}% unoffered")
+        if cov.get("dropped"):
+            line += (f"; {cov['dropped']} more segmented but not offered "
+                     f"(cap {_MAX_CANDIDATES})")
+        out["coverage"] = line
+    elif cov is not None:
+        out["coverage"] = ("no candidates — the window segments into nothing at "
+                           "this scale; select by hand (op=flood / by_axis / "
+                           "pick + grow)")
     if win["root"]:
         out["symmetric_x"] = win.get("symmetric_x", False)
     return out
@@ -626,6 +882,181 @@ def current_window():
     return win, None
 
 
+# ── claiming: where semantics enters the system (§6.3) ───────────────────────
+
+def _candidate_by_id(win, cid):
+    if win is None:
+        return None
+    return next((c for c in win.get("candidates", ()) if c["id"] == cid), None)
+
+
+def _offer_menu(win):
+    ids = ", ".join(f"{c['id']}({c['kind']})" for c in win.get("candidates", ()))
+    return ids or "(none — this window segments into nothing; select by hand)"
+
+
+def _operand_verts(win, obj, name):
+    """Resolve an add=/subtract= operand to a vert-index set: a candidate id of
+    the CURRENT window (c3), else a handle / vertex-group name substring (the
+    same matching pick's within= uses — minted handles' backing vgroups match).
+    Returns (verts, error)."""
+    nm = name.strip()
+    if len(nm) > 1 and nm[0] in "cC" and nm[1:].isdigit():
+        cand = _candidate_by_id(win, nm.lower())
+        if cand is not None:
+            return set(cand["verts"]), None
+        if win is not None:
+            return None, (f"'{nm}' names no candidate of window {win['id']}. "
+                          f"Offered: {_offer_menu(win)}")
+        return None, (f"'{nm}' looks like a candidate id but no window is open "
+                      f"— look target=<obj> first, or name a handle/vgroup")
+    needle = nm.lower()
+    matched = [vg for vg in obj.vertex_groups if needle in vg.name.lower()]
+    if not matched:
+        return None, (f"'{nm}' matches no candidate id, handle, or vertex group "
+                      f"on {obj.name}. Groups ({len(obj.vertex_groups)}): "
+                      f"{[vg.name for vg in obj.vertex_groups]}")
+    gidx = {vg.index for vg in matched}
+    verts = {v.index for v in obj.data.vertices
+             if any(g.group in gidx and g.weight > 0.0 for g in v.groups)}
+    if not verts:
+        return None, (f"'{nm}' matched group(s) "
+                      f"{[vg.name for vg in matched]} but they hold no verts")
+    return verts, None
+
+
+def claim_candidate(params):
+    """§6.3 — claim an offered candidate (and/or do region algebra), selecting
+    the result; `as=<name>` mints it as a vgroup-backed handle — THE moment the
+    agent's semantics ("that protrusion is the left arm") enters the scene as a
+    durable fact. Omitting `as` selects without minting; `as` naming an existing
+    handle re-points it (regions assemble across windows). add=/subtract= union
+    or remove candidate ids / handle / vgroup names from the working set."""
+    import bmesh
+    from . import handles as _handles
+    from . import perception
+    from .state import push_undo
+
+    cid = (params.get("candidate") or "").strip().lower()
+    name = (params.get("as") or "").strip()
+    adds = [s.strip() for s in (params.get("add") or "").split(",") if s.strip()]
+    subs = [s.strip() for s in (params.get("subtract") or "").split(",") if s.strip()]
+
+    win, werr = current_window()
+    if cid and win is None:
+        return {"error": f"claim candidate={cid} needs an open window — {werr}. "
+                         f"look target=<obj> first (the look reply offers the "
+                         f"candidates)."}
+    if not cid and not (adds or subs):
+        return {"error": "claim needs candidate=<id> and/or add=/subtract= — "
+                         "a bare claim has nothing to work from. look at the "
+                         "current window's offer, or select first and use "
+                         "add=/subtract= for algebra."}
+
+    if win is not None:
+        obj = bpy.data.objects.get(win["object"])
+        if obj is None:
+            return {"error": f"window {win['id']}'s object '{win['object']}' "
+                             f"no longer exists — look target=<obj> to re-open"}
+    else:
+        obj = bpy.context.active_object
+        if obj is None or obj.type != 'MESH':
+            return {"error": f"no window open ({werr}) and no active mesh to "
+                             f"run algebra on — look target=<obj> first"}
+
+    cand = None
+    if cid:
+        cand = _candidate_by_id(win, cid)
+        if cand is None:
+            return {"error": f"'{cid}' names no candidate of window {win['id']}. "
+                             f"Offered: {_offer_menu(win)}"}
+        base = set(cand["verts"])
+        base_desc = f"{cand['id']} ({cand['kind']}, {len(base)} verts)"
+    else:
+        if obj.mode == 'EDIT':
+            bm = bmesh.from_edit_mesh(obj.data)
+            base = {v.index for v in bm.verts if v.select}
+        else:
+            base = {v.index for v in obj.data.vertices if v.select}
+        base_desc = f"the current selection ({len(base)} verts)"
+
+    algebra = []
+    for nm in adds:
+        vs, e2 = _operand_verts(win, obj, nm)
+        if e2:
+            return {"error": e2}
+        base |= vs
+        algebra.append(f"+ {nm} ({len(vs)} verts)")
+    for nm in subs:
+        vs, e2 = _operand_verts(win, obj, nm)
+        if e2:
+            return {"error": e2}
+        base -= vs
+        algebra.append(f"− {nm} ({len(vs)} verts)")
+    if not base:
+        alg = " ".join(algebra)
+        return {"error": f"the result is empty — {base_desc}{' ' + alg if alg else ''} "
+                         f"left no verts, so there is nothing to select or claim"}
+
+    # Select the result on the window's object: enter edit mode there (so the
+    # G220 narration can read it), write the verts, flush up, exit. Selects
+    # persist on the mesh data after the exit, same as every select op.
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.select_all(action='DESELECT')
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.context.tool_settings.mesh_select_mode = (True, False, False)
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    for f in bm.faces:
+        f.select = False
+    for e in bm.edges:
+        e.select = False
+    for v in bm.verts:
+        v.select = v.index in base
+    bm.select_flush(True)
+    bmesh.update_edit_mesh(obj.data)
+    rep = perception.describe_selection(obj)
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    result = {"success": True, "selected": len(base), "source": base_desc}
+    if algebra:
+        result["algebra"] = " ".join(algebra)
+    if rep:
+        result["selection_report"] = rep["line"]
+
+    if name:
+        if _handles._find_handle(name) is not None:
+            minted = _handles.update_handle_verts(obj, sorted(base), name)
+        else:
+            minted = _handles.mint_from_vert_indices(obj, sorted(base), name,
+                                                     kind="claim")
+        if minted.get("error"):
+            result["handle_error"] = minted["error"]
+        else:
+            result["handle"] = minted["name"]
+            result["vgroup"] = minted["vgroup"]
+            result["handle_updated"] = bool(minted.get("updated"))
+
+    # mirror-twin prompt (§6.3): claiming one of a twinned pair reminds you the
+    # other half exists — left_arm usually wants a right_arm
+    if cand is not None and cand.get("twin"):
+        twin = _candidate_by_id(win, cand["twin"])
+        if twin is not None:
+            prompt = (f"mirror twin exists: {twin['id']} ({twin['kind']}, "
+                      f"{len(twin['verts'])} verts at {twin['token']})")
+            if name:
+                prompt += (f" — claim it too: select op=claim "
+                           f"candidate={twin['id']} name=<its name>")
+            result["twin_prompt"] = prompt
+
+    push_undo(f"claim {cid or 'selection'}" + (f" as {name}" if name else ""))
+    return result
+
+
 TOOLS = {
     "look_window": look_window,
+    "claim_candidate": claim_candidate,
 }

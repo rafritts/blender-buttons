@@ -50,9 +50,10 @@ _FID_K = 3      # extrinsic signature keeps distances to the k nearest neighbour
 # Registry ops never count as "geometry touched" for attribution — minting/accepting
 # a handle writes a vgroup + props but moves no verts. `feel_assembly` auto-mints
 # boundary handles the same way, so it's excluded too (else it would falsely mark
-# its own target meshes as agent-touched).
+# its own target meshes as agent-touched). `claim_candidate` (SPEC-21 §6.3) mutates
+# only the selection + handle vgroups — same class.
 _HANDLE_TOOLS = {"mint_handle", "list_handles", "resolve_handle", "accept_handle",
-                 "feel_assembly"}
+                 "feel_assembly", "claim_candidate"}
 
 
 def _handles_collection():
@@ -383,6 +384,57 @@ def mint_from_vert_indices(obj, indices, name, kind="boundary"):
         "vgroup": vgname, "vert_count": n,
         "point": [round(c, 5) for c in centroid],
         "normal": [round(c, 4) for c in nrm],
+    }
+
+
+def update_handle_verts(obj, indices, name):
+    """SPEC-21 §6.3 region algebra — re-point an EXISTING handle at a new vert
+    set (claiming into the same name assembles a region across windows: "rim
+    minus drip_zone" lands back in `rim`). Replaces the vgroup membership and
+    re-baselines the provenance snapshot, exactly like accept after an edit.
+    Returns the mint result shape with `updated: True`."""
+    empty = _find_handle(name)
+    if empty is None:
+        return {"error": f"handle '{name}' not found — mint it instead"}
+    if empty.get("bb_owner") != obj.name:
+        return {"error": f"handle '{name}' is anchored to "
+                         f"'{empty.get('bb_owner')}', not '{obj.name}' — "
+                         f"claim under a different name"}
+    if not empty.get("bb_vgroup"):
+        return {"error": f"handle '{name}' is a free-standing point handle "
+                         f"(no vert set to update) — claim under a different name"}
+    if obj.mode == 'EDIT':
+        return {"error": f"'{obj.name}' is in edit mode — exit to object mode "
+                         f"to update the handle"}
+    indices = list(dict.fromkeys(int(i) for i in indices))
+    if not indices:
+        return {"error": "no vertices to re-point the handle at"}
+
+    vgname = empty["bb_vgroup"]
+    vg = obj.vertex_groups.get(vgname)
+    if vg is None:
+        vg = obj.vertex_groups.new(name=f"{VGROUP_PREFIX}{empty.name}")
+        vgname = vg.name
+        empty["bb_vgroup"] = vgname
+    vg.remove(list(range(len(obj.data.vertices))))
+    vg.add(indices, 1.0, 'REPLACE')
+
+    mw = obj.matrix_world
+    world = [mw @ obj.data.vertices[i].co for i in indices]
+    centroid = _centroid(world)
+    owner_center = sum((mw @ Vector(c) for c in obj.bound_box), Vector()) / 8.0
+    nrm = _newell_normal(world, centroid, owner_center)
+    _snapshot_provenance(empty, centroid, nrm, world, len(world), empty.name)
+    if not empty.get("bb_vertex_parent"):
+        empty.location = centroid
+        empty.rotation_euler = nrm.to_track_quat('Z', 'Y').to_euler()
+
+    return {
+        "success": True, "name": empty.name, "kind": empty.get("bb_kind", "claim"),
+        "owner": obj.name, "vgroup": vgname, "vert_count": len(indices),
+        "point": [round(c, 5) for c in centroid],
+        "normal": [round(c, 4) for c in nrm],
+        "updated": True,
     }
 
 
