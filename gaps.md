@@ -32,3 +32,56 @@ catch is the feature working). The general primitive: any mutation routed throug
 bridge is FIRST-PARTY — every world-mutating verb, `file` included, must update the
 baseline it will later be diffed against. An interlock that cries wolf on the server's
 own actions erodes exactly the trust it exists to protect.
+
+## G204 — GN menu sockets: illegible options, unsettable by name
+
+Essentials GN modifiers gate their behavior behind **menu sockets** (Scatter on
+Surface: `Input Type`, `Instance Type`, `Density Method`, `Distribution Method`,
+`Alignment Axis`). The `inputs=` surface fails on them twice over: (a) passing the
+display name errors — "Cannot assign a 'str' value to the existing Int IDProperty" —
+only a raw int lands; (b) nothing anywhere reports what the ints MEAN. The mapping is
+not display order (`Instance Type`: UI shows Object, Collection but Object=1,
+Collection=0), the enum items live on Menu Switch nodes inside the group whose
+`NodeEnumItem` doesn't even expose its int identifier, and `inputs_available` lists
+bare names with no type/options/current-value. The agent is forced to sweep magic
+ints blind against evaluated geometry to reverse-engineer a dropdown. The general
+primitive: every settable input must be legible (type, options by NAME, current
+value) and settable by the same name a human sees in the modifier panel — the server
+should resolve name→int itself (empirically if the API hides it: probe the interface
+item's `default_value` string against a scratch modifier's idprop int).
+
+## G205 — add_asset `collection=` assigns a socket its gate ignores
+
+`modifier op=add_asset asset="Scatter on Surface" collection=Sprinkles` reports
+success with `set: {'Collection': 'Sprinkles'}` — and does nothing: the group only
+reads its Collection socket when the `Instance Type` menu is 'Collection', and the
+default is 'Object' (with Object unset, each point instances an invisible 8-loose-vert
+placeholder — zero faces, invisible in solid shading). The convenience arg's whole
+INTENT is "instance from this collection"; it must also flip the menu that gates the
+socket it just set, or refuse loudly. General form: assigning a value to a gated
+input while its gate points elsewhere is a silent no-op the agent cannot see — the
+server must either honor the intent (set value + gate together) or surface the gate.
+
+## G206 — GN modifier ops succeed while emitting zero instances
+
+Scatter on Surface defaults to Density=1/m². At real-world tutorial scale (a 0.15m
+donut ≈ 0.05 m² of surface) that floors to **0 points** — modifier added, success
+reported, viewport empty, no signal. Compounded by `Viewport Visibility` (a 0..1
+fraction that can hide everything) and G205's invisible placeholder. The agent had no
+read that says "this modifier currently emits N instances"; ground truth had to be
+extracted by duplicate→realize→apply→count. The general primitive: any op that adds
+or modifies an instance-emitting modifier should report the **evaluated instance
+count** in its result (and warn at 0) — that one number makes every configuration
+mistake in this family legible instantly.
+
+## G207 — `op=apply` silently discards unrealized instances
+
+Applying a NODES modifier whose output is instances-on-points (Realize
+Instances=False, the default) drops them: the mesh comes back byte-identical
+(caught only by the no-op interlock — the right alarm for the wrong reason) or, on
+a host with other changes, would silently lose the scatter. Worse, the add_asset
+result note actively claims the opposite: "add `modifier op=apply` (Realize
+Instances) if you need editable geometry." Fix: `op=apply` must detect an
+instance-emitting NODES modifier and set its Realize Instances socket (or append a
+realize step) before applying, and the add_asset note must stop promising apply
+realizes when it doesn't.
