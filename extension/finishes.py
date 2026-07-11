@@ -1715,11 +1715,15 @@ def _set_gn_inputs(mod, sockets, inputs, menu_maps=None):
                 unknown.append(f"{key} (datablock '{want}' not found / not set)")
         else:
             # Vector/Color sockets read back as an IDPropertyArray (not JSON-serializable);
-            # coerce to a plain rounded list. Scalars pass through.
-            if hasattr(eff, "__len__") and not isinstance(eff, str):
-                eff = [round(c, 4) if isinstance(c, float) else c for c in eff]
-            elif isinstance(eff, float):
-                eff = round(eff, 4)
+            # coerce to a plain rounded list. Scalars pass through. Force float() so bpy
+            # subtypes / IDPropertyArray elements never leak into the tool result.
+            if hasattr(eff, "__len__") and not isinstance(eff, (str, bytes)):
+                try:
+                    eff = [round(float(c), 4) for c in eff]
+                except (TypeError, ValueError):
+                    eff = list(eff)
+            elif isinstance(eff, (float, int)) and not isinstance(eff, bool):
+                eff = round(float(eff), 4)
             set_inputs[match] = eff
     return set_inputs, unknown
 
