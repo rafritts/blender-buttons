@@ -11,6 +11,7 @@ and what the N-panel round-trips. Setting a menu by name must land the authorita
 Usage: flatpak run --filesystem=host org.blender.Blender --background --factory-startup \
          --python /abs/path/to/tests/e2e_b7_menu_value.py
 """
+import json
 import os
 import sys
 
@@ -176,6 +177,27 @@ res = run("modify_modifier", target="Field", modifier_name=mod.name,
 skipped = " ".join(str(s) for s in (res.get("skipped") or []))
 check("an unknown menu option is reported, not silently accepted",
       "sphere" in skipped.lower(), str(res.get("skipped")))
+
+
+# ── the read-back echo must stay JSON-serializable — Vector sockets read back as an
+#    IDPropertyArray, which the effective-value echo has to coerce to a plain list. ──
+print("== a Vector input alongside a menu keeps the result JSON-serializable ==")
+clean()
+make_plane("Field", 1.0)
+make_sprinkle_collection()
+res = run("add_asset_modifier", asset="Scatter on Surface", host="Field",
+          collection="Sprinkles",
+          inputs={"Density": 3000, "Scale": [0.6, 0.6, 0.6], "Instance Type": "Collection"})
+try:
+    json.dumps(res)
+    serializable = True
+except TypeError as e:
+    serializable = False
+    print(f"    json error: {e}")
+check("add_asset result with a Vector input is JSON-serializable", serializable, str(res)[:200])
+iset = res.get("inputs_set") or {}
+scale_echo = next((v for k, v in iset.items() if k.lower() == "scale"), None)
+check("Scale echoes back as a plain list", isinstance(scale_echo, list), str(scale_echo))
 
 
 print()
