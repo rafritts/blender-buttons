@@ -238,14 +238,14 @@ def clear_intents():
 _drift = 0.0
 _DRIFT_THRESHOLD = 100.0
 _DRIFT_HIGH = {            # structural rearrangers — a lot can shift unseen
-    "boolean", "apply_modifiers", "remesh", "join_objects", "noise_displace", "bend",
-    "bake_shape_keys_to_basis", "separate_selection",
+    "boolean", "apply_modifiers", "remesh", "join_objects", "bend",
+    "separate_selection",
 }
 _DRIFT_MED = {             # local topology edits
     "extrude", "spin", "extrude_along_curve", "inset_faces", "loop_cut", "subdivide_selection",
-    "poke_faces", "grid_fill", "bridge_handles", "delete_geometry", "field", "flute",
-    "taper_end", "taper_section", "shape_profile", "relax_selection", "slide_selection",
-    "merge_by_distance", "bevel", "round_corners", "smooth_edges",
+    "poke_faces", "grid_fill", "bridge_handles", "delete_geometry", "flute",
+    "taper_end", "taper_section",
+    "merge_by_distance", "bevel",
 }
 
 

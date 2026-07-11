@@ -97,22 +97,6 @@ check("relative offset on", mr.use_relative_offset is True)
 check("relative_offset_displace.y == 1.5", abs(mr.relative_offset_displace[1] - 1.5) < 1e-5,
       list(mr.relative_offset_displace))
 
-# ───────────────────────── G88 — array_along between endpoints ─────────────────────────
-print("== G88: array_along distributes between two endpoint objects ==")
-clean()
-run("add_box", name="ep_a", width=0.1, depth=0.1, height=0.1)
-run("add_box", name="ep_b", width=0.1, depth=0.1, height=0.1)
-bpy.data.objects["ep_b"].location = (1.0, 0.0, 0.0)  # distinct endpoint (no coord-place key)
-run("add_box", name="proto", width=0.05, depth=0.05, height=0.05)
-r = run("array_along", prototype="proto", between=["ep_a", "ep_b"], count=6)
-check("array_along ok", r.get("success"), r.get("error"))
-check("axis is the A→B segment", r.get("axis") == "A→B segment", r.get("axis"))
-check("spacing == 0.2 (1.0/5)", abs((r.get("spacing") or 0) - 0.2) < 1e-3, r.get("spacing"))
-check("placed 6 copies", len(r.get("placed") or []) == 6, len(r.get("placed") or []))
-# copies must NOT be stacked at the origin
-xs = sorted(round(bpy.data.objects[n].location.x, 3) for n in (r.get("placed") or []))
-check("copies span x≈0..1 (not all at origin)", xs and xs[0] < 0.05 and xs[-1] > 0.95, xs)
-
 # ───────────────────────── G84 — material transmission ─────────────────────────
 print("== G84: material set transmission → BSDF + refraction flags ==")
 clean()

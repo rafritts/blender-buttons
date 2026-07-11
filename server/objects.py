@@ -152,40 +152,6 @@ def hollow(target: str = "", thickness: float = 0.004, open: str = "top",
 
 
 @mcp.tool()
-def duplicate_mirrored(target: str, axis: str = "X", pivot: str = "WORLD",
-                       new_name: str = "", label: str = "") -> str:
-    """
-    Bake a mirrored copy of an object across a world axis plane — the one-shot
-    "make the other half" verb for symmetry that's already finalized (a left
-    boot → right boot, one earring → the pair). For LIVE symmetry while you're
-    still editing, prefer the MIRROR modifier (add_modifier type='MIRROR') or the
-    placement DSL's mirror_of; this bakes a static, independent copy.
-
-    target:   object to mirror.
-    axis:     X | Y | Z — plane perpendicular to this axis. Default X
-              (mirror left↔right across the Y-Z plane).
-    pivot:    "WORLD" (default — reflect across the axis=0 plane at the world
-              origin) | "SELF" (about the object's own origin) | an object name
-              (across the plane through that object's center).
-    new_name: name for the copy (default "<target>_mirror").
-
-    Normals are recalculated outward after the reflection, and the transform is
-    applied so the copy ships with clean [1,1,1] scale.
-
-    Example: duplicate_mirrored("boot_L", axis="X", new_name="boot_R")
-    """
-    result = call_blender("duplicate_mirrored", {
-        "target": target, "axis": axis, "pivot": pivot, "new_name": new_name,
-    }, label=label)
-    if result.get("success"):
-        main = (f"mirrored '{result['original']}' → '{result['mirror']}' across {result['axis']} "
-                f"(pivot={result['pivot']}) dims={result['dimensions']} [{result.get('op_id','')}]")
-    else:
-        main = result.get("error", "failed")
-    return main + _status(result)
-
-
-@mcp.tool()
 def join_objects(names: list, merge_threshold: float = None) -> str:
     """
     Join multiple objects into one. The first name in the list becomes the surviving object.
@@ -426,7 +392,7 @@ def delete_shape_key(name: str, key: str = "", label: str = "") -> str:
     UNBLOCKS apply-Subsurf and dyntopo (both refuse while any key exists). A mesh
     duplicated from a rigged source inherits its keys — clear them before densifying
     for sculpt. Deleting all leaves the mesh at the Basis shape; if a non-Basis morph
-    is dialed in and you want to keep it, bake_shape_keys_to_basis first.
+    is dialed in and you want to keep it, apply it to the mesh first.
 
     Example: delete_shape_key("GEO_spring_body")        # clear all
              delete_shape_key("face", key="smile")       # one key
@@ -437,26 +403,6 @@ def delete_shape_key(name: str, key: str = "", label: str = "") -> str:
         remaining = result.get("remaining", [])
         tail = f"; {len(remaining)} remain" if remaining else " — mesh is now keyless"
         main = f"deleted shape key(s) {deleted} from {name}{tail} [{result.get('op_id','')}]"
-    else:
-        main = result.get("error", "failed")
-    return main + _status(result)
-
-
-@mcp.tool()
-def bake_shape_keys_to_basis(name: str, label: str = "") -> str:
-    """
-    Flatten the current shape-key mix into the base mesh and remove every key — the
-    'apply all shapes as the new rest shape' move. The visible (mixed) shape becomes
-    the keyless geometry: nothing changes on screen, but the mesh is now plain, so
-    apply-Subsurf and dyntopo are unblocked. Use this instead of delete_shape_key
-    when a non-Basis key is dialed in and you want to keep its contribution.
-
-    Example: bake_shape_keys_to_basis("GEO_spring_body")
-    """
-    result = call_blender("bake_shape_keys_to_basis", {"name": name}, label=label)
-    if result.get("success"):
-        main = (f"baked {result['baked_keys']} shape key(s) into {name}'s mesh "
-                f"({result['verts']} verts) — now keyless [{result.get('op_id','')}]")
     else:
         main = result.get("error", "failed")
     return main + _status(result)

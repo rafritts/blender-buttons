@@ -79,15 +79,6 @@ check("restore succeeds", r.get("success") is True, str(r))
 check("risky object gone after restore", "risky" not in bpy.data.objects, str(r))
 check("kept object survived", "keep" in bpy.data.objects)
 
-# ───────────── G20: helix primitive ───────────────────────────────────────────
-print("== G20: helix_coil builds a coil mesh ==")
-clean()
-h = run("helix_coil", name="coil", turns=9, height=0.3, radius=0.05,
-        tube_radius=0.01, segments_per_turn=16)
-check("helix succeeds (9 turns, no point cap)", h.get("success") is True, str(h))
-check("helix produced a mesh", bpy.data.objects.get("coil") is not None
-      and len(bpy.data.objects["coil"].data.vertices) > 100, str(h.get("dimensions")))
-
 # ───────────── G15 + G16: handles, relate, prune ──────────────────────────────
 print("== G15/G16: assembly handles, relate, prune ==")
 clean()

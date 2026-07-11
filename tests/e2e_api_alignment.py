@@ -1,7 +1,7 @@
 """E2E for the three.js-prior alignment pass — runs inside headless Blender.
 
 Covers: `segments` alias on add_cylinder/add_cone/add_circle, `hex` colors on
-add_light/modify_light/set_world_background/set_toon_material, and the
+add_light/modify_light/set_world_background, and the
 DIRECTIONAL→SUN light-type alias.
 
 Usage: flatpak run org.blender.Blender --background --python /abs/path/to/tests/e2e_api_alignment.py
@@ -96,18 +96,6 @@ check("set_world_background hex succeeds",
 check("world hex=#808080 → linear ≈0.2158",
       close(r.get("color", []), hex_to_linear_rgba("#808080")),
       repr(r.get("color")))
-
-print("== hex on toon material ==")
-run("add_box", name="toon_box", width=1, depth=1, height=1)
-r = run("set_toon_material", target="toon_box", hex="#3A86FF")
-check("set_toon_material hex alone succeeds (no base_color needed)",
-      r.get("success"), repr(r))
-if r.get("success"):
-    import json
-    stored = json.loads(bpy.data.materials[r["material"]]["bb_toon"])
-    check("toon base_color matches hex conversion",
-          close(stored["base_color"], hex_to_linear_rgba("#3A86FF")),
-          repr(stored["base_color"]))
 
 print()
 if failures:

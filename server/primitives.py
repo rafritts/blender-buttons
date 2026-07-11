@@ -1,5 +1,3 @@
-from typing import Union
-
 from server._core import mcp, call_blender, _status, _add_result
 
 
@@ -55,7 +53,7 @@ def add_box(name: str, width: float, depth: float, height: float,
             label: str = "") -> str:
     """
     Add a rectangular box of exact world-space dimensions (W × D × H, in meters).
-    The object's scale will be [1,1,1] after creation, so bevel / smooth_edges
+    The object's scale will be [1,1,1] after creation, so bevel / edge work
     produce uniform results without any extra apply-scale step.
 
     name:   REQUIRED — object name (must be unique).
@@ -142,7 +140,7 @@ def add_lattice(name: str, enclose: str = "", u: int = 4, v: int = 4, w: int = 4
     u/v/w:   control-point resolution on each axis (default 4×4×4).
     margin:  fractional oversize so the cage fully encloses the target (default 2%).
     Then: modifier op=add type=LATTICE host=<mesh> target=<this>, and push points with
-    transform op=lattice.
+    edit op=lattice.
     """
     params = {"name": name, "resolution_u": u, "resolution_v": v, "resolution_w": w,
               "margin": margin}
@@ -338,109 +336,6 @@ def add_circle(name: str, radius: float,
 
 
 @mcp.tool()
-def spline_tube(name: str, points: list, radius: Union[float, list] = 0.02,
-                resolution: int = 8, sides: int = 4, label: str = "",
-                between: list = None) -> str:
-    """
-    Create a tube mesh swept along a smooth curve that passes THROUGH every
-    control point (interpolating spline — no Bezier handles). The go-to tool for
-    hair strands, cables, ribbons, handles, branches, and any curved organic shape.
-
-    name:    REQUIRED — object name (must be unique).
-    points:  2–32 control points the curve passes through. Each is either
-             [x, y, z] world coords (ripcord), or
-             {"near": "object_name", "offset": [dx, dy, dz]} — anchored to an
-             existing object's bbox center, resolved once at creation, or
-             {"handle": "name"} — a minted handle's LIVE point (feel op=handle),
-             resolved here at creation. THIS is how you span two minted points
-             (e.g. a mug-handle loop between mug_attach_top/bottom) — no throwaway
-             marker objects needed (G144).
-    between: [A, B] — INSTEAD of points: connect two named OBJECTS with a straight
-             tube, endpoints at the nearest surface points between them (BVH). The
-             generic strut/cable/wire — no offset math, no dead-reckoned endpoints.
-             For minted POINT handles use points=[{"handle":…}, …] instead.
-    radius:  tube radius in meters. A single number, OR a list with one radius
-             per control point for taper (e.g. [0.03, 0.02, 0.005] = thick root
-             to thin tip — a hair strand).
-    resolution: curve samples per segment (default 8; raise for tight bends).
-    sides:   cross-section smoothness (default 4 ≈ 16-sided tube).
-
-    The result is a normal mesh object — group it, material it, mirror it like
-    any primitive. describe() reports the through-points for later adjustment.
-
-    Example — hair strand from scalp to shoulder, curving outward:
-      spline_tube("hair_strand_R",
-                  points=[{"near": "head", "offset": [0.08, 0, 0.05]},
-                          [0.14, -0.02, 1.35],
-                          [0.11, -0.04, 1.15]],
-                  radius=[0.025, 0.018, 0.004])
-    """
-    # G144: resolve any {"handle": name} control points to their live world point
-    # here, so a tube can span minted handles without throwaway marker objects.
-    if points:
-        from server import handles as _h
-        resolved = []
-        for p in points:
-            if isinstance(p, dict) and "handle" in p:
-                pt, err, _ = _h.resolve_point(p["handle"])
-                if err:
-                    return err
-                resolved.append(list(pt))
-            else:
-                resolved.append(p)
-        points = resolved
-    result = call_blender("spline_tube", {
-        "name": name, "points": points, "radius": radius,
-        "resolution": resolution, "sides": sides, "between": between,
-    }, label=label)
-    if result.get("success"):
-        main = (f"Added SPLINE_TUBE as '{result['object_name']}' through "
-                f"{len(result['points'])} points, length={result['length']}m, "
-                f"radii={result['radii']}, dims={result.get('dimensions')} "
-                f"[{result.get('op_id','')}]")
-    else:
-        main = result.get("error", "failed")
-    return main + _status(result)
-
-
-def helix_coil(name: str, turns: float = 3, height: float = 0.2, radius: float = 0.05,
-               tube_radius: float = 0.02, taper: float = 1.0, handedness: str = "right",
-               axis: str = "Z", center: list = None, segments_per_turn: int = 24,
-               sides: int = 4, label: str = "") -> str:
-    """
-    Create a continuous helix / coil swept into a tube mesh (add type=helix). The
-    primitive behind wire wraps, springs, screw threads, coiled cable/rope, and
-    twist-fluting — one parametric call instead of stacking rings by hand. It samples
-    its own dense path, so it has no control-point cap.
-
-    name:        REQUIRED, unique.
-    turns:       full revolutions (float ok).
-    height:      total rise along the axis (m); 0 = a flat spiral.
-    radius:      coil radius — centreline distance from the axis.
-    tube_radius: wire cross-section radius (m).
-    taper:       end/start wire-thickness ratio (1.0 = uniform; <1 thins, >1 thickens).
-    handedness:  'right' (default) | 'left'.
-    axis:        coil axis X|Y|Z (default Z).
-    center:      [x,y,z] base centre (default origin).
-    segments_per_turn / sides: smoothness of the path / the tube cross-section.
-    """
-    result = call_blender("helix_coil", {
-        "name": name, "turns": turns, "height": height, "radius": radius,
-        "tube_radius": tube_radius, "taper": taper, "handedness": handedness,
-        "axis": axis, "center": center or [0.0, 0.0, 0.0],
-        "segments_per_turn": segments_per_turn, "sides": sides,
-    }, label=label)
-    if result.get("success"):
-        main = (f"Added HELIX as '{result['object_name']}' — {result['turns']} turns "
-                f"{result['handedness']}-handed on {result['axis']}, wire "
-                f"{result['wire_length']}m, dims={result.get('dimensions')} "
-                f"[{result.get('op_id','')}]")
-    else:
-        main = result.get("error", "failed")
-    return main + _status(result)
-
-
-@mcp.tool()
 def add_curve(name: str, points: list, type: str = "BEZIER", cyclic: bool = False,
               resolution: int = 12, bevel_depth: float = 0.0, label: str = "") -> str:
     """
@@ -448,7 +343,7 @@ def add_curve(name: str, points: list, type: str = "BEZIER", cyclic: bool = Fals
     mesh. Use this when you need an editable curve in the scene: a camera DOLLY
     PATH (set it as a Follow Path constraint target), a bevel/taper profile, or a
     distribution control for scattering. For a one-shot swept TUBE MESH (hair,
-    cable, handle), use spline_tube instead — that bakes straight to geometry.
+    cable, handle), use a swept tube mesh instead — that bakes straight to geometry.
 
     name:        object name (required, unique).
     points:      2+ control points. Each is [x, y, z] world coords,
@@ -474,7 +369,7 @@ def add_curve(name: str, points: list, type: str = "BEZIER", cyclic: bool = Fals
     An anchored curve is a LIVE rig accessory. For a game-ready mesh, pose the rig
     then bake it with convert_to_mesh(this curve) — one call evaluates the hooks
     AND the bevel into texturable geometry. (apply_modifiers alone leaves it a
-    CURVE, which set_textured_material still can't UV cleanly.)
+    CURVE, which UV-projected materials still can't map cleanly.)
 
     Example — camera dolly arc: add_curve("dolly", points=[[6,-6,3],[0,-8,3],[-6,-6,3]],
                                           type="BEZIER")
@@ -500,14 +395,6 @@ def add_curve(name: str, points: list, type: str = "BEZIER", cyclic: bool = Fals
     else:
         main = result.get("error", "failed")
     return main + _status(result)
-
-
-@mcp.tool()
-def add_floor(name: str = "floor", size: float = 10.0, label: str = "") -> str:
-    """Add a large ground plane at z=0 for character-modeling reference + shadow catching.
-    name: object name (default 'floor'). size: side length in meters (default 10)."""
-    result = call_blender("add_floor", {"name": name, "size": size}, label=label)
-    return _add_result("FLOOR", result) + _status(result)
 
 
 @mcp.tool()

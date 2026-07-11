@@ -6,10 +6,6 @@ Runs the WORKING-TREE extension headless. Covers Phase 1's acceptance criteria:
      by model=quadric: coefficients a≈α, b≈β, c≈0, residual ≈ 0, captured ≈ 100%, and the
      shape verdict names it (saddle / dome). By symmetry the centred patch's PCA frame is the
      world axes, so recovery is exact, not approximate.
-  B. ROUND-TRIP — `edit op=field` a KNOWN quadric expr onto a flat grid, then fit it back and
-     recover the same surface (the §4 loop). Then apply the FITTED expr back through the real
-     field sandbox and confirm it parses + is a no-op on its own surface (verts already satisfy
-     it) — the emitted expr is genuinely executable, not decorative.
   C. REFUSE, DON'T CORRUPT (§1.5) — a folded region (a full sphere) is NOT a height field;
      model=quadric returns a HIGH residual (>> tol), never a quiet plausible fiction.
   D. The Phase-2 menu refuses cleanly with a teach error (model=bspline → not-built-yet).
@@ -118,45 +114,6 @@ check("A: emits an executable expr + axis:v channel",
       f"expr={r.get('expr')} ch={r.get('apply_channel')}")
 
 
-# ───────────────── B. ROUND-TRIP — field a known expr, fit it back ─────────────────
-print("== SPEC19-B: field a known quadric → fit recovers it → emitted expr re-applies clean ==")
-clean()
-g = make_grid(1.2, 0.8, subdiv=16)        # flat; field will shape it
-# author z = -0.50·x² - 0.30·y² (a dome). In the grid's AUTO frame L=X(field z), U=Y(field x).
-bpy.context.view_layer.objects.active = g
-bpy.ops.object.mode_set(mode='EDIT')
-bpy.ops.mesh.select_all(action='SELECT')
-bpy.ops.object.mode_set(mode='OBJECT')
-rf = run("field", axis="auto", channel="axis:v", field_mode="add",
-         expr="-0.50*z*z - 0.30*x*x")
-check("B: field applied", rf.get("success"), rf.get("error"))
-r = run("fit", model="quadric")
-check("B: fit recovers the field-authored surface (residual ≈ 0)", r.get("residual_mm", 99) < 0.05,
-      f"res={r.get('residual_mm')}mm")
-check("B: captured ≈ 100%", r.get("captured", 0) > 0.999, f"captured={r.get('captured')}")
-pb = r.get("params", {})
-check("B: both curvatures negative → dome", pb.get("k_max", 1) < 0 and pb.get("k_min", 1) < 0,
-      f"k=({pb.get('k_max')},{pb.get('k_min')})")
-check("B: shape verdict says 'dome'", "dome" in pb.get("shape", ""), f"shape={pb.get('shape')}")
-
-# now apply the FITTED expr back through the real field sandbox — must parse and be a no-op
-emitted = r.get("expr")
-bpy.ops.object.mode_set(mode='EDIT')
-bpy.ops.mesh.select_all(action='SELECT')
-bpy.ops.object.mode_set(mode='OBJECT')
-rr = run("field", axis="auto", channel="axis:v", field_mode="add", expr=emitted)
-check("B: emitted expr parses + runs in the field sandbox", rr.get("success"), rr.get("error"))
-# re-applying (quadric)−y to its own surface should displace by ≈0 (verts already satisfy it);
-# the residual displacement is just 6-sig-fig coefficient rounding — assert it's negligible in
-# MAGNITUDE (microns), the honest claim, not vert-count against the field's 1nm move threshold.
-frng = rr.get("f_range", [9, 9])
-check("B: emitted expr is a near-perfect no-op (|displacement| < 0.05mm)",
-      max(abs(frng[0]), abs(frng[1])) < 5e-5, f"f_range={frng} m")
-r2 = run("fit", model="quadric")
-check("B: re-fit after re-apply still ≈ 0 residual (round-trip closed)",
-      r2.get("residual_mm", 99) < 0.05, f"res={r2.get('residual_mm')}mm")
-
-
 # ───────────────── C. REFUSE — a fold is not a height field ─────────────────
 print("== SPEC19-C: a folded region (full sphere) returns a HIGH residual, no fiction ==")
 clean()
@@ -248,20 +205,6 @@ bumps = pf.get("bumps", [])
 near = any(abs(abs(b.get("cu", 9)) - CX) < 0.12 and abs(abs(b.get("cv", 9)) - CY) < 0.12
            and 0.04 < abs(b.get("amp", 0)) < 0.16 for b in bumps)
 check("F: a bump lands near the authored centre with ~right amplitude", near, f"bumps={bumps}")
-
-# the layered expr round-trips through the field sandbox
-emitted = rp.get("expr")
-clean()
-g2 = make_grid(1.2, 1.0, subdiv=24)
-bpy.context.view_layer.objects.active = g2
-bpy.ops.object.mode_set(mode='EDIT')
-bpy.ops.mesh.select_all(action='SELECT')
-bpy.ops.object.mode_set(mode='OBJECT')
-rr = run("field", axis="auto", channel="axis:v", field_mode="add", expr=emitted)
-check("F: layered expr parses + runs in the field sandbox", rr.get("success"), rr.get("error"))
-r2 = run("fit", model="quadric", progressive=True, basis_terms=3, tol=1.0)
-check("F: re-fit of the applied layered field reproduces the small residual (round-trip closed)",
-      r2.get("residual_mm", 99) < 3.0, f"res={r2.get('residual_mm')}mm")
 
 # rbf model is the standalone layered fit (base + bumps), same machinery, on the active mesh
 rrbf = run("fit", model="rbf", basis_terms=3, tol=1.0)

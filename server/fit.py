@@ -66,8 +66,6 @@ def _one_quadric(f):
     out.append(f"  captured {cap_s} of height · residual {rmm}mm "
                f"(max {f.get('residual_max_mm')}mm) · coverage {f.get('coverage')} · "
                f"tol {tmm}mm — {verdict}")
-    out.append(f"  ↻ apply (edit the coefficients first): edit op=field axis=auto "
-               f"channel={f.get('apply_channel', 'axis:v')} field_mode=add expr=\"{f.get('expr')}\"")
     return "\n".join(out)
 
 

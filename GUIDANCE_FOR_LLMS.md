@@ -143,48 +143,20 @@ most expensive failure here:
 If you ever see `validate: OFF (human override)`, the floor is down by the human's
 choice — you are genuinely blind, so slow down, `feel` deliberately, and ask.
 
-## Shaping a surface as math, not vertices (SPEC-19)
-
-To *shape* a freeform patch — not assemble a primitive — read it as a **formula**,
-edit the formula, write it back, and verify by re-reading. No vertex is ever typed:
-
-1. **Select** a coherent region of quads (claim a candidate, or `in_sphere`/`between`/
-   `flood`).
-2. **`feel op=fit model=quadric`** → a height-field formula with **named knobs**
-   (`a,b` = curvature/dome±, `c` = twist/saddle, `d,e` = tilt, `f` = offset), a shape
-   verdict (dome/bowl/saddle), and the honesty stamp (`captured 91% · residual
-   1.1mm`). It hands back a ready-to-run apply line.
-3. **Edit the coefficients** in your head (steepen the dome: `a` −0.31 → −0.45).
-4. **Apply**: `edit op=field axis=auto channel=axis:v field_mode=add expr="(…edited…) - y"`
-   (the fit emits this `expr` in the field grammar; it round-trips byte-for-byte).
-5. **Verify by re-fitting** — coefficients + residual confirm the surface matches
-   intent. You never read a render to check shape.
-
-**The residual is load-bearing.** A high residual means the basis can't describe this
-region (a fold, an overhang, a ragged blob) — it **refuses honestly**. Split the
-selection or pick a finer basis; don't push the bad formula through.
-
-The rest of the menu: `model=rbf` / `progressive=true tol=<mm>` (quadric base +
-localized `amp·exp(−r²/w²)` bumps — cheekbone, brow; round-trips via `edit op=field`);
-`model=bspline basis_terms=N` (control-grid workhorse — mints via `as_surface=`, no
-overshoot); `model=superquadric` (the gross mass of a closed blob; mints with
-`as_surface=`); `as_net=<name>` (the fit as drawable iso-curves). To *merge* shaped
-masses or weld patches afterwards, see `guidance://techniques/smooth-union` and
-`ring-weld` — hard union + native seam work replaced the old compiled merges.
-
 ## Enlarging / reshaping a soft form (and editing imported meshes)
 
 A mesh's origin doesn't matter — once imported (Maya `polySurfaceN`, a scan, etc.) its
 verts are just verts; the loop and the deform ops work the same as on a self-built mesh.
 
-But **do not use `edit op=inflate` (per-vertex-normal push) to grow a soft bulge on a
-dense, irregular mesh.** The normals disagree, so a uniform push lumps and *collapses*
-the form (this sank a bust on the first try). Instead:
+But **do not use `edit op=shrink_fatten` (per-vertex-normal push, Alt+S) to grow a soft
+bulge on a dense, irregular mesh.** The normals disagree, so a uniform push lumps and
+*collapses* the form (this sank a bust on the first try). Instead:
 
-- **`edit op=proportional_move`** — `select op=shrink` the patch to a small apex core,
-  then move the core directionally (e.g. `forward=0.02`) with a `radius` covering the
-  whole bulge and `falloff=SMOOTH`. The core leads, the surroundings follow → a
-  rounded, seam-free enlargement. Pure directional motion, no normals involved.
+- **`edit op=grab proportional=True`** (G with proportional editing, O) — `select op=shrink`
+  the patch to a small apex core, then move the core directionally (e.g. `forward=0.02`)
+  with a `radius` covering the whole bulge and `falloff=SMOOTH`. The core leads, the
+  surroundings follow → a rounded, seam-free enlargement. Pure directional motion, no
+  normals involved.
 - Keep the core **off the symmetry seam** if the lobes should stay separate — a core
   spanning both lobes + the cleft drags the valley forward too (merges a bust).
 - **Be wary of `region_form` for confirming a size change**: it is shape-relative —
@@ -194,20 +166,12 @@ the form (this sank a bust on the first try). Instead:
 
 ## Scene dressing
 
-- `search_textures` / `search_hdris` → Poly Haven ids; `material op=textured` needs no
-  UVs (box projection). `dark_wood` + `brown_photostudio_02` is a proven warm
-  product-shot combo.
-- **Local texture sets on disk (Poliigon, Megascans, ambientCG) → `material op=pbr
-  folder=<asset dir>`.** Auto-detects maps by filename, no UVs, no addon/login.
-  `search_textures` is Poly Haven only — don't fall back to a flat tint when a real
-  texture set is on disk.
-- **UVs: box projection is the default and needs none.** Reach for `uv op=unwrap` +
-  `material … space=uv` **only** when grain must follow a curved surface (a mug belly
-  → `method=cylinder`, wood edge grain). `space=uv` with no UV layer refuses and
-  points you at `uv op=unwrap`.
+- `search_textures` / `search_hdris` → Poly Haven ids (a read); `brown_photostudio_02`
+  is a proven warm product-shot HDRI. Flat/solid look is `material op=set`
+  (base_color/metallic/roughness/…); a full PBR texture graph is native node work.
 - One soft AREA key light angled across the subject adds sparkle the HDRI alone
   doesn't give. Aim with `target=`.
-- DOF: `set_camera_dof(focus_object=...)`; f/4 keeps a tabletop scene readable, f/2.8
+- DOF: `view op=camera_dof focus_object=...`; f/4 keeps a tabletop scene readable, f/2.8
   for macro drama.
 - AgX (default) for PBR realism; `render op=color view_transform=Standard` for
-  toon/NPR or saturated emission (see `guidance://techniques/npr-look`).
+  saturated emission.

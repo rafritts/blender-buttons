@@ -41,18 +41,6 @@ def mod(name, mod_name):
     return {m.name: m for m in bpy.data.objects[name].modifiers}.get(mod_name)
 
 
-def bound_cloth():
-    """A high-res mesh fully enclosed by a low-res cage, with a BOUND MeshDeform —
-    the recoverable production-stack shape from batch 7."""
-    clean()
-    run("add_sphere", name="cloth", radius=1.0, segments=24, rings=16)
-    run("add_box", name="cage", width=2.6, depth=2.6, height=2.6)
-    run("select_object", name="cloth")
-    r = run("bind_mesh_deform", mesh="cloth", cage="cage")
-    assert r.get("bound") is True, f"setup bind failed: {r}"
-    return r
-
-
 # ───────── W1: move_modifier reorders the stack ─────────
 print("== W1: move_modifier ==")
 clean()
@@ -83,22 +71,6 @@ check("no destination errors", "error" in run("move_modifier", target="block", m
 check("unknown modifier errors", "error" in run("move_modifier", target="block", modifier="Nope", index=0))
 check("unknown reference errors", "error" in run("move_modifier", target="block", modifier="Bevel", before="Nope"))
 
-# W1 trap: moving a BOUND deform modifier must warn (no vert-count change → V2 blind).
-print("== W1: moving a bound deform modifier warns ==")
-bound_cloth()
-run("select_object", name="cloth")
-run("add_modifier", type="SUBSURF", name="Subsurf")  # appends below MeshDeform
-md_name = next(m for m in mods("cloth") if mod("cloth", m).type == 'MESH_DEFORM')
-check("MeshDeform starts above Subsurf", mods("cloth").index(md_name) < mods("cloth").index("Subsurf"))
-r = run("move_modifier", target="cloth", modifier=md_name, after="Subsurf")
-check("move bound deform success", r.get("success") is True, str(r))
-check("bind_invalidated flag set", r.get("bind_invalidated") is True, str(r))
-check("stackmove warning points at rebind_deform", "rebind_deform" in (r.get("bind_warning") or ""), str(r))
-check("warning names stack-order cause", "stack-order" in (r.get("bind_warning") or ""), str(r))
-# Moving a plain (non-deform) modifier never warns.
-r = run("move_modifier", target="cloth", modifier="Subsurf", index=0)
-check("moving plain modifier does NOT warn", r.get("bind_invalidated") is None, str(r))
-
 # CORRECTIVE_SMOOTH is now creatable via add_modifier.
 print("== W1: add_modifier CORRECTIVE_SMOOTH ==")
 clean()
@@ -114,68 +86,7 @@ r = run("add_modifier", type="CORRECTIVE_SMOOTH", name="CSorco", rest_source="OR
 check("rest_source=ORCO honored", mod("cs", "CSorco").rest_source == 'ORCO')
 
 
-# ───────── W2: manual edit-mode path now warns ─────────
-print("== W2: bind warning is no longer bypassed by the manual edit path ==")
-bound_cloth()
-before_n = len(bpy.data.objects["cloth"].data.vertices)
-run("select_object", name="cloth")
-run("set_mode", mode="EDIT")
-run("select_by_axis", axis="Z", factor=0.5, comparison="GREATER")
-run("delete_geometry")               # NO target= — the path that V2 missed
-r = run("set_mode", mode="OBJECT")   # compare-on-exit
-after_n = len(bpy.data.objects["cloth"].data.vertices)
-check("manual edit changed vert count", after_n != before_n, f"{before_n}->{after_n}")
-check("W2 bind_invalidated on EDIT exit", r.get("bind_invalidated") is True, str(r))
-check("W2 warning names the modifier + rebind", "MESH_DEFORM" in (r.get("bind_warning") or "")
-      and "rebind_deform" in (r.get("bind_warning") or ""), str(r))
-
-# A position-only manual edit keeps the vert count → no warning.
-print("== W2: position-only manual edit stays silent ==")
-bound_cloth()
-run("select_object", name="cloth")
-run("set_mode", mode="EDIT")
-run("select_all", action="SELECT")
-run("move_vertices", direction=[0, 0, 0.05])
-r = run("set_mode", mode="OBJECT")
-check("position-only edit does NOT warn", r.get("bind_invalidated") is None, str(r))
-
-# An unbound mesh-deform mesh never warns even on topology change.
-print("== W2: unbound mesh never warns ==")
-clean()
-run("add_sphere", name="plain", radius=1.0, segments=16, rings=12)
-run("select_object", name="plain")
-run("set_mode", mode="EDIT")
-run("select_by_axis", axis="Z", factor=0.5, comparison="GREATER")
-run("delete_geometry")
-r = run("set_mode", mode="OBJECT")
-check("unbound mesh manual edit does NOT warn", r.get("bind_invalidated") is None, str(r))
-
-# No regression: the request-scoped target= path still warns immediately.
-print("== W2: request-scoped target= path still warns (no regression) ==")
-bound_cloth()
-r = run("delete_geometry", target="cloth", axis="Z", factor=0.5, comparison="GREATER")
-check("target= path still warns immediately", r.get("bind_invalidated") is True, str(r))
-
-
 # ───────── W3: rebind_deform (umbrella, rebind-only) ─────────
-print("== W3: rebind_deform recovers a dead MESH_DEFORM bind ==")
-bound_cloth()
-md_name = next(m for m in mods("cloth") if mod("cloth", m).type == 'MESH_DEFORM')
-# Kill the bind with a topology edit.
-run("delete_geometry", target="cloth", axis="Z", factor=0.5, comparison="GREATER")
-r = run("rebind_deform", mesh="cloth")
-check("rebind_deform success", r.get("success") is True, str(r))
-check("rebound lists MESH_DEFORM", any(x["type"] == 'MESH_DEFORM' for x in r.get("rebound", [])), str(r))
-check("modifier reads bound again", mod("cloth", md_name).is_bound is True)
-
-# Rebind a single named modifier.
-bound_cloth()
-md_name = next(m for m in mods("cloth") if mod("cloth", m).type == 'MESH_DEFORM')
-run("delete_geometry", target="cloth", axis="Z", factor=0.5, comparison="GREATER")
-r = run("rebind_deform", mesh="cloth", modifier=md_name)
-check("rebind named modifier success", r.get("success") is True, str(r))
-check("named rebind re-bound it", mod("cloth", md_name).is_bound is True)
-
 # CORRECTIVE_SMOOTH(rest_source=BIND): rebind_deform captures the bind.
 print("== W3: rebind_deform binds a CORRECTIVE_SMOOTH(BIND) ==")
 clean()

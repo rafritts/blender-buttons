@@ -19,8 +19,8 @@ The native primitive is **Bridge Edge Loops** — `edit op=bridge`.
    for a curved span raise `bridge_cuts` (intermediate loops) with `smoothness` for the
    tangent bow, `profile` to bulge the throat outward, and `twist` to kill the spiral
    when the rims' vert orders start misaligned.
-5. **Settle the span**: `edit op=relax` on the new band evens the quads without
-   changing shape; `material op=shade_smooth` if the joint should read organic.
+5. **Settle the span**: `sculpt brush=smooth` across the new band evens the quads;
+   `material op=shade_smooth` if the joint should read organic.
 
 **Verify:** the bridge's status block + `feel op=topology` — the two open rims are
 gone, no non-manifold edges. Then `feel op=clearance` against neighbours if the new

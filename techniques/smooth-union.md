@@ -24,10 +24,9 @@ or fill the rim with `edit op=grid_fill`) or EXACT leaves internal membranes —
 ## Continuous flesh (organic — no visible seam at all)
 
 After the hard union, `edit op=subdivide` the seam zone locally, then blend it away:
-`sculpt brush=smooth` strokes across the seam (or `edit op=relax` on the selected
-zone, which keeps the shape while evening the mesh). Verify with `feel op=fit
-model=quadric` over the blend patch — a low residual says the flesh is now one smooth
-surface, not two crashed ones.
+`sculpt brush=smooth` strokes across the seam. Verify with `feel op=fit model=quadric`
+over the blend patch — a low residual says the flesh is now one smooth surface, not two
+crashed ones.
 
 Blender 5.x also ships a native **SDF grid family** in Geometry Nodes (Mesh to SDF
 Grid → SDF Grid Boolean → SDF filters → Grid to Mesh) — the heavy-duty path for

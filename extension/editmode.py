@@ -284,7 +284,7 @@ def _contact_distance(bm, obj, unit, target_name):
 
 # ───────────────────────── sweep the selection along a curve (G1) ────────────
 # extrude_along_curve: the classic SWEEP — extrude the current edit-mode face
-# selection along a curve in ONE call (spline_tube sweeps a circle into a NEW
+# selection along a curve in ONE call (a swept-tube curve sweeps a circle into a NEW
 # object; this aims the same idea at the in-mesh selection). Reuses the F1 frame:
 # the curve describes the SHAPE of the path, re-rooted so its start sits at the
 # selection's centroid with its initial tangent aligned to the selection's `out`
@@ -2067,8 +2067,8 @@ def spin(params):
         return {"error": "Must be in edit mode"}
     if obj.data.shape_keys is not None:
         return {"error": f"'{obj.name}' has shape keys — spin changes topology, which "
-                         f"corrupts every key. Bake keys first (bake_shape_keys_to_basis) "
-                         f"or spin a key-free copy."}
+                         f"corrupts every key. Clear the keys first (pose "
+                         f"op=shape_key_delete key=ALL) or spin a key-free copy."}
     axis_name = (params.get("axis") or "Z").upper()
     if axis_name not in ("X", "Y", "Z"):
         return {"error": f"axis must be X, Y or Z (got '{axis_name}')"}
@@ -2711,9 +2711,8 @@ def assign_weight(params):
 
     The deform-side sibling of select_by_axis / select_in_sphere: select the verts
     (by axis band, sphere, ring…), then bind just those to a named group at a chosen
-    weight. The general primitive the all-or-nothing binders lacked — weight_to_bone
-    rigid-binds the WHOLE mesh to one bone, auto_weight heat-solves the WHOLE mesh;
-    neither can say "these verts → this group, blended N%". A group named after a
+    weight. The general primitive the all-or-nothing binders lacked — auto_weight
+    heat-solves the WHOLE mesh; it can't say "these verts → this group, blended N%". A group named after a
     bone is read by an Armature modifier as that bone's influence; an arbitrary group
     is read by a MeshDeform / mask modifier's vertex_group slot — so this stays a
     general weight verb, not a bespoke 'bind the shoulder' tool.
@@ -2868,88 +2867,6 @@ def _reproject(verts, tree):
     return n
 
 
-def relax_selection(params):
-    """G49 — RELAX: even out vertex spacing over the existing form without changing
-    its shape. Laplacian-smooths the selected verts (each drifts toward the average of
-    its neighbours), then reprojects every one onto a BVH snapshot of the pre-relax
-    surface so the form is preserved and only the layout improves. The fix for stretched
-    / bunched quads at a feature — the redistribute half of the retopo toolkit.
-
-    iterations: smoothing passes (default 5). factor: 0..1 step per pass (default 0.5).
-    reproject:  snap back onto the original surface each pass (default True). False =
-                a plain Laplacian smooth that also relaxes the shape (shrinks bulges)."""
-    import bmesh
-    obj = bpy.context.active_object
-    if obj is None or obj.mode != 'EDIT':
-        return {"error": "Must be in edit mode"}
-    iterations = max(1, int(params.get("iterations", 5)))
-    factor = float(params.get("factor", 0.5))
-    reproject = params.get("reproject", True)
-
-    bm = bmesh.from_edit_mesh(obj.data)
-    sel = [v for v in bm.verts if v.select]
-    if not sel:
-        return {"error": "No vertices selected"}
-    before = [v.co.copy() for v in sel]
-    tree = _surface_bvh(bm) if reproject else None
-    for _ in range(iterations):
-        bmesh.ops.smooth_vert(bm, verts=sel, factor=factor,
-                              use_axis_x=True, use_axis_y=True, use_axis_z=True)
-        if tree is not None:
-            _reproject(sel, tree)
-    bm.normal_update()
-    bmesh.update_edit_mesh(obj.data)
-    push_undo(f"relax_selection x{iterations}")
-    mw = obj.matrix_world
-    drift = sum(((mw @ v.co) - (mw @ b)).length for v, b in zip(sel, before)) / len(sel)
-    return {"success": True, "verts_relaxed": len(sel), "iterations": iterations,
-            "factor": factor, "reprojected": bool(reproject),
-            "avg_drift_cm": round(drift * 100, 3)}
-
-
-def slide_selection(params):
-    """G49 — SLIDE: drag the selected verts ALONG the surface in a direction, instead of
-    THROUGH space. Moves them by the usual metre direction words, then reprojects onto a
-    BVH snapshot of the pre-slide surface — so the net motion is the tangential component
-    (the verts travel over the form; the form's shape is unchanged). Relocate a pole or a
-    loop to a feature's high point without denting the mesh.
-
-    Direction words (METERS, composable): out/inward (selection normal),
-    up/down/left/right/forward/back (world axes). The displacement should be small
-    relative to the surface's curvature — a slide is a nudge, looped if you need more."""
-    import bmesh
-    obj = bpy.context.active_object
-    if obj is None or obj.mode != 'EDIT':
-        return {"error": "Must be in edit mode"}
-    if not _has_dir_words(params):
-        return {"error": "slide needs a direction — out/inward or up/down/left/right/"
-                         "forward/back (meters)"}
-    bm = bmesh.from_edit_mesh(obj.data)
-    sel = [v for v in bm.verts if v.select]
-    if not sel:
-        return {"error": "No vertices selected"}
-    wv, frame, err = _resolve_world_delta(bm, obj, params)
-    if err:
-        return err
-    local = obj.matrix_world.inverted().to_3x3() @ wv
-    before = [v.co.copy() for v in sel]
-    tree = _surface_bvh(bm)
-    for v in sel:
-        v.co += local
-    _reproject(sel, tree)
-    bm.normal_update()
-    bmesh.update_edit_mesh(obj.data)
-    push_undo("slide_selection")
-    mw = obj.matrix_world
-    drift = sum(((mw @ v.co) - (mw @ b)).length for v, b in zip(sel, before)) / len(sel)
-    result = {"success": True, "verts_slid": len(sel),
-              "requested_world": [round(c, 5) for c in wv],
-              "avg_slide_cm": round(drift * 100, 3)}
-    if frame:
-        result["frame"] = frame
-    return result
-
-
 # ───────────────────────── face authoring / retopo primitives (G50) ──────────
 
 def poke_faces(params):
@@ -3048,8 +2965,6 @@ def grid_fill(params):
 
 
 TOOLS = {
-    "relax_selection":    relax_selection,
-    "slide_selection":    slide_selection,
     "poke_faces":         poke_faces,
     "inset_faces":        inset_faces,
     "grid_fill":          grid_fill,

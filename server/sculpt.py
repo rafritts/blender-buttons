@@ -71,39 +71,6 @@ def sculpt_grab(target: str, at_x: float, at_y: float, at_z: float, radius: floa
 
 
 @mcp.tool()
-def sculpt_gravity(target: str, at_x: Optional[float] = None, at_y: Optional[float] = None,
-                   at_z: Optional[float] = None, radius: Optional[float] = None,
-                   strength: float = 0.02, pin: float = 0.25,
-                   falloff: str = "SMOOTH", subdivide: bool = False,
-                   detail: Optional[float] = None, connected: bool = False,
-                   label: str = "") -> str:
-    """Drape a region of `target` under GRAVITY — the lead region-parametric deformer.
-
-    Pins the TOP of the region and lets the lower mass fall along world -Z, ramped by
-    height (top frozen → bottom falls fully). The fullest point sinks and the lower
-    pole elongates → a hanging / teardrop form by construction, not by a seeing hand.
-    Use this instead of hand-grabbing a soft form into shape.
-
-    Scope: pass at_x/at_y/at_z + radius to drape just a sphere (e.g. one breast);
-    omit them to drape the WHOLE mesh.
-
-    strength: metres the free (bottom) end falls (try 0.02).
-    pin:      0..1 top fraction frozen as the attachment (default 0.25). pin=0 is a
-              rigid slide (no sag); higher pin freezes more of the top.
-    falloff:  radial falloff at the sphere edge (scoped mode). SMOOTH|LINEAR|…
-    """
-    params = {"target": target, "strength": strength, "pin": pin,
-              "falloff": falloff, "subdivide": subdivide,
-              "detail": detail, "connected": connected}
-    if at_x is not None and at_y is not None and at_z is not None:
-        params["at"] = [at_x, at_y, at_z]
-        if radius is not None:
-            params["radius"] = radius
-    result = call_blender("sculpt_gravity", params, label=label)
-    return _sculpt_result("gravity", result) + _status(result)
-
-
-@mcp.tool()
 def sculpt_inflate(target: str, at_x: float, at_y: float, at_z: float, radius: float,
                    amount: float, falloff: str = "SMOOTH", subdivide: bool = False,
                    detail: Optional[float] = None, connected: bool = False,

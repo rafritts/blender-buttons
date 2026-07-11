@@ -8,9 +8,6 @@ Covers:
   • multi-target unwrap (each mesh gets its own UVs)
   • mode hygiene (G157): the scene is left in OBJECT mode
   • registration / categorization (mutating, not a read, not lock-exempt)
-  • material space=uv refuses legibly when the mesh has no UV layer
-  • material space=uv wires TexCoord.UV + Image projection='FLAT'
-  • material space=box (default) still wires TexCoord.Object + projection='BOX'
 
 Usage: flatpak run --filesystem=host org.blender.Blender --background --factory-startup \
        --python /abs/path/to/tests/e2e_uv_unwrap.py
@@ -26,7 +23,6 @@ import bmesh      # noqa: E402
 from extension import server as bb_server   # noqa: E402
 from extension import state                 # noqa: E402
 from extension import uv as bb_uv           # noqa: E402
-from extension import textures              # noqa: E402
 
 failures = []
 
@@ -61,15 +57,6 @@ def make_cube(name):
     obj = bpy.data.objects.new(name, me)
     bpy.context.collection.objects.link(obj)
     return obj
-
-
-def tiny_png(path):
-    """A real 4x4 PNG on disk — image_node loads from a file path."""
-    img = bpy.data.images.new("uv_test_tex", 4, 4)
-    img.filepath_raw = path
-    img.file_format = 'PNG'
-    img.save()
-    return path
 
 
 # ── 0. registration + categorization ─────────────────────────────────────────
@@ -110,59 +97,6 @@ make_cube("X")
 r = bb_uv.uv_unwrap({"target": "X", "method": "angle"})
 check("angle (Phase 2) refused with guidance", not r.get("success") and "Phase 2" in r.get("error", ""),
       str(r)[:160])
-
-# ── 4. material space=uv refusal (no UV layer) ───────────────────────────────
-print("[4] material space=uv refusal")
-clean()
-make_cube("NoUV")
-path = tiny_png(os.path.join("/tmp", "uv_e2e_tex.png"))
-r = textures.set_textured_material({"target": "NoUV", "maps": {"diffuse": path}, "space": "uv"})
-check("space=uv with no UV layer refuses", not r.get("success") and "no UV layer" in r.get("error", ""),
-      str(r)[:160])
-check("refusal points at uv op=unwrap", "uv op=unwrap" in r.get("error", ""), str(r)[:160])
-
-# ── 5. material space=uv success → TexCoord.UV + projection FLAT ──────────────
-print("[5] material space=uv node graph")
-clean()
-obj = make_cylinder("Wrapped")
-bb_uv.uv_unwrap({"target": "Wrapped", "method": "cylinder"})
-r = textures.set_textured_material({"target": "Wrapped", "maps": {"diffuse": path}, "space": "uv"})
-check("space=uv applies", r.get("success"), str(r)[:160])
-check("result records space=uv", r.get("space") == "uv")
-if r.get("success"):
-    mat = bpy.data.materials.get(r["material"])
-    nt = mat.node_tree
-    img_nodes = [n for n in nt.nodes if n.type == 'TEX_IMAGE']
-    check("image node projection=FLAT", img_nodes and all(n.projection == 'FLAT' for n in img_nodes))
-    texco = next((n for n in nt.nodes if n.type == 'TEX_COORD'), None)
-    mapping = next((n for n in nt.nodes if n.type == 'MAPPING'), None)
-    # the UV output of TexCoord must feed the Mapping vector
-    uv_feeds_mapping = False
-    if texco and mapping:
-        for link in nt.links:
-            if (link.from_node == texco and link.from_socket.name == 'UV'
-                    and link.to_node == mapping):
-                uv_feeds_mapping = True
-    check("TexCoord.UV feeds Mapping", uv_feeds_mapping)
-
-# ── 6. material space=box (default) → TexCoord.Object + projection BOX ────────
-print("[6] material space=box default unchanged")
-clean()
-obj = make_cube("Boxed")
-r = textures.set_textured_material({"target": "Boxed", "maps": {"diffuse": path}})
-check("default (no space) applies", r.get("success"), str(r)[:160])
-check("result records space=box", r.get("space") == "box")
-if r.get("success"):
-    mat = bpy.data.materials.get(r["material"])
-    nt = mat.node_tree
-    img_nodes = [n for n in nt.nodes if n.type == 'TEX_IMAGE']
-    check("image node projection=BOX", img_nodes and all(n.projection == 'BOX' for n in img_nodes))
-    texco = next((n for n in nt.nodes if n.type == 'TEX_COORD'), None)
-    mapping = next((n for n in nt.nodes if n.type == 'MAPPING'), None)
-    obj_feeds_mapping = any(
-        (link.from_node == texco and link.from_socket.name == 'Object' and link.to_node == mapping)
-        for link in nt.links) if (texco and mapping) else False
-    check("TexCoord.Object feeds Mapping", obj_feeds_mapping)
 
 # ── summary ──────────────────────────────────────────────────────────────────
 print()

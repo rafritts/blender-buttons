@@ -99,7 +99,7 @@ def extrude(out: float = 0.0, inward: float = 0.0,
 def extrude_along_curve(curve: str, segments: int = 8, taper: float = 1.0,
                         label: str = "") -> str:
     """Sweep the current edit-mode FACE selection along a curve in ONE call — the
-    classic SWEEP. spline_tube sweeps a circle into a NEW object; this aims the same
+    classic SWEEP. A swept-tube curve sweeps a circle into a NEW object; this aims the same
     idea at the selection, in-mesh. A curved horn, a duct, a tentacle: sweep + taper
     in one call instead of N hand-rotated extrude/taper pairs.
 
@@ -599,8 +599,8 @@ def assign_weight(group: str, weight: float = 1.0, mode: str = "REPLACE",
 
     Select verts (axis band, sphere, ring), then bind just those to a named group at
     a chosen weight. The general primitive the all-or-nothing binders lacked:
-    weight_to_bone rigid-binds the WHOLE mesh, auto_weight heat-solves the WHOLE mesh;
-    neither can say "these verts → this group, blended N%". A group named after a bone
+    auto_weight heat-solves the WHOLE mesh; it can't say
+    "these verts → this group, blended N%". A group named after a bone
     is read by an Armature modifier as that bone's influence; an arbitrary group feeds
     a MeshDeform / mask modifier's vertex_group slot.
 
@@ -1177,53 +1177,6 @@ def select_by_radius(shape: str = "CYLINDER", axis: str = "Z", radius_inner: flo
         sh = result["shape"].lower() + (f" axis={result['axis']}" if result.get("axis") else "")
         main = (f"{result['action']} {result['selected']} verts ({sh}) {band} "
                 f"about {result['center']}")
-    else:
-        main = result.get("error", "failed")
-    return main + _status(result)
-
-
-def relax_selection(iterations: int = 5, factor: float = 0.5, reproject: bool = True,
-                    label: str = "", target: str = "") -> str:
-    """G49 — RELAX the selected verts: even out their spacing over the existing form
-    without changing its shape (Laplacian smooth + reproject onto the pre-relax surface).
-    The redistribute primitive for stretched/bunched quads at a feature — moves verts
-    ALONG the surface, not through space.
-
-    iterations: smoothing passes (default 5). factor: 0..1 step per pass (default 0.5).
-    reproject: snap back onto the original surface each pass (default True; False = a
-               plain smooth that also relaxes the shape).
-    target: optional object name — enters edit mode on it first, exits after."""
-    result = call_blender("relax_selection", {
-        "iterations": iterations, "factor": factor, "reproject": reproject,
-        "target": target}, label=label)
-    if result.get("success"):
-        main = (f"relaxed {result['verts_relaxed']} verts ×{result['iterations']} "
-                f"(reproject {result['reprojected']}) — avg drift {result['avg_drift_cm']}cm "
-                f"[{result.get('op_id','')}]")
-    else:
-        main = result.get("error", "failed")
-    return main + _status(result)
-
-
-def slide_selection(out: float = 0.0, inward: float = 0.0,
-                    up: float = 0.0, down: float = 0.0, left: float = 0.0, right: float = 0.0,
-                    forward: float = 0.0, back: float = 0.0,
-                    label: str = "", target: str = "") -> str:
-    """G49 — SLIDE the selected verts ALONG the surface: move them by the metre direction
-    words, then reproject onto the pre-slide surface so the net motion is tangential (the
-    verts travel over the form; its shape is unchanged). Relocate a pole/loop to a
-    feature's high point without denting the mesh. Keep the slide small vs. the curvature.
-
-    Directions (METERS, composable): out/inward (selection normal), up/down/left/right/
-    forward/back (world axes).
-    target: optional object name — enters edit mode on it first, exits after."""
-    result = call_blender("slide_selection", {
-        "out": out, "inward": inward, "up": up, "down": down, "left": left,
-        "right": right, "forward": forward, "back": back, "target": target}, label=label)
-    if result.get("success"):
-        frame = f" ({result['frame']})" if result.get("frame") else ""
-        main = (f"slid {result['verts_slid']} verts along surface — moved "
-                f"{result['avg_slide_cm']}cm{frame} [{result.get('op_id','')}]")
     else:
         main = result.get("error", "failed")
     return main + _status(result)

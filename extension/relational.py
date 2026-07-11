@@ -1,5 +1,4 @@
-"""Relational verbs that act on named parts: match_dimension, mirror_across,
-distribute_evenly, array_at_corners, array_along."""
+"""Relational verbs that act on named parts: match_dimension, distribute_evenly."""
 
 import bpy
 
@@ -36,52 +35,6 @@ def match_dimension(params):
             "new_size": round(r_size, 5), "factor_applied": round(factor, 5)}
 
 
-def mirror_across(params):
-    """Duplicate parts and mirror the copies across a world axis plane.
-    plane: 'X' (mirror across YZ plane through origin), 'Y', or 'Z'.
-    replace: optional ["_R", "_L"] — copies of names containing the first string
-    get it swapped for the second ('eye_R' → 'eye_L') instead of suffix appending."""
-    targets = params.get("targets")
-    plane = params.get("plane", "X").upper()
-    suffix = params.get("suffix", "_mirror")
-    replace = params.get("replace")
-    if replace is not None and not (isinstance(replace, (list, tuple)) and len(replace) == 2):
-        return {"error": "'replace' must be a 2-item list like [\"_R\", \"_L\"]"}
-    objs, err = resolve_targets(targets)
-    if err:
-        return {"error": err}
-
-    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(plane, 0)
-    if bpy.context.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
-
-    new_names = []
-    for o in objs:
-        activate(o)
-        bpy.ops.object.duplicate(linked=False)
-        dup = bpy.context.active_object
-        if replace and replace[0] in o.name:
-            dup_name = o.name.replace(replace[0], replace[1])
-        else:
-            dup_name = o.name + suffix
-        if bpy.data.objects.get(dup_name) is None:
-            dup.name = dup_name
-            if dup.data:
-                dup.data.name = dup_name
-        s = list(dup.scale)
-        s[axis_idx] *= -1
-        dup.scale = s
-        loc = list(dup.location)
-        loc[axis_idx] *= -1
-        dup.location = loc
-        bpy.context.view_layer.update()
-        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-        new_names.append(dup.name)
-
-    return {"success": True, "mirrored_from": [o.name for o in objs],
-            "mirrored_to": new_names, "plane": plane}
-
-
 def distribute_evenly(params):
     """Position parts so their centers are evenly spaced between two anchor objects' centers.
     The first and last anchor positions are NOT occupied; only the in-between slots get parts."""
@@ -116,128 +69,6 @@ def distribute_evenly(params):
     bpy.context.view_layer.update()
     return {"success": True, "axis": axis, "count": n, "spacing": round(step, 5),
             "placed": placed}
-
-
-def array_at_corners(params):
-    """Duplicate a prototype object 4 times, placing each copy at a corner of a target object's
-    footprint. Each copy is named with the corner suffix.
-    standing_on_floor: if True, copies' z_min = 0 regardless of target z."""
-    prototype = params.get("prototype")
-    of = params.get("of")
-    standing_on_floor = params.get("standing_on_floor", True)
-    keep_original = params.get("keep_original", False)
-    name_prefix = params.get("name_prefix", prototype)
-    linked = bool(params.get("linked", False))  # G54: share the prototype's mesh
-
-    proto = bpy.data.objects.get(prototype) if prototype else None
-    target = bpy.data.objects.get(of) if of else None
-    if proto is None:
-        return {"error": f"Prototype '{prototype}' not found"}
-    if target is None:
-        return {"error": f"Target 'of'={of} not found"}
-
-    t_xmin, t_ymin, t_zmin, t_xmax, t_ymax, t_zmax = world_bbox(target)
-    p_xmin, p_ymin, p_zmin, p_xmax, p_ymax, p_zmax = world_bbox(proto)
-    p_w = p_xmax - p_xmin
-    p_d = p_ymax - p_ymin
-    p_h = p_zmax - p_zmin
-
-    corners = [
-        ("front_left",  t_xmin + p_w / 2, t_ymin + p_d / 2),
-        ("front_right", t_xmax - p_w / 2, t_ymin + p_d / 2),
-        ("back_left",   t_xmin + p_w / 2, t_ymax - p_d / 2),
-        ("back_right",  t_xmax - p_w / 2, t_ymax - p_d / 2),
-    ]
-
-    if bpy.context.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
-
-    shared_mesh = proto.data.name if (linked and proto.data) else None
-    placed = []
-    for corner_name, cx, cy in corners:
-        activate(proto)
-        bpy.ops.object.duplicate(linked=linked)
-        dup = bpy.context.active_object
-        new_name = f"{name_prefix}_{corner_name}"
-        if bpy.data.objects.get(new_name) is None:
-            dup.name = new_name
-            if dup.data and not linked:
-                dup.data.name = new_name
-        cz = (p_h / 2) if standing_on_floor else world_center(proto)[2]
-        dup.location = (cx, cy, cz)
-        placed.append(dup.name)
-
-    bpy.context.view_layer.update()
-    if not keep_original:
-        bpy.data.objects.remove(proto, do_unlink=True)
-
-    return {"success": True, "placed": placed, "of": of, "removed_prototype": not keep_original,
-            "linked": linked, "shared_mesh": shared_mesh}
-
-
-def array_along(params):
-    """Duplicate a prototype N times, evenly spaced along the SEGMENT between two anchor
-    objects' centers.
-
-    G74: the direction is the true A→B vector in 3D (resolved from the anchors' world
-    centres), NOT a single named axis — so anchors that differ on more than one axis, or
-    that are coplanar on the axis you'd have guessed, both distribute correctly instead of
-    collapsing to spacing 0. Copies INCLUDE both endpoints: copy i sits at A + (B−A)·i/(N−1),
-    so step = |B−A|/(N−1) (a single copy lands at the midpoint)."""
-    from mathutils import Vector
-    prototype = params.get("prototype")
-    count = params.get("count", 3)
-    between = params.get("between")
-    keep_original = params.get("keep_original", False)
-    name_prefix = params.get("name_prefix", prototype)
-    linked = bool(params.get("linked", False))  # G54: share the prototype's mesh
-
-    proto = bpy.data.objects.get(prototype) if prototype else None
-    if proto is None:
-        return {"error": f"Prototype '{prototype}' not found"}
-    if not (isinstance(between, list) and len(between) == 2):
-        return {"error": "'between' must be a list of 2 object names"}
-    a = bpy.data.objects.get(between[0])
-    b = bpy.data.objects.get(between[1])
-    if a is None or b is None:
-        return {"error": f"Anchor objects not found: {between}"}
-    if count < 1:
-        return {"error": "count must be >= 1"}
-
-    pa = Vector(world_center(a))
-    pb = Vector(world_center(b))
-    seg = pb - pa
-    length = seg.length
-
-    if bpy.context.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
-
-    shared_mesh = proto.data.name if (linked and proto.data) else None
-    placed = []
-    for i in range(count):
-        t = 0.5 if count == 1 else i / (count - 1)
-        target_pt = pa + seg * t
-        activate(proto)
-        bpy.ops.object.duplicate(linked=linked)
-        dup = bpy.context.active_object
-        new_name = f"{name_prefix}_{i + 1}"
-        if bpy.data.objects.get(new_name) is None:
-            dup.name = new_name
-            if dup.data and not linked:
-                dup.data.name = new_name
-        # Move the dup's CENTER onto the target point (full 3D, not one axis).
-        dup.location = Vector(dup.location) + (target_pt - Vector(world_center(dup)))
-        placed.append(dup.name)
-
-    bpy.context.view_layer.update()
-    if not keep_original:
-        bpy.data.objects.remove(proto, do_unlink=True)
-
-    step = round(length / (count - 1), 5) if count > 1 else 0.0
-    return {"success": True, "axis": "A→B segment", "count": count, "spacing": step,
-            "span": round(length, 5), "placed": placed,
-            "removed_prototype": not keep_original,
-            "linked": linked, "shared_mesh": shared_mesh}
 
 
 def _pca_plane(pts):
@@ -375,9 +206,6 @@ def check_linked(params):
 
 TOOLS = {
     "match_dimension":    match_dimension,
-    "mirror_across":      mirror_across,
     "distribute_evenly":  distribute_evenly,
-    "array_at_corners":   array_at_corners,
-    "array_along":        array_along,
     "check_linked":       check_linked,
 }

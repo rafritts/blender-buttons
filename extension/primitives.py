@@ -405,23 +405,6 @@ def add_primitives(params):
     return {"success": True, "created": created, "count": len(created)}
 
 
-def add_floor(params):
-    """Add a large ground plane at z=0 for character-modeling reference and shadow catching.
-
-    name: object name (default 'floor').
-    size: side length in meters (default 10).
-    """
-    name = params.get("name") or "floor"
-    size = float(params.get("size", 10.0))
-    return _build_primitive(
-        name=name,
-        ptype="PLANE",
-        target_dims=(size, size, 0.0),
-        on={"on_floor": True},  # G95: 'z' is not a placement key; on_floor seats z_min at 0
-        rotation_deg=[0, 0, 0],
-    )
-
-
 def add_grid(params):
     """Add a flat GRID: a subdivided plane — a rectangle of verts already wired into
     quad topology (Blender's native Add > Mesh > Grid / mesh.primitive_grid_add). This
@@ -447,7 +430,7 @@ def add_lattice(params):
     LATTICE modifier finally has a cage to bind to. A low-res cage that warps a dense mesh
     (and any instances on it) as one smooth, NON-destructive gesture — the standard way to
     give a stiff form organic life. Bind it with modifier op=add type=LATTICE host=<mesh>
-    target=<this>, then push its points with transform op=lattice."""
+    target=<this>, then push its points with edit op=lattice."""
     name = params.get("name")
     if not name:
         return {"error": "'name' is required — give the lattice a meaningful name"}
@@ -497,7 +480,7 @@ def add_lattice(params):
         "location": [round(cx, 4), round(cy, 4), round(cz, 4)],
         "note": (f"lattice cage '{obj.name}' ready — bind a mesh with "
                  f"modifier op=add type=LATTICE host=<mesh> target={obj.name}, then warp it "
-                 f"with transform op=lattice (push a slab of control points)."),
+                 f"with edit op=lattice (push a slab of control points)."),
     }
 
 
@@ -600,7 +583,6 @@ TOOLS = {
     "add_text":       add_text,
     "add_grid":       add_grid,
     "add_primitives": add_primitives,
-    "add_floor":      add_floor,
     "add_plane":     add_plane,
     "add_cylinder":  add_cylinder,
     "add_sphere":    add_sphere,

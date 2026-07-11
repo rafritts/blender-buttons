@@ -1,4 +1,4 @@
-"""Bundled finishes: smooth_edges, round_corners, add_modifier, apply_modifiers."""
+"""Bundled finishes: bend, add_modifier, apply_modifiers, materials."""
 
 import math
 import os
@@ -7,132 +7,6 @@ import bpy
 
 from .common import activate, linked_guard, resolve_targets, world_bbox
 from .state import push_undo, ui_override
-
-
-def smooth_edges(params):
-    """Round off the sharp edges of one or more objects.
-    Adds a BEVEL modifier with angle-limit (only sharp edges get beveled, not coplanar ones),
-    then shade_smooth + auto_smooth so the rounded edges read as smooth, not faceted.
-    width: bevel offset in world units (default 2mm). segments: more = smoother curve.
-    angle_limit: edges sharper than this (degrees) get beveled. Default 30°."""
-    targets = params.get("targets")
-    width = params.get("width", 0.002)
-    segments = params.get("segments", 2)
-    angle_limit_deg = params.get("angle_limit", 30.0)
-    objs, err = resolve_targets(targets)
-    if err:
-        return {"error": err}
-
-    if bpy.context.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
-
-    processed = []
-    for o in objs:
-        if o.type != 'MESH':
-            continue
-        activate(o)
-        if any(abs(s - 1.0) > 1e-4 for s in o.scale):
-            bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-
-        for m in list(o.modifiers):
-            if m.name == "Smooth_Bevel":
-                o.modifiers.remove(m)
-
-        mod = o.modifiers.new(name="Smooth_Bevel", type='BEVEL')
-        mod.width = width
-        mod.segments = segments
-        mod.limit_method = 'ANGLE'
-        mod.angle_limit = math.radians(angle_limit_deg)
-        mod.miter_outer = 'MITER_ARC'
-        bpy.ops.object.modifier_apply(modifier=mod.name)
-        bpy.ops.object.shade_smooth()
-        if hasattr(o.data, "use_auto_smooth"):
-            o.data.use_auto_smooth = True
-            o.data.auto_smooth_angle = math.radians(angle_limit_deg)
-        processed.append(o.name)
-
-    return {"success": True, "smoothed": processed, "width": width,
-            "segments": segments, "angle_limit": angle_limit_deg}
-
-
-def round_corners(params):
-    """Round specific vertical corner edges of an object by a real-world radius.
-
-    target:   object name.
-    corners:  list of "front_left" | "front_right" | "back_left" | "back_right".
-    radius:   bevel offset in meters (the rounding radius). Default 0.02 (2cm).
-    segments: number of segments in the round; more = smoother curve. Default 6.
-    """
-    import bmesh
-    target = params.get("target")
-    corners = params.get("corners", [])
-    radius = params.get("radius", 0.02)
-    segments = params.get("segments", 6)
-
-    obj = bpy.data.objects.get(target) if target else None
-    if obj is None:
-        return {"error": f"Object '{target}' not found"}
-    if obj.type != 'MESH':
-        return {"error": f"'{target}' is not a mesh"}
-    if not corners:
-        return {"error": "'corners' must be a non-empty list (front_left|front_right|back_left|back_right)"}
-
-    activate(obj)
-    xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
-
-    corner_map = {
-        "front_left":  (xmin, ymin),
-        "front_right": (xmax, ymin),
-        "back_left":   (xmin, ymax),
-        "back_right":  (xmax, ymax),
-    }
-    bad = [c for c in corners if c not in corner_map]
-    if bad:
-        return {"error": f"Unknown corner(s) {bad}. Valid: {list(corner_map.keys())}"}
-
-    if bpy.context.mode != 'EDIT':
-        bpy.ops.object.mode_set(mode='EDIT')
-    bpy.ops.mesh.select_mode(type='EDGE')
-    bpy.ops.mesh.select_all(action='DESELECT')
-
-    bm = bmesh.from_edit_mesh(obj.data)
-    mat = obj.matrix_world
-    tol = max(radius * 0.5, 1e-3)
-
-    selected = 0
-    for edge in bm.edges:
-        v0 = mat @ edge.verts[0].co
-        v1 = mat @ edge.verts[1].co
-        if abs(v0.x - v1.x) > 1e-4 or abs(v0.y - v1.y) > 1e-4:
-            continue
-        if abs(v0.z - v1.z) < 1e-4:
-            continue
-        ex, ey = v0.x, v0.y
-        for cname in corners:
-            tx, ty = corner_map[cname]
-            if abs(ex - tx) < tol and abs(ey - ty) < tol:
-                edge.select = True
-                selected += 1
-                break
-
-    bm.select_flush_mode()
-    bmesh.update_edit_mesh(obj.data)
-
-    if selected == 0:
-        bpy.ops.object.mode_set(mode='OBJECT')
-        return {"error": f"No vertical corner edges found near {corners}. "
-                          f"Object may need loop_cut along Z first if it's a single-segment box."}
-
-    bpy.ops.mesh.bevel(offset=radius, segments=segments, affect='EDGES')
-    bpy.ops.object.mode_set(mode='OBJECT')
-    bpy.ops.object.shade_smooth()
-    if hasattr(obj.data, "use_auto_smooth"):
-        obj.data.use_auto_smooth = True
-        obj.data.auto_smooth_angle = math.radians(60)
-
-    push_undo(f"round_corners {target} {corners} r={radius}")
-    return {"success": True, "target": target, "corners": corners,
-            "radius": radius, "segments": segments, "edges_beveled": selected}
 
 
 def bend(params):
@@ -226,95 +100,6 @@ def bend(params):
     if notes:
         out["warnings"] = notes
     return out
-
-
-def noise_displace(params):
-    """G55 — coherent organic surface noise via a DISPLACE modifier driven by a
-    procedural noise texture.
-
-    Unlike edit op=jitter (per-vertex WHITE noise — every vert moves independently, so
-    the result is spiky and uncorrelated), a texture-driven displace samples a noise
-    field that varies SMOOTHLY across space, so neighbouring verts move together → real
-    LUMPS. The move for foliage canopies, terrain, bark, rock — any soft irregular
-    surface. The noise is sampled in WORLD space, so copies at different positions get
-    different break-up for free (no two scattered bushes look identical).
-
-    target:    mesh to break up (empty = active).
-    strength:  ≈ peak displacement in meters (default 0.05). The amount.
-    scale:     feature size — noise texture scale (default 0.5). Larger = bigger, broader
-               lumps; smaller = finer, busier detail.
-    detail:    extra octaves of finer noise layered on the big lumps (default 2).
-    direction: NORMAL (default — push along each vert's normal, the organic puff) |
-               X | Y | Z (push along a world axis).
-    apply:     bake the displacement into the mesh (default True). False keeps the
-               DISPLACE modifier + texture live for tweaking via modify_modifier.
-
-    NEEDS RESOLUTION: displacement only shows where there are verts to move — a coarse
-    primitive barely ripples. remesh / subdivide first so the surface has verts to break
-    up. This is BREAK-UP (positional/textured), distinct from inflate (normal push on a
-    dense mesh). Refused on rigged/keyed meshes when apply=True (modifier_apply can't
-    bake over shape keys / deform binds — duplicate and strip first, or pass apply=False).
-    """
-    from .common import linked_guard, deform_binds
-    name = params.get("target") or params.get("name")
-    obj = bpy.data.objects.get(name) if name else bpy.context.active_object
-    if obj is None or obj.type != 'MESH':
-        return {"error": f"'{name}' is not a mesh" if name else "No active mesh object"}
-    err = linked_guard(obj)
-    if err:
-        return {"error": err}
-    strength = float(params.get("strength", 0.05))
-    scale = float(params.get("scale", 0.5))
-    detail = max(0, int(params.get("detail", 2)))
-    direction = (params.get("direction") or "NORMAL").upper()
-    do_apply = bool(params.get("apply", True))
-    if direction not in ("NORMAL", "X", "Y", "Z"):
-        return {"error": "direction must be NORMAL | X | Y | Z"}
-    if scale <= 0:
-        return {"error": "scale must be > 0 (noise feature size, meters)"}
-    if do_apply and (obj.data.shape_keys or deform_binds(obj)):
-        return {"error": "refusing to bake a displace over a rigged/keyed mesh "
-                         "(modifier_apply can't run with shape keys / deform binds). "
-                         "Duplicate it and strip the rig, or pass apply=False to keep "
-                         "the modifier live."}
-
-    if bpy.context.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
-    activate(obj)
-    xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
-    dims_before = [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)]
-
-    # CLOUDS = multi-octave Perlin — coherent, organic, fast. noise_scale sets the
-    # feature size; noise_depth adds finer octaves on top.
-    tex = bpy.data.textures.new(name=f"{obj.name}_noise", type='CLOUDS')
-    if hasattr(tex, "noise_scale"):
-        tex.noise_scale = scale
-    if hasattr(tex, "noise_depth"):
-        tex.noise_depth = detail
-
-    mod = obj.modifiers.new(name="Noise_Displace", type='DISPLACE')
-    mod.texture = tex
-    mod.strength = strength
-    mod.mid_level = 0.5            # CLOUDS ~0..1; mid 0.5 displaces both in and out
-    mod.texture_coords = 'GLOBAL'  # world-space → placed copies break up differently
-    mod.direction = direction
-
-    applied = False
-    if do_apply:
-        try:
-            bpy.ops.object.modifier_apply(modifier=mod.name)
-            applied = True
-            bpy.data.textures.remove(tex)  # baked in — the texture is now an orphan
-        except RuntimeError as e:
-            return {"error": f"displace apply failed: {e}"}
-
-    xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
-    dims_after = [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)]
-    push_undo(f"noise_displace {obj.name} strength={strength} scale={scale}")
-    return {"success": True, "object": obj.name, "strength": strength, "scale": scale,
-            "detail": detail, "direction": direction, "applied": applied,
-            "modifier": None if applied else mod.name,
-            "dims_before": dims_before, "dims_after": dims_after}
 
 
 def _configure_array(mod, params):
@@ -538,7 +323,7 @@ def add_modifier(params):
     # Deform modifiers that bind/track another object. All three drive obj's
     # geometry from a partner via mod.object (a cage mesh, an armature, a lattice)
     # — the recovery door for production deform stacks (gaps.md V1). MESH_DEFORM is
-    # added unbound; bind it with bind_mesh_deform.
+    # added unbound; bind it with rebind_deform.
     if mod_type in _OBJECT_PARTNER_EXPECT:
         partner_role = {"MESH_DEFORM": "cage mesh", "ARMATURE": "armature",
                         "LATTICE": "lattice", "CURVE": "curve"}[mod_type]
@@ -573,7 +358,7 @@ def add_modifier(params):
                 mod.precision = int(precision)
             return {"success": True, "modifier": mod.name, "bound": False,
                     "note": f"MESH_DEFORM added against cage '{target_name}' (unbound) — "
-                            f"call bind_mesh_deform('{obj.name}') to bind it."}
+                            f"call rebind_deform('{obj.name}') to bind it."}
     # CORRECTIVE_SMOOTH: corrects deform-skinning collapse on bends. Two rest
     # sources — ORCO (smooth toward the base mesh, no bind) and BIND (smooth toward
     # a captured pose, vertex-keyed like mesh-deform). Created unbound here; default
@@ -651,124 +436,6 @@ def add_modifier(params):
     return out
 
 
-def bind_mesh_deform(params):
-    """Bind / unbind / rebind a Mesh Deform modifier (gaps.md V1).
-
-    MESH_DEFORM drives a mesh from a low-res cage — higher-quality cloth/skin
-    deformation than direct skinning. The bind is computed once and is keyed to
-    the mesh's vertex count, so any topology edit invalidates it (gaps.md V2) and
-    a rebind is the recovery. Nothing in the toolset reached the bind operator
-    before this; the deform stack was unrecoverable after an edit.
-
-    mesh:      mesh carrying (or to carry) the MESH_DEFORM modifier (required).
-    cage:      cage object that drives the deform. If the mesh has no MESH_DEFORM
-               modifier yet, one is created against this cage; if it already has
-               one, cage is optional (re-points it when given).
-    modifier:  name of a specific MESH_DEFORM modifier (when the mesh has several);
-               defaults to the first one on the mesh.
-    action:    'bind' (default — bind if currently unbound) |
-               'unbind' (drop the bind data) |
-               'rebind' (unbind then bind — after a cage edit or topology change).
-    precision: optional bind precision 2–10 (higher = sharper, slower bind).
-    """
-    mesh_name = params.get("mesh")
-    if not mesh_name:
-        return {"error": "'mesh' is required"}
-    mesh = bpy.data.objects.get(mesh_name)
-    if mesh is None or mesh.type != 'MESH':
-        return {"error": f"mesh '{mesh_name}' not found or not a mesh"}
-    err = linked_guard(mesh)
-    if err:
-        return {"error": err}
-
-    action = (params.get("action") or "bind").lower()
-    if action not in ("bind", "unbind", "rebind"):
-        return {"error": "action must be 'bind', 'unbind', or 'rebind'"}
-
-    mod_name = params.get("modifier")
-    if mod_name:
-        mod = mesh.modifiers.get(mod_name)
-        if mod is None or mod.type != 'MESH_DEFORM':
-            return {"error": f"no MESH_DEFORM modifier '{mod_name}' on '{mesh_name}'"}
-    else:
-        mod = next((m for m in mesh.modifiers if m.type == 'MESH_DEFORM'), None)
-
-    cage_name = params.get("cage")
-    cage = None
-    if cage_name:
-        cage = bpy.data.objects.get(cage_name)
-        if cage is None or cage.type != 'MESH':
-            return {"error": f"cage '{cage_name}' not found or not a mesh"}
-
-    if mod is None:
-        if cage is None:
-            return {"error": f"'{mesh_name}' has no MESH_DEFORM modifier — pass "
-                             f"'cage' to create one (or add_modifier type=MESH_DEFORM first)"}
-        mod = mesh.modifiers.new(name="MeshDeform", type='MESH_DEFORM')
-        mod.object = cage
-    elif cage is not None:
-        mod.object = cage
-    if mod.object is None:
-        return {"error": f"MESH_DEFORM '{mod.name}' has no cage object — pass 'cage'"}
-
-    precision = params.get("precision")
-    if precision is not None and hasattr(mod, "precision"):
-        mod.precision = max(2, min(10, int(precision)))
-
-    activate(mesh)
-    override = ui_override()
-
-    def _toggle():
-        # meshdeform_bind is a toggle: binds when unbound, unbinds when bound.
-        if override:
-            with bpy.context.temp_override(**override):
-                bpy.ops.object.meshdeform_bind(modifier=mod.name)
-        else:
-            bpy.ops.object.meshdeform_bind(modifier=mod.name)
-
-    was_bound = bool(mod.is_bound)
-    if action == "unbind":
-        if was_bound:
-            _toggle()
-    elif action == "rebind":
-        if was_bound:
-            _toggle()  # unbind first
-        _toggle()       # then bind fresh
-    else:  # bind
-        if not was_bound:
-            _toggle()
-
-    bound = bool(mod.is_bound)
-    # A 'bind' that comes back unbound means the operator silently refused (cage
-    # doesn't enclose the mesh is the usual cause) — surface it, don't claim success.
-    if action in ("bind", "rebind") and not bound:
-        return {"error": f"bind failed — '{mod.name}' is still unbound after the bind. "
-                         f"The cage '{mod.object.name}' must be a closed volume that "
-                         f"wraps '{mesh_name}' (a flat/open or zero-volume cage won't "
-                         f"bind). Fix the cage, then bind again."}
-
-    if bound:
-        # X4: a fresh valid bind — record the vert count it's keyed to, so a later
-        # position-only edit can be flagged as shadowed (and a topology edit as dead).
-        mesh["bb_bind_vcount"] = len(mesh.data.vertices)
-    push_undo(f"{action} mesh-deform '{mod.name}' on {mesh_name}")
-    return {"success": True, "mesh": mesh_name, "modifier": mod.name,
-            "cage": mod.object.name, "action": action, "bound": bound,
-            "was_bound": was_bound}
-
-
-# The three deform modifiers that store vertex-keyed bind data, each with the
-# is-bound flag to read, the operator to (re)bind it, and the attribute holding
-# its driving object (None for corrective-smooth, which binds the mesh to its own
-# captured pose). rebind_deform dispatches on type so one verb cures whichever the
-# bind-invalidation warning diagnosed.
-_BIND_TYPES = {
-    'MESH_DEFORM':       ("is_bound", "meshdeform_bind",       "object"),
-    'SURFACE_DEFORM':    ("is_bound", "surfacedeform_bind",    "target"),
-    'CORRECTIVE_SMOOTH': ("is_bind",  "correctivesmooth_bind", None),
-}
-
-
 def rebind_deform(params):
     """Rebind stale deform binds after a topology edit or a stack-order move (gaps.md W3).
 
@@ -780,8 +447,8 @@ def rebind_deform(params):
     recomputes it against the current geometry.
 
     This RE-BINDS existing modifiers only — it never creates one (use add_modifier
-    / bind_mesh_deform for that). bind_mesh_deform stays the MESH_DEFORM setup verb
-    (it manages the cage); rebind_deform is the type-agnostic recovery verb.
+    for that). add_modifier adds the MESH_DEFORM cage unbound; rebind_deform is the
+    type-agnostic verb that binds and re-binds it.
 
     mesh:     mesh carrying the bound deform modifier(s) (required).
     modifier: name of one specific modifier; default rebinds EVERY bindable deform
@@ -1073,7 +740,7 @@ def move_modifier(params):
 
     Stack ORDER is semantics, not cosmetics: a deform modifier ABOVE a Subsurf
     binds against the base mesh; below it, against the 4×-denser subdivided
-    result. add_modifier / bind_mesh_deform append to the BOTTOM, and nothing
+    result. add_modifier appends to the BOTTOM, and nothing
     could move them before this — so a production stack whose MeshDeform belongs
     at index 0 (before Subsurf/Displace) was unrebuildable.
 
@@ -1258,7 +925,7 @@ def convert_to_mesh(params):
     bevel/extrude, and any hooks — and replaces the object's data with that mesh.
     The R4 following rope is a LIVE curve; once the rig is posed, one
     convert_to_mesh bakes the beveled, hook-deformed tube into game-ready,
-    texturable geometry (a curve still can't take set_textured_material's UVs as
+    texturable geometry (a curve still can't take UV-projected textures as
     cleanly as a mesh, and isn't export geometry). Already-mesh objects are a
     no-op, reported not errored.
 
@@ -1836,13 +1503,9 @@ def add_asset_modifier(params):
 
 
 TOOLS = {
-    "smooth_edges":    smooth_edges,
-    "round_corners":   round_corners,
     "bend":            bend,
-    "noise_displace":  noise_displace,
     "add_modifier":    add_modifier,
     "add_asset_modifier": add_asset_modifier,
-    "bind_mesh_deform": bind_mesh_deform,
     "rebind_deform":   rebind_deform,
     "modify_modifier": modify_modifier,
     "remove_modifier": remove_modifier,

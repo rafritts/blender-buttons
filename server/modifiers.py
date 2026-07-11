@@ -42,10 +42,10 @@ def add_modifier(type: str, name: str = "", levels: int = 2, render_levels: int 
     target: the partner object. Required for —
       SHRINKWRAP  : the surface to wrap onto.
       MESH_DEFORM : the cage mesh that drives the deform (added UNBOUND — then
-                    call bind_mesh_deform to bind it; the recovery path for a
+                    call rebind_deform to bind it; the recovery path for a
                     production cloth/skin deform stack).
       ARMATURE    : the armature that deforms this mesh (needs vertex groups /
-                    weights — see auto_weight / weight_to_bone).
+                    weights — see auto_weight / pose op=assign_weight).
       LATTICE     : the lattice cage that deforms this mesh.
       CURVE       : the curve object whose shape the mesh is bent along (the
                     ARRAY→CURVE chain-along-a-path pattern — put the mesh's long
@@ -171,52 +171,6 @@ def add_asset_modifier(asset: str, host: str = "", name: str = "",
 
 
 @mcp.tool()
-def bind_mesh_deform(mesh: str, cage: str = "", action: str = "bind",
-                     modifier: str = "", precision: int = None,
-                     timeout: float = 120, label: str = "") -> str:
-    """
-    Bind / unbind / rebind a Mesh Deform modifier — the recovery path for a
-    production cloth/skin deform stack (gaps.md V1).
-
-    MESH_DEFORM drives a high-res mesh from a low-res cage (better cloth/skin
-    deformation than direct armature skinning). The bind is computed once and is
-    keyed to the mesh's vertex count — so ANY topology edit silently invalidates
-    it (the modifier stops deforming with no error), and rebinding is the fix.
-
-    mesh:      the mesh carrying (or to carry) the MESH_DEFORM modifier.
-    cage:      the cage object that drives the deform. If the mesh has no
-               MESH_DEFORM modifier yet, one is created against this cage; if it
-               already has one, cage is optional (re-points it when given).
-    action:    bind (default — bind if currently unbound) | unbind | rebind
-               (unbind then bind, after a cage edit or topology change).
-    modifier:  name of a specific MESH_DEFORM modifier (when several exist).
-    precision: bind precision 2–10 (higher = sharper, slower bind).
-    timeout:   seconds to allow the bind to run (default 120). A mesh-deform bind on
-               a production cage is genuinely slow — well past the default 30s — so
-               this is generous; raise it for very dense meshes.
-
-    The cage must fully ENCLOSE the mesh or the bind silently refuses — this
-    reports that as an error rather than a false success.
-    """
-    params = {"mesh": mesh, "action": action}
-    if cage:
-        params["cage"] = cage
-    if modifier:
-        params["modifier"] = modifier
-    if precision is not None:
-        params["precision"] = precision
-    result = call_blender("bind_mesh_deform", params, label=label, timeout=timeout)
-    if result.get("success"):
-        state = "bound" if result.get("bound") else "unbound"
-        main = (f"mesh-deform {result['action']}: '{result['modifier']}' on "
-                f"'{result['mesh']}' (cage '{result['cage']}') → {state} "
-                f"[{result.get('op_id','')}]")
-    else:
-        main = result.get("error", "failed")
-    return main + _status(result)
-
-
-@mcp.tool()
 def rebind_deform(mesh: str, modifier: str = "", timeout: float = 120,
                   label: str = "") -> str:
     """
@@ -228,7 +182,7 @@ def rebind_deform(mesh: str, modifier: str = "", timeout: float = 120,
     change) or a move_modifier that changes the modifier's evaluated input leaves
     the bind flag reading True while the bind is silently DEAD. This rebinds it
     (unbind → bind) against the current geometry. RE-BINDS existing modifiers only
-    — it never creates one (use add_modifier / bind_mesh_deform for setup).
+    — it never creates one (use add_modifier for setup).
 
     mesh:     the mesh carrying the bound deform modifier(s).
     modifier: name of ONE specific modifier; omit to rebind EVERY bindable deform
@@ -261,8 +215,8 @@ def move_modifier(target: str, modifier: str, index: int = None,
     """
     Reorder a modifier in the object's stack (gaps.md W1). Stack ORDER is
     semantics: a deform modifier ABOVE a Subsurf binds against the base mesh;
-    below it, against the denser subdivided result. add_modifier / bind_mesh_deform
-    append to the BOTTOM and nothing could move them before this.
+    below it, against the denser subdivided result. add_modifier
+    appends to the BOTTOM and nothing could move it before this.
 
     target:   object name.
     modifier: name of the modifier to move.

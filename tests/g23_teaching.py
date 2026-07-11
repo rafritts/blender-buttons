@@ -44,10 +44,6 @@ check("distribute missing endpoints", transform(op="distribute", targets="a,b,c"
       ["op=distribute: needs", "between=[a,b]"])
 check("distribute with only one endpoint", transform(op="distribute", targets="a,b", between=["x"]),
       ["op=distribute: needs"])
-check("array_corners missing of", transform(op="array_corners", prototype="leg"),
-      ["op=array_corners: needs", "of="])
-check("array_along missing count", transform(op="array_along", prototype="picket", between=["l", "r"]),
-      ["op=array_along: needs", "count"])
 check("array_radial missing center", transform(op="array_radial", prototype="spoke", count=8),
       ["op=array_radial: needs", "center"])
 check("scatter missing source", transform(op="scatter", target="rock"),
@@ -64,16 +60,12 @@ check("boolean missing cutter", edit(op="boolean", target="block"),
       ["op=boolean: needs", "cutter="])
 check("extrude_along_curve missing curve", edit(op="extrude_along_curve", target="ring"),
       ["op=extrude_along_curve: needs", "curve="])
-check("round missing corners", edit(op="round", target="panel"),
-      ["op=round: needs", "corners="])
 
 print("== add teaching errors ==")
 check("box missing name", add(type="box"),
       ["add type=box: needs name", "e.g."])
 check("cylinder missing name", add(type="cylinder"),
       ["add type=cylinder: needs name"])
-check("tube missing points", add(type="tube", name="cable"),
-      ["add type=tube: needs", "points="])
 check("curve missing points", add(type="curve", name="path"),
       ["add type=curve: needs", "points="])
 

@@ -176,45 +176,6 @@ def taper_section(axis: str = "Z", from_ring: int = 0, to_ring: int = -1,
 
 
 @mcp.tool()
-def shape_profile(axis: str = "Z", points: list = [], label: str = "",
-                  target: str = "") -> str:
-    """
-    Set ring radii in ABSOLUTE meters, interpolating between control points — the lathe.
-
-    Unlike taper_section (which scales each ring's CURRENT radius, so tiling touching
-    ranges double-scales the shared seam ring into a pinhole), shape_profile addresses
-    radius outright: idempotent and seam-safe by construction. Say "ring 7 = 12mm"
-    without remembering a ratio.
-
-    points: list of [ring_index, radius_m] pairs (negatives wrap, -1 = top ring).
-            Rings between listed control rings interpolate linearly by axis position;
-            rings outside the lowest..highest control ring are left untouched. Radius is
-            the distance from the lathe axis to the surface.
-    target: optional object name — auto-selects it, enters edit mode, exits after.
-
-    Example — a goblet profile in one call (call get_rings first for indices):
-      shape_profile(axis="Z", points=[[0,0.05],[4,0.012],[11,0.009],[22,0.06]])
-
-    Must be in edit mode (or provide target).
-    """
-    result = call_blender("shape_profile", {"axis": axis, "points": points,
-                                            "target": target}, label=label)
-    if result.get("success"):
-        rs = result.get("rings_set", [])
-        main = (f"shaped {result['rings_affected']} rings of {result['ring_count']} "
-                f"({result['verts_affected']} verts)")
-        if rs:
-            main += "  " + ", ".join(f"[{r['ring']}]={r['radius']}m" for r in rs[:8])
-            if len(rs) > 8:
-                main += f", …+{len(rs)-8}"
-        for w in result.get("warnings", []):
-            main += f"\n⚠ {w}"
-    else:
-        main = result.get("error", "failed")
-    return main + _status(result)
-
-
-@mcp.tool()
 def flute(axis: str = "Z", count: int = 0, depth: float = 0.0,
           profile: str = "convex", phase: float = 0.0, label: str = "",
           target: str = "") -> str:

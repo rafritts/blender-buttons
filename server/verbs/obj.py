@@ -11,8 +11,8 @@ from server._core import mcp
 from server import objects, groups, modifiers, queries, scene as _scene
 from ._common import tag, unknown
 
-_OPS = ["info", "describe", "rename", "delete", "duplicate", "duplicate_mirrored",
-        "join", "split", "group", "ungroup", "add_to_group", "parts",
+_OPS = ["info", "describe", "rename", "delete", "duplicate",
+        "join", "separate", "group", "ungroup", "add_to_group", "parts",
         "convert", "visibility", "particle_visibility", "props", "set_prop", "light",
         "aim", "mode", "remesh"]
 
@@ -20,7 +20,7 @@ _OPS = ["info", "describe", "rename", "delete", "duplicate", "duplicate_mirrored
 @mcp.tool(name="object")
 def object_verb(
     op: Literal["info", "describe", "rename", "delete", "duplicate",
-                "duplicate_mirrored", "join", "split", "group", "ungroup",
+                "join", "separate", "group", "ungroup",
                 "add_to_group", "parts", "convert", "visibility",
                 "particle_visibility", "props", "set_prop", "light", "aim", "mode",
                 "remesh"],
@@ -29,7 +29,7 @@ def object_verb(
     pattern: tag(str, "[delete] glob ('Sprinkle_inst*') or bare prefix ('Sprinkle_inst') "
                       "to bulk-delete many objects in one call — clears a whole scatter/array") = "",
     # rename / duplicate
-    new_name: tag(str, "[rename/duplicate/duplicate_mirrored] new object name") = "",
+    new_name: tag(str, "[rename/duplicate] new object name") = "",
     old_name: tag(str, "[rename] source name (alias of name)") = "",
     linked: tag(bool, "[duplicate] make an INSTANCE (Alt+D) sharing the source mesh — "
                       "N copies cost one mesh; edit one, all change") = False,
@@ -37,9 +37,6 @@ def object_verb(
     names: tag(list, "[join] objects to weld together") = None,
     parts: tag(list, "[group/add_to_group] member object names") = None,
     merge_threshold: tag(float, "[join] weld distance") = None,
-    # mirror-duplicate
-    axis: tag(str, "[duplicate_mirrored] mirror axis X|Y|Z") = "X",
-    pivot: tag(str, "[duplicate_mirrored] WORLD|CURSOR|…") = "WORLD",
     # visibility
     viewport: tag(bool, "[visibility] show in viewport") = None,
     render: tag(bool, "[visibility] show in render") = None,
@@ -73,9 +70,8 @@ def object_verb(
       delete      — remove the object (name); or bulk-delete by pattern=<glob|prefix>
                     to clear a whole scatter/array in one call
       duplicate   — copy it  (name, new_name, linked=True for a mesh-sharing instance)
-      duplicate_mirrored — mirrored copy   (name, axis=X|Y|Z, pivot=WORLD|.., new_name)
       join        — weld several into one  (names=[...], merge_threshold)
-      split       — split active by loose parts into objects       (—)
+      separate    — split active into objects by LOOSE PARTS (P ▸ By Loose Parts)  (—)
       group       — gather parts into a named collection; move/rotate the whole
                     group as one by passing its name to a transform's targets=
                     (name, parts=[...])
@@ -113,11 +109,9 @@ def object_verb(
         return objects.delete_object(name, label, pattern)
     if o == "duplicate":
         return objects.duplicate_object(name, new_name, linked)
-    if o == "duplicate_mirrored":
-        return objects.duplicate_mirrored(name, axis, pivot, new_name, label)
     if o == "join":
         return objects.join_objects(names or [], merge_threshold)
-    if o == "split":
+    if o == "separate":
         return objects.split_by_part(label)
     if o == "group":
         return groups.group(name, parts or [], label)

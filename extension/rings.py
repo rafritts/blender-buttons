@@ -211,7 +211,7 @@ def taper_end(params):
         return {"error": "No rings found"}
     ring_idx = len(rings) - 1 if end == "MAX" else 0
 
-    # E8 guard: after smooth_edges/bevel bakes a roundover, a thin sliver ring
+    # E8 guard: after a bevel bakes a roundover, a thin sliver ring
     # sits just inside the extreme face. Tapering THAT collapses the 2–6mm bevel
     # lip, not the wall — almost never what's wanted. If the extreme ring is
     # hugging its neighbor (gap < 2% of the axis extent), warn and point at
@@ -368,120 +368,6 @@ def taper_section(params):
     }
 
 
-def shape_profile(params):
-    """G92: set ring radii in ABSOLUTE meters, interpolating between control points.
-
-    The lathe/turning op. taper_section multiplies each ring's CURRENT radius, so tiling
-    a profile as touching ranges double-scales the shared seam ring into a pinhole. This
-    addresses radius outright — idempotent and seam-safe by construction — and lets you
-    say "make ring 7 exactly 12 mm" without remembering a ratio.
-
-    points: list of [ring_index, radius] pairs (or {ring, radius} dicts). Radius is the
-            distance from the lathe axis to the surface, in meters. Negative ring indices
-            wrap. Rings BETWEEN listed control rings interpolate linearly by world-axis
-            position; rings OUTSIDE the lowest..highest control ring are left untouched.
-
-    Each ring is scaled around its own centroid in the two non-axis directions by
-    target/current_mean_radius, preserving the cross-section shape (a slightly oval ring
-    stays oval, just resized). Done in world space so rotated objects shape evenly.
-    """
-    import bmesh
-    obj = bpy.context.active_object
-    if obj is None or obj.mode != 'EDIT':
-        return {"error": "Must be in edit mode"}
-    axis = params.get("axis", "Z").upper()
-    raw = params.get("points", []) or []
-    axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 2)
-    bm, rings = _compute_rings(obj, axis_idx)
-    n = len(rings)
-    if n == 0:
-        return {"error": "No rings found"}
-    if not raw:
-        return {"error": "'points' must be a non-empty list of [ring_index, radius] pairs"}
-
-    cps = []
-    for p in raw:
-        if isinstance(p, dict):
-            ri = p.get("ring", p.get("index"))
-            r = p.get("radius", p.get("r"))
-        elif isinstance(p, (list, tuple)) and len(p) == 2:
-            ri, r = p
-        else:
-            return {"error": f"bad point {p!r}; want [ring_index, radius] or {{ring, radius}}"}
-        if ri is None or r is None:
-            return {"error": f"point {p!r} is missing a ring index or radius"}
-        ri = int(ri)
-        if ri < 0:
-            ri = n + ri
-        if ri < 0 or ri >= n:
-            return {"error": f"ring index {ri} out of range [0, {n-1}] in point {p!r}"}
-        cps.append((ri, float(r)))
-    cps.sort(key=lambda c: c[0])
-    lo_idx, hi_idx = cps[0][0], cps[-1][0]
-    # Control points as (world_position, radius), for position-based interpolation.
-    ctrl = [(rings[ri][0], rad) for (ri, rad) in cps]
-
-    def target_radius_at(pos):
-        if pos <= ctrl[0][0]:
-            return ctrl[0][1]
-        if pos >= ctrl[-1][0]:
-            return ctrl[-1][1]
-        for k in range(len(ctrl) - 1):
-            p0, r0 = ctrl[k]
-            p1, r1 = ctrl[k + 1]
-            if p0 <= pos <= p1:
-                if p1 - p0 < 1e-12:
-                    return r1
-                t = (pos - p0) / (p1 - p0)
-                return r0 + t * (r1 - r0)
-        return ctrl[-1][1]
-
-    mat = obj.matrix_world
-    mat_inv = mat.inverted()
-    other_idxs = [i for i in range(3) if i != axis_idx]
-    set_rings = []
-    warnings = []
-    affected = 0
-    for i in range(lo_idx, hi_idx + 1):
-        pos, vert_indices = rings[i]
-        verts = [bm.verts[vi] for vi in vert_indices]
-        world_cos = [mat @ v.co for v in verts]
-        centroid_w = mathutils.Vector((0.0, 0.0, 0.0))
-        for wc in world_cos:
-            centroid_w += wc
-        centroid_w /= len(world_cos)
-        cur = 0.0
-        for wc in world_cos:
-            cur += mathutils.Vector(
-                (wc[other_idxs[0]] - centroid_w[other_idxs[0]],
-                 wc[other_idxs[1]] - centroid_w[other_idxs[1]], 0.0)).length
-        cur /= len(world_cos)
-        tgt = target_radius_at(pos)
-        if cur < 1e-9:
-            warnings.append(
-                f"ring {i} is collapsed (radius~0) — can't expand it to {round(tgt, 4)}m; skipped")
-            continue
-        factor = tgt / cur
-        for v, wc in zip(verts, world_cos):
-            new_w = wc.copy()
-            for ax in other_idxs:
-                new_w[ax] = centroid_w[ax] + (wc[ax] - centroid_w[ax]) * factor
-            v.co = mat_inv @ new_w
-        affected += len(verts)
-        set_rings.append({"ring": i, "radius": round(tgt, 5)})
-    bmesh.update_edit_mesh(obj.data)
-    push_undo(f"shape_profile {axis} {len(cps)}pts")
-    return {
-        "success": True,
-        "axis": axis,
-        "ring_count": n,
-        "rings_set": set_rings,
-        "rings_affected": len(set_rings),
-        "verts_affected": affected,
-        "warnings": warnings,
-    }
-
-
 def flute(params):
     """G94: corrugate a SURFACE OF REVOLUTION with N evenly-spaced vertical flutes/lobes.
 
@@ -591,6 +477,5 @@ TOOLS = {
     "scale_rings":   scale_rings,
     "taper_end":     taper_end,
     "taper_section": taper_section,
-    "shape_profile": shape_profile,
     "flute":         flute,
 }

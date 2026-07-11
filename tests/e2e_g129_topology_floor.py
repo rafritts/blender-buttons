@@ -5,7 +5,6 @@
   G118 — an impossible Euler characteristic (χ vs boundary loops vs components) is a defect.
   G105/G134 — a geometry op that opens a hole / adds non-manifold junk warns at the op
          (topology_delta_warning), the mirror of the no-op detector.
-  G101 — smooth_edges (shading-only) no longer trips the geometry no-op detector.
   G124 — penetration depth against an OPEN shell is suppressed (no bogus mm).
 
 Usage: flatpak run org.blender.Blender --background --python /abs/path/to/tests/e2e_g129_topology_floor.py

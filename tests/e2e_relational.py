@@ -2,7 +2,6 @@
 
   P1  on/under accept a LIST of anchors (span across / hang between supports)
   P2  at_corner gains top=True (rest on the target's top, not embed at its bottom)
-  P3  add type=tube between=[A,B] (strut between two anchors, nearest-surface endpoints)
 
 Usage: flatpak run --filesystem=home org.blender.Blender --background --factory-startup \
        --python /abs/path/to/tests/e2e_relational.py
@@ -89,24 +88,6 @@ r2 = run("add_cylinder", name="post_embed", radius=0.005, height=0.08,
          on={"at_corner": {"of": "base2", "corner": "back_right"}})
 _, _, ezmin, _, _, _ = bounds("post_embed")
 check("at_corner without top still embeds at base bottom (zmin≈0)", abs(ezmin - 0.0) < 1e-3, f"zmin={ezmin:.4f}")
-
-# ───────────── P3: tube between=[A,B] — strut on nearest-surface endpoints ───
-print("== P3: add type=tube between=[A,B] connects two anchors ==")
-clean()
-run("add_box", name="objA", width=0.04, depth=0.04, height=0.04, on={"at": [-0.1, 0, 0.05]})  # +X face at -0.08
-run("add_box", name="objB", width=0.04, depth=0.04, height=0.04, on={"at": [0.1, 0, 0.05]})   # -X face at 0.08
-r = run("spline_tube", name="strut", radius=0.005, between=["objA", "objB"])
-check("tube between two anchors succeeds", r.get("success") is True, str(r))
-xmin, ymin, zmin, xmax, ymax, zmax = bounds("strut")
-# endpoints should land on the facing surfaces (~ -0.08 .. 0.08), at the boxes' height (~0.05)
-check("strut spans the gap between the facing faces", xmin > -0.105 and xmax < 0.105 and (xmax - xmin) > 0.12,
-      f"x=[{xmin:.3f},{xmax:.3f}]")
-check("strut sits at the anchors' height (z≈0.05)", abs((zmin + zmax) / 2 - 0.05) < 0.02, f"cz={(zmin+zmax)/2:.4f}")
-# guard rails
-r2 = run("spline_tube", name="bad1", radius=0.005, between=["objA"])
-check("between with one name errors", r2.get("success") is not True and "between" in r2.get("error", ""), str(r2))
-r3 = run("spline_tube", name="bad2", radius=0.005, points=[[0, 0, 0], [0, 0, 1]], between=["objA", "objB"])
-check("points + between together errors", r3.get("success") is not True, str(r3))
 
 print()
 if failures:

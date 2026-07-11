@@ -62,7 +62,7 @@ def rotate_to(targets: str = "", x: float = None, y: float = None, z: float = No
 def aim_axis(targets: str = "", frm: list = None, to: list = None,
              axis: str = "Z", label: str = "") -> str:
     """Rotate objects so their local `axis` points down the frm→to segment (G25) — the
-    orient-along-an-edge primitive for solids that don't self-orient like add type=tube.
+    orient-along-an-edge primitive for solids that don't self-orient like a swept coil.
     Endpoints are world points; the `transform` verb resolves from_handle/to_handle names
     to points before calling here. Orientation only — pair with move_to to position.
     Example: lay a helix along a strut's two ends."""

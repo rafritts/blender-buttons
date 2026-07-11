@@ -1,51 +1,42 @@
-"""transform — move / rotate / scale / snap / mirror / array (SPEC-05).
+"""transform — move / rotate / scale / snap / distribute (SPEC-05).
 
-Mode-agnostic transforms: relocate, resize, rotate, snap, mirror, distribute,
-array — plus vertex-level move/scale. `op` selects the operation;
-`targets` is "" (active), one name, or "a,b,c".
+Object-mode relational transforms: relocate, resize, rotate, snap, distribute.
+`op` selects the operation; `targets` is "" (active), one name, or "a,b,c".
 
-(Native paths, SPEC-20: a radial/circular array is `modifier op=add_asset asset="Array"`
-— Blender 5.0's GN Array has a native Circular mode; surface scattering is
-`modifier op=add_asset asset="Scatter on Surface"`. The bespoke array_radial / scatter
-ops were retired as native cousins.)
+SPEC-22: this verb is the relational-placement SUBSTRATE (the mouse the agent lacks).
+Edit-mode geometry transforms are native hands and live on `edit` now (grab/scale/
+lattice/shrink_fatten). The dup-and-place array/mirror composites were stripped — the
+native single-operation equivalents are the Mirror and Array MODIFIERS (`modifier op=add`
+/ `modifier op=add_asset asset="Array"` — Blender 5.0's GN Array has a native Circular
+mode; surface scatter is asset="Scatter on Surface").
 """
 
 from typing import Literal
 
 from server._core import mcp
-from server import transforms, relational, editmode, handles, primitives
+from server import transforms, relational, editmode, handles
 from ._common import tag, unknown, teach
 
 _OPS = ["nudge", "place", "move_to", "rotate_to", "aim_axis", "rest_on", "seat", "resize",
-        "scale", "rotate", "apply", "snap", "snap_grid", "match_dim", "mirror", "distribute",
-        "array_corners", "array_along", "move_verts",
-        "scale_verts", "snap_loop", "lattice"]
+        "scale", "rotate", "apply", "snap", "snap_grid", "match_dim", "distribute",
+        "snap_loop"]
 
 
 @mcp.tool(name="transform")
 def transform(
     op: Literal["nudge", "place", "move_to", "rotate_to", "aim_axis", "rest_on", "seat",
                 "resize", "scale", "rotate", "apply", "snap", "snap_grid", "match_dim",
-                "mirror", "distribute", "array_corners", "array_along",
-                "move_verts", "scale_verts", "snap_loop", "lattice"],
+                "distribute", "snap_loop"],
     targets: tag(str, "object(s): '' active, 'name', or 'a,b,c'") = "",
-    # lattice (warp a deform cage's control points — G189)
-    lat_u: tag(str, "[lattice] U points to move: all|min|max|mid|<index>|[lo,hi]") = None,
-    lat_v: tag(str, "[lattice] V points to move: all|min|max|mid|<index>|[lo,hi]") = None,
-    lat_w: tag(str, "[lattice] W points to move: all|min|max|mid|<index>|[lo,hi]") = None,
-    lat_translate: tag(list, "[lattice] world-space delta [dx,dy,dz] (m)") = None,
-    lat_scale: tag(list, "[lattice] scale the slab about the cage centre [sx,sy,sz]") = None,
     # place (relational re-placement — same DSL as add's on=)
     on: tag(dict, "[place] placement spec — {\"left_of\":\"base\",\"gap\":0}, {\"on\":\"seat\"}, …") = None,
     # nudge (relative meters)
     right: tag(float, "[nudge] +X (m)") = 0.0,
     left: tag(float, "[nudge] -X (m)") = 0.0,
-    up: tag(float, "[nudge/move_verts] +Z (m)") = 0.0,
-    down: tag(float, "[nudge/move_verts] -Z (m)") = 0.0,
-    back: tag(float, "[nudge/move_verts] +Y (m)") = 0.0,
-    forward: tag(float, "[nudge/move_verts] -Y (m)") = 0.0,
-    inward: tag(float, "[move_verts] inward along normal (m)") = 0.0,
-    out: tag(float, "[move_verts] outward along normal (m)") = 0.0,
+    up: tag(float, "[nudge] +Z (m)") = 0.0,
+    down: tag(float, "[nudge] -Z (m)") = 0.0,
+    back: tag(float, "[nudge] +Y (m)") = 0.0,
+    forward: tag(float, "[nudge] -Y (m)") = 0.0,
     # rotate_to (absolute euler degrees; omitted axis preserved). An ANGLE, not a
     # position — intrinsic orientation, no world coordinate involved.
     deg_x: tag(float, "[rotate_to] absolute X euler (deg)") = None,
@@ -65,7 +56,7 @@ def transform(
     pivot: tag(str, "[scale/rotate] pivot point. rotate: self=own origin (default — each target spins about ITSELF; with several targets use assembly instead) | assembly/bbox_center=shared centre of ALL targets (rigid group turn) | world=world 0,0,0 | cursor. (legacy aliases: center→self, origin→world — named backwards vs Blender, prefer self/world.) scale: center=bbox centre (default) | bottom_center | world | object name") = "center",
     pivot_object: tag(str, "[scale/rotate] object to pivot around") = "",
     angle: tag(float, "[rotate] degrees") = 0.0,
-    axis: tag(str, "[rotate/match_dim/array_*] axis X|Y|Z; [aim_axis] local axis (signed ok, e.g. -Z); [rest_on/seat] drop axis") = "Z",
+    axis: tag(str, "[rotate/match_dim] axis X|Y|Z; [aim_axis] local axis (signed ok, e.g. -Z); [rest_on/seat] drop axis") = "Z",
     # apply
     scale: tag(bool, "[apply] bake scale into mesh data") = True,
     rotation: tag(bool, "[apply] bake rotation") = False,
@@ -80,40 +71,17 @@ def transform(
     axes: tag(str, "[snap_grid] axes to snap, e.g. XYZ") = "XYZ",
     # match_dim
     reference: tag(str, "[match_dim] object whose extent to match") = "",
-    # mirror
-    plane: tag(str, "[mirror] mirror plane X|Y|Z") = "X",
-    suffix: tag(str, "[mirror] suffix for the mirrored copy") = "_mirror",
-    replace: tag(bool, "[mirror] replace existing mirror") = None,
-    # distribute / array
-    between: tag(list, "[distribute/array_along] two endpoint objects [a,b]") = None,
-    prototype: tag(str, "[array_*] object to copy") = "",
-    of: tag(str, "[array_corners] target whose 4 corners to fill") = "",
-    count: tag(int, "[array_along] number of copies") = 0,
-    standing_on_floor: tag(bool, "[array_corners] keep copies on the floor") = True,
-    keep_original: tag(bool, "[array_*] keep the prototype") = False,
-    linked: tag(bool, "[array_*] make INSTANCES sharing the prototype's mesh — one mesh "
-                      "for the whole array (pickets, balusters); edit one, all change") = False,
-    name_prefix: tag(str, "[array_*] name prefix for copies") = "",
-    # move_verts / scale_verts (edit-mode component transforms)
-    x: tag(float, "[move_verts] explicit X amount (m)") = 0.0,
-    y: tag(float, "[move_verts] explicit Y amount (m)") = 0.0,
-    z: tag(float, "[move_verts] explicit Z amount (m)") = 0.0,
-    sx: tag(float, "[scale_verts] X scale factor") = 1.0,
-    sy: tag(float, "[scale_verts] Y scale factor") = 1.0,
-    sz: tag(float, "[scale_verts] Z scale factor") = 1.0,
-    in_plane: tag(float, "[scale_verts] in-plane scale (flatten)") = 0.0,
-    vert_pivot: tag(str, "[scale_verts] SELECTION (shared centre, default) | INDIVIDUAL "
-                         "(each connected island about its OWN centre — even out N "
-                         "separate features in place) | ORIGIN") = "SELECTION",
+    # distribute
+    between: tag(list, "[distribute] two endpoint objects [a,b]") = None,
     # snap_loop
     fit_scale: tag(bool, "[snap_loop] scale the loop rim→rim to the target (False=keep size)") = True,
     fit_rotation: tag(bool, "[snap_loop] tilt the loop's plane parallel to the target") = False,
     label: str = "",
 ) -> str:
     """
-    Transform objects (or verts) — the **transform** tools. `op` selects:
+    Transform objects — the **transform** tools. `op` selects:
 
-      nudge    — relative move in meters  (right/left/up/down/back/forward/inward/out)
+      nudge    — relative move in meters  (right/left/up/down/back/forward)
       place    — RE-place an existing object with the relational DSL (on=) — the same
                  vocabulary as add's on=, but for objects already in the scene. Seat
                  left_of/on/under/at_corner another without raw coordinates. Resolves
@@ -125,7 +93,7 @@ def transform(
                  kept). An angle, not a position — intrinsic orientation only.
       aim_axis — orient a LOCAL axis down a from→to segment (from_handle/to_handle;
                  axis=Z default, signed ok). The orient-along-an-edge primitive for
-                 solids that don't self-orient like type=tube — lay a coil/bolt/strut
+                 solids that don't self-orient — lay a coil/bolt/strut
                  along a direction without hand-trig. Rotation only; pair with move_to
                  to position.
       rest_on  — drop along −axis until the object's REAL geometry rests on `target`
@@ -144,18 +112,7 @@ def transform(
       snap     — snap flush to a target    (target, side, source_side, offset)
       snap_grid— round origin to a grid    (size, axes)
       match_dim— match one object's extent (target, reference, axis)
-      mirror   — mirrored copy across a plane (targets, plane=X|Y|Z, suffix, replace)
       distribute — space evenly between two (targets, between=[a,b], axis)
-      array_corners — copy to a target's 4 corners (prototype, of, standing_on_floor)
-      array_along  — N copies evenly along the A→B segment, endpoints included
-                   (prototype, count, between=[a,b]); direction is the true A→B vector
-                   (radial/circular array → modifier op=add_asset asset="Array";
-                   surface scatter → modifier op=add_asset asset="Scatter on Surface")
-      move_verts — move selected verts (edit) (out/up/.. or x/y/z, target)
-      scale_verts— scale selected verts (edit) (sx/sy/sz, in_plane, vert_pivot, target).
-                   vert_pivot=individual scales each connected island about its OWN
-                   centre (Blender's Individual Origins) — even out N separate features
-                   in one call instead of looping one face at a time.
       snap_loop  — seat the SELECTED boundary loop onto a target opening (handle):
                    translate centre→centre, optional scale rim→rim (fit_scale) and
                    tilt plane→plane (fit_rotation). The action half of feel op=assembly
@@ -196,12 +153,6 @@ def transform(
         "distribute":    (bool(between) and len(between or []) == 2,
                           "between=[a,b] (two endpoint objects)",
                           "transform op=distribute targets=a,b,c between=[left,right] axis=X"),
-        "array_corners": (bool(prototype and of),
-                          "prototype and of=<target whose 4 corners to fill>",
-                          "transform op=array_corners prototype=leg of=tabletop"),
-        "array_along":   (bool(prototype and count) and len(between or []) == 2,
-                          "prototype, count, between=[a,b]",
-                          "transform op=array_along prototype=picket count=5 between=[postL,postR]"),
         "snap_loop":     (bool(handle),
                           "handle=<target opening> (be in edit mode, loop selected)",
                           "transform op=snap_loop handle=jar.rim"),
@@ -246,24 +197,8 @@ def transform(
         return transforms.snap_to_grid(size, axes, label)
     if o == "match_dim":
         return relational.match_dimension(target, reference, axis, label)
-    if o == "mirror":
-        return relational.mirror_across(targets, plane, suffix, replace, label)
     if o == "distribute":
         return relational.distribute_evenly(targets, between or [], axis, label)
-    if o == "array_corners":
-        return relational.array_at_corners(prototype, of, standing_on_floor,
-                                           keep_original, name_prefix, linked, label)
-    if o == "array_along":
-        return relational.array_along(prototype, count, between or [], axis,
-                                      keep_original, name_prefix, linked, label)
-    if o == "move_verts":
-        return editmode.move_vertices(out, inward, up, down, left, right, forward,
-                                      back, x, y, z, label, target)
-    if o == "scale_verts":
-        return editmode.scale_vertices(in_plane, sx, sy, sz, vert_pivot, label, target)
     if o == "snap_loop":
         return editmode.snap_loop(handle, fit_scale, fit_rotation, label)
-    if o == "lattice":
-        return primitives.deform_lattice(targets or target, lat_u, lat_v, lat_w,
-                                         lat_translate, lat_scale, label)
     return unknown("transform", "op", op, _OPS)

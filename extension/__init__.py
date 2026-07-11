@@ -4,13 +4,13 @@ This package is split into single-topic modules. To find a tool, look in the
 module whose name matches the tool family:
 
   primitives.py   add_box / add_plane / add_cylinder / add_sphere / add_cone
-  curves.py       spline_tube (interpolating curve swept into a tube mesh)
+  curves.py       add_curve (live editable Bézier/NURBS/POLY curve datablock)
   objects.py      select / delete / rename / duplicate / join / mode / info / profile / selection
   transforms.py   nudge / resize / rotate / apply_transform / snap_to / snap_to_grid
   queries.py      describe / distance_between / gap_between / is_aligned
-  relational.py   match_dimension / mirror_across / distribute_evenly / array_at_corners / array_along
+  relational.py   match_dimension / distribute_evenly
   groups.py       group / parts_in / ungroup
-  finishes.py     smooth_edges / round_corners / add_modifier / modify_modifier /
+  finishes.py     add_modifier / modify_modifier /
                   remove_modifier / list_modifiers / apply_modifiers
   editmode.py     bevel / extrude / loop_cut / select_* / grow_selection / move/scale_vertices /
                   delete_geometry / separate_selection / jitter_vertices / random_select /
@@ -22,7 +22,7 @@ module whose name matches the tool family:
   lighting.py     add_light / modify_light / set_world_background / set_camera_dof
   sculpt.py       sculpt_grab / inflate / draw / smooth / crease / pinch / flatten
   viewport.py     view angle / shading mode / framing / orbit / camera positioning
-  shaders.py      set_toon_material (cel/anime) / add_outline / remove_outline
+  shaders.py      material-slot + shading helpers
   history.py      get_history / undo_steps / redo_steps / undo_to
   designs.py      save_design / open_design / list_designs
   status.py       get_scene_tree / get_blender_status

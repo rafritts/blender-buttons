@@ -468,3 +468,55 @@ vgroup-backed handle (a scene fact, G218), still addressing. No native/delete cu
 - **`material set/assign/shade_*` → NATIVE; `textured/pbr/toon/outline` → DELETE.** The kept
   four are single native operations (Principled input writes, `material_index`, shade ops);
   the deleted four are multi-node shader-graph builders (Node-Wrangler / NPR composites).
+
+## II.4 Phase 2 notes (2026-07-11) — what shipped, and how the rename collisions resolved
+
+Phase 2 executed the DELETE (24) and NATIVE-RENAME (9) lists. The rename column collides
+where Part II names several minted ops after the same native operator; each was converged
+to **one op per native operator**, named by the operator's hotkey/menu label.
+
+- **`edit op=grab` (G / `transform.translate`) absorbs `transform op=move_verts`,
+  `edit op=proportional_move`, AND `transform op=lattice`'s translate role.** Move and
+  proportional-move are the *same* native operator — proportional editing is the O toggle,
+  not a different verb — so they merged into one `grab` op with a `proportional=False`
+  parameter (O). `proportional=True` routes to the falloff translate (radius/falloff/
+  connected/freeze); the default is the rigid translate. Rigid and proportional keep
+  separate internal handlers (`move_vertices` / `proportional_move`) — both are the
+  mouse-substitute for one native operator, i.e. substrate, not two ops.
+- **`edit op=scale` (S / `transform.resize`) absorbs `transform op=scale_verts` and
+  `edit op=proportional_scale`.** Same pattern: `proportional=False` (default) is the rigid
+  per-axis/in-plane vert scale (`sx/sy/sz`, `in_plane`, `vert_pivot`); `proportional=True`
+  is the falloff gather/swell (`factor`, radius/falloff/connected/freeze). Part II's rename
+  column gave these two names (scale vs resize) for one operator; converged to **`scale`**,
+  matching the S hotkey's menu label (and consistent with `grab`=G).
+- **Edit-mode geometry transforms now live on `edit`, not `transform`.** Per II.4's
+  object-placement-is-mouse / geometry-mutation-is-native split, `grab`/`scale`/`lattice`/
+  `shrink_fatten`/`randomize` are native hands and moved onto the `edit` verb (the Mesh
+  menu). `transform` is left as the pure relational-placement SUBSTRATE (nudge/place/snap/
+  rotate/resize/distribute/…). `transform op=apply` (Ctrl+A) stays on `transform` as before.
+- **`transform op=lattice` → `edit op=lattice` (distinct handling, recorded).** Native G/S
+  *does* grab lattice control points, but the implementation shares no machinery with mesh
+  grab: it has no live edit-mode selection, addresses points by U/V/W slab-pickers
+  (`lat_u/lat_v/lat_w`), and does translate **and** scale (`lat_translate`/`lat_scale`) in
+  one call on a lattice object in its own edit mode. Folding it into `grab` would have made
+  a "grab" that also scales and ignores the selection model. So it kept its own op under the
+  native name **lattice** (the Blender object type + its edit mode), moved onto `edit`
+  alongside the other native hands. This is the "otherwise pick native-truthful distinct
+  handling and record why" branch of the collision instruction.
+- **`edit op=inflate` → `shrink_fatten`, `edit op=jitter` → `randomize`** — straight
+  renames on the `edit` verb (Alt+S; Mesh ▸ Transform ▸ Randomize). Helpers unchanged.
+- **`object op=split` → `object op=separate`** (P ▸ By Loose Parts). Note `edit op=separate`
+  (mesh.separate SELECTED) and `object op=separate` (mesh.separate LOOSE) now coexist on two
+  verbs — native-truthful, both are the Separate menu, different modes.
+- **`add type=floor` → `add type=plane`.** `floor` was a plane seated at z=0; `plane`
+  already exists and a plane sits on z=0 by default (or `on={"on_floor":true}`), so `floor`
+  was removed rather than aliased. `add_floor` helper + handler deleted.
+- **`sculpt brush=gravity` deleted with its legacy `strength` alias** (aliases for deleted
+  ops die with the op, per the Phase 2 exception clause).
+- **`pose op=bind` deleted, `rebind` kept.** `bind` was MESH_DEFORM-create + `meshdeform_bind`
+  (composite); a mesh-deform modifier is now added natively via `modifier op=add`, then bound
+  with `pose op=rebind`.
+- **Orphaned module removed:** `server/fields.py` (only `field`/`loft` lived there) was
+  deleted. `extension/fields.py` stayed — its `field` handler + registration were removed but
+  its interpolation/frame helpers (`_group_frame`, curve interp) are imported by
+  `extension/curves.py` and `extension/fit.py`, so the module remains for those.

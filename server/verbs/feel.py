@@ -113,8 +113,8 @@ def feel(
     # fit (SPEC-14 / G100) — describe a selection as parametric form
     model: tag(str, "[fit] auto|plane|sphere|cylinder|cone|ellipsoid|torus|swept_tube | "
                     "quadric|rbf|gaussians|bspline|superquadric (SPEC-19: a region → an "
-                    "editable analytic surface. quadric = gross dome/bowl/saddle (round-trips "
-                    "via edit op=field); rbf/gaussians = base + localized bumps (progressive="
+                    "editable analytic surface. quadric = gross dome/bowl/saddle (an analytic "
+                    "height-field read); rbf/gaussians = base + localized bumps (progressive="
                     "true auto-layers); bspline = control-grid surface (mints via as_surface, "
                     "stitches at shared rows); superquadric = closed mass A,B,C + boxiness "
                     "e1,e2 (mints a blob, merges by smooth-min, Phase 3 graft))") = "auto",
@@ -267,8 +267,8 @@ def feel(
                  directions. 'Clean arc or lump' as numbers; profile_radius= adds the
                  sweep-feasibility preflight. Live read, no bake. (target, resolution,
                  profile_radius)
-      fit      — GEOMETRY FIT (SPEC-14): describe the SELECTION as parametric form — the
-                 analytic INVERSE of edit op=field. Fits a library of generative models
+      fit      — GEOMETRY FIT (SPEC-14): describe the SELECTION as parametric form.
+                 Fits a library of generative models
                  (plane|sphere|cylinder|cone|ellipsoid|torus|swept_tube) and returns the
                  best fit's type, named unit-tagged params, and — the load-bearing output
                  — a RESIDUAL (mm) + COVERAGE that say WHEN the math describes the shape
@@ -286,12 +286,10 @@ def feel(
                  h(u,v)=au²+bv²+cuv+du+ev+f over the selection's best-fit plane (linear least
                  squares). The payoff is the round-trip: it returns the formula + named
                  coefficients (a,b curvature, c twist/saddle, d,e tilt, f offset), the shape
-                 verdict (dome/bowl/saddle), the captured-% + residual honesty stamp, AND a
-                 ready-to-run `edit op=field` apply line. You read the surface as math, EDIT a
-                 coefficient (steepen the dome: −0.31→−0.45), apply it, then re-fit to verify —
-                 no vertex typed, no render read. This is how you SHAPE a surface instead of
-                 ASSEMBLE primitives. A high residual means the region isn't height-field-like
-                 (a fold/overhang) → it refuses honestly rather than emit a fiction (§1.5).
+                 verdict (dome/bowl/saddle), and the captured-% + residual honesty stamp — a
+                 READ of the surface as math (no vertex typed, no render read). A high residual
+                 means the region isn't height-field-like (a fold/overhang) → it refuses
+                 honestly rather than emit a fiction (§1.5).
                  (target, model, axis, tol, per_component, bands, as_handle, as_curve, lod)
       coverage — MODEL-FREE continuity/coverage read (G100) for a selection that ISN'T a
                  swept tube — a flat sheet, a doubly-curved patch, a branching region, where

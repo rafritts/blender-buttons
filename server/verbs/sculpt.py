@@ -11,33 +11,30 @@ from server._core import mcp
 from server import sculpt as _s, handles, queries
 from ._common import tag, unknown
 
-_BRUSHES = ["grab", "draw", "inflate", "smooth", "crease", "pinch", "flatten", "gravity"]
+_BRUSHES = ["grab", "draw", "inflate", "smooth", "crease", "pinch", "flatten"]
 
 # Organic-deform ops that live on OTHER verbs — agents reach for these as "sculpt
 # brushes" (tutorial language calls noise an "inflate brush"), so when one shows up
 # as a brush=, redirect to where it actually lives instead of a bare "unknown brush".
 _ELSEWHERE = {
-    "noise_displace": "edit op=noise_displace (coherent organic surface break-up)",
-    "noise":          "edit op=noise_displace (coherent organic surface break-up)",
-    "displace":       "edit op=noise_displace, or modifier op=add type=displace",
-    "proportional":   "edit op=proportional_move (soft directional bulge)",
-    "proportional_move": "edit op=proportional_move (soft directional bulge)",
+    "noise":          "modifier op=add type=displace (a noise-textured Displace modifier)",
+    "displace":       "modifier op=add type=displace",
+    "proportional":   "edit op=grab proportional=True (soft directional bulge)",
 }
 
 
 @mcp.tool(name="sculpt")
 def sculpt(
-    brush: Literal["grab", "draw", "inflate", "smooth", "crease", "pinch", "flatten", "gravity"],
+    brush: Literal["grab", "draw", "inflate", "smooth", "crease", "pinch", "flatten"],
     target: tag(str, "mesh to sculpt"),
-    radius: tag(float, "brush radius (m); optional for gravity (omit = whole mesh)") = None,
+    radius: tag(float, "brush radius (m)") = None,
     at: tag(str, "WHERE to brush — 'selection' uses the LIVE edit-mode selection's "
                  "surface-snapped centroid (the measured, no-coordinate default; "
                  "SPEC-09).") = "",
     handle: tag(str, "brush at a named handle's live point (recomputed)") = "",
     # amount — the family's one magnitude word (SPEC-21 §3)
     amount: tag(float, "the brush magnitude: [draw/inflate/crease/pinch/flatten] "
-                       "strength (default 1.0); [gravity] metres the free end falls "
-                       "(default 0.02)") = None,
+                       "strength (default 1.0)") = None,
     # grab displacement — relative directions (m)
     out: tag(float, "[grab] drag outward (m)") = 0.0,
     inward: tag(float, "[grab] drag inward (m)") = 0.0,
@@ -56,10 +53,6 @@ def sculpt(
     plane_normal_z: tag(float, "[flatten] plane normal Z") = 0.0,
     # smooth
     iterations: tag(int, "[smooth] relax iterations") = 1,
-    # gravity (region-parametric drape)
-    strength: tag(float, "[gravity] LEGACY alias for amount= (metres the free end "
-                         "falls) — prefer amount") = 0.02,
-    pin: tag(float, "[gravity] 0..1 top fraction frozen as the attachment") = 0.25,
     falloff: tag(str, "brush falloff SMOOTH|SHARP|…") = "SMOOTH",
     subdivide: tag(bool, "force extra resolution under the brush first (a coarse footprint "
                          "auto-densifies to detail= anyway — G213; this adds a pass on top)") = False,
@@ -84,24 +77,18 @@ def sculpt(
       crease  — pull into a sharp ridge     (amount; falloff defaults SHARP)
       pinch   — pull verts together         (amount)
       flatten — flatten toward a plane      (amount, plane_normal_x/y/z)
-      gravity — DRAPE a soft form: pin the top, let the lower mass fall →
-                a hanging/teardrop shape by construction (amount = metres the
-                free end falls, pin). Scope with at=selection/handle + radius,
-                or omit the point to drape the whole mesh.
 
     falloff: SMOOTH|SHARP|… subdivide=True adds resolution under the brush first.
 
-    NOT a sculpt brush: organic surface BREAK-UP (lumpy noise, glaze drips) is
-    `edit op=noise_displace`; a soft directional bulge on a dense/irregular mesh is
-    `edit op=proportional_move` (a uniform normal-push `inflate` lumps it — see
+    NOT a sculpt brush: organic surface BREAK-UP (lumpy noise) is a noise-textured
+    `modifier op=add type=displace`; a soft directional bulge on a dense/irregular mesh
+    is `edit op=grab proportional=True` (a uniform normal-push `inflate` lumps it — see
     guidance). Pass either of those to `brush=` and you'll be pointed back here.
     """
     b = brush.lower().strip()
-    # SPEC-21 §3: one magnitude word (`amount`) across the family, with per-member
-    # defaults. gravity's is metres (0.02); the strength brushes' is 1.0. `strength`
-    # survives as gravity's legacy alias when amount isn't given.
+    # SPEC-21 §3: one magnitude word (`amount`) across the family, default 1.0.
     if amount is None:
-        amount = strength if b == "gravity" else 1.0
+        amount = 1.0
     note = ""
     at_x = at_y = at_z = None
     if at.strip().lower() == "selection":
@@ -122,11 +109,6 @@ def sculpt(
             return err
         note = drift or ""
         at_x, at_y, at_z = pt
-    # gravity is region-parametric, not a stroke: it allows no point (whole mesh).
-    if b == "gravity":
-        return note + _s.sculpt_gravity(target, at_x, at_y, at_z, radius,
-                                        amount, pin, falloff, subdivide,
-                                        detail, connected, label)
     if at_x is None or at_y is None or at_z is None:
         return "sculpt: need a brush point — pass at=selection or handle=<name>"
     if radius is None:

@@ -36,7 +36,7 @@ def uv(
 
       unwrap — flatten a mesh's UVs with a parametric / auto projection (no seams):
                method=smart|cube|cylinder|sphere, target, angle_limit, island_margin,
-               scale_to_bounds. Then consume it with `material op=pbr/textured space=uv`.
+               scale_to_bounds. Then feed the UV layer to a UV-projected material node graph.
 
     Box projection (`material` without space=uv) is the default and needs NO unwrap —
     use this only when grain must follow a curved surface. The unwrap is mechanical: it

@@ -401,7 +401,7 @@ def sculpt_inflate(params):
         return refusal
 
     # G208: denominate in true world meters — divide the local normal delta by the
-    # object's per-axis scale, exactly like edit op=inflate, so a scaled host doesn't
+    # object's per-axis scale, exactly like edit op=shrink_fatten, so a scaled host doesn't
     # silently amplify the move.
     scale = obj.scale
     sx = abs(scale.x) or 1.0
@@ -696,121 +696,6 @@ def sculpt_flatten(params):
     return result
 
 
-def sculpt_gravity(params):
-    """Region-parametric GRAVITY drape — SPEC-08 Tier A, the lead deformer.
-
-    Pins the TOP of the region (the attachment) and lets the lower mass fall along
-    world -Z, weighted by height: the top is frozen, the bottom falls fully, the
-    middle ramps. The fullest point sinks and the lower pole elongates downward → a
-    hanging / teardrop form BY CONSTRUCTION, not by a seeing hand. The correctness
-    lives in the algorithm; the agent only tunes magnitude (strength + pin), which
-    the numeric reads can verify (feel op=silhouette/protrusion).
-
-    target:   object name (required).
-    at:       optional [x, y, z] world center to SCOPE the drape to a sphere. Omit
-              to drape the WHOLE mesh (SPEC-08 build-order Phase 1).
-    radius:   sphere radius (m) — required when `at` is given; ignored otherwise.
-    strength: metres the FREE (bottom) end falls. Default 0.02.
-    pin:      0..1 fraction of the region's Z-height, measured from the TOP, that is
-              FROZEN (the attachment line). Default 0.25 — the top quarter holds, the
-              rest hangs. pin=0 lets everything fall (rigid slide, no sag); pin→1
-              freezes nearly all of it.
-    falloff:  radial falloff at the sphere edge (scoped mode only). Default SMOOTH.
-    """
-    target = params.get("target")
-    if not target:
-        return {"error": "'target' (object name) is required"}
-    obj = bpy.data.objects.get(target)
-    if obj is None:
-        return {"error": f"Object '{target}' not found"}
-    if obj.type != 'MESH':
-        return {"error": f"'{target}' is not a mesh (type={obj.type})"}
-
-    at = params.get("at")
-    scoped = isinstance(at, list) and len(at) == 3
-    falloff = (params.get("falloff") or "SMOOTH").upper()
-    if falloff not in _FALLOFFS:
-        return {"error": f"Invalid falloff '{falloff}'. Use one of {sorted(_FALLOFFS)}"}
-    strength = float(params.get("strength", params.get("amount", 0.02)))
-    pin = max(0.0, min(0.95, float(params.get("pin", 0.25))))
-    connected = bool(params.get("connected", False))
-
-    bm = _enter_edit(obj)
-    subdivided = 0
-    if scoped:
-        center = mathutils.Vector((float(at[0]), float(at[1]), float(at[2])))
-        radius = float(params.get("radius", 0.0))
-        if radius <= 0:
-            _exit_edit(obj)
-            return {"error": "'radius' must be > 0 when 'at' is given"}
-        refusal = _runaway_refusal(abs(strength), radius, "sculpt_gravity", "strength")
-        if refusal:
-            _exit_edit(obj)
-            return refusal
-        subdivided = _maybe_subdivide(bm, obj, center, radius, params.get("subdivide", False),
-                                      params.get("detail"))
-        hits = _verts_in_radius(bm, obj, center, radius, connected)
-    else:
-        hits = [(v, 0.0) for v in bm.verts]
-
-    if not hits:
-        _exit_edit(obj)
-        return {"error": "no verts in region"}
-
-    mat = obj.matrix_world
-    world = [(v, mat @ v.co) for v, _ in hits]
-    zs = [w.z for _, w in world]
-    zmin, zmax = min(zs), max(zs)
-    pin_z = zmax - pin * (zmax - zmin)
-    free_span = pin_z - zmin
-    if free_span <= 1e-9:
-        _exit_edit(obj)
-        return {"error": "region has no vertical extent below the pin line to drape"}
-    # Transition band just below the pin line: the free mass ramps in over the top
-    # 30% of the free span, then falls at FULL strength below that. This translates
-    # the mass DOWN as a body (the fullest point descends) rather than only stretching
-    # the bottom — the fix for "gravity didn't de-cone" (the old linear-to-bottom ramp
-    # under-moved the apex).
-    band = 0.3 * free_span
-
-    moved = 0
-    max_drop = 0.0
-    for v, w in world:
-        if w.z >= pin_z:
-            continue  # frozen attachment
-        vw = min(1.0, (pin_z - w.z) / band)
-        vw = vw * vw * (3.0 - 2.0 * vw)
-        if scoped:
-            # LATERAL falloff only — horizontal distance from the gravity axis through
-            # `center`, ignoring Z. The old 3D falloff pinned the lower pole (far from
-            # center because it's LOW), killing exactly the verts that should fall most.
-            # Horizontal-only softens just the lateral seam; the vertical drape is the
-            # pin gradient's job.
-            dx = w.x - center.x
-            dy = w.y - center.y
-            th = min(1.0, ((dx * dx + dy * dy) ** 0.5) / radius)
-            rw = _falloff_weight(th, falloff)
-        else:
-            rw = 1.0
-        drop = strength * vw * rw
-        if drop == 0.0:
-            continue
-        v.co += _world_to_local_dir(obj, mathutils.Vector((0.0, 0.0, -drop)))
-        moved += 1
-        if drop > max_drop:
-            max_drop = drop
-
-    _exit_edit(obj)
-    push_undo(f"sculpt_gravity strength={strength}")
-    result = {"success": True, "verts_affected": moved, "strength": strength,
-              "pin": pin, "region": "sphere" if scoped else "whole_mesh",
-              "max_drop": round(max_drop, 4), "subdivided_edges": subdivided}
-    warn = _affected_warning(moved, subdivided, "sculpt_gravity")
-    if warn:
-        result["warning"] = warn
-    return result
-
-
 TOOLS = {
     "sculpt_grab":    sculpt_grab,
     "sculpt_inflate": sculpt_inflate,
@@ -819,5 +704,4 @@ TOOLS = {
     "sculpt_crease":  sculpt_crease,
     "sculpt_pinch":   sculpt_pinch,
     "sculpt_flatten": sculpt_flatten,
-    "sculpt_gravity": sculpt_gravity,
 }

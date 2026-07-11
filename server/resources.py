@@ -48,17 +48,13 @@ _TECHNIQUES = {
     "form-blockout": "Starting ANY new asset: classify the form BEFORE choosing a tool, "
                      "then block proportioned masses relationally. Read this one first.",
     "revolved-vessel": "The form's silhouette sweeps around an axis (goblet, vase, plate, "
-                       "wheel): spin a profile / author ring radii directly.",
+                       "wheel): trace a profile and spin it.",
     "shell": "A surface that follows another at a distance (clothing, armor, icing, a "
              "case), or a solid to carve into a walled vessel (cup, bowl).",
     "smooth-union": "Two closed masses must read as ONE body (handle→mug, limb→torso): "
                     "hard union, filleted seam, or continuous flesh.",
     "ring-weld": "Two open rims must join into one continuous skin (neck→head, "
                  "spout→body, tubes between openings).",
-    "drip": "Matter that flowed and set — icing/wax/paint hanging off a rim: drape, "
-            "shape tongues, bulb tips, weld beads locally.",
-    "npr-look": "A stylized cel/anime look: toon band material, inverted-hull outline, "
-                "flat-color render settings.",
 }
 
 

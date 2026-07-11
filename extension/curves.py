@@ -1,4 +1,4 @@
-"""Curve-based geometry: spline_tube.
+"""Curve-based geometry.
 
 Design notes (why interpolating, why not Bezier handles): an LLM works in
 checkable claims — "the curve passes through these named places". Catmull-Rom
@@ -309,8 +309,8 @@ def _frame_anchor(name):
 def _build_relational_path(raw):
     """G174 — grow a sweep centerline from a MEASURED anchor frame as vectors in its (n,u,v)
     basis, so no world coordinate is ever typed (origin measured, basis measured, the
-    multipliers are authored dimensions). The uniform application of edit op=field's
-    measured-frame vector language to the sweep family. Detected when raw is a list whose
+    multipliers are authored dimensions). The same measured-frame vector language, applied
+    to the sweep family. Detected when raw is a list whose
     first entry is a dict carrying 'from'. Returns (abs_points, note, error); (None, None,
     None) when raw is NOT a relational path (caller falls through to literal points).
 
@@ -398,174 +398,10 @@ def _build_relational_path(raw):
     return pts, note, None
 
 
-def spline_tube(params):
-    """Create a tube mesh swept along an interpolating spline through 2–32 points.
-
-    name:       required, unique.
-    points:     list of control points the curve passes THROUGH. Each is
-                [x, y, z] world coords, or {"near": "obj", "offset": [dx,dy,dz]}
-                relative to an existing object's bbox center.
-                RELATIONAL PATH (G174) — instead of typed coordinates, grow the path
-                from a MEASURED handle frame as vectors in its (n,u,v) basis, so no
-                world coordinate is divined. Pass points as a list whose FIRST entry
-                is a header {"from": <handle/obj>, "frame": "tangent_normal"} and the
-                rest are [n,u,v] basis-vector steps (incremental from the anchor), an
-                optional terminus {"to": <handle>} to weld the end onto a second
-                anchor, OR a parametric form
-                {"from":A, "f":{"steps":64, "n":"0.02*cos(tau*5*t)",
-                                "u":"0.02*sin(tau*5*t)", "v":"0.06*t"}} (a helix/coil
-                in one expression; n/u/v are sandboxed exprs in t∈[0,1]).
-    between:    [A, B] — alternative to `points`: connect two named objects with a
-                straight tube, endpoints picked at the NEAREST SURFACE points
-                between them (BVH). The generic strut/cable/wire — no offset math.
-    radius:     tube radius in meters — a single float, or a list (one per
-                control point) for taper. Default 0.02.
-    resolution: curve samples per segment (default 8; higher = smoother bends).
-    sides:      cross-section resolution (default 4 → 16-sided tube).
-
-    Result is a plain MESH object (smooth-shaded, capped ends). The control
-    points are stored on the object and reported by describe().
-    """
-    name = params.get("name")
-    if not name:
-        return {"error": "'name' is required"}
-    if bpy.data.objects.get(name) is not None:
-        return {"error": f"Object '{name}' already exists — choose a different name"}
-
-    # `between`: connect two named anchors with a straight tube whose endpoints are
-    # the NEAREST SURFACE points between them (the generic "strut/cable between A and
-    # B" — struts, wiring, linkages, a cradle's suspension string). No offset math:
-    # the BVH finds where the two surfaces face each other.
-    between = params.get("between")
-    raw_points = params.get("points")
-    if between is not None:
-        if raw_points:
-            return {"error": "pass either 'points' or 'between' — not both"}
-        if not (isinstance(between, (list, tuple)) and len(between) == 2):
-            return {"error": "'between' must be [A, B] — two object names to connect"}
-        from .introspect import _prepare
-        from .queries import _nearest_surface_pair
-        preps = []
-        for nm in between:
-            o = bpy.data.objects.get(nm)
-            if o is None:
-                return {"error": f"'between' anchor '{nm}' not found"}
-            p = _prepare(o)
-            if p is None:
-                return {"error": f"'between' anchor '{nm}' has no geometry to connect"}
-            preps.append(p)
-        d, pt_a, pt_b = _nearest_surface_pair(preps[0], preps[1])
-        if pt_a is None:
-            return {"error": f"no surface path found between '{between[0]}' and '{between[1]}'"}
-        raw_points = [[pt_a[0], pt_a[1], pt_a[2]], [pt_b[0], pt_b[1], pt_b[2]]]
-
-    # G174: a relational vector-path (grown from a measured handle frame) in place of typed
-    # coordinates — see _build_relational_path. No-op for ordinary [x,y,z]/{"near"} lists.
-    rel_pts, rel_note, rel_err = _build_relational_path(raw_points)
-    if rel_err:
-        return {"error": rel_err}
-    if rel_pts is not None:
-        raw_points = rel_pts
-
-    if not isinstance(raw_points, list) or len(raw_points) < 2:
-        return {"error": "'points' must be a list of at least 2 control points (or use 'between')"}
-    # G20: the old cap of 32 blocked legitimate hand-authored swept paths (a 9-turn
-    # coil needs ~73). The per-point resolve is cheap; 256 is a generous ceiling that
-    # still guards against a runaway payload. For a CONTINUOUS helix/coil use
-    # `add type=helix`, which generates its own dense samples and ignores this cap.
-    if len(raw_points) > 256:
-        return {"error": f"'points' supports at most 256 control points (got "
-                         f"{len(raw_points)}); for a continuous coil use add type=helix"}
-
-    points = []
-    for i, entry in enumerate(raw_points):
-        pt, err = _resolve_point(entry, i)
-        if err:
-            return {"error": err}
-        points.append(pt)
-
-    radius = params.get("radius", 0.02)
-    if isinstance(radius, (int, float)):
-        radii = [float(radius)] * len(points)
-    elif isinstance(radius, (list, tuple)):
-        if len(radius) != len(points):
-            return {"error": (f"'radius' list must match points count "
-                              f"({len(radius)} radii vs {len(points)} points)")}
-        radii = [float(r) for r in radius]
-    else:
-        return {"error": "'radius' must be a number or a list of numbers"}
-    if any(r <= 0 for r in radii):
-        return {"error": "all radii must be > 0"}
-
-    resolution = max(2, min(int(params.get("resolution", 8)), 64))
-    sides = max(2, min(int(params.get("sides", 4)), 16))
-
-    samples, ts = _catmull_rom(points, resolution)
-    radii_per_sample = [_radius_at(radii, t) for t in ts]
-
-    if bpy.context.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
-
-    # G161/G177: build the swept mesh DIRECTLY (clean rings + center-vertex cap fans on a
-    # rotation-minimizing frame) instead of beveling a POLY curve and converting — that route
-    # self-intersected at the end caps on clean paths and straight runs.
-    verts, faces = _tube_geometry(samples, radii_per_sample, sides)
-    if verts is None:
-        return {"error": "tube path collapsed to one point — give distinct control points"}
-    me = bpy.data.meshes.new(name)
-    me.from_pydata(verts, [], faces)
-    me.update()
-    obj = bpy.data.objects.new(name, me)
-    bpy.context.scene.collection.objects.link(obj)
-    import bmesh
-    bm = bmesh.new()
-    bm.from_mesh(me)
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)   # consistent outward winding
-    bm.to_mesh(me)
-    bm.free()
-    me.update()
-    bpy.ops.object.select_all(action='DESELECT')
-    obj.select_set(True)
-    bpy.context.view_layer.objects.active = obj
-    bpy.ops.object.shade_smooth()
-    obj = bpy.context.active_object
-
-    rounded_pts = [[round(v, 4) for v in p] for p in points]
-    obj["bb_spline_points"] = json.dumps(rounded_pts)
-    obj["bb_spline_radii"] = json.dumps([round(r, 4) for r in radii])
-
-    bpy.context.view_layer.update()
-    xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
-    result = {
-        "success": True,
-        "object_name": obj.name,
-        "points": rounded_pts,
-        "radii": [round(r, 4) for r in radii],
-        "length": round(_polyline_length(samples), 4),
-        "dimensions": [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)],
-        "world_bounds": {
-            "x": [round(xmin, 4), round(xmax, 4)],
-            "y": [round(ymin, 4), round(ymax, 4)],
-            "z": [round(zmin, 4), round(zmax, 4)],
-        },
-    }
-    # G121: preflight the bend-vs-radius feasibility at creation (instead of only via a
-    # separate feel op=curve) — warn when the tube self-intersects at a tight turn.
-    mbr = _min_bend_radius(samples)
-    result["min_bend_radius"] = round(mbr, 4) if mbr else None
-    warn = _bend_warning(mbr, max(radii), "tube")
-    if warn:
-        result.setdefault("notes", []).append(warn)
-    if rel_note:
-        result.setdefault("notes", []).append(rel_note)
-        result["relational_path"] = True
-    return result
-
-
 def add_curve(params):
     """Create a LIVE curve datablock object (not a baked mesh).
 
-    Unlike spline_tube (which samples a spline into a fixed mesh), this leaves a
+    Unlike a spline baked into a fixed mesh, this leaves a
     real editable curve object in the scene — the thing you want as a camera dolly
     path (Follow Path constraint target), a bevel/taper profile, or a scatter
     distribution control. Editable after the fact in Blender's curve tools.
@@ -602,7 +438,7 @@ def add_curve(params):
 
     raw = params.get("points") or []
     # G174: relational vector-path grown from a measured handle frame (same grammar as
-    # spline_tube) → resolve to absolute control points before the normal per-point loop.
+    # a swept tube path) → resolve to absolute control points before the normal per-point loop.
     rel_pts, rel_note, rel_err = _build_relational_path(raw)
     if rel_err:
         return {"error": rel_err}
@@ -698,109 +534,6 @@ def add_curve(params):
 
 
 _AXES = {"X": 0, "Y": 1, "Z": 2}
-
-
-def helix_coil(params):
-    """G20 — a continuous parametric helix / coil swept into a tube mesh. Subsumes
-    wire wraps, springs, screw threads, coiled cable/rope, twist-fluting — the thing
-    11 stacked torus rings only faked. Generates its OWN dense sample polyline, so it
-    sidesteps the control-point cap entirely instead of fighting it.
-
-    name:        required, unique.
-    turns:       number of full revolutions (float ok, e.g. 9 or 4.5).
-    height:      total rise along the axis in meters (0 = a flat spiral).
-    radius:      helix radius — distance of the coil centreline from the axis.
-    tube_radius: cross-section radius of the swept wire (default 0.02).
-    taper:       end/start tube_radius ratio (1.0 = uniform; 0.5 = wire halves along
-                 its length; >1 = thickens). Tapers the wire thickness, not the coil.
-    handedness:  'right' (default, CCW rising) | 'left'.
-    axis:        coil axis X|Y|Z (default Z).
-    center:      [x,y,z] base centre of the coil (default origin = world cursor 0).
-    segments_per_turn: samples per revolution (default 24; higher = rounder).
-    sides:       tube cross-section resolution (default 4 → 16-sided)."""
-    name = params.get("name")
-    if not name:
-        return {"error": "'name' is required"}
-    if bpy.data.objects.get(name) is not None:
-        return {"error": f"Object '{name}' already exists — choose a different name"}
-
-    import math
-    turns = float(params.get("turns", 3))
-    if turns <= 0:
-        return {"error": "'turns' must be > 0"}
-    height = float(params.get("height", 0.2))
-    radius = float(params.get("radius", 0.05))
-    if radius <= 0:
-        return {"error": "'radius' must be > 0"}
-    tube_radius = float(params.get("tube_radius", 0.02))
-    if tube_radius <= 0:
-        return {"error": "'tube_radius' must be > 0"}
-    taper = float(params.get("taper", 1.0))
-    if taper <= 0:
-        return {"error": "'taper' must be > 0 (end/start thickness ratio)"}
-    handed = (params.get("handedness") or "right").lower()
-    sign = -1.0 if handed.startswith("l") else 1.0
-    axis = (params.get("axis") or "Z").upper()
-    if axis not in _AXES:
-        return {"error": "'axis' must be X, Y, or Z"}
-    ai = _AXES[axis]
-    ui, vi = [i for i in range(3) if i != ai]   # the two in-plane axes
-    center = params.get("center") or [0.0, 0.0, 0.0]
-    if not (isinstance(center, (list, tuple)) and len(center) == 3):
-        return {"error": "'center' must be [x, y, z]"}
-    spt = max(3, min(int(params.get("segments_per_turn", 24)), 128))
-    sides = max(2, min(int(params.get("sides", 4)), 16))
-
-    n = max(2, int(round(turns * spt)))
-    samples, radii = [], []
-    for i in range(n + 1):
-        t = i / n
-        ang = sign * 2.0 * math.pi * turns * t
-        p = [0.0, 0.0, 0.0]
-        p[ui] = center[ui] + radius * math.cos(ang)
-        p[vi] = center[vi] + radius * math.sin(ang)
-        p[ai] = center[ai] + height * t
-        samples.append(p)
-        radii.append(tube_radius * (1.0 + (taper - 1.0) * t))
-
-    if bpy.context.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
-
-    cu = bpy.data.curves.new(name, type='CURVE')
-    cu.dimensions = '3D'
-    cu.bevel_depth = 1.0
-    cu.bevel_resolution = sides
-    cu.use_fill_caps = True
-    spline = cu.splines.new('POLY')
-    spline.points.add(len(samples) - 1)
-    for pt, r, cpt in zip(samples, radii, spline.points):
-        cpt.co = (pt[0], pt[1], pt[2], 1.0)
-        cpt.radius = r
-
-    obj = bpy.data.objects.new(name, cu)
-    bpy.context.scene.collection.objects.link(obj)
-    bpy.ops.object.select_all(action='DESELECT')
-    obj.select_set(True)
-    bpy.context.view_layer.objects.active = obj
-    bpy.ops.object.convert(target='MESH')
-    obj = bpy.context.active_object
-    bpy.ops.object.shade_smooth()
-
-    bpy.context.view_layer.update()
-    xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
-    return {
-        "success": True,
-        "object_name": obj.name,
-        "turns": turns, "handedness": "left" if sign < 0 else "right",
-        "axis": axis,
-        "wire_length": round(_polyline_length(samples), 4),
-        "dimensions": [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)],
-        "world_bounds": {
-            "x": [round(xmin, 4), round(xmax, 4)],
-            "y": [round(ymin, 4), round(ymax, 4)],
-            "z": [round(zmin, 4), round(zmax, 4)],
-        },
-    }
 
 
 def _spline_centreline(spline, resolution):
@@ -941,8 +674,6 @@ def feel_curve(params):
 
 
 TOOLS = {
-    "spline_tube": spline_tube,
     "add_curve":   add_curve,
-    "helix_coil":  helix_coil,
     "feel_curve":  feel_curve,
 }

@@ -1,13 +1,12 @@
 """material — Material Properties / shading (SPEC-05).
 
-Assign and tune materials (PBR, textured), shade smooth/flat, and search the Poly Haven
-texture/HDRI libraries. `op` selects the operation.
+Assign and tune materials, shade smooth/flat, and search the Poly Haven texture/HDRI
+libraries. `op` selects the operation.
 
-`set`/`assign` use the stock Principled BSDF (native); `textured`/`pbr`/`toon` build a
-composite node graph (≈ Node-Wrangler "Principled Texture Setup" / the Shader-to-RGB cel
-chain) but live here because their purpose is material application. `outline` is the
-inverted-hull silhouette (native Solidify machinery). SPEC-21 §4 folded the NPR-look
-macro into these ops; the WHEN lives in guidance://techniques/npr-look.
+SPEC-22: `set`/`assign` use the stock Principled BSDF (native single operations —
+input writes + slot assign). The multi-node shader-graph builders (textured/pbr/toon)
+and the inverted-hull outline composite were stripped. Author node graphs natively via
+the modifier/material stack if needed; texture/HDRI SEARCH stays (it's a read).
 """
 
 from typing import Literal
@@ -16,69 +15,34 @@ from server._core import mcp
 from server import finishes, shaders, textures, scene
 from ._common import tag, unknown
 
-_OPS = ["set", "assign", "textured", "pbr", "toon", "outline", "remove_outline",
-        "remove_slot", "remove_unused_slots",
+_OPS = ["set", "assign", "remove_slot", "remove_unused_slots",
         "shade_smooth", "shade_flat", "search_textures", "search_hdris"]
 
 
 @mcp.tool(name="material")
 def material(
-    op: Literal["set", "assign", "textured", "pbr", "toon", "outline", "remove_outline",
-                "remove_slot", "remove_unused_slots",
+    op: Literal["set", "assign", "remove_slot", "remove_unused_slots",
                 "shade_smooth", "shade_flat", "search_textures", "search_hdris"],
     target: tag(str, "object(s) to shade: 'name', group, or 'a,b,c'") = "",
     # PBR (set)
-    base_color: tag(list, "[set/textured/toon] [r,g,b] 0..1") = None,
-    hex: tag(str, "[set/toon] #RRGGBB color") = "",
-    metallic: tag(float, "[set/textured] metallic 0..1") = None,
-    roughness: tag(float, "[set/textured] roughness 0..1") = None,
+    base_color: tag(list, "[set] [r,g,b] 0..1") = None,
+    hex: tag(str, "[set] #RRGGBB color") = "",
+    metallic: tag(float, "[set] metallic 0..1") = None,
+    roughness: tag(float, "[set] roughness 0..1") = None,
     ior: tag(float, "[set] index of refraction (glass≈1.5, water≈1.33)") = None,
     alpha: tag(float, "[set] opacity 0..1 (flat see-through)") = None,
     transmission: tag(float, "[set] 0..1 refractive solid — glass/gem/lens/water; pair with ior, roughness frosts it") = None,
     emission_color: tag(list, "[set] emission [r,g,b]") = None,
     emission_strength: tag(float, "[set] emission strength") = None,
-    material_name: tag(str, "[set/textured/toon] name for the material") = "",
+    material_name: tag(str, "[set] name for the material") = "",
     material: tag(str, "[set/assign] reuse an existing material by name") = "",
-    slot: tag(int, "[set/textured/remove_slot] material slot index") = None,
-    # textured (Poly Haven) + pbr (local folder)
-    asset_id: tag(str, "[textured] Poly Haven texture id") = "",
-    scale: tag(float, "[textured/pbr] unitless UV/texture scale (ignored if physical_size set)") = 1.0,
-    physical_size: tag(float, "[textured/pbr] real-world metres ONE texture tile should cover — "
-                              "derives the box-projection scale from the object's measured size "
-                              "so grain reads at a true physical scale (G141)") = 0.0,
-    space: tag(str, "[textured/pbr] box (default) | uv. box = object-coordinate box "
-                    "projection, needs NO unwrap (the default for blockout/portfolio). "
-                    "uv = read the mesh's active UV layer (run `uv op=unwrap` first) — "
-                    "only when grain must follow a curved surface. In uv mode physical_size "
-                    "is ignored and `scale` means UV tiling.") = "box",
-    resolution: tag(str, "[textured] 1k|2k|4k") = "1k",
-    tint: tag(list, "[textured/pbr] tint [r,g,b]") = None,
-    folder: tag(str, "[pbr] local texture-set folder (Poliigon/Megascans/etc.) — maps auto-detected by filename") = "",
-    size: tag(str, "[pbr] resolution subfolder/token to pick, e.g. 4K (default: largest present)") = "",
-    displacement: tag(float, "[pbr] bump-displacement strength from the height map (0=off)") = 0.0,
-    use_alpha: tag(bool, "[pbr/textured] wire a detected alpha/opacity map into transparency. "
-                         "Default False — an alpha channel in a surface scan is usually a "
-                         "mask, not whole-material transparency (auto-wiring it made an opaque "
-                         "material render invisible, G126). Set True for a real cutout.") = False,
-    # toon — the Shader-to-RGB cel graph (EEVEE only; Blender ships no stock toon preset)
-    shadow_color: tag(list, "[toon] shadow band [r,g,b]") = None,
-    bands: tag(int, "[toon] number of shading bands") = 2,
-    shadow_softness: tag(float, "[toon] band edge softness") = 0.05,
-    rim_color: tag(list, "[toon] rim light [r,g,b]") = None,
-    rim_width: tag(float, "[toon] rim width") = 0.2,
-    gradient_top: tag(list, "[toon] gradient top [r,g,b]") = None,
-    gradient_bottom: tag(list, "[toon] gradient bottom [r,g,b]") = None,
-    # outline — inverted-hull silhouette (native Solidify machinery, baked)
-    thickness: tag(float, "[outline] outline thickness (m)") = 0.01,
-    color: tag(list, "[outline] outline [r,g,b]") = None,
+    slot: tag(int, "[set/remove_slot] material slot index") = None,
     # shade_smooth
     auto_smooth_angle: tag(float, "[shade_smooth] auto-smooth angle (deg)") = 30.0,
     # search
     query: tag(str, "[search_textures/search_hdris] search keywords") = "",
     limit: tag(int, "[search_textures/search_hdris] max results") = 10,
-    source: tag(str, "[search_textures/textured] library: 'polyhaven' (default, CC0, fully "
-                     "automated) | 'poliigon' (licensed — returns the live addon-driven route, "
-                     "no silent Poly Haven substitution)") = "polyhaven",
+    source: tag(str, "[search_textures] library: 'polyhaven' (default, CC0) | 'poliigon'") = "polyhaven",
     label: str = "",
 ) -> str:
     """
@@ -90,29 +54,6 @@ def material(
       assign    — paint a material onto the LIVE edit-mode FACE SELECTION only — rim
                   bands, label patches, wainscot (select faces first, then: target,
                   material=<existing> | base_color|hex [+metallic/roughness/material_name])
-      textured  — Poly Haven PBR texture set (target, asset_id, scale, resolution,
-                  base_color/tint, metallic, roughness, slot). COMPOSITE node graph (a
-                  macro ≈ Node-Wrangler "Principled Texture Setup"); kept here as its
-                  purpose is material application.
-      pbr       — PBR material from a LOCAL texture-set folder, maps auto-detected by
-                  filename — vendor-neutral (Poliigon/Megascans/ambientCG/loose folders),
-                  no addon or login needed (target, folder, size, scale, displacement,
-                  base_color/tint, metallic, roughness, slot)
-
-      toon      — flat CEL/anime material: the native Shader-to-RGB → ColorRamp band
-                  graph, assembled (EEVEE only — Cycles has no Shader-to-RGB; known 5.x
-                  quirk: the chain ignores object emission, blender #119828). Pair with
-                  render op=color view_transform=Standard — AgX muddies flat colors.
-                  (target, base_color|hex, shadow_color, bands, shadow_softness,
-                  rim_color/width, gradient_top/bottom, material_name)
-      outline   — INVERTED-HULL silhouette outline: the flipped-normal Solidify shell,
-                  baked to mesh (target, thickness, color). For true line RENDERING
-                  reach for Line Art (Grease Pencil) instead.
-      remove_outline — strip an inverted-hull outline (target)
-
-      textured/pbr take space=box|uv: box (default) projects off object coordinates and
-      needs NO unwrap; uv reads the mesh's active UV layer (run `uv op=unwrap` first) for
-      grain that must follow a curved surface (a mug belly, a plate rim). SPEC-18.
       remove_slot — remove one material slot by index — reassign its faces FIRST
                   (Blender re-homes orphaned faces to slot 0)  (target, slot)
       remove_unused_slots — drop every slot with no faces — trim a consolidated
@@ -132,24 +73,6 @@ def material(
     if o == "assign":
         return finishes.assign_material(target, material, base_color, hex, metallic,
                                         roughness, material_name, label)
-    if o == "textured":
-        return textures.set_textured_material(target, asset_id, scale, resolution,
-                                              base_color, tint, metallic, roughness,
-                                              material_name, slot, use_alpha,
-                                              physical_size, space, source, label)
-    if o == "pbr":
-        return textures.set_pbr_material(target, folder, size, scale, displacement,
-                                         base_color, tint, metallic, roughness,
-                                         material_name, slot, use_alpha,
-                                         physical_size, space, label)
-    if o == "toon":
-        return shaders.set_toon_material(target, base_color, hex, shadow_color, bands,
-                                         shadow_softness, rim_color, rim_width,
-                                         gradient_top, gradient_bottom, material_name, label)
-    if o == "outline":
-        return shaders.add_outline(target, thickness, color, label)
-    if o == "remove_outline":
-        return shaders.remove_outline(target, label)
     if o == "remove_slot":
         return shaders.remove_material_slot(target, slot, label)
     if o == "remove_unused_slots":

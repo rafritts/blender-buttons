@@ -1,6 +1,5 @@
 """Armature / rigging primitives — the spine of character work.
 
-create_armature: build a bone skeleton from named head/tail joints + parenting.
 auto_weight:     bind a mesh to an armature with automatic weights (vertex groups
                  + an Armature modifier), so posing bones deforms the mesh.
 pose_bone:       rotate a pose bone (the per-pose articulation verb).
@@ -63,82 +62,6 @@ def _orphan_islands(obj):
     return total, len(orphan), islands
 
 
-def create_armature(params):
-    """Create an armature object from a list of bones.
-
-    name:  armature object name (required, unique).
-    bones: list of bone specs (required). Each:
-             {"name": str,
-              "head": [x, y, z],          # joint start, world coords
-              "tail": [x, y, z],          # joint end, world coords
-              "parent": str (optional),   # name of a bone defined earlier/here
-              "connected": bool (optional)}  # snap head to parent's tail + connect
-    """
-    name = params.get("name")
-    if not name:
-        return {"error": "'name' is required"}
-    if bpy.data.objects.get(name) is not None:
-        return {"error": f"Object '{name}' already exists"}
-    bones = params.get("bones") or []
-    if not bones:
-        return {"error": "'bones' must be a non-empty list of bone specs"}
-
-    names = [b.get("name") for b in bones]
-    if not all(names):
-        return {"error": "every bone needs a 'name'"}
-    if len(set(names)) != len(names):
-        return {"error": "bone names must be unique"}
-
-    arm_data = bpy.data.armatures.new(name)
-    obj = bpy.data.objects.new(name, arm_data)
-    bpy.context.scene.collection.objects.link(obj)
-    activate(obj)
-    bpy.ops.object.mode_set(mode='EDIT')
-
-    try:
-        made = {}
-        for b in bones:
-            head = b.get("head")
-            tail = b.get("tail")
-            if not (isinstance(head, (list, tuple)) and len(head) == 3):
-                return {"error": f"bone '{b['name']}': 'head' must be [x, y, z]"}
-            if not (isinstance(tail, (list, tuple)) and len(tail) == 3):
-                return {"error": f"bone '{b['name']}': 'tail' must be [x, y, z]"}
-            length = sum((tail[i] - head[i]) ** 2 for i in range(3)) ** 0.5
-            if length < 1e-5:
-                return {"error": f"bone '{b['name']}': head and tail coincide (zero length)"}
-            eb = arm_data.edit_bones.new(b["name"])
-            eb.head = tuple(float(c) for c in head)
-            eb.tail = tuple(float(c) for c in tail)
-            # deform=false → bone.use_deform off, so this bone never competes in
-            # the auto-weight heat solve (the catapult fix: root/control bones near
-            # the meshes were stealing weights; the workaround was burying them
-            # below the floor — this flag replaces that hack).
-            eb.use_deform = bool(b.get("deform", True))
-            made[b["name"]] = eb
-
-        for b in bones:
-            parent = b.get("parent")
-            if parent:
-                if parent not in made:
-                    return {"error": f"bone '{b['name']}': parent '{parent}' not defined"}
-                eb = made[b["name"]]
-                eb.parent = made[parent]
-                if b.get("connected"):
-                    eb.use_connect = True
-    finally:
-        bpy.ops.object.mode_set(mode='OBJECT')
-
-    bpy.context.view_layer.update()
-    return {
-        "success": True,
-        "object_name": obj.name,
-        "bones": [bn.name for bn in arm_data.bones],
-        "bone_count": len(arm_data.bones),
-        "non_deform_bones": [bn.name for bn in arm_data.bones if not bn.use_deform],
-    }
-
-
 def auto_weight(params):
     """Bind a mesh to an armature with automatic weights.
 
@@ -193,7 +116,7 @@ def auto_weight(params):
         warnings.append(
             f"{weighted}/{total} weighted — {orphans} orphaned vert(s) in "
             f"{len(islands)} island(s): {where}{more}. These float in place when "
-            f"posed. Rigid parts (rings/bolts) want weight_to_bone(); for organic "
+            f"posed. Rigid parts (rings/bolts) want a rigid full-weight bind; for organic "
             f"geometry add loop cuts or weight the gaps by hand."
         )
 
@@ -208,67 +131,6 @@ def auto_weight(params):
         "orphan_islands": [{"verts": n, "region": region} for n, region in islands],
         "armature_modifier": mod.name if mod else None,
         "warnings": warnings,
-    }
-
-
-def weight_to_bone(params):
-    """Rigid-bind every vertex of a mesh to ONE named bone at full weight.
-
-    mesh:     mesh object to bind (required).
-    armature: armature that owns the bone (required).
-    bone:     bone name — gets 100% weight on every vertex (required).
-
-    This is the standard game workflow for MECHANICAL parts (wheels, doors,
-    levers, turrets, throwing arms) where bone-heat's blending is actively wrong:
-    a rigid part should follow exactly one bone with no falloff. Creates a vertex
-    group named after the bone with weight 1.0 on all verts, strips any existing
-    weights for this armature's OTHER bones (so the named bone is the sole
-    influence), and creates/reuses the Armature modifier — the same plumbing
-    auto_weight lays down, minus the heat solve that orphans thin detail."""
-    mesh_name = params.get("mesh")
-    arm_name = params.get("armature")
-    bone = params.get("bone")
-    if not mesh_name or not arm_name or not bone:
-        return {"error": "'mesh', 'armature', and 'bone' are all required"}
-    mesh = bpy.data.objects.get(mesh_name)
-    arm = bpy.data.objects.get(arm_name)
-    if mesh is None or mesh.type != 'MESH':
-        return {"error": f"mesh '{mesh_name}' not found or not a mesh"}
-    if arm is None or arm.type != 'ARMATURE':
-        return {"error": f"armature '{arm_name}' not found or not an armature"}
-    if bone not in arm.data.bones:
-        return {"error": f"bone '{bone}' not found on '{arm_name}'. "
-                         f"Available: {[b.name for b in arm.data.bones]}"}
-
-    if bpy.context.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
-
-    # Strip existing weights for THIS armature's bones so the named bone is the
-    # sole influence (true rigid bind). Non-bone vertex groups are left alone.
-    bone_names = {b.name for b in arm.data.bones}
-    for vg in list(mesh.vertex_groups):
-        if vg.name in bone_names:
-            mesh.vertex_groups.remove(vg)
-
-    vg = mesh.vertex_groups.new(name=bone)
-    all_idx = [v.index for v in mesh.data.vertices]
-    vg.add(all_idx, 1.0, 'REPLACE')
-
-    mod = next((m for m in mesh.modifiers if m.type == 'ARMATURE'), None)
-    if mod is None:
-        mod = mesh.modifiers.new(name="Armature", type='ARMATURE')
-    mod.object = arm
-    mod.use_vertex_groups = True
-
-    bpy.context.view_layer.update()
-    return {
-        "success": True,
-        "mesh": mesh.name,
-        "armature": arm.name,
-        "bone": bone,
-        "weighted_vertices": len(all_idx),
-        "total_vertices": len(mesh.data.vertices),
-        "armature_modifier": mod.name,
     }
 
 
@@ -341,7 +203,7 @@ def pose_bone(params):
 
 def get_bone_tree(params):
     """Hierarchy tree of an armature's bones — the read-side complement of
-    create_armature. Filterable, because production rigs have hundreds of bones.
+    the rig. Filterable, because production rigs have hundreds of bones.
 
     armature:    armature object name (required).
     filter:      optional substring — show only bones whose name contains it
@@ -528,9 +390,7 @@ def list_constraints(params):
 
 
 TOOLS = {
-    "create_armature": create_armature,
     "auto_weight":     auto_weight,
-    "weight_to_bone":  weight_to_bone,
     "pose_bone":       pose_bone,
     "get_bone_tree":   get_bone_tree,
     "describe_bone":   describe_bone,

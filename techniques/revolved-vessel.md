@@ -4,9 +4,7 @@
 baluster, chess pawn, lamp base, wheel. The tell: one silhouette curve + one axis
 describes the whole thing.
 
-Two native authors, by starting point:
-
-## From nothing: trace the silhouette, spin it
+## Trace the silhouette, spin it
 
 1. Author the **profile** as an open edge run in a plane through the axis — e.g.
    `add type=plane`, delete down to a vertex strip, or extrude a chain of verts whose
@@ -18,31 +16,14 @@ Two native authors, by starting point:
    `feel op=topology` for watertightness where the profile allows it.
 
 Helical variants (threads, springs) are the **SCREW modifier**
-(`modifier op=add type=SCREW`), or `add type=helix` for wire forms.
+(`modifier op=add type=SCREW`).
 
-## From an existing revolve: author the silhouette directly
+## Reshaping the silhouette afterward
 
-`edit op=shape_profile axis=Z points=[[ring, radius_m], …]` sets ring radii in
-**absolute meters**, interpolating between control points — seam-safe and idempotent.
-Read ring indices first (`select op=ring` / the `edit op=trace` cross-sections), then
-type the silhouette as numbers. A goblet from a cylinder is one call:
-`points=[[0,0.05],[11,0.009],[22,0.06]]`.
-
-- **Taper / flare**: a 2-point profile (or `edit op=field channel=radial
-  field_mode=multiply preset=taper preset_a=1 preset_b=<end scale>` for a relative
-  scale — preset_b 0 collapses to a point, >1 flares a bell lip).
-- **Flutes / gadroons** (radius vs *azimuth*, not height): `edit op=field
-  channel=radial preset=lobes freq=<count> amp=<depth>` — negative-feel grooves =
-  concave flutes, outward lobes = gadroons. `amp` is the depth in **metres**: a
-  zero-centered preset (lobes/sine/bell) on `radial` defaults to `field_mode=add`,
-  so `amp=0.002` cuts a 2 mm flute. (Forcing `field_mode=multiply` instead reads
-  `amp` as a *relative* ±fraction of the radius.) Scope it to a band first (select
-  the rings) for band-local fluting.
-- **One ring**: shape_profile with a single-ring pair, or select the ring and scale.
-
-**Verify after each shaping pass:** `edit op=trace` (the measured cross-section
-silhouette) against the numbers you authored — the profile IS the design, so re-read
-it rather than eyeballing.
+The profile IS the design — to re-shape it, select the rings whose radius should change
+and `edit op=scale` them (per-ring, about the axis), then re-read with `edit op=trace`
+(the measured cross-section) against the numbers you intended. Re-read rather than
+eyeballing.
 
 ## Failure modes
 
@@ -50,5 +31,4 @@ it rather than eyeballing.
   origin ON the intended axis (radius = distance from origin); a profile whose whole
   strip sits away from the axis spins into a torus-like shell, which is sometimes the
   point (a rim) and usually not.
-- shape_profile wants an actual ring structure (a lathe-like mesh); on a blob it has
-  nothing to grip — spin a fresh profile instead.
+- On a solid blob there's no ring structure to grip — spin a fresh profile instead.

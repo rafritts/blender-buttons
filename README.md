@@ -114,11 +114,11 @@ returns 21 schemas, not hundreds of flat tools.
 | `look` | **The loop's eyes** — landmark LOD windows: `look target=` opens a salience window, `at=` descends, windows offer claimable selections |
 | `add` | Add menu — box / cylinder / sphere / torus / curve / light / camera / … with dimensions + relational `on=` placement |
 | `object` | Object Mode — select, rename, duplicate, join, group, delete |
-| `edit` | Edit Mode / Mesh menu — loop-cut, extrude, bevel, spin, bridge, boolean, plus the formula deformers (`field`/`loft`/`shape_profile`) |
+| `edit` | Edit Mode / Mesh menu — loop-cut, extrude, bevel, spin, bridge, boolean, grab/scale (with proportional editing), shrink_fatten, randomize, lattice |
 | `select` | Select menu — claim offered candidates, pick, by axis/between/radius, boundary, rings, grow/shrink, INTERSECT |
-| `transform` | move / rotate / scale / resize / snap / mirror / array |
+| `transform` | move / rotate / scale / resize / snap / distribute (relational placement) |
 | `modifier` | Modifier Properties — add/apply, incl. `op=add_asset` for the native GN modifiers (Scatter on Surface, Array-Circular, …) |
-| `material` | Material Properties / shading — solid colors, PBR-folder import, Principled values |
+| `material` | Material Properties / shading — solid colors, Principled values, texture/HDRI search |
 | `sculpt` | Sculpt Mode brushes |
 | `pose` | Pose Mode / armature — rigging, weights, binding, shape keys |
 | `scene` | Outliner + scene-level Properties |

@@ -424,9 +424,8 @@ def fit_quadric(np, P):
     squares (closed-form, exact residual). A region of quads becomes an editable formula the
     model reads in coefficient-space.
 
-    The frame is the field deformer's OWN AUTO frame (shared `_group_frame`) so the emitted
-    `expr` round-trips byte-for-byte through `edit op=field`: u along L (field `z`), v along U
-    (field `x`), height along V = the minor/normal axis (field `y`)."""
+    The frame is the fit's OWN AUTO frame (shared `_group_frame`): u along L, v along U,
+    height along V = the minor/normal axis."""
     from .fields import _group_frame
     O, L, U, V = _group_frame(np, P, "AUTO")
     rel = P - O

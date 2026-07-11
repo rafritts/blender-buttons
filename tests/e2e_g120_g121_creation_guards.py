@@ -2,8 +2,6 @@
 
   G120 — modifier add SUBSURF on a capped primitive with no holding loop near the cap warns
          about doming (and a plain box does NOT false-warn).
-  G121 — spline_tube warns when the centreline bends tighter than the tube radius
-         (self-intersection), and stays quiet on a gentle sweep.
 
 Usage: flatpak run org.blender.Blender --background --python /abs/path/to/tests/e2e_g120_g121_creation_guards.py
 """
@@ -54,21 +52,6 @@ bpy.context.active_object.name = "Box"
 res = run("add_modifier", type="SUBSURF", target="Box", levels=2)
 check("SUBSURF on a plain box does NOT false-warn", "dome" not in notes(res).lower(),
       notes(res))
-
-
-# ---- G121: tube self-intersection at a tight bend ------------------------------------
-clean()
-# a sharp U-turn whose bend radius is far below the tube radius
-res = run("spline_tube", name="Handle",
-          points=[[0, 0, 0], [0.1, 0, 0], [0.1, 0, 0.02], [0, 0, 0.02]], radius=0.03)
-check("tight tube warns about self-intersection",
-      "self-intersect" in notes(res).lower(), notes(res) or "(no notes)")
-
-clean()
-# a gentle, wide arc — feasible
-res = run("spline_tube", name="Arc",
-          points=[[0, 0, 0], [0.5, 0, 0.2], [1.0, 0, 0]], radius=0.02)
-check("gentle tube stays quiet", "self-intersect" not in notes(res).lower(), notes(res))
 
 
 print()

@@ -6,23 +6,23 @@ the shape's own params are flat, optional fields — use the ones your `type` ne
 across the dimensional primitives, exactly as in the Add menu.
 """
 
-from typing import Literal, Union
+from typing import Literal
 
 from server._core import mcp
 from server import primitives, scene
 from ._common import tag, unknown, teach
 
 _TYPES = ["box", "plane", "cylinder", "sphere", "cone", "torus", "icosphere",
-          "circle", "grid", "tube", "helix", "curve", "text", "lattice", "floor",
+          "circle", "grid", "curve", "text", "lattice",
           "light", "camera"]
 
 
 @mcp.tool(name="add")
 def add(
     type: Literal["box", "plane", "cylinder", "sphere", "cone", "torus",
-                  "icosphere", "circle", "grid", "tube", "helix", "curve", "text",
-                  "lattice", "floor", "light", "camera"],
-    name: tag(str, "object name (required except floor)") = "",
+                  "icosphere", "circle", "grid", "curve", "text",
+                  "lattice", "light", "camera"],
+    name: tag(str, "object name (required)") = "",
     # ── placement & orientation (the dimensional primitives) ──
     on: tag(dict, "[mesh primitives] placement DSL — {\"on\":\"seat\"}, {\"on_floor\":true}, …") = None,
     rot_x: tag(float, "[mesh primitives] rotation X (deg)") = 0,
@@ -40,7 +40,7 @@ def add(
     radius_bottom: tag(float, "[cone] base radius (m)") = 0,
     major_radius: tag(float, "[torus] center-to-tube radius (m)") = 0,
     minor_radius: tag(float, "[torus] tube radius (m)") = 0,
-    size: tag(float, "[floor/light] floor side length / light size (m); [text] cap height (m)") = 0,
+    size: tag(float, "[light] light size (m); [text] cap height (m)") = 0,
     # ── resolution / topology ──
     segments: tag(int, "[cylinder/cone/sphere/circle] segments around") = 0,
     rings: tag(int, "[sphere] latitudinal rings") = 0,
@@ -58,21 +58,12 @@ def add(
     v: tag(int, "[lattice] control-point resolution on V (default 4)") = 0,
     w: tag(int, "[lattice] control-point resolution on W (default 4)") = 0,
     margin: tag(float, "[lattice] fractional oversize so the cage fully encloses (default 0.02)") = None,
-    # ── curve / tube (type=curve|tube) ──
-    points: tag(list, "[tube/curve] control points the curve passes through") = None,
-    between: tag(list, "[tube] connect two anchors [A,B] — straight tube, nearest-surface endpoints (alt to points)") = None,
+    # ── curve (type=curve) ──
+    points: tag(list, "[curve] control points the curve passes through") = None,
     subtype: tag(str, "[light] POINT|SUN|SPOT|AREA · [curve] BEZIER|NURBS|POLY") = "",
     cyclic: tag(bool, "[curve] close the curve into a loop") = False,
-    resolution: tag(int, "[tube/curve] samples per segment") = 0,
-    sides: tag(int, "[tube/helix] cross-section smoothness") = 0,
+    resolution: tag(int, "[curve] samples per segment") = 0,
     bevel_depth: tag(float, "[curve] round-bevel radius → solid tube (m)") = 0,
-    tube_radius: tag(Union[float, list], "[tube] radius float OR per-point list for taper; [helix] wire radius (float)") = None,
-    # ── helix / coil (type=helix) ──
-    turns: tag(float, "[helix] number of full revolutions") = 0,
-    taper: tag(float, "[helix] end/start wire-thickness ratio (1=uniform)") = 0,
-    handedness: tag(str, "[helix] right (default) | left") = "",
-    axis: tag(str, "[helix] coil axis X|Y|Z (default Z)") = "",
-    segments_per_turn: tag(int, "[helix] samples per revolution (default 24)") = 0,
     # ── light / camera (type=light|camera) ──
     energy: tag(float, "[light] strength (watts; SUN ~5)") = 0,
     color: tag(list, "[light] [r,g,b] 0..1") = None,
@@ -96,27 +87,10 @@ def add(
         torus      — major_radius, minor_radius, major_segments, minor_segments
         icosphere  — radius, subdivisions                (uniform tris; prefer for sculpt)
         circle     — radius, segments, fill_type         (NOTHING|NGON|TRIFAN)
-        floor      — size                                (ground plane at z=0)
         grid       — width, depth, x_subdivisions, y_subdivisions  (a flat subdivided
                      PLANE: a width×depth rectangle of verts already wired into quad
-                     topology. Native Add > Mesh > Grid. The sheet you VACUUM-FORM: lay it
-                     down, then pull it onto a mould with edit op=loft
-                     (keyed cross-sections) or op=field (one function) — the grid is the
-                     hot plastic, the mould is authored. Vary the mould down the sheet or
-                     it forms a flat ribbon.)
-      CURVES (take name, points)  — tube/helix are composite MACROS (SPEC-20): they kept
-      their home under `add` because their purpose IS construction, but each carries an
-      R1 native-cousin note below:
-        tube       — points + tube_radius (float OR per-point list for taper),
-                     resolution, sides    (baked tube MESH — hair/cable/handle).
-                     OR between=[A,B] to strut/connect two objects (nearest-surface
-                     endpoints — no coordinates).  MACRO ≈ a Curve + Bevel / Blender 5.0's
-                     native "Curve to Tube" modifier; tube bakes the swept mesh in one call.
-        helix      — turns, height, radius, tube_radius, taper, handedness, axis,
-                     segments_per_turn, sides  (continuous coil MESH — wire wrap,
-                     spring, screw thread, coiled rope; no point cap). Spawns at the
-                     origin — re-seat it relationally with transform op=place.
-                     MACRO ≈ the native Screw modifier / a swept curve.
+                     topology. Native Add > Mesh > Grid.)
+      CURVES (take name, points):
         curve      — points + subtype (BEZIER|NURBS|POLY), cyclic, resolution,
                      bevel_depth          (LIVE curve datablock — dolly path, rope)
         text       — body=<string>, size (cap height), depth (extrude), bevel
@@ -126,28 +100,26 @@ def add(
         lattice    — enclose=<object> (or width/depth/height), u/v/w resolution,
                      margin. A u×v×w control-point cage that warps a dense mesh
                      non-destructively. Bind it: modifier op=add type=LATTICE
-                     host=<mesh> target=<lattice>; push points: transform op=lattice.
+                     host=<mesh> target=<lattice>; push points: edit op=lattice.
       OBJECTS (spawn at a default viewpoint — re-seat relationally with
       transform op=place / op=nudge, or aim with target=<object>):
         light      — subtype (POINT|SUN|SPOT|AREA), energy, color|hex,
                      size, target, spot_angle
         camera     — target=<object>, lens   (focal mm; 35 wide, 85 portrait)
 
-    name: REQUIRED for everything except floor (defaults to 'floor').
+    name: REQUIRED.
     on:   placement DSL for mesh primitives — {"on":"seat"}, {"between":[...]},
           {"at_corner":{...}}, {"on_floor":true}, {"gap":0.01}, … (see primitives.py).
     """
     t = type.lower().strip()
     r = [rot_x, rot_y, rot_z]
 
-    # G23 move 3 — teaching errors. name is required for everything but floor; the
-    # curve types are inert without the points they pass through.
-    if t != "floor" and t in _TYPES and not name:
+    # G23 move 3 — teaching errors. name is required; the curve types are inert
+    # without the points they pass through.
+    if t in _TYPES and not name:
         return (f"add type={t}: needs name=<object name> — got none. "
                 f"e.g. add type={t} name=my_{t}")
     bad = teach("add", "type", t, {
-        "tube":  (bool(points) or bool(between), "points=[...] the tube passes through, or between=[A,B]",
-                  "add type=tube name=cable points=[[0,0,0],[0,0,1]] tube_radius=0.02"),
         "curve": (bool(points), "points=[...] control points",
                   "add type=curve name=path points=[[0,0,0],[1,0,0]] subtype=BEZIER"),
         "text":  (bool(body), "body=<string> the characters to render",
@@ -182,22 +154,10 @@ def add(
         return primitives.add_circle(
             name, radius, on, segments or None, segments or 32,
             fill_type or "NOTHING", *r, label)
-    if t == "floor":
-        return primitives.add_floor(name or "floor", size or 10.0, label)
     if t == "grid":
         return primitives.add_grid(
             name, width or 1.0, depth or 1.0,
             x_subdivisions or 10, y_subdivisions or 10, on, *r, label)
-    if t == "tube":
-        return primitives.spline_tube(
-            name, points or [], tube_radius if tube_radius is not None else 0.02,
-            resolution or 8, sides or 4, label, between)
-    if t == "helix":
-        return primitives.helix_coil(
-            name, turns or 3, height or 0.2, radius or 0.05,
-            (tube_radius if isinstance(tube_radius, (int, float)) else None) or 0.02,
-            taper or 1.0, handedness or "right", axis or "Z", None,
-            segments_per_turn or 24, sides or 4, label)
     if t == "curve":
         return primitives.add_curve(
             name, points or [], subtype or "BEZIER", cyclic, resolution or 12,

@@ -2,37 +2,6 @@ from server._core import mcp, call_blender, _status, _targets
 
 
 @mcp.tool()
-def round_corners(target: str, corners: list, radius: float = 0.02,
-                  segments: int = 6, label: str = "") -> str:
-    """
-    Round specific vertical corners of an object with a given world-space radius.
-
-    Where `smooth_edges` does a small uniform bevel over every edge of an object,
-    `round_corners` rounds ONLY the named corners — and by a real radius (e.g. 2cm),
-    not the 1-3mm refinement that smooth_edges produces.
-
-    target:   object name.
-    corners:  list of "front_left" | "front_right" | "back_left" | "back_right".
-              Each identifies a vertical edge at that XY corner of the bounding box.
-    radius:   the rounding radius in meters. Default 0.02 (2cm — typical seat-front round).
-    segments: smoothness of the curve. Default 6 (looks like a hand-routed roundover).
-
-    Example: round_corners("seat", corners=["front_left", "front_right"], radius=0.025)
-             → rounds just the two front corners of the seat by 25mm.
-
-    Works on already-smoothed meshes: the corner matcher tolerates the small bevels
-    left behind by smooth_edges. Re-applies shade_smooth so the new curve reads smooth.
-    """
-    result = call_blender("round_corners", {
-        "target": target, "corners": corners, "radius": radius, "segments": segments,
-    }, label=label)
-    if result.get("success"):
-        return (f"rounded {result['edges_beveled']} corner edge(s) of '{target}' "
-                f"({corners}) by {radius}m [{result.get('op_id','')}]" + _status(result))
-    return result.get("error", "failed")
-
-
-@mcp.tool()
 def bend(targets: str, angle: float, axis: str = "X", apply: bool = True,
          label: str = "") -> str:
     """
@@ -69,69 +38,6 @@ def bend(targets: str, angle: float, axis: str = "X", apply: bool = True,
         for warning in result.get("warnings", []):
             main += f"\n⚠ {warning}"
         return main + _status(result)
-    return result.get("error", "failed")
-
-
-@mcp.tool()
-def noise_displace(target: str = "", strength: float = 0.05, scale: float = 0.5,
-                   detail: int = 2, direction: str = "NORMAL", apply: bool = True,
-                   label: str = "") -> str:
-    """
-    Coherent organic surface noise (G55) — break a soft form up into LUMPS with a
-    DISPLACE modifier driven by a procedural noise texture.
-
-    The difference from edit op=jitter: jitter is per-vertex WHITE noise (each vert
-    hops on its own → spiky, incoherent), this samples a SMOOTH noise field so
-    neighbouring verts move together → real lumps. The move for foliage canopies,
-    terrain, bark, rock. Noise is sampled in WORLD space, so copies at different
-    positions break up differently for free (scattered bushes won't look identical).
-
-    target:    mesh to break up (empty = active).
-    strength:  ≈ peak displacement in meters (default 0.05). The amount.
-    scale:     feature size (default 0.5). Larger = bigger, broader lumps; smaller =
-               finer, busier detail.
-    detail:    extra octaves of finer noise on top of the big lumps (default 2).
-    direction: NORMAL (default — push along each vert's normal, the organic puff) |
-               X | Y | Z.
-    apply:     bake into the mesh (default True). False keeps the modifier live.
-
-    NEEDS RESOLUTION: displacement only moves existing verts — a coarse primitive
-    barely ripples. remesh / loop_cut / subdivide first. Rigged/keyed meshes refused
-    when apply=True (duplicate + strip first, or apply=False).
-    """
-    result = call_blender("noise_displace", {
-        "target": target, "strength": strength, "scale": scale, "detail": detail,
-        "direction": direction, "apply": apply,
-    }, label=label)
-    if result.get("success"):
-        state = "baked" if result.get("applied") else f"live modifier '{result.get('modifier')}'"
-        return (f"noise_displace '{result['object']}' strength={strength}m scale={scale} "
-                f"dir={result['direction']} ({state}): dims {result['dims_before']} → "
-                f"{result['dims_after']} [{result.get('op_id','')}]" + _status(result))
-    return result.get("error", "failed")
-
-
-@mcp.tool()
-def smooth_edges(targets: str = "", width: float = 0.002, segments: int = 2,
-                 angle_limit: float = 30.0, label: str = "") -> str:
-    """
-    Round off sharp edges on objects so they don't look blocky.
-    Bundles BEVEL (with angle-limit so only sharp edges are beveled, not coplanar ones)
-    + shade_smooth + auto_smooth + apply, in one call.
-
-    targets: object name, group name, or comma-separated list. Empty = active object.
-    width: bevel offset in meters (default 2mm — small, refined edge).
-    segments: more = smoother curve (2 is a good default for furniture; 3+ for hero objects).
-    angle_limit: only edges sharper than this (degrees) get beveled. Default 30°.
-
-    Example: smooth_edges("chair", width=0.003) — round every edge in the chair group.
-    """
-    result = call_blender("smooth_edges", {
-        "targets": _targets(targets), "width": width, "segments": segments, "angle_limit": angle_limit,
-    }, label=label)
-    if result.get("success"):
-        return (f"smoothed: {result['smoothed']} (width={width}m, segs={segments}, "
-                f"angle<{angle_limit}°) [{result.get('op_id','')}]" + _status(result))
     return result.get("error", "failed")
 
 

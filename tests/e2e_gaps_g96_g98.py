@@ -1,6 +1,6 @@
 """E2E for the G96-G98 gap fixes — runs the WORKING-TREE extension headless.
 
-  G96 — the flute engine (now the lobes preset of edit op=field, SPEC-21 §4) respects the live vertex selection (band-local fluting), and
+  G96 — the flute engine respects the live vertex selection (band-local fluting), and
         computes its rotation center from the selection, not the whole-mesh centroid.
   G97 — the clad engine (surface retired → guidance://techniques/shell, SPEC-21 §4): one-call surface-offset SHELL (clearance + wall) following a
         region (whole / selection / trunk).

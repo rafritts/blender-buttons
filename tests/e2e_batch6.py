@@ -11,7 +11,6 @@ import bpy  # noqa: E402
 
 from extension import server as bb_server            # noqa: E402
 from extension.viewport import find_view3d_context   # noqa: E402
-from extension.common import eval_world_bbox          # noqa: E402
 
 failures = []
 
@@ -89,26 +88,6 @@ if area is not None:
     check("no-flags call errors helpfully", "error" in none_given, str(none_given))
 else:
     check("no-viewport handled gracefully", "error" in ov, str(ov))
-
-# ───────────────────── T5: hide an armature, deformation continues ─────────────────────
-print("== T5: set_object_visibility hides bones but keeps deform ==")
-clean()
-run("add_box", name="limb", width=0.3, depth=0.3, height=2.0, on={"at": [0, 0, 1.0]})
-run("loop_cut", target="limb", axis="Z", cuts=8)
-run("create_armature", name="limb_rig", bones=[
-    {"name": "lower", "head": [0, 0, 0],   "tail": [0, 0, 1.0]},
-    {"name": "upper", "head": [0, 0, 1.0], "tail": [0, 0, 2.0], "parent": "lower", "connected": True},
-])
-run("auto_weight", mesh="limb", armature="limb_rig")
-run("pose_bone", armature="limb_rig", bone="upper", rot=[80, 0, 0])
-vis = run("set_object_visibility", name="limb_rig", viewport=False)
-check("set_object_visibility success", vis.get("success") is True, str(vis))
-check("armature hidden in viewport", bpy.data.objects["limb_rig"].hide_viewport is True)
-check("reports viewport hidden", vis.get("viewport_visible") is False, str(vis))
-# The bound mesh is STILL deformed (Armature modifier evaluates regardless of vis).
-xmin, ymin, zmin, xmax, ymax, zmax = eval_world_bbox(bpy.data.objects["limb"])
-check("bound mesh still deformed after hiding the rig", (ymax - ymin) > 0.6,
-      f"depth={(ymax - ymin):.3f}")
 
 print()
 if failures:

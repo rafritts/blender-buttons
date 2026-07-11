@@ -191,25 +191,6 @@ r = run("move_vertices", x=0.0, y=0.0, z=0.2)
 check("edit on Basis is NOT shadowed", not r.get("shape_key_warning"), repr(r.get("shape_key_warning")))
 run("set_mode", mode="OBJECT")
 
-# Precedence (Y1c): a keyed AND cage-bound mesh, position-only edit → the shape-key
-# warning wins; bind_shadowed must NOT also fire (it would misdirect the diagnosis).
-clean()
-run("add_sphere", name="cloth", radius=1.0, segments=16, rings=12)
-run("add_box", name="cage", width=2.6, depth=2.6, height=2.6)
-run("select_object", name="cloth")
-rb = run("bind_mesh_deform", mesh="cloth", cage="cage")
-if rb.get("bound"):
-    obj = bpy.data.objects["cloth"]
-    obj.shape_key_add(name="Basis")
-    k = obj.shape_key_add(name="corrective"); k.value = 0.0
-    obj.active_shape_key_index = 1
-    r = run("move_vertices", x=0.0, y=0.0, z=0.1, target="cloth")
-    check("keyed+bound: shape-key warning fires", bool(r.get("shape_key_warning")), repr(r.keys()))
-    check("keyed+bound: bind_shadowed SUPPRESSED (precedence)", not r.get("bind_shadowed"), repr(r))
-else:
-    print("  skip  bind_mesh_deform setup failed (live-only?) — precedence check skipped")
-
-
 # ───────── X3B / Y2: select_boundary + crease the rim ─────────
 print("== X3B/Y2: select_boundary grabs an open rim, set_edge_crease aims at it ==")
 clean()

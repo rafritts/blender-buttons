@@ -17,7 +17,7 @@ def uv_unwrap(target: str, method: str = "smart", angle_limit: float = 66.0,
 
     Box projection (`material` without space=uv) needs none of this and is the default;
     unwrap only when grain must follow a curved surface (a mug belly, a plate rim, wood
-    edge grain). After unwrapping, consume it with `material op=pbr/textured space=uv`.
+    edge grain). After unwrapping, feed the UV layer to a UV-projected material node graph.
 
     target:          object, group/collection, or 'a,b,c' — each mesh unwrapped
                      INDEPENDENTLY (UVs are per-mesh).

@@ -22,7 +22,7 @@ def band_around(name: str, targets: str, axis: str = "Z", at: float = None,
     thickness: how far it stands proud of the surface. Default 0.02 (2cm).
 
     The result is a closed mesh loop — material it (set_material hex=...), group it,
-    duplicate_mirrored it like any object.
+    mirror it with a MIRROR modifier like any object.
 
     Example — gold strap around a chest (body+lid) two-thirds up:
       band_around("strap", targets="chest_body,chest_lid", axis="Y", at=0.6,

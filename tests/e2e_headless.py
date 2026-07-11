@@ -37,7 +37,7 @@ for obj in list(bpy.data.objects):
     bpy.data.objects.remove(obj, do_unlink=True)
 
 print("== dispatch registration ==")
-for t in ("spline_tube", "bend", "scale_group"):
+for t in ("bend", "scale_group"):
     check(f"{t} in dispatch", t in bb_server.TOOLS)
 
 print("== placement: at ==")
@@ -72,53 +72,7 @@ r = run("resize", targets="t_box", height=0.3)
 check("unrotated resize success", r.get("success"), r.get("error"))
 check("no warning on unrotated", not r.get("warnings"), r.get("warnings"))
 
-print("== spline_tube ==")
-r = run("spline_tube", name="t_tube",
-        points=[{"near": "t_box", "offset": [0.2, 0, 0]}, [1.5, 2.2, 2.5], [1.7, 2.0, 2.0]],
-        radius=[0.03, 0.02, 0.005], resolution=8)
-check("spline_tube success", r.get("success"), r.get("error"))
-tube = bpy.data.objects.get("t_tube")
-check("tube exists as mesh", tube is not None and tube.type == 'MESH',
-      getattr(tube, "type", None))
-check("tube has verts", tube is not None and len(tube.data.vertices) > 50,
-      len(tube.data.vertices) if tube else 0)
-check("through-points stored", tube is not None and tube.get("bb_spline_points") is not None)
-check("length reported", r.get("length", 0) > 0.5, r.get("length"))
-# first anchored point = t_box center + offset
-p0 = r["points"][0]
-expected0 = [1.2, 2.0, 3.0]
-check("anchored point resolved", all(abs(p0[i] - expected0[i]) < 1e-3 for i in range(3)), p0)
-
-print("== spline_tube validation ==")
-r = run("spline_tube", name="t_tube2", points=[[0, 0, 0]])
-check("1 point rejected", "error" in r, r)
-r = run("spline_tube", name="t_tube2", points=[[0, 0, 0], {"near": "missing"}])
-check("missing anchor rejected", "error" in r and "not found" in r["error"], r)
-r = run("spline_tube", name="t_tube2", points=[[0, 0, 0], [1, 1, 1]], radius=[0.1])
-check("radius count mismatch rejected", "error" in r, r)
-
-print("== materials introspection ==")
-r = run("set_material", target="t_tube", base_color=[0.9, 0.2, 0.2], roughness=0.4)
-check("set_material success", r.get("success"), r.get("error"))
-r = run("describe", name="t_tube")
-check("describe success", r.get("success"), r.get("error"))
-mats = r.get("materials", [])
-check("describe reports material", mats and mats[0].get("name") == "t_tube_mat", mats)
-check("describe reports color", mats and mats[0].get("base_color", [0])[0] == 0.9, mats)
-check("describe mentions spline", "spline tube through" in r.get("description", ""),
-      r.get("description"))
-r = run("get_object_info", name="t_tube")
-check("get_object_info materials", r["info"].get("materials") is not None,
-      r["info"].keys())
-
 print("== bend ==")
-before = world_bbox(bpy.data.objects["t_tube"])
-r = run("bend", targets="t_tube", angle=90, axis="X")
-check("bend success", r.get("success"), r.get("error"))
-after = world_bbox(bpy.data.objects["t_tube"])
-changed = any(abs(before[i] - after[i]) > 1e-4 for i in range(6))
-check("bend changed geometry", changed, (before, after))
-check("bend applied (no modifier left)", len(bpy.data.objects["t_tube"].modifiers) == 0)
 r = run("bend", targets="t_box", angle=45)  # box long axis warning not expected (cube)
 check("bend works on box", r.get("success"), r.get("error"))
 
@@ -135,75 +89,6 @@ check("parts scaled ×2", abs((da[3] - da[0]) - 0.4) < 1e-4, da)
 check("z preserved at pivot", abs(ca[2] - 1.0) < 1e-4, ca)
 r = run("scale_group", targets=["g_a", "g_b"], factor=0.5, pivot="bottom_center")
 check("bottom_center pivot works", r.get("success"), r.get("error"))
-
-print("== mirror_across replace ==")
-run("add_box", name="arm_R", width=0.1, depth=0.1, height=0.4, on={"at": [0.3, 0, 1]})
-r = run("mirror_across", targets="arm_R", plane="X", replace=["_R", "_L"])
-check("mirror replace success", r.get("success"), r.get("error"))
-check("arm_L created", bpy.data.objects.get("arm_L") is not None,
-      r.get("mirrored_to"))
-cl = world_center(bpy.data.objects["arm_L"])
-check("arm_L mirrored to -X", abs(cl[0] + 0.3) < 1e-4, cl)
-r = run("mirror_across", targets="t_box", plane="X", replace=["_R", "_L"])
-check("no-token falls back to suffix", "t_box_mirror" in r.get("mirrored_to", []), r)
-
-print("== T1 set_toon_material ==")
-run("add_sphere", name="toon_ball", radius=0.5, on={"at": [5, 0, 0]})
-r = run("set_toon_material", target="toon_ball", base_color=[0.2, 0.5, 0.9], bands=3)
-check("toon success", r.get("success"), r.get("error"))
-tmat = bpy.data.objects["toon_ball"].data.materials[0]
-check("toon material assigned", tmat is not None and tmat.get("bb_toon") is not None)
-import json as _json
-stored = _json.loads(tmat["bb_toon"]) if tmat and tmat.get("bb_toon") else {}
-check("bb_toon round-trips bands", stored.get("bands") == 3, stored.get("bands"))
-check("bb_toon round-trips base_color", stored.get("base_color")[:3] == [0.2, 0.5, 0.9], stored.get("base_color"))
-check("bb_toon graph_version", stored.get("graph_version") == 1)
-nodes = tmat.node_tree.nodes
-has_s2rgb = any(n.bl_idname == "ShaderNodeShaderToRGB" for n in nodes)
-check("graph has ShaderToRGB", has_s2rgb)
-ramp = next((n for n in nodes if n.bl_idname == "ShaderNodeValToRGB"), None)
-check("graph has ColorRamp", ramp is not None)
-check("ColorRamp is CONSTANT", ramp is not None and ramp.color_ramp.interpolation == "CONSTANT",
-      ramp.color_ramp.interpolation if ramp else None)
-check("ColorRamp has 3 stops", ramp is not None and len(ramp.color_ramp.elements) == 3,
-      len(ramp.color_ramp.elements) if ramp else 0)
-# idempotent reuse: second call, different shadow_color, same datablock
-n_mats_before = len(bpy.data.materials)
-r = run("set_toon_material", target="toon_ball", base_color=[0.2, 0.5, 0.9],
-        bands=3, shadow_color=[0.1, 0.1, 0.3])
-check("toon reuse success", r.get("success"), r.get("error"))
-check("no .001 duplicate material", len(bpy.data.materials) == n_mats_before,
-      (n_mats_before, len(bpy.data.materials)))
-check("same material datablock", bpy.data.objects["toon_ball"].data.materials[0] == tmat)
-r = run("describe", name="toon_ball")
-check("describe mentions toon", "toon(" in r.get("description", ""), r.get("description"))
-
-print("== T2 add_outline / remove_outline ==")
-run("add_box", name="out_box", width=0.5, depth=0.5, height=0.5, on={"at": [7, 0, 0]})
-r = run("add_outline", target="out_box", thickness=0.01, color=[0, 0, 0])
-check("add_outline success", r.get("success"), r.get("error"))
-ob = bpy.data.objects["out_box"]
-omod = ob.modifiers.get("bb_outline")
-check("bb_outline modifier exists", omod is not None)
-check("outline normals flipped", omod is not None and omod.use_flip_normals)
-check("outline material_offset=1", omod is not None and omod.material_offset == 1)
-check("two material slots", len(ob.data.materials) == 2, len(ob.data.materials))
-slot1 = ob.data.materials[1] if len(ob.data.materials) > 1 else None
-check("slot1 backface-culled", slot1 is not None and slot1.use_backface_culling)
-check("slot1 is emission", slot1 is not None and any(
-    n.bl_idname == "ShaderNodeEmission" for n in slot1.node_tree.nodes))
-# remove restores 1 slot, 0 outline modifiers
-r = run("remove_outline", target="out_box")
-check("remove_outline success", r.get("success"), r.get("error"))
-check("one slot after remove", len(ob.data.materials) == 1, len(ob.data.materials))
-check("no bb_outline modifier after remove", ob.modifiers.get("bb_outline") is None)
-# composes with toon: slot 0 toon material untouched
-r = run("add_outline", target="toon_ball", thickness=0.008)
-check("outline on toon success", r.get("success"), r.get("error"))
-tb = bpy.data.objects["toon_ball"]
-check("toon still in slot 0", tb.data.materials[0].get("bb_toon") is not None,
-      tb.data.materials[0].name if tb.data.materials[0] else None)
-check("outline appended after toon", len(tb.data.materials) == 2, len(tb.data.materials))
 
 print("== T3 undo / redo / verification ==")
 for i in range(5):
@@ -281,105 +166,7 @@ check("world depth unchanged", abs((b1[4] - b1[1]) - (b0[4] - b0[1])) < 1e-4,
 check("world height unchanged", abs((b1[5] - b1[2]) - (b0[5] - b0[2])) < 1e-4,
       (b1[5] - b1[2], b0[5] - b0[2]))
 
-print("== T6 set_textured_material (node wiring from local paths) ==")
 _texdir = os.path.dirname(os.path.abspath(__file__))
-def _make_img(nm, col):
-    im = bpy.data.images.new(nm, 4, 4)
-    im.pixels = list(col) * 16
-    p = os.path.join(_texdir, f"_{nm}.png")
-    im.filepath_raw = p
-    im.file_format = 'PNG'
-    im.save()
-    return p
-_dif = _make_img("texdif", [0.6, 0.3, 0.1, 1])
-_nor = _make_img("texnor", [0.5, 0.5, 1.0, 1])
-_rgh = _make_img("texrgh", [0.4, 0.4, 0.4, 1])
-run("add_box", name="tex_box", width=0.6, depth=0.6, height=0.6, on={"at": [46, 0, 0]})
-r = run("set_textured_material", target="tex_box",
-        maps={"diffuse": _dif, "normal": _nor, "roughness": _rgh},
-        scale=2.0, asset_id="test_asset", resolution="1k")
-check("set_textured_material success", r.get("success"), r.get("error"))
-txmat = bpy.data.objects["tex_box"].data.materials[0]
-img_nodes = [n for n in txmat.node_tree.nodes if n.bl_idname == 'ShaderNodeTexImage']
-check("3 image texture nodes", len(img_nodes) == 3, len(img_nodes))
-check("all BOX projection", all(n.projection == 'BOX' for n in img_nodes),
-      [n.projection for n in img_nodes])
-check("projection_blend 0.2", all(abs(n.projection_blend - 0.2) < 1e-6 for n in img_nodes))
-cspaces = sorted(n.image.colorspace_settings.name for n in img_nodes)
-check("colorspaces: 1 sRGB + 2 Non-Color",
-      cspaces.count('sRGB') == 1 and cspaces.count('Non-Color') == 2, cspaces)
-check("has NormalMap node", any(n.bl_idname == 'ShaderNodeNormalMap'
-                                for n in txmat.node_tree.nodes))
-check("has Mapping node", any(n.bl_idname == 'ShaderNodeMapping'
-                              for n in txmat.node_tree.nodes))
-txstore = _json.loads(txmat["bb_texture"]) if txmat.get("bb_texture") else {}
-check("bb_texture asset_id round-trips", txstore.get("asset_id") == "test_asset", txstore)
-check("bb_texture scale round-trips", txstore.get("scale") == 2.0, txstore)
-r = run("describe", name="tex_box")
-check("describe mentions texture", "texture(" in r.get("description", ""), r.get("description"))
-
-print("== T6b set_textured_material metal map + overrides ==")
-_met = _make_img("texmet", [1.0, 1.0, 1.0, 1])
-run("add_box", name="tex_box_m", width=0.6, depth=0.6, height=0.6, on={"at": [48, 0, 0]})
-r = run("set_textured_material", target="tex_box_m",
-        maps={"diffuse": _dif, "roughness": _rgh, "metal": _met},
-        asset_id="test_metal", resolution="1k")
-check("metal-map wiring success", r.get("success"), r.get("error"))
-_mmat = bpy.data.objects["tex_box_m"].data.materials[0]
-_mbsdf = next(n for n in _mmat.node_tree.nodes if n.bl_idname == 'ShaderNodeBsdfPrincipled')
-check("Metallic input linked to metal map", _mbsdf.inputs['Metallic'].is_linked)
-check("metal map is Non-Color",
-      next((n.image.colorspace_settings.name for n in _mmat.node_tree.nodes
-            if n.bl_idname == 'ShaderNodeTexImage' and 'texmet' in n.image.filepath), None)
-      == 'Non-Color')
-run("add_box", name="tex_box_o", width=0.6, depth=0.6, height=0.6, on={"at": [50, 0, 0]})
-r = run("set_textured_material", target="tex_box_o",
-        maps={"diffuse": _dif, "roughness": _rgh, "metal": _met},
-        base_color=[1.0, 0.55, 0.09], metallic=1.0,
-        asset_id="test_gold", resolution="1k")
-check("override wiring success", r.get("success"), r.get("error"))
-_omat = bpy.data.objects["tex_box_o"].data.materials[0]
-_obsdf = next(n for n in _omat.node_tree.nodes if n.bl_idname == 'ShaderNodeBsdfPrincipled')
-check("Base Color NOT linked (override)", not _obsdf.inputs['Base Color'].is_linked)
-check("Base Color override value",
-      abs(_obsdf.inputs['Base Color'].default_value[0] - 1.0) < 1e-6
-      and abs(_obsdf.inputs['Base Color'].default_value[1] - 0.55) < 1e-6)
-check("Metallic NOT linked (override)", not _obsdf.inputs['Metallic'].is_linked)
-check("Metallic forced to 1.0", abs(_obsdf.inputs['Metallic'].default_value - 1.0) < 1e-6)
-check("roughness still linked", _obsdf.inputs['Roughness'].is_linked)
-_ostore = _json.loads(_omat["bb_texture"])
-check("bb_texture records overrides",
-      _ostore.get("metallic") == 1.0 and _ostore.get("base_color") == [1.0, 0.55, 0.09],
-      _ostore)
-
-print("== T6c set_textured_material tint + roughness override ==")
-run("add_box", name="tex_box_t", width=0.6, depth=0.6, height=0.6, on={"at": [52, 0, 0]})
-r = run("set_textured_material", target="tex_box_t",
-        maps={"diffuse": _dif, "roughness": _rgh},
-        tint=[0.5, 0.4, 0.35], roughness=1.0,
-        asset_id="test_tint", resolution="1k")
-check("tint wiring success", r.get("success"), r.get("error"))
-_tmat = bpy.data.objects["tex_box_t"].data.materials[0]
-_tbsdf = next(n for n in _tmat.node_tree.nodes if n.bl_idname == 'ShaderNodeBsdfPrincipled')
-_tmix = next((n for n in _tmat.node_tree.nodes if n.bl_idname == 'ShaderNodeMix'), None)
-check("Mix(multiply) node present", _tmix is not None and _tmix.blend_type == 'MULTIPLY',
-      getattr(_tmix, 'blend_type', None))
-check("Base Color fed by mix", _tbsdf.inputs['Base Color'].is_linked
-      and _tbsdf.inputs['Base Color'].links[0].from_node == _tmix)
-check("diffuse map feeds mix A", _tmix.inputs['A'].is_linked)
-check("tint value in mix B", abs(_tmix.inputs['B'].default_value[0] - 0.5) < 1e-6
-      and abs(_tmix.inputs['B'].default_value[1] - 0.4) < 1e-6)
-check("Roughness NOT linked (override)", not _tbsdf.inputs['Roughness'].is_linked)
-check("Roughness forced to 1.0", abs(_tbsdf.inputs['Roughness'].default_value - 1.0) < 1e-6)
-_tstore = _json.loads(_tmat["bb_texture"])
-check("bb_texture records tint+roughness",
-      _tstore.get("tint") == [0.5, 0.4, 0.35] and _tstore.get("roughness") == 1.0, _tstore)
-
-for _p in (_dif, _nor, _rgh, _met):
-    try:
-        os.remove(_p)
-    except OSError:
-        pass
 
 print("== T7 set_world_background HDRI ==")
 # Poly Haven id resolution is server-side (no bpy); here we resolve via the same
@@ -489,17 +276,6 @@ check("boolean changed target geometry",
       (_v_before, len(bpy.data.objects["bool_target"].data.vertices)))
 check("cutter hidden from render", bpy.data.objects["bool_cutter"].hide_render is True)
 
-print("== duplicate_mirrored ==")
-run("add_box", name="mir_src", width=0.4, depth=0.2, height=0.6, on={"at": [80, 1.0, 0.3]})
-r = run("duplicate_mirrored", target="mir_src", axis="Y", pivot="WORLD", new_name="mir_dst")
-check("duplicate_mirrored success", r.get("success"), r.get("error"))
-check("mirror object created", bpy.data.objects.get("mir_dst") is not None)
-_src_c = world_center(bpy.data.objects["mir_src"])
-_dst_c = world_center(bpy.data.objects["mir_dst"])
-check("mirror reflected across Y=0", abs(_dst_c[1] + _src_c[1]) < 1e-3, (_src_c[1], _dst_c[1]))
-check("mirror keeps clean +scale", all(s > 0 for s in bpy.data.objects["mir_dst"].scale),
-      list(bpy.data.objects["mir_dst"].scale))
-
 print("== E8 deform-after-bevel guard ==")
 import bmesh as _bm  # noqa: E402
 def _make_ringed(name, zs, at_x):
@@ -580,69 +356,6 @@ if r.get("success"):
         pass
 r = run("render_to_file", filepath="/tmp/should_fail", format="BOGUS")
 check("bad format errors", "error" in r, r)
-
-print("== Tier C: armature + auto_weight + pose ==")
-# Bone-heat weighting is well-conditioned near the world origin, so the limb
-# lives at origin here (other test objects don't interfere — weighting is
-# selection-scoped). auto_weight warns if weighting ever comes back empty.
-BX = 0.0
-run("add_box", name="limb", width=0.3, depth=0.3, height=2.0, on={"at": [BX, 0, 1.0]})
-run("loop_cut", target="limb", axis="Z", cuts=8)   # segments so the joint can bend
-r = run("create_armature", name="limb_rig", bones=[
-    {"name": "lower", "head": [BX, 0, 0.0], "tail": [BX, 0, 1.0]},
-    {"name": "upper", "head": [BX, 0, 1.0], "tail": [BX, 0, 2.0],
-     "parent": "lower", "connected": True},
-])
-check("create_armature success", r.get("success"), r.get("error"))
-check("armature has 2 bones", r.get("bone_count") == 2, r.get("bones"))
-_arm = bpy.data.objects.get("limb_rig")
-check("armature object is ARMATURE", _arm is not None and _arm.type == 'ARMATURE')
-check("child bone parented", _arm.data.bones["upper"].parent is not None
-      and _arm.data.bones["upper"].parent.name == "lower")
-
-r = run("create_armature", name="bad_rig", bones=[
-    {"name": "x", "head": [0, 0, 0], "tail": [0, 0, 0]}])  # zero-length
-check("zero-length bone errors", "error" in r, r)
-
-r = run("auto_weight", mesh="limb", armature="limb_rig")
-check("auto_weight success", r.get("success"), r.get("error"))
-check("auto_weight made vertex groups", r.get("vertex_groups") >= 2, r.get("vertex_groups"))
-check("auto_weight actually weighted vertices", r.get("weighted_vertices", 0) > 0,
-      r.get("weighted_vertices"))
-check("no empty-weight warning at origin", len(r.get("warnings", [])) == 0, r.get("warnings"))
-_limb = bpy.data.objects["limb"]
-check("armature modifier added", any(m.type == 'ARMATURE' for m in _limb.modifiers),
-      [m.type for m in _limb.modifiers])
-
-
-def _top_vertex_world():
-    """World position of the highest rest-vertex, read from the EVALUATED mesh
-    (so armature deformation is included)."""
-    rest = _limb.data.vertices
-    top_idx = max(range(len(rest)), key=lambda i: rest[i].co.z)
-    deps = bpy.context.evaluated_depsgraph_get()
-    ev = _limb.evaluated_get(deps)
-    em = ev.to_mesh()
-    wco = ev.matrix_world @ em.vertices[top_idx].co
-    ev.to_mesh_clear()
-    return wco.copy()
-
-
-_before = _top_vertex_world()
-# Bend the ROOT bone about local Z (perpendicular to the bone — local Y runs
-# along it and would only twist). Bending the root swings the whole chain, so
-# the top vertex must move a lot. Swing direction depends on bone-local axes,
-# so check horizontal (XY) displacement rather than a specific axis.
-r = run("pose_bone", armature="limb_rig", bone="lower", rot=[0, 0, 60])
-check("pose_bone success", r.get("success"), r.get("error"))
-check("returned to object mode", bpy.context.mode == 'OBJECT', bpy.context.mode)
-bpy.context.view_layer.update()
-_after = _top_vertex_world()
-_dh = ((_after.x - _before.x) ** 2 + (_after.y - _before.y) ** 2) ** 0.5
-check("posing the root bone deforms the mesh (top vertex swings)", _dh > 0.5,
-      (round(_before.x, 3), round(_before.y, 3), round(_after.x, 3), round(_after.y, 3), round(_dh, 3)))
-r = run("pose_bone", armature="limb_rig", bone="nonexistent", rot=[0, 0, 0])
-check("pose_bone unknown bone errors", "error" in r, r)
 
 print("== new_scene (File > New > General) ==")
 import extension.state as _st  # noqa: E402

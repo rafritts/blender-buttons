@@ -43,12 +43,13 @@ scale so later modifiers (incl. the scatter modifier) behave.
 
 **3 · Smooth dough.**
 `modifier op=add target=Donut type=SUBSURF levels=2 render_levels=2`, then
-`edit op=smooth_edges target=Donut angle_limit=60`.
+`material op=shade_smooth target=Donut`.
 
 **4 · Organic lumps** (along normals, softened by subsurf).
-`select op=all target=Donut action=SELECT` → `edit op=noise_displace target=Donut amount=0.0012
-feature_size=0.35 detail=2 direction=NORMAL`. *Provenance:* amount ≈ 9 % of the tube radius
-(0.013) — visible but not blobby. *Verify:* still 1 shell, still genus-1.
+`select op=all target=Donut action=SELECT`, then add a noise-textured Displace
+(`modifier op=add target=Donut type=DISPLACE`, strength ≈ 0.0012). *Provenance:*
+strength ≈ 9 % of the tube radius (0.013) — visible but not blobby. *Verify:* still 1
+shell, still genus-1.
 
 ---
 
@@ -68,16 +69,15 @@ how you drip.
 **7 · Drape the outer rim.**
 `select op=boundary target=Icing` (both rims, 64 v) →
 `select op=by_radius target=Icing action=INTERSECT shape=CYLINDER radius_inner=0.025 radius_outer=0.06`
-(keeps the **outer** rim, 32 v) → `transform op=move_verts target=Icing z=-0.004` (drape it down
+(keeps the **outer** rim, 32 v) → `edit op=grab target=Icing z=-0.004` (drape it down
 past the equator so it hangs over the edge).
 
-**8 · Make the drip edge organic.** With the rim still selected:
-`edit op=noise_displace target=Icing amount=0.003 feature_size=0.2 detail=2 direction=Z`
-→ a wavy, dribbling rim.
+**8 · Make the drip edge organic.** With the rim still selected, jitter it into a wavy,
+dribbling edge: `edit op=randomize target=Icing amount=0.003 axis=Z`.
 
 **9 · Declare the contact + smooth.** The drips now rest on the dough:
 `validate op=expect a=Icing b=Donut max_depth=2 reason="glaze rests/melts onto the dough; shallow drip contact intended"`
-then `edit op=smooth_edges target=Icing angle_limit=60`. (The `max_depth=2` envelope still flags a
+then `material op=shade_smooth target=Icing`. (The `max_depth=2` envelope still flags a
 *deep* poke-through.)
 
 ---
@@ -130,7 +130,7 @@ still sit at the origin and would render there (and overlap). Move them out of f
 `transform op=nudge targets=Sprinkle,Sprinkle_y,Sprinkle_b,Sprinkle_w down=0.3`, then nudge three of
 them sideways (`right=0.06 / 0.12 / 0.18`) so no two are coplanar. Now they're alive, hidden, silent.
 
-**14 · Floor.** `add type=floor size=0.5` → `transform op=nudge targets=floor down=0.0104` (seat the
+**14 · Floor.** `add type=plane name=floor width=0.5 depth=0.5` → `transform op=nudge targets=floor down=0.0104` (seat the
 donut's underside `z=-0.0104` on it) → `material op=set target=floor hex=#e7ddcf roughness=0.9`.
 
 **15 · Light + camera.**

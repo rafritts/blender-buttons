@@ -504,7 +504,7 @@ def snap_to_grid(params):
 def aim_axis(params):
     """Rotate objects so a chosen LOCAL axis points down the from→to segment (G25).
 
-    The construction-side analogue of `add type=tube`'s point list, for the solids that
+    The construction-side analogue of a swept tube's point list, for the solids that
     DON'T orient themselves (cylinder, cone, helix, box). Lays a coil along an edge, a
     bolt down a hole, a spring along a strut — without hand-computing the euler. Sets
     ABSOLUTE orientation about each object's own origin (roll is left free, which is

@@ -137,10 +137,10 @@ EDIT_MODE_TOOLS = {
     "random_select", "pick_element", "proportional_move", "proportional_scale", "inflate_selection", "mark_sharp",
     "set_edge_crease", "merge_by_distance", "symmetrize", "select_in_sphere", "select_by_radius", "split_by_part",
     "get_rings", "select_ring", "select_rings", "scale_rings", "taper_end", "taper_section",
-    "shape_profile", "flute", "field",
+    "flute",
     "assign_weight", "select_boundary", "select_limb", "flood_to_crease",
     "select_by_vgroup", "select_by_material", "assign_material",
-    "relax_selection", "slide_selection", "poke_faces", "inset_faces", "grid_fill",
+    "poke_faces", "inset_faces", "grid_fill",
     "recalc_normals",
 }
 
@@ -153,12 +153,10 @@ SHAPE_KEY_SHADOW_TOOLS = {
     "move_vertices", "scale_vertices", "snap_loop", "proportional_move",
     "proportional_scale", "inflate_selection",
     "jitter_vertices", "bevel", "extrude", "extrude_along_curve", "scale_rings",
-    "subdivide_selection", "relax_selection", "slide_selection",
-    "poke_faces", "inset_faces", "grid_fill",
-    "taper_end", "taper_section", "shape_profile", "flute", "field",
+    "subdivide_selection", "poke_faces", "inset_faces", "grid_fill",
+    "taper_end", "taper_section", "flute",
     "sculpt_grab", "sculpt_inflate", "sculpt_draw", "sculpt_smooth", "sculpt_crease",
-    "sculpt_pinch", "sculpt_flatten", "sculpt_gravity",
-}
+    "sculpt_pinch", "sculpt_flatten", }
 
 
 # G56: every op that's SUPPOSED to change an object's geometry or its transform. A
@@ -175,37 +173,36 @@ NOOP_CHECK_TOOLS = {
     "move_vertices", "scale_vertices", "snap_loop", "proportional_move",
     "proportional_scale", "inflate_selection", "jitter_vertices", "bevel", "extrude",
     "spin", "extrude_along_curve", "scale_rings", "subdivide_selection",
-    "relax_selection", "slide_selection", "poke_faces", "inset_faces",
-    "grid_fill", "taper_end", "taper_section", "shape_profile", "flute", "field",
+    "poke_faces", "inset_faces",
+    "grid_fill", "taper_end", "taper_section", "flute",
     "loop_cut", "merge_by_distance", "symmetrize",
     "delete_geometry", "separate_selection", "bridge_handles",
     # object transforms (caught via the TRS component of the signature)
     "nudge", "place", "aim_axis", "rest_on", "move_to", "rotate_to",
     "resize", "scale_group", "rotate_object", "apply_transform",
     "snap_to", "snap_to_grid", "set_origin", "match_dimension",
-    # geometry bakers. G101: smooth_edges is EXCLUDED — it adds a BEVEL modifier + sets
+    # geometry bakers. G101: a bevel-modifier finish is EXCLUDED — it adds a BEVEL modifier + sets
     # shade-smooth flags and never touches base vertex positions, so the geometry
     # signature is byte-identical by design; checking it cried "no-op" on every successful
     # shade-smooth. Shading-only ops have no geometry no-op to detect.
-    "boolean", "apply_modifiers", "noise_displace", "bend",
-    "round_corners", "remesh", "join_objects", "bake_shape_keys_to_basis", "hollow",
+    "boolean", "apply_modifiers", "bend",
+    "remesh", "join_objects", "hollow",
     # sculpt strokes
     "sculpt_grab", "sculpt_inflate", "sculpt_draw", "sculpt_smooth",
-    "sculpt_crease", "sculpt_pinch", "sculpt_flatten", "sculpt_gravity",
-}
+    "sculpt_crease", "sculpt_pinch", "sculpt_flatten", }
 
 
 # Bakers whose CHANGED object is the `target` param (their other object — cutter /
 # reference — is a separate param). Everywhere else the moved object is `targets` (the
 # moved selection) or `name`/`names`; for snap_to / rest_on the `target` param is the
 # reference/surface, NOT what moves, so it must never be picked.
-_NOOP_TARGET_KEY = {"boolean", "match_dimension", "noise_displace", "round_corners",
+_NOOP_TARGET_KEY = {"boolean", "match_dimension",
                     # sculpt strokes carry their subject in `target` (singular) and are
                     # NOT in EDIT_MODE_TOOLS, so without this the no-op snapshot fell back
                     # to the ACTIVE object — a false "byte-identical" whenever the sculpt
                     # target wasn't already active (G206).
                     "sculpt_grab", "sculpt_inflate", "sculpt_draw", "sculpt_smooth",
-                    "sculpt_crease", "sculpt_pinch", "sculpt_flatten", "sculpt_gravity"}
+                    "sculpt_crease", "sculpt_pinch", "sculpt_flatten"}
 
 
 # G77: ops that PLACE a single part — after these, the status block auto-surfaces a NEW
@@ -237,7 +234,7 @@ TOPO_CHECK_TOOLS = {
     "extrude", "spin", "extrude_along_curve", "inset_faces", "poke_faces", "loop_cut",
     "subdivide_selection", "grid_fill", "merge_by_distance", "symmetrize", "delete_geometry",
     "separate_selection", "bridge_handles", "boolean", "apply_modifiers", "remesh",
-    "join_objects", "round_corners", "bevel",
+    "join_objects", "bevel",
     "graft", "stitch",                       # SPEC-19 Phase 3 (create/weld geometry)
 }
 

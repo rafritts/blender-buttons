@@ -298,7 +298,7 @@ def set_color_management(view_transform: str = "", look: str = "",
     gamma:          display gamma (default 1.0).
 
     Current values are reported in get_blender_status under `render:`.
-    Recommendation: set_toon_material scenes want view_transform='Standard'.
+    Recommendation: toon / cel-shaded scenes want view_transform='Standard'.
 
     Example: set_color_management(view_transform="Standard")  # un-mute toon colors
     """

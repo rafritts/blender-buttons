@@ -11,7 +11,7 @@ The one general-purpose escape hatch over the named-handler surface: `op` select
 
 `run` is a real mutation: logged, undoable (history op=undo), status-reported, and
 blocked while the external-mutation lock is set. For BUILDING materials from local
-texture files prefer `material op=pbr` — it is vendor-neutral and needs no addon.
+texture files are applied via a local-texture material graph — vendor-neutral, no addon.
 """
 
 from typing import Literal

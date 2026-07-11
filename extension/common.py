@@ -385,7 +385,7 @@ def material_summary(obj):
                         src = bc.links[0].from_node
                         if (src.type == 'MIX' and getattr(src, "blend_type", "") == 'MULTIPLY'
                                 and "B" in src.inputs):
-                            # set_textured_material wires diffuse → MULTIPLY(B=tint) →
+                            # textured materials wire diffuse → MULTIPLY(B=tint) →
                             # Base Color; read the live tint back, the honest
                             # instrument for "did the tint land?" (gaps.md T3).
                             entry["base_color_tint"] = [

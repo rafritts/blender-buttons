@@ -40,7 +40,7 @@ from . import (  # noqa: F401
 # SPEC-21 §4 retired the SPEC-20 buttons-<purpose>-macro verbs: a macro compiles the
 # adaptation between steps into code, where it can't happen (G217 — a macro whose
 # failure mode is "success"). Their general survivors were re-homed under native-named
-# ops (edit op=field/loft/shape_profile/spin, material op=toon/outline); the multi-step
+# ops or stripped entirely (SPEC-22); the multi-step
 # methods became TECHNIQUES (guidance://techniques) — prose over primitives, applied
 # live with perception reads between steps.
 

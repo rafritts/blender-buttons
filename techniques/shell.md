@@ -16,9 +16,9 @@ cleanup work you adapt to the mesh at hand.
 3. **Keep only the region on the copy**: reselect the zone on the duplicate
    (`select op=group name=shell_zone target=<shell>` — the claimed vgroup rode along),
    then `select op=all action=INVERT` and `edit op=delete mode=FACE`.
-4. **Stand it off the host**: `edit op=inflate amount=<clearance>` pushes the copy out
-   along its normals (a few mm). On a dense, irregular mesh normals disagree — if the
-   inflate lumps, use `modifier op=add type=SHRINKWRAP` with an `offset` instead.
+4. **Stand it off the host**: `edit op=shrink_fatten amount=<clearance>` (Alt+S) pushes
+   the copy out along its normals (a few mm). On a dense, irregular mesh normals
+   disagree — if it lumps, use `modifier op=add type=SHRINKWRAP` with an `offset` instead.
 5. **Give it walls**: `modifier op=add type=SOLIDIFY thickness=<m>` (add SUBSURF after
    it for a soft rim).
 

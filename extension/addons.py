@@ -7,7 +7,7 @@ dispatch spine, so addon_run is logged + undoable + status-reported like any mut
 and is blocked while the external-mutation lock is set (it is NOT lock-exempt).
 
 Used to drive e.g. the Poliigon addon's online download/login when wanted — but note
-material BUILDING from local files is handled vendor-neutrally by `material op=pbr`,
+material BUILDING from local files is handled vendor-neutrally by a local-texture material graph,
 which has zero dependency on this bridge or on any addon's API.
 """
 

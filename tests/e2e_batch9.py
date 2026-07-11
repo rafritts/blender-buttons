@@ -48,16 +48,6 @@ def clean():
         bpy.data.objects.remove(obj, do_unlink=True)
 
 
-def bound_cloth():
-    clean()
-    run("add_sphere", name="cloth", radius=1.0, segments=24, rings=16)
-    run("add_box", name="cage", width=2.6, depth=2.6, height=2.6)
-    run("select_object", name="cloth")
-    r = run("bind_mesh_deform", mesh="cloth", cage="cage")
-    assert r.get("bound") is True, f"setup bind failed: {r}"
-    return r
-
-
 # ───────── X1: timeout never serializes None ─────────
 print("== X1: handle_client returns an honest error on timeout, never null ==")
 bb_state._eval_dirty = set()
@@ -136,51 +126,6 @@ check("NOT all faces still selected (no whole-mesh extrude)", sel_f < tot_f, f"{
 bad_edges = [e for e in bm.edges if e.select and not all(v.select for v in e.verts)]
 check("every selected edge is fully within the vert selection", len(bad_edges) == 0, f"{len(bad_edges)}")
 run("set_mode", mode="OBJECT")
-
-
-# ───────── X4: valid bind shadows a rest-shape edit; dead bind does not ─────────
-def manual_position_edit(name):
-    """A position-only edit via the manual path; returns the set_mode(OBJECT) result."""
-    run("select_object", name=name)
-    run("set_mode", mode="EDIT")
-    run("select_all", action="SELECT")
-    run("move_vertices", direction=[0, 0, 0.02])
-    return run("set_mode", mode="OBJECT")
-
-
-def manual_topology_edit(name):
-    run("select_object", name=name)
-    run("set_mode", mode="EDIT")
-    run("select_by_axis", axis="Z", factor=0.5, comparison="GREATER")
-    run("delete_geometry")
-    return run("set_mode", mode="OBJECT")
-
-
-print("== X4: VALID bind shadows a position-only edit ==")
-bound_cloth()
-r = manual_position_edit("cloth")
-check("valid bind → bind_shadowed flag", r.get("bind_shadowed") is True, str(r))
-check("shadow warning points at rebind_deform", "rebind_deform" in (r.get("bind_warning") or ""), str(r))
-check("shadow warning is NOT the topology one", "VERTEX COUNT" not in (r.get("bind_warning") or "").upper())
-
-print("== X4: a DEAD bind (vert-count mismatch) does NOT shadow ==")
-r = manual_topology_edit("cloth")  # kills the bind (count changes)
-check("topology edit → bind_invalidated", r.get("bind_invalidated") is True, str(r))
-r = manual_position_edit("cloth")  # bind now dead → edit shows 1:1, must stay silent
-check("dead bind → NO shadow warning (edit is real)", r.get("bind_shadowed") is None, str(r))
-check("dead bind → NO invalidated warning (count unchanged)", r.get("bind_invalidated") is None, str(r))
-
-print("== X4: rebind restores validity → shadow warns again ==")
-r = run("rebind_deform", mesh="cloth")
-check("rebind success", r.get("success") is True, str(r))
-r = manual_position_edit("cloth")
-check("revalidated bind → bind_shadowed again", r.get("bind_shadowed") is True, str(r))
-
-print("== X4: an unbound mesh never shadows ==")
-clean()
-run("add_sphere", name="plain", radius=1.0, segments=16, rings=12)
-r = manual_position_edit("plain")
-check("unbound mesh → no shadow warning", r.get("bind_shadowed") is None, str(r))
 
 
 # ───────── X5: modify_modifier factor / strength / show toggles ─────────

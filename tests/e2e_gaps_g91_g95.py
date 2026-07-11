@@ -2,10 +2,8 @@
 
   G87 — move_vertices/scale_vertices flush selection so it survives the edit round-trip
   G91 — feel op=linked: pierce-test linkage (threaded vs touching)
-  G92 — shape_profile: absolute-radius lathe, seam-safe
   G93 — array_radial: default end_angle = start+360 → full ring for any start_angle
   G94 — flute: meridional corrugation of a surface of revolution
-  G95 — add type=floor without an illegal 'z' placement key
 
 Usage: flatpak run org.blender.Blender --background --python /abs/path/to/tests/e2e_gaps_g91_g95.py
 """
@@ -57,18 +55,6 @@ def ring_radii(obj, axis_idx=2, decimals=4):
     return out
 
 
-# ───────────────────────── G95 — add type=floor ─────────────────────────
-print("== G95: add_floor without illegal placement key ==")
-clean()
-r = run("add_floor", name="floor", size=4)
-check("add_floor succeeds (no 'z' placement key error)", r.get("success"), r.get("error"))
-flo = bpy.data.objects.get("floor")
-check("floor exists", flo is not None)
-if flo:
-    zmin = min((flo.matrix_world @ v.co).z for v in flo.data.vertices)
-    check("floor sits at z=0", abs(zmin) < 1e-5, f"zmin={zmin}")
-
-
 # ───────────────────────── G93 — array_radial full ring offset ─────────────────────────
 print("== G93: array_radial start_angle=45, default end_angle → full even ring ==")
 clean()
@@ -89,35 +75,6 @@ r = run("array_radial", prototype="p2", count=5, start_angle=0.0, end_angle=180.
         axis="Z", center=[0, 0, 0])
 check("explicit arc not full_circle", r.get("full_circle") is False, r)
 check("arc step is 45 deg (180/4)", abs(r.get("step_deg", 0) - 45.0) < 1e-3, r.get("step_deg"))
-
-
-# ───────────────────────── G92 — shape_profile absolute radii ─────────────────────────
-print("== G92: shape_profile sets absolute radii, seam-safe across touching ranges ==")
-clean()
-run("add_cylinder", name="cyl", radius=0.1, height=1.0, segments=24)
-run("loop_cut", target="cyl", axis="Z", cuts=10)
-rg = run("get_rings", target="cyl", axis="Z")
-n = rg.get("ring_count")
-check("cylinder has rings", n and n >= 6, f"ring_count={n}")
-# Tile two TOUCHING ranges sharing the seam ring — the case that pinholed taper_section.
-mid = n // 2
-r = run("shape_profile", target="cyl", axis="Z",
-        points=[[0, 0.05], [mid, 0.12], [n - 1, 0.03]])
-check("shape_profile succeeds", r.get("success"), r.get("error"))
-radii = ring_radii(bpy.data.objects["cyl"])
-positions = sorted(radii)
-got_lo = radii[positions[0]]
-got_mid = radii[positions[mid]]
-got_hi = radii[positions[-1]]
-check("bottom ring ≈ 0.05m", abs(got_lo - 0.05) < 1e-3, f"got {got_lo}")
-check("seam ring ≈ 0.12m (NOT collapsed)", abs(got_mid - 0.12) < 2e-3, f"got {got_mid}")
-check("top ring ≈ 0.03m", abs(got_hi - 0.03) < 1e-3, f"got {got_hi}")
-# Idempotent: re-running with the same points changes nothing meaningful.
-run("shape_profile", target="cyl", axis="Z",
-    points=[[0, 0.05], [mid, 0.12], [n - 1, 0.03]])
-radii2 = ring_radii(bpy.data.objects["cyl"])
-check("shape_profile idempotent", abs(radii2[sorted(radii2)[mid]] - 0.12) < 2e-3,
-      f"got {radii2[sorted(radii2)[mid]]}")
 
 
 # ───────────────────────── G94 — flute ─────────────────────────

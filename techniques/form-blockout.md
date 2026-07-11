@@ -8,7 +8,7 @@ before any detail.
 
 Ask of every major mass: what is its geometric condition?
 
-- Silhouette swept around an axis → **revolved-vessel** (spin / shape_profile).
+- Silhouette swept around an axis → **revolved-vessel** (spin a profile).
 - A skin at an offset over another surface → **shell**.
 - A profile pushed along a line/curve → extrude (`edit op=extrude`, or a curve +
   *Curve to Tube*).
@@ -36,13 +36,14 @@ box-modelled blob costs 10× the calls. Classify, then pull the matching techniq
 
 ## Rough the soft masses
 
-- Swells/bulges: `select op=shrink` to an apex core → `edit op=proportional_move`
-  with a radius spanning the bulge (never `inflate` on a dense irregular cap — the
+- Swells/bulges: `select op=shrink` to an apex core → `edit op=grab proportional=True`
+  with a radius spanning the bulge (never `shrink_fatten` on a dense irregular cap — the
   disagreeing normals lump it).
 - Keep bilateral work honest: shape one side, `edit op=symmetrize` to reflect it true.
 - Add resolution only where shaping needs it: `edit op=subdivide` on the selection,
   never a global densify.
-- Surface break-up (bark, rock, cloth rumple) comes LAST: `edit op=noise_displace`.
+- Surface break-up (bark, rock, cloth rumple) comes LAST: a noise-textured Displace
+  modifier (`modifier op=add type=DISPLACE`).
 
 **Verify at every step:** the status block bounds ARE the blockout — keep a stack-up
 of them; `validate` catches the coplanar z-fights that exact stacking invites (two

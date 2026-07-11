@@ -7,7 +7,7 @@ Covers:
   G211 — edit op=bend refuses BEFORE mutating when the axis is the object's long axis.
   G213 — a coarse footprint auto-densifies to detail= edge length before a stroke.
   G215 — a euclidean brush on a thin shell warns (two walls); connected= scopes one wall.
-  G216 — edit op=proportional_scale gathers a selection toward its centroid with falloff.
+  G216 — edit op=scale proportional=True gathers a selection toward its centroid with falloff.
 
 Usage: flatpak run org.blender.Blender --background --factory-startup \
          --python /abs/path/to/tests/e2e_g203_g216_deform.py
@@ -204,7 +204,7 @@ check("connected scope touched FEWER verts than euclidean (one wall, not both)",
 
 
 # ───────────────────────── G216: proportional_scale gathers with falloff ─────────────────────────
-print("== G216: edit op=proportional_scale gathers a selection toward its centroid ==")
+print("== G216: edit op=scale proportional=True gathers a selection toward its centroid ==")
 clean()
 patch = make_grid("Patch", size=0.2, segs=12)
 # select a central cluster of verts (within 4cm of local origin)

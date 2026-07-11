@@ -834,102 +834,6 @@ def get_current_selection(params):
             "centroid_world": None, "bbox_world": None}
 
 
-def duplicate_mirrored(params):
-    """Bake a mirrored copy of an object across a world axis plane.
-
-    The static "make the other half" escape hatch — for symmetry that's already
-    finalized (the MIRROR modifier / placement mirror_of handle live cases).
-
-    target:   object to mirror (required).
-    axis:     X | Y | Z — the plane is perpendicular to this axis (default X,
-              i.e. mirror left↔right across the Y-Z plane).
-    pivot:    "WORLD" (default — reflect across the axis=0 plane through the
-              world origin) | "SELF" (reflect about the object's own origin) |
-              an object name (reflect across the plane through that object's
-              center) | [x, y, z] explicit plane point.
-    new_name: name for the copy. Defaults to "<target>_mirror".
-
-    Reflection inverts the mesh, so winding/normals are recalculated outward
-    afterward and the transform is applied (scale stays positive, [1,1,1])."""
-    target = params.get("target")
-    if not target:
-        return {"error": "'target' is required"}
-    obj = bpy.data.objects.get(target)
-    if obj is None:
-        return {"error": f"Object '{target}' not found"}
-    axis = (params.get("axis") or "X").upper()
-    if axis not in ("X", "Y", "Z"):
-        return {"error": "axis must be X, Y, or Z"}
-    ai = "XYZ".index(axis)
-
-    pivot = params.get("pivot", "WORLD")
-    if isinstance(pivot, (list, tuple)) and len(pivot) == 3:
-        c = mathutils.Vector(pivot)
-    elif isinstance(pivot, str) and pivot.upper() == "WORLD":
-        c = mathutils.Vector((0.0, 0.0, 0.0))
-    elif isinstance(pivot, str) and pivot.upper() == "SELF":
-        c = obj.matrix_world.translation.copy()
-    else:  # object name
-        piv = bpy.data.objects.get(pivot)
-        if piv is None:
-            return {"error": f"pivot object '{pivot}' not found"}
-        c = mathutils.Vector(world_center(piv))
-
-    # Reflection across the plane through c, perpendicular to `axis`:
-    #   R = T(c) · S(-1 on axis) · T(-c)
-    S = mathutils.Matrix.Identity(4)
-    S[ai][ai] = -1.0
-    R = mathutils.Matrix.Translation(c) @ S @ mathutils.Matrix.Translation(-c)
-
-    if bpy.context.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
-    activate(obj)
-    bpy.ops.object.duplicate(linked=False)
-    dup = bpy.context.active_object
-
-    new_name = params.get("new_name") or f"{target}_mirror"
-    dup.name = new_name
-    if dup.data and dup.data.users == 1:
-        dup.data.name = new_name
-
-    # G194: reflect each vertex's WORLD position and bake it into the mesh with an
-    # IDENTITY object transform. The world result is exactly R·(M·v) — the true mirror
-    # image, tilt preserved — with no negative-determinant matrix decompose (the old path
-    # assigned R·M to matrix_world + transform_apply, and that decompose silently dropped
-    # an off-axis rotation: a leg splayed 4° about Y came back upright). World-space bake
-    # is unambiguous: geometry is provably correct, only the origin/rotation are baked.
-    M = dup.matrix_world.copy()
-    if dup.type == 'MESH' and dup.data is not None:
-        me = dup.data
-        for v in me.vertices:
-            v.co = R @ (M @ v.co)
-        me.update()
-        dup.matrix_world = mathutils.Matrix.Identity(4)
-        # winding flipped by the reflection — recompute outward.
-        activate(dup)
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.mesh.select_all(action='SELECT')
-        bpy.ops.mesh.normals_make_consistent(inside=False)
-        bpy.ops.object.mode_set(mode='OBJECT')
-        # Re-centre the origin on the reflected geometry (world geometry unchanged).
-        activate(dup)
-        bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='MEDIAN')
-    else:
-        dup.matrix_world = R @ M
-
-    bpy.context.view_layer.update()
-    xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(dup)
-    return {
-        "success": True,
-        "original": target,
-        "mirror": dup.name,
-        "axis": axis,
-        "pivot": pivot,
-        "dimensions": [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)],
-        "note": "mirror image baked into geometry — the source's live tilt is preserved.",
-    }
-
-
 # ─────────────────────── custom properties (U2) ───────────────────────
 # Production rigs/addons/game-export pipelines store metadata in custom
 # properties — IK/FK switches, panel toggles, LOD flags. General Blender data,
@@ -1121,8 +1025,8 @@ def delete_shape_key(params):
     back into a plain mesh — which is what UNBLOCKS apply-Subsurf and dyntopo (both
     refuse to run while any shape key exists). A mesh duplicated from a rigged source
     inherits its keys; clear them before densifying for sculpt. Deleting all leaves
-    the mesh at the Basis shape — to keep a dialed-in non-Basis mix, bake it first
-    (bake_shape_keys_to_basis)."""
+    the mesh at the Basis shape — to keep a dialed-in non-Basis mix, apply it to
+    the mesh first."""
     name = params.get("name")
     key = params.get("key") or ""
     obj = bpy.data.objects.get(name)
@@ -1143,30 +1047,6 @@ def delete_shape_key(params):
     after = obj.data.shape_keys
     remaining = [k.name for k in after.key_blocks] if after else []
     return {"success": True, "name": name, "deleted": [key], "remaining": remaining}
-
-
-def bake_shape_keys_to_basis(params):
-    """Flatten the CURRENT shape-key mix into the base mesh and remove every key —
-    the 'apply all shapes as the new rest shape' move. The visible (mixed) shape
-    becomes the keyless geometry, so nothing changes on screen, but the mesh is now
-    plain and apply-Subsurf / dyntopo are unblocked. Use this instead of a plain
-    delete when a non-Basis key is dialed in and you want to keep its contribution."""
-    name = params.get("name")
-    obj = bpy.data.objects.get(name)
-    if obj is None:
-        return {"error": f"Object '{name}' not found"}
-    me = getattr(obj, "data", None)
-    sk = getattr(me, "shape_keys", None) if me is not None else None
-    if sk is None:
-        return {"error": f"'{name}' has no shape keys"}
-    n_keys = len(sk.key_blocks)
-    mix = obj.shape_key_add(name="__bake_mix__", from_mix=True)
-    coords = [d.co.copy() for d in mix.data]
-    obj.shape_key_clear()           # removes ALL key blocks (incl. the temp mix)
-    for i, co in enumerate(coords):
-        me.vertices[i].co = co
-    me.update()
-    return {"success": True, "name": name, "baked_keys": n_keys, "verts": len(coords)}
 
 
 def set_object_visibility(params):
@@ -1338,7 +1218,7 @@ def clad_surface(params):
         bpy.ops.mesh.select_all(action='SELECT')
 
     # Lift the skin off the body along its own normals by `clearance` (local-space,
-    # scale-corrected — same convention as edit op=inflate).
+    # scale-corrected — same convention as edit op=shrink_fatten).
     sx = abs(dup.scale.x) or 1.0
     sy = abs(dup.scale.y) or 1.0
     sz = abs(dup.scale.z) or 1.0
@@ -1458,7 +1338,6 @@ TOOLS = {
     "select_object":          select_object,
     "delete_object":          delete_object,
     "duplicate_object":       duplicate_object,
-    "duplicate_mirrored":     duplicate_mirrored,
     "join_objects":           join_objects,
     "set_mode":               set_mode,
     "get_object_info":        get_object_info,
@@ -1473,6 +1352,5 @@ TOOLS = {
     "set_shape_key":          set_shape_key,
     "set_active_shape_key":   set_active_shape_key,
     "delete_shape_key":       delete_shape_key,
-    "bake_shape_keys_to_basis": bake_shape_keys_to_basis,
     "set_object_visibility":  set_object_visibility,
 }
