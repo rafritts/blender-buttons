@@ -25,11 +25,11 @@ def file(
     """
     Persistence — the **File** menu. `op` selects:
 
-      save   — save the current design to a named .blend          (name)
-      open   — open a named design                                (name)
+      save   — Ctrl+S · File ▸ Save · save the current design to a named .blend   (name)
+      open   — Ctrl+O · File ▸ Open · open a named design                         (name)
       list   — list saved designs                                 (—)
-      import — import a mesh file into the scene (any common fmt); a .blend is
-               APPENDED (combine two scenes without an out-of-band script)
+      import — File ▸ Import · import a mesh file into the scene (any common fmt); a .blend
+               is APPENDED (combine two scenes without an out-of-band script)
                (path, filter, link)
     """
     o = op.lower().strip()

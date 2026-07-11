@@ -543,11 +543,16 @@ work) → out of the gap table's scope by design.
 
 ### Counts
 
-| status | count |
-|---|---|
-| **present** (as a surviving native op) | 24 |
-| **missing** (native item with no op) | 41 |
-| **deliberately-skipped** (with reason) | 6 |
+| status | count (Phase 3 audit) | after Phase 4 |
+|---|---|---|
+| **present** (as a surviving native op) | 24 | **43** (+19 shipped) |
+| **missing** (native item with no op) | 41 | **0** |
+| **deliberately-skipped** (with reason) | 6 | **28** (Tier-3 niche/modifier-reachable) |
+
+**Phase 4 (2026-07-11) resolved every MISSING row:** all of Tier 1 and Tier 2 shipped
+(19 new `edit` ops + the shrink_fatten fidelity fix + the grab snapping flag); every
+Tier-3 row is now `deliberately-skipped` with a reason (see "Phase 4 — what shipped"
+at the end of this section). No row remains bare "missing".
 
 Tiers below are **daily-driver-first**: Tier 1 = the hotkeys every tutorial uses (each is
 *missing* — the audit's headline). Tier 2 = common menu ops seen in most tutorials. Tier 3 =
@@ -557,12 +562,12 @@ menu-completeness / niche. Present and skipped items are folded in per tier.
 
 | native action | hotkey · menu path | status |
 |---|---|---|
-| Duplicate (in-mesh) | Shift+D · Mesh ▸ Duplicate (`mesh.duplicate_move`) | **MISSING** — `object op=duplicate` is object-level; there is no in-mesh copy-selected. Seed row confirmed. |
-| Rotate selection | R · Mesh ▸ Transform ▸ Rotate (`transform.rotate`) | **MISSING** — `transform op=rotate` is object-mode (substrate); no edit-mode selection rotate. Seed row confirmed. |
-| Merge At Center / Cursor / First / Last / Collapse | M · Mesh ▸ Merge (`mesh.merge`) | **MISSING** — only **By Distance** (`remove_doubles`) ships as `edit op=merge`. The M-menu targets are absent. Seed row confirmed. |
-| New Edge/Face from vertices | F · Vertex ▸ New Edge/Face (`mesh.edge_face_add`) | **MISSING** — the "F closes a face" reflex has no op (grid_fill needs a closed loop; this is F on 2–4 verts). |
-| Dissolve Verts / Edges / Faces | Ctrl+X, X-menu · Mesh ▸ Delete ▸ Dissolve (`mesh.dissolve_verts/edges/faces`) | **MISSING** — `edit op=delete` is `mesh.delete` (removes geometry + holes); dissolve (removes element, keeps surface) is a distinct operator. Seed row confirmed. |
-| Hide / Reveal (edit mode) | H / Alt+H / Shift+H · Mesh ▸ Show/Hide (`mesh.hide`/`mesh.reveal`) | **MISSING** — `object op=visibility` hides whole objects; edit-mode element hide/reveal is a different operator pair. Seed row confirmed. |
+| Duplicate (in-mesh) | Shift+D · Mesh ▸ Duplicate (`mesh.duplicate_move`) | **present** (P4) — `edit op=duplicate` (bmesh.ops.duplicate + direction-word grab tail; the copy is selected, native default unmoved). |
+| Rotate selection | R · Mesh ▸ Transform ▸ Rotate (`transform.rotate`) | **present** (P4) — `edit op=rotate` (`transform.rotate` about the selection median, angle/axis). |
+| Merge At Center / Cursor / First / Last / Collapse | M · Mesh ▸ Merge (`mesh.merge`) | **present** (P4) — `edit op=merge at=CENTER\|CURSOR\|FIRST\|LAST\|COLLAPSE\|DISTANCE` (one op: `mesh.merge` enum + the existing remove_doubles for DISTANCE). |
+| New Edge/Face from vertices | F · Vertex ▸ New Edge/Face (`mesh.edge_face_add`) | **present** (P4) — `edit op=edge_face` (`mesh.edge_face_add`). |
+| Dissolve Verts / Edges / Faces | Ctrl+X, X-menu · Mesh ▸ Delete ▸ Dissolve (`mesh.dissolve_verts/edges/faces`) | **present** (P4) — `edit op=dissolve mode=VERT\|EDGE\|FACE` (its own op, distinct from `delete`). |
+| Hide / Reveal (edit mode) | H / Alt+H / Shift+H · Mesh ▸ Show/Hide (`mesh.hide`/`mesh.reveal`) | **present** (P4) — `edit op=hide` (unselected= for Shift+H) + `edit op=reveal`. |
 | Grab / Move selection | G · Mesh ▸ Transform ▸ Move | **present** — `edit op=grab` (proportional=O param). |
 | Scale selection | S · Mesh ▸ Transform ▸ Scale | **present** — `edit op=scale` (proportional=O param). |
 | Extrude Region | E · Mesh ▸ Extrude | **present** — `edit op=extrude` (`mesh.extrude_region_move`). |
@@ -581,19 +586,19 @@ menu-completeness / niche. Present and skipped items are folded in per tier.
 
 | native action | hotkey · menu path | status |
 |---|---|---|
-| Rip / Rip & Fill / Rip & Extend | V / Alt+V · Vertex ▸ Rip (`mesh.rip_move` / `mesh.rip_edge_move`) | **MISSING**. Seed row confirmed. |
-| Split (selection) | Y · Mesh ▸ Split ▸ Selection (`mesh.split`) | **MISSING**. Seed row confirmed. |
-| Smooth Vertices | Vertex ▸ Smooth Vertices (`mesh.vertices_smooth`) | **MISSING** — **seed correction:** `relax` was the placeholder here and was **DELETED in Phase 2** (BVH-reproject composite). Native per-vert smooth now has no op. |
-| Bisect | Mesh ▸ Bisect (`mesh.bisect`) | **MISSING**. Seed row confirmed. |
-| Shear | Shift+Ctrl+Alt+S · Mesh ▸ Transform ▸ Shear (`transform.shear`) | **MISSING**. Seed row confirmed. |
-| To Sphere | Shift+Alt+S · Mesh ▸ Transform ▸ To Sphere (`transform.tosphere`) | **MISSING**. Seed row confirmed. |
-| Triangulate Faces | Ctrl+T · Face ▸ Triangulate (`mesh.quads_convert_to_tris`) | **MISSING**. Seed row confirmed. |
-| Tris to Quads | Alt+J · Face ▸ Tris to Quads (`mesh.tris_convert_to_quads`) | **MISSING**. Seed row confirmed. |
-| Fill | Alt+F · Face ▸ Fill (`mesh.fill`) | **MISSING** — **seed confirmed:** `grid_fill` present, plain n-gon/triangle `fill` absent. |
-| Beautify Faces | Shift+Alt+F · Face ▸ Beautify Faces (`mesh.beautify_fill`) | **MISSING**. Seed row confirmed. |
-| Connect Vertex Path / Pairs | J · Vertex ▸ Connect (`mesh.vert_connect_path` / `mesh.vert_connect`) | **MISSING** — the J "cut a quad in two" reflex. |
-| Vertex Slide / Edge Slide | Shift+V / Double-G · Vertex/Edge ▸ Slide (`transform.vert_slide` / `edge_slide`) | **MISSING** — the `slide` op that wrapped these was DELETED in Phase 2 (BVH composite). |
-| Snap-to-face-projected vert dragging | Snapping: Face + Project as a flag on Grab | **MISSING** — no snapping flag on `edit op=grab`. Seed row confirmed. |
+| Rip / Rip & Fill / Rip & Extend | V / Alt+V · Vertex ▸ Rip (`mesh.rip_move` / `mesh.rip_edge_move`) | **present** (P4) — `edit op=rip` (bmesh.ops.split_edges + direction-word pull; `mesh.rip*` is modal and **crashes headless** — live-build derived, R3 — so a bmesh equivalent of the one operator was used). |
+| Split (selection) | Y · Mesh ▸ Split ▸ Selection (`mesh.split`) | **present** (P4) — `edit op=split` (`mesh.split`). |
+| Smooth Vertices | Vertex ▸ Smooth Vertices (`mesh.vertices_smooth`) | **present** (P4) — `edit op=smooth` (`mesh.vertices_smooth`, factor/repeat). Replaces the deleted `relax`. |
+| Bisect | Mesh ▸ Bisect (`mesh.bisect`) | **present** (P4) — `edit op=bisect` (`mesh.bisect`, axis/offset, use_fill/clear_inner/clear_outer). |
+| Shear | Shift+Ctrl+Alt+S · Mesh ▸ Transform ▸ Shear (`transform.shear`) | **present** (P4) — `edit op=shear` (bmesh shear matrix; `transform.shear` **fails poll headless** — live-build derived — so the one operator's semantics were reproduced in bmesh). |
+| To Sphere | Shift+Alt+S · Mesh ▸ Transform ▸ To Sphere (`transform.tosphere`) | **present** (P4) — `edit op=to_sphere` (`transform.tosphere`, factor). |
+| Triangulate Faces | Ctrl+T · Face ▸ Triangulate (`mesh.quads_convert_to_tris`) | **present** (P4) — `edit op=triangulate` (`mesh.quads_convert_to_tris`). |
+| Tris to Quads | Alt+J · Face ▸ Tris to Quads (`mesh.tris_convert_to_quads`) | **present** (P4) — `edit op=tris_to_quads` (`mesh.tris_convert_to_quads`). |
+| Fill | Alt+F · Face ▸ Fill (`mesh.fill`) | **present** (P4) — `edit op=fill` (`mesh.fill`). `grid_fill` remains the quad-grid path. |
+| Beautify Faces | Shift+Alt+F · Face ▸ Beautify Faces (`mesh.beautify_fill`) | **present** (P4) — `edit op=beautify` (`mesh.beautify_fill`). |
+| Connect Vertex Path / Pairs | J · Vertex ▸ Connect (`mesh.vert_connect_path` / `mesh.vert_connect`) | **present** (P4) — `edit op=connect` (`mesh.vert_connect`). |
+| Vertex Slide / Edge Slide | Shift+V / Double-G · Vertex/Edge ▸ Slide (`transform.vert_slide` / `edge_slide`) | **present** (P4) — `edit op=slide` (bmesh along-rail interpolation; `transform.*_slide` **segfaults headless** — live-build derived — so a faithful bmesh equivalent of the one operator was used; NOT the deleted BVH-reproject composite). |
+| Snap-to-face-projected vert dragging | Snapping: Face + Project as a flag on Grab | **present** (P4) — `edit op=grab snap_to=face_project snap_target=<mesh>` (drops moved verts onto the target surface via BVH; native Snapping as a flag, not a new verb). |
 | Fill Grid | Face ▸ Grid Fill | **present** — `edit op=grid_fill`. |
 | Bridge Edge Loops | Edge ▸ Bridge | **present** — `edit op=bridge`. |
 | Subdivide | Edge ▸ Subdivide | **present** — `edit op=subdivide`. |
@@ -608,6 +613,23 @@ menu-completeness / niche. Present and skipped items are folded in per tier.
 | Mirror (interactive) | Ctrl+M · Mesh ▸ Mirror (`transform.mirror`) | **SKIP** — modal; the batch native is the **Mirror modifier** (`modifier op=add`), and the `mirror` composite was DELETED in Phase 2 by design. |
 
 ### Tier 3 — menu completeness / niche (present or missing/skip, grouped)
+
+**Phase 4 disposition (2026-07-11): every Tier-3 row below is `deliberately-skipped`,
+per the spec's own priority rule ("daily-driver-first … outrank menu completeness").**
+The reasons fall into four buckets, and each row's parenthetical names which applies:
+(a) **modifier-reachable** — Solidify, Wireframe, Decimate, Screw, Array-variants are
+each a native *modifier* via `modifier op=add` (the batch-native path SPEC-22 §II.4 already
+blessed for Mirror/Array); the edit-mode operator form would duplicate it. (b) **custom
+split-normals / shape-key / UV-seam / bevel-weight niche** — the Normals submenu tail,
+Blend/Propagate-from-Shape, Mark Seam, Edge/Vertex Crease-weight, Face-Strength: specialist
+authoring outside the daily driver set. (c) **cleanup variants of ops already present** —
+Dissolve Limited, Delete Loose, Fill Holes, Degenerate Dissolve, Edge Collapse, Convex
+Hull, Make Planar, Unsubdivide, Rotate Edge: single operators, but menu-completeness on top
+of the shipped delete/dissolve/merge/fill basis (candidates for a later thin-wrapper pass if
+a build calls for them). (d) **modal / interactive** — Knife, Knife Project, interactive
+Mirror: mouse substrate, not hands (Knife/Mirror already recorded SKIP in Tiers 1–2). No
+Tier-3 row is a daily-driver hotkey; all daily drivers shipped in Tiers 1–2.
+
 
 **Mesh menu.** Bisect-family knife-project (`mesh.knife_project`) — MISSING; Convex Hull
 (`mesh.convex_hull`) — MISSING; Symmetry Snap (`mesh.symmetry_snap`) — MISSING; Set Attribute
@@ -694,3 +716,65 @@ from Faces, Rotate/Point-to-Target, Merge/Split, Copy/Paste/Smooth/Reset Vector,
 - **Solidify / Wireframe / Decimate / Screw** appear in the Face/Edge/Clean menus but are all
   reachable as **modifiers** (`modifier op=add`) — Phase 4 should decide whether the edit-mode
   operator forms are worth duplicating or left to the modifier path (leaning: leave them).
+
+### Phase 4 — what shipped (2026-07-11)
+
+**19 new `edit` ops** (name · hotkey · native call), all headless-verified on real
+geometry (`tests/e2e_spec22_phase4.py`, 47 assertions, ALL PASSED):
+
+| op | hotkey · menu | native call |
+|---|---|---|
+| `duplicate` | Shift+D · Mesh ▸ Duplicate | `bmesh.ops.duplicate` + direction grab tail |
+| `rotate` | R · Mesh ▸ Transform ▸ Rotate | `transform.rotate` (about selection median) |
+| `merge at=…` | M · Mesh ▸ Merge | `mesh.merge` (CENTER/CURSOR/FIRST/LAST/COLLAPSE) + remove_doubles (DISTANCE) |
+| `edge_face` | F · Vertex ▸ New Edge/Face | `mesh.edge_face_add` |
+| `dissolve` | Ctrl+X · Mesh ▸ Dissolve | `mesh.dissolve_verts/edges/faces` |
+| `hide` / `reveal` | H / Shift+H / Alt+H · Mesh ▸ Show/Hide | `mesh.hide(unselected=)` / `mesh.reveal` |
+| `rip` | V · Vertex ▸ Rip | `bmesh.ops.split_edges` + grab tail (modal native crashes headless) |
+| `split` | Y · Mesh ▸ Split ▸ Selection | `mesh.split` |
+| `smooth` | Vertex ▸ Smooth Vertices | `mesh.vertices_smooth` |
+| `bisect` | Mesh ▸ Bisect | `mesh.bisect` |
+| `shear` | Shift+Ctrl+Alt+S · Mesh ▸ Transform ▸ Shear | bmesh shear matrix (native fails poll headless) |
+| `to_sphere` | Shift+Alt+S · Mesh ▸ Transform ▸ To Sphere | `transform.tosphere` |
+| `triangulate` | Ctrl+T · Face ▸ Triangulate | `mesh.quads_convert_to_tris` |
+| `tris_to_quads` | Alt+J · Face ▸ Tris to Quads | `mesh.tris_convert_to_quads` |
+| `fill` | Alt+F · Face ▸ Fill | `mesh.fill` |
+| `beautify` | Shift+Alt+F · Face ▸ Beautify Faces | `mesh.beautify_fill` |
+| `connect` | J · Vertex ▸ Connect | `mesh.vert_connect` |
+| `slide` | Shift+V / GG · Vertex/Edge ▸ Slide | bmesh along-rail interp (modal native segfaults headless) |
+
+Plus the **grab snapping flag** — `edit op=grab snap_to=face_project snap_target=<mesh>`
+drops the moved verts onto the target's surface (BVH nearest-point), native Snapping
+(Face + Project) as a flag on Move, not a minted verb.
+
+**shrink_fatten fix (as shipped):** `edit op=shrink_fatten` now **wraps
+`transform.shrink_fatten` directly** (confirmed drivable headless in 5.1.2), replacing the
+hand-rolled per-vert-normal push (which scaled by inverse object scale and skipped Offset
+Even). It inherits native semantics for free, and exposes `even=` (native "Offset Even",
+default off = native default) so a non-planar patch can keep even wall thickness.
+
+**Headless-drivability findings (R3, derived from the live 5.1.2 build — these outrank the
+Phase-3 note's expectation that Rip was "implementable headless"):** `transform.rotate`,
+`transform.shrink_fatten`, `transform.tosphere`, `mesh.bisect`, and the whole `mesh.*`
+family (merge, split, dissolve, fill, triangulate, …) **drive headless** via `bpy.ops`.
+But `transform.shear` **fails poll** (context incorrect), and the modal
+`transform.edge_slide` / `vert_slide` and `mesh.rip[_move]` **segfault / fail poll**
+headless — so rip, slide, and shear use faithful **bmesh equivalents of the single native
+operator** (§5 rule 3; the house precedent for grab/scale/sculpt). None reproduces a
+deleted composite: slide is a pure along-edge interpolation (not the deleted BVH reproject),
+rip is `split_edges` + grab (not a mould deformer).
+
+**Tier-3:** all `deliberately-skipped` with reasons (see the Tier-3 disposition note above).
+Buckets: modifier-reachable (Solidify/Wireframe/Decimate/Screw/Array-variants), custom
+split-normals / shape-key / UV-seam / bevel-weight niche, cleanup variants of shipped ops
+(Convex Hull, Fill Holes, Delete Loose, Dissolve Limited, … — candidates for a later
+thin-wrapper pass), and modal/interactive (Knife, Knife Project, interactive Mirror).
+
+**Retrieval-key retrofit (§5.2):** every new op opens with its hotkey + menu path, and the
+surviving NATIVE-KEEP/renamed ops got anchors retrofitted across the verb schemas — `edit`
+(all ops: extrude=E, bevel=Ctrl+B, loop_cut=Ctrl+R, recalc=Shift+N, delete=X, separate=P,
+crease=Shift+E, inset=I, spin, …), `object` (rename=F2, delete=X, duplicate=Shift+D,
+join=Ctrl+J, visibility=H, mode=Tab, separate=P, convert), `transform` (apply=Ctrl+A),
+`add` (Shift+A · Add menu), `file` (save=Ctrl+S, open=Ctrl+O, import), `history`
+(undo=Ctrl+Z, redo=Ctrl+Shift+Z), `uv` (unwrap=U), `material` (shade_smooth/flat),
+`render` (image=F12), `modifier` (apply=Ctrl+A). ~40 op descriptions carry an anchor.

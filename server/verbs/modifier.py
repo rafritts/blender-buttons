@@ -83,7 +83,7 @@ def modifier(
       move   — reorder in the stack (target, modifier, index OR before/after)
       remove — delete a modifier   (target, modifier_name)
       list   — list a target's modifiers (target)
-      apply  — apply all modifiers to the mesh (target→name)
+      apply  — Ctrl+A (in the modifier panel) · apply all modifiers to the mesh (target→name)
 
     (object convert → real mesh; edit boolean → boolean cut; pose bind/rebind →
     mesh-deform binding.)

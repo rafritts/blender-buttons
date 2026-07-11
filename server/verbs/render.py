@@ -47,7 +47,8 @@ def render(
     """
     Render & look — the **Render** menu. `op` selects:
 
-      image   — render the scene camera to a file (filepath, resolution_x/y, samples,
+      image   — F12 · Render ▸ Render Image · render the scene camera to a file
+                (filepath, resolution_x/y, samples,
                 engine, format, transparent, timeout, output_dir). filepath is just a
                 NAME — every render lands in the configured render_dir
                 (server/settings.json) with an 8-char anti-collision tag; pass

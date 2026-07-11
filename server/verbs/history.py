@@ -26,8 +26,8 @@ def history(
     Undo / redo / inspect the operation history — the top **Edit** menu. `op` selects:
 
       log     — list the operation history (default)
-      undo    — undo N steps               (steps)
-      redo    — redo N steps               (steps)
+      undo    — Ctrl+Z · undo N steps               (steps)
+      redo    — Ctrl+Shift+Z · redo N steps          (steps)
       undo_to — undo back to an op id      (id)
       mark    — name the current point as a checkpoint, to restore to later  (name)
       restore — roll the scene back to a named checkpoint (mark, try, restore) (name)

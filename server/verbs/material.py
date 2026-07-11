@@ -58,8 +58,9 @@ def material(
                   (Blender re-homes orphaned faces to slot 0)  (target, slot)
       remove_unused_slots — drop every slot with no faces — trim a consolidated
                   mesh to its real slot count               (target)
-      shade_smooth — smooth shading            (target(s), auto_smooth_angle)
-      shade_flat   — flat shading              (target(s))
+      shade_smooth — Object ▸ Shade Smooth (Face ▸ Shade Smooth) · smooth shading
+                    (target(s), auto_smooth_angle)
+      shade_flat   — Object ▸ Shade Flat (Face ▸ Shade Flat) · flat shading   (target(s))
       search_textures — find PBR texture ids   (query, limit)
       search_hdris    — find HDRI ids for lighting (query, limit)
 

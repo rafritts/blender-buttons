@@ -74,8 +74,8 @@ def add(
     label: str = "",
 ) -> str:
     """
-    Add something to the scene — the Blender **Add** menu. Auto-enters Object Mode.
-    `type` picks the category; fill only the params that category uses.
+    Add something to the scene — Shift+A · the Blender **Add** menu. Auto-enters Object
+    Mode. `type` picks the category; fill only the params that category uses.
 
     type = one of:
       MESH PRIMITIVES (take name, on=placement DSL, rot_x/y/z):

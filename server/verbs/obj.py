@@ -66,20 +66,21 @@ def object_verb(
 
       info        — object's placement, dims, material  (name; empty=active)
       describe    — fuller report; posed=True evaluates the rig    (name)
-      rename      — name → new_name                                (name, new_name)
-      delete      — remove the object (name); or bulk-delete by pattern=<glob|prefix>
-                    to clear a whole scatter/array in one call
-      duplicate   — copy it  (name, new_name, linked=True for a mesh-sharing instance)
-      join        — weld several into one  (names=[...], merge_threshold)
-      separate    — split active into objects by LOOSE PARTS (P ▸ By Loose Parts)  (—)
+      rename      — F2 · name → new_name                           (name, new_name)
+      delete      — X · Object ▸ Delete · remove the object (name); or bulk-delete by
+                    pattern=<glob|prefix> to clear a whole scatter/array in one call
+      duplicate   — Shift+D (Alt+D linked) · Object ▸ Duplicate Objects · copy it
+                    (name, new_name, linked=True for a mesh-sharing instance)
+      join        — Ctrl+J · Object ▸ Join · weld several into one  (names=[...], merge_threshold)
+      separate    — P ▸ By Loose Parts · split active into objects by LOOSE PARTS  (—)
       group       — gather parts into a named collection; move/rotate the whole
                     group as one by passing its name to a transform's targets=
                     (name, parts=[...])
       ungroup     — dissolve the group                             (name)
       add_to_group— add parts to an existing group (name, parts=[...])
       parts       — list a group's members                        (name)
-      convert     — convert curve/text/etc to a real mesh          (name)
-      visibility  — show/hide      (name, viewport=bool, render=bool)
+      convert     — Object ▸ Convert To · convert curve/text/etc to a real mesh    (name)
+      visibility  — H / Alt+H · Object ▸ Show/Hide · show/hide  (name, viewport=bool, render=bool)
       particle_visibility — toggle particle systems  (name, show=bool)
       props       — read custom properties           (name, bone)
       set_prop    — write a custom property   (name, key, value, bone)
@@ -88,8 +89,8 @@ def object_verb(
       aim         — re-aim an object's -Z at a named target (camera, spotlight, any
                     object). To position AND aim by angle+distance, use view op=rig.
                     (name, target=<object to look at>)
-      mode        — explicit mode switch; pass name to guarantee it lands on that
-                    object despite a stray click   (name, mode=OBJECT|EDIT|SCULPT|POSE)
+      mode        — Tab (mode pie) · explicit mode switch; pass name to guarantee it lands
+                    on that object despite a stray click  (name, mode=OBJECT|EDIT|SCULPT|POSE)
       remesh      — auto-retopology of the whole mesh (mode=voxel → uniform sculpt-ready
                     grid at voxel_size; mode=quad → QuadriFlow clean quad flow at
                     ~target_faces). Destructive; rigged/keyed meshes refused.

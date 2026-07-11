@@ -108,7 +108,7 @@ def transform(
       resize   — set absolute dims         (width, depth, height)
       scale    — multiply size             (factor, pivot=center|.., pivot_object)
       rotate   — rotate degrees            (angle, axis, pivot, pivot_object)
-      apply    — bake transform to data    (scale, rotation, location)
+      apply    — Ctrl+A · Object ▸ Apply · bake transform to data  (scale, rotation, location)
       snap     — snap flush to a target    (target, side, source_side, offset)
       snap_grid— round origin to a grid    (size, axes)
       match_dim— match one object's extent (target, reference, axis)
