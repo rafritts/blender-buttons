@@ -520,3 +520,177 @@ to **one op per native operator**, named by the operator's hotkey/menu label.
   deleted. `extension/fields.py` stayed — its `field` handler + registration were removed but
   its interpolation/frame helpers (`_group_frame`, curve interp) are imported by
   `extension/curves.py` and `extension/fit.py`, so the module remains for those.
+
+## II.5 Phase 3 — native-basis gap audit (2026-07-11)
+
+**How the menus were enumerated.** From the **live Blender 5.1.2 build** (flatpak
+`org.blender.Blender`, build hash `ec6e62d40fa9`, `blender-v5.1-release`), two build-derived
+methods: (1) the bundled UI script `…/files/blender/5.1/scripts/startup/bl_ui/space_view3d.py`
+was read directly — every `layout.operator(...)` / `operator_enum` / `operator_menu_enum` call
+in the edit-mesh menu classes `VIEW3D_MT_edit_mesh` (Mesh), `_edit_mesh_vertices` (Vertex),
+`_edit_mesh_edges` (Edge), `_edit_mesh_faces` (Face) and their submenus (`_transform`,
+`_edit_mesh_merge`, `_split`, `_delete`, `_normals`, `_shading`, `_clean`, `_showhide`,
+`_edit_mesh_extrude`), plus `VIEW3D_MT_select_edit_mesh` and `VIEW3D_MT_snap`; (2) enum
+members read headless via `bpy.ops.<op>.get_rna_type().properties[...].enum_items` for
+`mesh.merge` (`CENTER/CURSOR/COLLAPSE/FIRST/LAST`), `mesh.separate` (`SELECTED/MATERIAL/LOOSE`),
+`mesh.delete`, `mesh.edge_split`. The surface side was enumerated from each verb's `Literal[...]`
+in `server/verbs/*.py` (grep), reading impls in `extension/*.py` for evidence — not memory. The
+live port-8767 instance (stale pre-Phase-2 addon) was **not** touched. **Every item** in the
+build's edit-mode Mesh/Vertex/Edge/Face menus has a row below (present / missing / skipped).
+The **Select** menu and the **Snap** submenu (`snap_selected_to_*`, `snap_cursor_to_*`) are
+pure selection/cursor placement = **substrate** (§1: "all of `select`"; placement is mouse
+work) → out of the gap table's scope by design.
+
+### Counts
+
+| status | count |
+|---|---|
+| **present** (as a surviving native op) | 24 |
+| **missing** (native item with no op) | 41 |
+| **deliberately-skipped** (with reason) | 6 |
+
+Tiers below are **daily-driver-first**: Tier 1 = the hotkeys every tutorial uses (each is
+*missing* — the audit's headline). Tier 2 = common menu ops seen in most tutorials. Tier 3 =
+menu-completeness / niche. Present and skipped items are folded in per tier.
+
+### Tier 1 — daily drivers (the every-tutorial hotkey set)
+
+| native action | hotkey · menu path | status |
+|---|---|---|
+| Duplicate (in-mesh) | Shift+D · Mesh ▸ Duplicate (`mesh.duplicate_move`) | **MISSING** — `object op=duplicate` is object-level; there is no in-mesh copy-selected. Seed row confirmed. |
+| Rotate selection | R · Mesh ▸ Transform ▸ Rotate (`transform.rotate`) | **MISSING** — `transform op=rotate` is object-mode (substrate); no edit-mode selection rotate. Seed row confirmed. |
+| Merge At Center / Cursor / First / Last / Collapse | M · Mesh ▸ Merge (`mesh.merge`) | **MISSING** — only **By Distance** (`remove_doubles`) ships as `edit op=merge`. The M-menu targets are absent. Seed row confirmed. |
+| New Edge/Face from vertices | F · Vertex ▸ New Edge/Face (`mesh.edge_face_add`) | **MISSING** — the "F closes a face" reflex has no op (grid_fill needs a closed loop; this is F on 2–4 verts). |
+| Dissolve Verts / Edges / Faces | Ctrl+X, X-menu · Mesh ▸ Delete ▸ Dissolve (`mesh.dissolve_verts/edges/faces`) | **MISSING** — `edit op=delete` is `mesh.delete` (removes geometry + holes); dissolve (removes element, keeps surface) is a distinct operator. Seed row confirmed. |
+| Hide / Reveal (edit mode) | H / Alt+H / Shift+H · Mesh ▸ Show/Hide (`mesh.hide`/`mesh.reveal`) | **MISSING** — `object op=visibility` hides whole objects; edit-mode element hide/reveal is a different operator pair. Seed row confirmed. |
+| Grab / Move selection | G · Mesh ▸ Transform ▸ Move | **present** — `edit op=grab` (proportional=O param). |
+| Scale selection | S · Mesh ▸ Transform ▸ Scale | **present** — `edit op=scale` (proportional=O param). |
+| Extrude Region | E · Mesh ▸ Extrude | **present** — `edit op=extrude` (`mesh.extrude_region_move`). |
+| Inset Faces | I · Face ▸ Inset | **present** — `edit op=inset`. |
+| Bevel | Ctrl+B · Edge/Vertex ▸ Bevel | **present** — `edit op=bevel`. |
+| Loop Cut and Slide | Ctrl+R · Edge ▸ Loop Cut | **present** — `edit op=loop_cut`. |
+| Shrink/Fatten | Alt+S · Mesh ▸ Transform ▸ Shrink/Fatten (`transform.shrink_fatten`) | **present** — `edit op=shrink_fatten` (Phase 2 rename of `inflate`). **Semantics gotcha for Phase 4 below.** |
+| Randomize | Mesh ▸ Transform ▸ Randomize (`transform.vertex_random`) | **present** — `edit op=randomize` (Phase 2 rename of `jitter`). |
+| Recalculate Normals | Shift+N · Mesh ▸ Normals ▸ Recalc Outside/Inside/Flip | **present** — `edit op=recalc_normals` (inside/flip params). |
+| Separate | P · Mesh ▸ Separate (Selection / By Loose Parts) | **present** — `edit op=separate` (SELECTED) + `object op=separate` (LOOSE). **By Material MISSING** (Tier 3). |
+| Merge By Distance | Mesh ▸ Merge ▸ By Distance | **present** — `edit op=merge`. |
+| Proportional Editing toggle | O | **present** — `proportional=` param on `edit op=grab`/`scale`. |
+| Knife | K · Mesh ▸ Knife Tool (`mesh.knife_tool`) | **SKIP** — modal interactive drawn cut, no batch/parameter semantics (the mouse, not hands). |
+
+### Tier 2 — common menu ops (in most tutorials)
+
+| native action | hotkey · menu path | status |
+|---|---|---|
+| Rip / Rip & Fill / Rip & Extend | V / Alt+V · Vertex ▸ Rip (`mesh.rip_move` / `mesh.rip_edge_move`) | **MISSING**. Seed row confirmed. |
+| Split (selection) | Y · Mesh ▸ Split ▸ Selection (`mesh.split`) | **MISSING**. Seed row confirmed. |
+| Smooth Vertices | Vertex ▸ Smooth Vertices (`mesh.vertices_smooth`) | **MISSING** — **seed correction:** `relax` was the placeholder here and was **DELETED in Phase 2** (BVH-reproject composite). Native per-vert smooth now has no op. |
+| Bisect | Mesh ▸ Bisect (`mesh.bisect`) | **MISSING**. Seed row confirmed. |
+| Shear | Shift+Ctrl+Alt+S · Mesh ▸ Transform ▸ Shear (`transform.shear`) | **MISSING**. Seed row confirmed. |
+| To Sphere | Shift+Alt+S · Mesh ▸ Transform ▸ To Sphere (`transform.tosphere`) | **MISSING**. Seed row confirmed. |
+| Triangulate Faces | Ctrl+T · Face ▸ Triangulate (`mesh.quads_convert_to_tris`) | **MISSING**. Seed row confirmed. |
+| Tris to Quads | Alt+J · Face ▸ Tris to Quads (`mesh.tris_convert_to_quads`) | **MISSING**. Seed row confirmed. |
+| Fill | Alt+F · Face ▸ Fill (`mesh.fill`) | **MISSING** — **seed confirmed:** `grid_fill` present, plain n-gon/triangle `fill` absent. |
+| Beautify Faces | Shift+Alt+F · Face ▸ Beautify Faces (`mesh.beautify_fill`) | **MISSING**. Seed row confirmed. |
+| Connect Vertex Path / Pairs | J · Vertex ▸ Connect (`mesh.vert_connect_path` / `mesh.vert_connect`) | **MISSING** — the J "cut a quad in two" reflex. |
+| Vertex Slide / Edge Slide | Shift+V / Double-G · Vertex/Edge ▸ Slide (`transform.vert_slide` / `edge_slide`) | **MISSING** — the `slide` op that wrapped these was DELETED in Phase 2 (BVH composite). |
+| Snap-to-face-projected vert dragging | Snapping: Face + Project as a flag on Grab | **MISSING** — no snapping flag on `edit op=grab`. Seed row confirmed. |
+| Fill Grid | Face ▸ Grid Fill | **present** — `edit op=grid_fill`. |
+| Bridge Edge Loops | Edge ▸ Bridge | **present** — `edit op=bridge`. |
+| Subdivide | Edge ▸ Subdivide | **present** — `edit op=subdivide`. |
+| Spin | Mesh ▸ Extrude ▸ Spin (`mesh.spin`) | **present** — `edit op=spin`. |
+| Poke Faces | Face ▸ Poke | **present** — `edit op=poke`. |
+| Symmetrize | Mesh ▸ Symmetrize | **present** — `edit op=symmetrize`. |
+| Mark Sharp / Clear Sharp | Edge ▸ Mark Sharp | **present** — `edit op=mark_sharp` (clear param). |
+| Edge Crease | Shift+E · Edge ▸ Crease | **present** — `edit op=crease`. |
+| Shade Smooth / Flat (faces) | Face ▸ Shade Smooth/Flat | **present** — `material op=shade_smooth`/`shade_flat`. |
+| Bend | Mesh ▸ Transform ▸ Bend (`transform.bend`) | **present-approx** — `edit op=bend` reaches the outcome via a `SIMPLE_DEFORM` (BEND) modifier bake, **not** the modal `transform.bend`. Same result, different operator. |
+| Delete | X · Mesh ▸ Delete | **present** — `edit op=delete` (`mesh.delete`, all `type=` modes). |
+| Mirror (interactive) | Ctrl+M · Mesh ▸ Mirror (`transform.mirror`) | **SKIP** — modal; the batch native is the **Mirror modifier** (`modifier op=add`), and the `mirror` composite was DELETED in Phase 2 by design. |
+
+### Tier 3 — menu completeness / niche (present or missing/skip, grouped)
+
+**Mesh menu.** Bisect-family knife-project (`mesh.knife_project`) — MISSING; Convex Hull
+(`mesh.convex_hull`) — MISSING; Symmetry Snap (`mesh.symmetry_snap`) — MISSING; Set Attribute
+(`mesh.attribute_set`) — MISSING (attributes niche); Sort Elements (`mesh.sort_elements`) —
+MISSING; Separate **By Material** (`mesh.separate` type=MATERIAL) — MISSING; Split ▸ Faces by
+Edges/Vertices (`mesh.edge_split`) — MISSING; Extrude **Repeat** (`mesh.extrude_repeat`),
+Extrude **Individual Faces** (`mesh.extrude_faces_move`), Extrude **Along Normals**
+(`view3d.…_shrink_fatten`), Extrude **Manifold** — MISSING (variants; core extrude present).
+**Transform submenu:** Push/Pull (`transform.push_pull`), Warp (`transform.vertex_warp`),
+Skin Resize (`transform.skin_resize`) — all MISSING (niche).
+
+**Delete/Clean submenus.** Dissolve Limited (`mesh.dissolve_limited`), Edge Collapse
+(`mesh.edge_collapse`), Delete Edge Loops (`mesh.delete_edgeloop`), Delete Loose
+(`mesh.delete_loose`), Degenerate Dissolve (`mesh.dissolve_degenerate`), Make Planar
+(`mesh.face_make_planar`), Split Non-Planar/Concave (`mesh.vert_connect_nonplanar/concave`),
+Fill Holes (`mesh.fill_holes`), Decimate (`mesh.decimate` — also a modifier) — all MISSING.
+
+**Vertex menu.** Extrude to Cursor (`mesh.dupli_extrude_cursor`), Vertex Crease
+(`transform.vert_crease`), Smooth Laplacian (`mesh.vertices_smooth_laplacian`), Blend From
+Shape (`mesh.blend_from_shape`), Propagate to Shapes (`mesh.shape_propagate_to_all`), Vertex
+Parent Set (`object.vertex_parent_set`) — all MISSING (shape-key / parenting niche). Bevel
+Vertices — **present** (`edit op=bevel affect=VERTICES`). Extrude Vertices — **present**
+(covered by `edit op=extrude`). Vertex Group / Hook submenus — **SKIP** (addressing/rigging
+plumbing routed through `select claim` / `pose` / curve hooks).
+
+**Edge menu.** Screw (`mesh.screw`) — MISSING (the `helix` composite it resembles was DELETED);
+Subdivide Edge-Ring (`mesh.subdivide_edgering`), Unsubdivide (`mesh.unsubdivide`), Rotate Edge
+CW/CCW (`mesh.edge_rotate`), Offset Edge Loop Slide (`mesh.offset_edge_loops_slide`), Edge
+Bevel Weight (`transform.edge_bevelweight`), Set Sharpness by Angle (`mesh.set_sharpness_by_angle`),
+Mark/Clear Seam (`mesh.mark_seam`), Mark Sharp from Vertices (variant) — all MISSING (topology
+/ UV-seam / bevel-weight niche).
+
+**Face menu.** Solidify (`mesh.solidify`) / Wireframe (`mesh.wireframe`) — MISSING (both exist
+as **modifiers** via `modifier op=add`); Intersect Knife (`mesh.intersect`) — MISSING; Intersect
+Boolean (`mesh.intersect_boolean`, edit-mode self-boolean) — MISSING (`edit op=boolean` is the
+modifier-boolean-with-a-cutter path, a different operator); Split by Edges
+(`mesh.face_split_by_edges`) — MISSING; Face Data (colors/UVs rotate/reverse,
+`mesh.flip_quad_tessellation`) — MISSING (niche). Inset / Poke / Grid Fill / Shade Smooth/Flat
+— **present** (see Tiers 1–2).
+
+**Normals submenu.** Recalc Outside/Inside/Flip — **present** (`edit op=recalc_normals`). Set
+from Faces, Rotate/Point-to-Target, Merge/Split, Copy/Paste/Smooth/Reset Vector, Face Strength
+(`mesh.set_normals_from_faces`, `transform.rotate_normal`, `mesh.point_normals`,
+`mesh.merge/split_normals`, `mesh.normals_tools`, `mesh.smooth_normals`,
+`mesh.mod_weighted_strength`) — all MISSING (custom split-normals niche).
+
+### Seed-table corrections (rows the build or Phase 2 changed)
+
+- **Shrink/Fatten (Alt+S):** seed said "`move_verts` out/in exists — verify." **Resolved:** it is
+  now `edit op=shrink_fatten` (Phase 2 rename of `inflate`). **But** the impl (`inflate_selection`)
+  does a raw per-vert-normal push scaled by inverse object scale — it does **not** set
+  `use_even_offset` (native Alt+S ▸ *Offset Even*, which corrects thickness on non-flat patches).
+  Present, semantics ~90% — see Phase 4 note.
+- **Randomize:** seed said "`jitter` exists — rename candidate." **Done in Phase 2** → `edit
+  op=randomize`. Not a gap.
+- **Smooth Vertices:** seed said "`relax` exists — verify vs native." **Wrong now:** `relax` was a
+  BVH-reproject composite and was **DELETED in Phase 2**. Native `mesh.vertices_smooth` (Vertex ▸
+  Smooth Vertices) is **MISSING** → promoted to a real Tier-2 gap.
+- **Vertex/Edge Slide:** the `slide` op (seed-adjacent) was likewise **DELETED in Phase 2** as a
+  composite, so `transform.vert_slide`/`edge_slide` are now **MISSING** (Tier 2), not present.
+- **Fill / Beautify (F):** seed said "grid_fill exists; plain fill unverified." **Confirmed:**
+  `grid_fill` present; `mesh.fill` and `mesh.beautify_fill` both MISSING.
+- **Randomize/Shrink already-done** aside, **every other seed row (Duplicate, Rotate, Merge-at,
+  Rip, Split, Bisect, Shear, To Sphere, Dissolve, Hide/Reveal, Triangulate/Tris-to-Quads,
+  Snap-project) verified MISSING against the build** — none was quietly resolved by Phase 2.
+
+### Notes for Phase 4 (implementation)
+
+- **`shrink_fatten` fidelity:** add `use_even_offset` (native "Offset Even") so puffing a
+  non-planar patch keeps even wall thickness; the current fixed-normal push diverges from native
+  on curved regions. Also consider wrapping `transform.shrink_fatten` directly (it exists in 5.1.2,
+  confirmed in II Part-I introspection) rather than the hand-rolled bmesh push, to inherit native
+  offset semantics for free.
+- **Merge (M)** is a family: one `edit op=merge` with `at=CENTER|CURSOR|FIRST|LAST|COLLAPSE|DISTANCE`
+  covering `mesh.merge` enum + the existing `remove_doubles` — do not add five ops.
+- **Dissolve (Ctrl+X)** vs **Delete (X)** are semantically distinct (dissolve keeps the surface,
+  delete makes holes) and must be a separate op, not a `mode=` on delete — the tutorial vocabulary
+  ("dissolve" / Ctrl+X) is the retrieval key.
+- **Hide/Reveal** is edit-mode element visibility (`mesh.hide`/`mesh.reveal`), distinct from the
+  object-level `object op=visibility`; needs `unselected=` for Hide Unselected (Shift+H).
+- **Rip (V)** and **Knife-project** have batch semantics (parameters, no live mouse) and are
+  implementable headless; **Knife tool (K)** and **Interactive Mirror** are modal-only and stay
+  skipped (mouse substrate / Mirror modifier already reachable).
+- **Solidify / Wireframe / Decimate / Screw** appear in the Face/Edge/Clean menus but are all
+  reachable as **modifiers** (`modifier op=add`) — Phase 4 should decide whether the edit-mode
+  operator forms are worth duplicating or left to the modifier path (leaning: leave them).
