@@ -20,7 +20,10 @@ from ._common import tag, unknown, teach
 _OPS = ["extrude", "bevel", "loop_cut", "merge", "symmetrize", "delete", "separate",
         "mark_sharp", "crease", "shrink_fatten", "randomize", "grab", "scale", "lattice",
         "bend", "trace", "boolean", "subdivide", "bridge", "spin",
-        "poke", "inset", "grid_fill", "recalc_normals"]
+        "poke", "inset", "grid_fill", "recalc_normals",
+        "duplicate", "rotate", "dissolve", "hide", "reveal", "rip", "split",
+        "smooth", "bisect", "shear", "to_sphere", "triangulate", "tris_to_quads",
+        "edge_face", "fill", "beautify", "connect", "slide"]
 
 
 @mcp.tool(name="edit")
@@ -28,7 +31,10 @@ def edit(
     op: Literal["extrude", "bevel", "loop_cut", "merge", "symmetrize", "delete", "separate",
                 "mark_sharp", "crease", "shrink_fatten", "randomize", "grab", "scale",
                 "lattice", "bend", "trace", "boolean", "subdivide",
-                "bridge", "spin", "poke", "inset", "grid_fill", "recalc_normals"],
+                "bridge", "spin", "poke", "inset", "grid_fill", "recalc_normals",
+                "duplicate", "rotate", "dissolve", "hide", "reveal", "rip", "split",
+                "smooth", "bisect", "shear", "to_sphere", "triangulate", "tris_to_quads",
+                "edge_face", "fill", "beautify", "connect", "slide"],
     target: tag(str, "mesh object to edit (empty=active); [lattice] the lattice cage object") = "",
     # bridge — weld two boundary handles (SPEC-07 Phase 5 / G10)
     a: tag(str, "[bridge] first boundary handle (order-independent)") = "",
@@ -57,13 +63,18 @@ def edit(
     width: tag(float, "[bevel] bevel width (m)") = 0.0,
     factor: tag(float, "[bevel] bevel amount as a factor (alt to width; unset→0.05); "
                        "[scale proportional] scale at the handle verts (<1 gathers/narrows, "
-                       ">1 swells); radius-edge verts stay 1.0, lerped by falloff") = 1.0,
+                       ">1 swells); radius-edge verts stay 1.0, lerped by falloff; "
+                       "[smooth] relax strength (unset→0.5); [slide] fraction along the rail "
+                       "edge, -1..1, sign picks the side (unset→0.5); [to_sphere] blend toward "
+                       "a sphere 0..1 (1=full)") = 1.0,
     segments: tag(int, "[bevel] bevel segments") = 1,
     affect: tag(str, "[bevel] EDGES | VERTICES") = "EDGES",
     # loop_cut / axis-based
-    axis: tag(str, "[loop_cut/trace/bend/spin/randomize] axis X|Y|Z (bend: the axis to bend "
-                   "AROUND — refused if it's the object's own long axis, pick a perpendicular "
-                   "one; spin: the axis to REVOLVE around, through the object's origin)") = "Z",
+    axis: tag(str, "[loop_cut/trace/bend/spin/randomize/rotate/bisect/shear] axis X|Y|Z "
+                   "(bend: the axis to bend AROUND — refused if it's the object's own long "
+                   "axis, pick a perpendicular one; spin: the axis to REVOLVE around, through "
+                   "the object's origin; rotate: rotation axis; bisect: cut-plane normal; "
+                   "shear: the direction verts slide)") = "Z",
     cuts: tag(int, "[loop_cut/subdivide] number of cuts to add") = 1,
     seed_at: tag(float, "[loop_cut] world coord on `axis` to aim the loop at one cross-section "
                         "(only edges straddling that plane are cut) — seeds a spanning ring on "
@@ -79,12 +90,20 @@ def edit(
     # merge / symmetrize / delete / sharp / crease
     threshold: tag(float, "[merge] merge-by-distance threshold (m); [symmetrize] seam-weld distance") = 0.001,
     selected_only: tag(bool, "[merge] merge only within the selection") = False,
+    at: tag(str, "[merge] where to weld the selection: CENTER (median) | CURSOR | FIRST | "
+                 "LAST | COLLAPSE (each island to its own centre) | DISTANCE (weld coincident, "
+                 "the by-distance path). Native M-menu.") = "CENTER",
     keep: tag(str, "[symmetrize] which half is the SOURCE mirrored onto the other: '+' | '-' along axis") = "+",
-    mode: tag(str, "[delete] VERT|EDGE|FACE|ONLY_FACE|EDGE_FACE") = "VERT",
+    mode: tag(str, "[delete] VERT|EDGE|FACE|ONLY_FACE|EDGE_FACE; [dissolve] VERT|EDGE|FACE") = "VERT",
     clear: tag(bool, "[mark_sharp] clear instead of mark") = False,
     weight: tag(float, "[crease] crease weight 0..1") = 1.0,
     # shrink_fatten / randomize
-    amount: tag(float, "[shrink_fatten/randomize] displacement amount (m)") = 0.003,
+    amount: tag(float, "[shrink_fatten/randomize] displacement amount (m); [shear] shear "
+                       "factor (unitless slant, e.g. 0.5)") = 0.003,
+    even: tag(bool, "[shrink_fatten] native 'Offset Even' — correct the push by vertex-normal "
+                    "angle so a non-planar patch keeps even wall thickness (native default off)") = False,
+    along: tag(str, "[shear] the gradient axis: verts displace along `axis` in proportion to "
+                    "their coordinate along this one (X|Y|Z, must differ from axis)") = "Z",
     seed: tag(int, "[randomize] random seed") = 0,
     only_positive: tag(bool, "[randomize] jitter outward only") = False,
     # grab / scale — proportional-edit option (O) + rigid vert scale
@@ -95,6 +114,10 @@ def edit(
     falloff: tag(str, "[grab/scale proportional] SMOOTH|SHARP|…") = "SMOOTH",
     connected: tag(bool, "[grab/scale proportional] geodesic (along-edges) falloff — won't drag a disconnected shell") = False,
     freeze: tag(str, "[grab/scale proportional] handle whose verts are held rigid (and wall off the falloff)") = "",
+    snap_to: tag(str, "[grab] native Snapping mode — 'face_project' drops each moved vert "
+                      "onto the surface of snap_target after the grab (drape verts onto "
+                      "another mesh's face). Empty = no snapping (default).") = "",
+    snap_target: tag(str, "[grab snap_to=face_project] the mesh to project the moved verts onto") = "",
     sx: tag(float, "[scale] X scale factor") = 1.0,
     sy: tag(float, "[scale] Y scale factor") = 1.0,
     sz: tag(float, "[scale] Z scale factor") = 1.0,
@@ -110,9 +133,10 @@ def edit(
     lat_scale: tag(list, "[lattice] scale the slab about the cage centre [sx,sy,sz]") = None,
     # separate
     new_name: tag(str, "[separate] name for the split-off object") = "",
-    # bend / spin
-    angle: tag(float, "[bend/spin] angle in degrees — bend arc / spin revolution (spin: "
-                      "unset ⇒ a full 360°, seam auto-welded)") = 0.0,
+    # bend / spin / rotate
+    angle: tag(float, "[bend/spin/rotate] angle in degrees — bend arc / spin revolution / "
+                      "rotate the selection about its median (spin: unset ⇒ a full 360°, "
+                      "seam auto-welded)") = 0.0,
     apply: tag(bool, "[bend] apply the bend modifier") = True,
     # trace / spin
     sections: tag(int, "[trace] cross-sections along the span; [spin] steps around the "
@@ -123,12 +147,20 @@ def edit(
     solver: tag(str, "[boolean] EXACT|FLOAT (5.0 renamed 'Fast'->'Float'; legacy FAST ok)") = "EXACT",
     hide_cutter: tag(bool, "[boolean] hide the cutter afterward") = True,
     # poke / inset / grid_fill (G50) — face authoring
-    offset: tag(float, "[poke] push the new centre vert along the face normal (m)") = 0.0,
+    offset: tag(float, "[poke] push the new centre vert along the face normal (m); "
+                       "[bisect] the cut plane's position along `axis` (world m)") = 0.0,
     depth: tag(float, "[inset] push the inset in/out along the normal (m)") = 0.0,
     thickness: tag(float, "[inset] inset distance (m)") = 0.02,
     individual: tag(bool, "[inset] inset each face separately vs. the region as a whole") = False,
     span: tag(int, "[grid_fill] grid span (0 = auto)") = 0,
     grid_offset: tag(int, "[grid_fill] grid offset") = 0,
+    # SPEC-22 Phase 4 native ops
+    repeat: tag(int, "[smooth] smoothing iterations (native default 1)") = 1,
+    unselected: tag(bool, "[hide] hide the UNSELECTED elements instead (Shift+H)") = False,
+    use_fill: tag(bool, "[bisect] fill the cut plane with a face") = False,
+    clear_inner: tag(bool, "[bisect] delete the geometry on the negative-normal side") = False,
+    clear_outer: tag(bool, "[bisect] delete the geometry on the positive-normal side") = False,
+    use_beauty: tag(bool, "[fill] arrange the fill triangles for better shape (native default on)") = True,
     label: str = "",
 ) -> str:
     """
@@ -142,52 +174,100 @@ def edit(
     no-op detector flags the byte-identical result). Issue dependent edit ops sequentially,
     one per message. Independent edits on DIFFERENT meshes are fine to batch.
 
-      extrude     — push the selection out (out/inward/up/down/left/right/forward/back
-                    meters, or until_contact=obj / until_length)
-      bevel       — round edges/verts   (width OR factor, segments, affect=EDGES|VERTICES)
-      loop_cut    — add edge loops       (axis, cuts, seed_at=cross-section to seed a ring).
-                    WHOLE-MESH by default, like native Ctrl+R — ignores the selection and
-                    rings the whole mesh, so you can chain cuts (grid a cube: loop_cut X then
-                    loop_cut Y) with NO reselect between them. only_selected=True opts into
-                    scoping — cut only edges with BOTH ends selected, to rib one limb.
-      recalc_normals — repair flipped normals IN PLACE (Shift-N) — fix a boolean
-                    result whose shell inverted, or bad imported winding (inside, flip).
-                    WHOLE-MESH by default (ignores leftover selection); only_selected=True
-                    recalcs just one selected shell.
-      subdivide   — densify the SELECTED patch locally — sculptable resolution where
-                    you select, no global loops, no shape-key block  (cuts, subdivide_smooth)
-      merge       — merge by distance    (threshold, selected_only)
-      symmetrize  — make the mesh bilaterally symmetric across an axis plane through its
-                    origin: one half mirrored onto the other and welded. How a SINGLE-MESH
-                    organic edit stays bilateral — shape one side freely (grab / sculpt),
-                    then symmetrize to reflect it true, with no per-op mirror flag and no
-                    half-mesh MIRROR modifier. (axis=X|Y|Z plane normal, keep='+'|'-'
-                    source half, threshold=seam weld)
-      delete      — delete geometry      (mode=VERT|EDGE|FACE|ONLY_FACE|EDGE_FACE)
-      separate    — split selection into a new object   (new_name)
-      mark_sharp  — mark/clear sharp edges               (clear)
-      crease      — set edge crease weight               (weight)
-      shrink_fatten — Alt+S · push the selected verts along their OWN per-vert normals
-                    (puffs/spreads a patch); amount in meters, negative = inward.
+      extrude     — E · Mesh ▸ Extrude · push the selection out
+                    (out/inward/up/down/left/right/forward/back meters, or
+                    until_contact=obj / until_length)
+      bevel       — Ctrl+B · Edge/Vertex ▸ Bevel · round edges/verts
+                    (width OR factor, segments, affect=EDGES|VERTICES)
+      loop_cut    — Ctrl+R · Edge ▸ Loop Cut · add edge loops (axis, cuts,
+                    seed_at=cross-section to seed a ring). WHOLE-MESH by default, like
+                    native Ctrl+R — ignores the selection and rings the whole mesh, so you
+                    can chain cuts (grid a cube: loop_cut X then loop_cut Y) with NO reselect
+                    between them. only_selected=True opts into scoping — cut only edges with
+                    BOTH ends selected, to rib one limb.
+      recalc_normals — Shift+N · Mesh ▸ Normals ▸ Recalculate Outside · repair flipped
+                    normals IN PLACE — fix a boolean result whose shell inverted, or bad
+                    imported winding (inside, flip). WHOLE-MESH by default (ignores leftover
+                    selection); only_selected=True recalcs just one selected shell.
+      subdivide   — Edge ▸ Subdivide · densify the SELECTED patch locally — sculptable
+                    resolution where you select, no global loops  (cuts, subdivide_smooth)
+      merge       — M · Mesh ▸ Merge · weld the selection to one point. at=CENTER (median) |
+                    CURSOR | FIRST | LAST | COLLAPSE (each island to its own centre) |
+                    DISTANCE (weld coincident verts — threshold, selected_only).
+      symmetrize  — Mesh ▸ Symmetrize · make the mesh bilaterally symmetric across an axis
+                    plane through its origin: one half mirrored onto the other and welded.
+                    How a SINGLE-MESH organic edit stays bilateral — shape one side freely
+                    (grab / sculpt), then symmetrize to reflect it true, with no per-op mirror
+                    flag and no half-mesh MIRROR modifier. (axis=X|Y|Z plane normal,
+                    keep='+'|'-' source half, threshold=seam weld)
+      delete      — X · Mesh ▸ Delete · delete geometry, leaving holes
+                    (mode=VERT|EDGE|FACE|ONLY_FACE|EDGE_FACE)
+      dissolve    — Ctrl+X · Mesh ▸ Dissolve · remove the selected elements but KEEP the
+                    surrounding surface (merges neighbours into a larger face) — distinct
+                    from delete, which makes a hole. (mode=VERT|EDGE|FACE)
+      separate    — P · Mesh ▸ Separate ▸ Selection · split the selection into a NEW object
+                    (new_name)
+      mark_sharp  — Edge ▸ Mark Sharp · mark/clear sharp edges               (clear)
+      crease      — Shift+E · Edge ▸ Crease · set edge crease weight          (weight)
+      shrink_fatten — Alt+S · Mesh ▸ Transform ▸ Shrink/Fatten · push the selected verts
+                    along their OWN per-vert normals (puffs/spreads a patch); amount in
+                    meters, negative = inward. even=native Offset Even.
       randomize   — Mesh ▸ Transform ▸ Randomize · per-vertex WHITE noise → spiky
                     (amount, axis, seed, only_positive)
-      grab        — G · MOVE the selection (out/inward/up/down/left/right/forward/back
-                    meters, or x/y/z). proportional=True turns on proportional editing
-                    (O): a soft falloff drags nearby verts along — the icing-drip pull
-                    (radius, falloff, connected=geodesic, freeze=hold a handle rigid).
-      scale       — S · SCALE the selection about its pivot (sx/sy/sz, in_plane=flatten
-                    in the tangent plane, vert_pivot=SELECTION|INDIVIDUAL|ORIGIN).
-                    proportional=True is the soft gather/swell toward the centroid with a
-                    falloff — a drip narrows toward its tip (factor<1 gathers, >1 swells;
-                    radius, falloff, connected, freeze).
+      grab        — G · Mesh ▸ Transform ▸ Move · MOVE the selection
+                    (out/inward/up/down/left/right/forward/back meters, or x/y/z).
+                    proportional=True turns on proportional editing (O): a soft falloff drags
+                    nearby verts along — the icing-drip pull (radius, falloff,
+                    connected=geodesic, freeze=hold a handle rigid). snap_to='face_project'
+                    drapes the moved verts onto snap_target's surface (native Snapping).
+      scale       — S · Mesh ▸ Transform ▸ Scale · SCALE the selection about its pivot
+                    (sx/sy/sz, in_plane=flatten in the tangent plane,
+                    vert_pivot=SELECTION|INDIVIDUAL|ORIGIN). proportional=True is the soft
+                    gather/swell toward the centroid with a falloff — a drip narrows toward
+                    its tip (factor<1 gathers, >1 swells; radius, falloff, connected, freeze).
+      rotate      — R · Mesh ▸ Transform ▸ Rotate · rotate the selection about its own
+                    median around a world axis (angle degrees, axis=X|Y|Z).
+      shear       — Shift+Ctrl+Alt+S · Mesh ▸ Transform ▸ Shear · slant the selection —
+                    verts displace along `axis` in proportion to their `along` coordinate
+                    (amount=shear factor, axis=direction, along=gradient axis).
+      to_sphere   — Shift+Alt+S · Mesh ▸ Transform ▸ To Sphere · blend the selection toward
+                    a sphere about its median (factor 0..1).
+      duplicate   — Shift+D · Mesh ▸ Duplicate · copy the selected geometry IN-MESH; the copy
+                    is selected and (default) unmoved — pass direction words to grab it away
+                    in the same call (out/up/x/…).
+      rip         — V · Vertex ▸ Rip · tear the mesh open along the selected edge(s)/vert
+                    chain, splitting shared verts so the sides part; pass direction words to
+                    pull the torn side away.
+      split       — Y · Mesh ▸ Split ▸ Selection · disconnect the selected geometry from the
+                    rest (stays in the same object as a loose island).
+      slide       — Vertex/Edge Slide (Shift+V / GG) · Vertex/Edge ▸ Slide · move the
+                    selected verts ALONG their neighbouring edges (factor -1..1, sign picks
+                    the rail), staying on the topology.
+      smooth      — Vertex ▸ Smooth Vertices · relax selected verts toward their neighbours'
+                    average (factor, repeat).
+      bisect      — Mesh ▸ Bisect · cut the geometry with an infinite plane (axis + offset;
+                    use_fill, clear_inner, clear_outer).
+      triangulate — Ctrl+T · Face ▸ Triangulate Faces · quads/n-gons → triangles.
+      tris_to_quads — Alt+J · Face ▸ Tris to Quads · merge adjacent triangles back to quads.
+      edge_face   — F · Vertex ▸ New Edge/Face from Vertices · 2 selected verts → an edge,
+                    3+ / a boundary chain → a face (the "F closes it" reflex).
+      fill        — Alt+F · Face ▸ Fill · fill a selected closed edge boundary with triangles
+                    (use_beauty).
+      beautify    — Shift+Alt+F · Face ▸ Beautify Faces · re-flip shared edges of the selected
+                    triangles toward a balanced triangulation.
+      connect     — J · Vertex ▸ Connect Vertices · cut a new edge between selected verts
+                    across the face they share (split a quad in two).
+      hide        — H (Shift+H unselected) · Mesh ▸ Show/Hide ▸ Hide · hide selected elements
+                    in edit mode (unselected=True hides the rest).
+      reveal      — Alt+H · Mesh ▸ Show/Hide ▸ Reveal · unhide everything hidden in edit mode.
       lattice     — Lattice edit (G/S on control points): warp a bound deform cage by
                     pushing a SLAB of its points; every mesh bound to it follows,
                     non-destructively. (lat_u/lat_v/lat_w slab pickers, lat_translate,
                     lat_scale)
-      bend        — bend the object into an arc  (angle, axis, apply). Pivots about
-                    the object ORIGIN and is SYMMETRIC about it — a bar centred on its
-                    origin humps both ways ("mustache"); move the origin to one end
-                    for a one-way crescent. apply=True forces OBJECT mode.
+      bend        — Mesh ▸ Transform ▸ Bend · bend the object into an arc  (angle, axis,
+                    apply). Pivots about the object ORIGIN and is SYMMETRIC about it — a bar
+                    centred on its origin humps both ways ("mustache"); move the origin to one
+                    end for a one-way crescent. apply=True forces OBJECT mode.
       trace       — trace a cross-section profile  (target, axis, sections)
       boolean     — boolean with a cutter  (cutter, bool_op=DIFFERENCE|UNION|
                     INTERSECT, solver, apply, hide_cutter)
@@ -201,18 +281,18 @@ def edit(
                     bow, profile=outward bulge, interpolation=linear|path|surface), and
                     twist to align rims that face apart (kills the spiral).
                     (a, b, bridge_cuts, smoothness, interpolation, profile, twist)
-      spin        — NATIVE SPIN: revolve the selected PROFILE around a world axis
+      spin        — Mesh ▸ Extrude ▸ Spin · revolve the selected PROFILE around a world axis
                     through the object's origin — the surface-of-revolution author
                     (goblet, plate, wheel: trace the silhouette as an edge run, spin it).
                     A full 360° welds the seam and recalcs normals outward.
                     (axis, angle=360, sections=steps around the turn)
-      poke        — fan each selected face out from a new centre vert → mints a POLE
-                    (radial centre) where the form wants one. FACE mode.   (offset)
-      inset       — ring the selected faces with a new face band (shrink a copy inward);
-                    adds an edge loop to define/tighten a feature. FACE mode.
-                    (thickness, depth, individual)
-      grid_fill   — fill a selected closed edge loop with a clean quad grid (re-flow a
-                    hole/region instead of a fan). One even-vert loop selected.
+      poke        — Face ▸ Poke Faces · fan each selected face out from a new centre vert →
+                    mints a POLE (radial centre) where the form wants one. FACE mode. (offset)
+      inset       — I · Face ▸ Inset Faces · ring the selected faces with a new face band
+                    (shrink a copy inward); adds an edge loop to define/tighten a feature.
+                    FACE mode. (thickness, depth, individual)
+      grid_fill   — Face ▸ Grid Fill · fill a selected closed edge loop with a clean quad grid
+                    (re-flow a hole/region instead of a fan). One even-vert loop selected.
                     (span, grid_offset)
     """
     o = op.lower().strip()
@@ -240,7 +320,7 @@ def edit(
     if o == "subdivide":
         return editmode.subdivide_selection(cuts, subdivide_smooth, label, target)
     if o == "merge":
-        return editmode.merge_by_distance(threshold, selected_only, label, target)
+        return editmode.merge(at, threshold, selected_only, label, target)
     if o == "symmetrize":
         return editmode.symmetrize(axis, keep, threshold, target, label)
     if o == "delete":
@@ -252,7 +332,7 @@ def edit(
     if o == "crease":
         return editmode.set_edge_crease(weight, label, target)
     if o == "shrink_fatten":
-        return editmode.inflate_selection(amount, label, target)
+        return editmode.inflate_selection(amount, even, label, target)
     if o == "randomize":
         return editmode.jitter_vertices(amount, axis, seed, only_positive, label, target)
     if o == "grab":
@@ -261,7 +341,7 @@ def edit(
                                               forward, back, x, y, z, radius, falloff,
                                               connected, freeze, label, target)
         return editmode.move_vertices(out, inward, up, down, left, right, forward,
-                                      back, x, y, z, label, target)
+                                      back, x, y, z, label, target, snap_to, snap_target)
     if o == "scale":
         if proportional:
             return editmode.proportional_scale(factor, radius, falloff, connected, freeze,
@@ -287,4 +367,44 @@ def edit(
         return editmode.inset_faces(thickness, depth, individual, label, target)
     if o == "grid_fill":
         return editmode.grid_fill(span, grid_offset, label, target)
+    if o == "duplicate":
+        return editmode.duplicate_selection(out, inward, up, down, left, right,
+                                            forward, back, x, y, z, label, target)
+    if o == "rotate":
+        return editmode.rotate_selection(angle, axis, label, target)
+    if o == "dissolve":
+        return editmode.dissolve(mode, label, target)
+    if o == "hide":
+        return editmode.hide_geometry(unselected, label, target)
+    if o == "reveal":
+        return editmode.reveal_geometry(label, target)
+    if o == "rip":
+        return editmode.rip_selection(out, inward, up, down, left, right,
+                                      forward, back, x, y, z, label, target)
+    if o == "split":
+        return editmode.split_selection(label, target)
+    if o == "smooth":
+        return editmode.smooth_vertices(0.5 if factor == 1.0 else factor, repeat,
+                                        label, target)
+    if o == "bisect":
+        return editmode.bisect(axis, offset, use_fill, clear_inner, clear_outer,
+                               label, target)
+    if o == "shear":
+        return editmode.shear_selection(amount, axis, along, label, target)
+    if o == "to_sphere":
+        return editmode.to_sphere(factor, label, target)
+    if o == "triangulate":
+        return editmode.triangulate(label, target)
+    if o == "tris_to_quads":
+        return editmode.tris_to_quads(label=label, target=target)
+    if o == "edge_face":
+        return editmode.make_edge_face(label, target)
+    if o == "fill":
+        return editmode.fill(use_beauty, label, target)
+    if o == "beautify":
+        return editmode.beautify(label=label, target=target)
+    if o == "connect":
+        return editmode.connect_verts(label, target)
+    if o == "slide":
+        return editmode.slide(0.5 if factor == 1.0 else factor, "EDGE", label, target)
     return unknown("edit", "op", op, _OPS)

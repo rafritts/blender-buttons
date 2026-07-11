@@ -1210,6 +1210,35 @@ def verify_selection(params):
     }
 
 
+def _face_project_snap(moving_obj, moved_verts, target_name):
+    """Native Snapping (Face + Project) as a headless drag-snap: after the grab, drop each
+    moved vert onto the nearest point of `target_name`'s surface. A BVHTree of the target's
+    evaluated mesh (world space) is the projection surface; verts are round-tripped through
+    the moving object's matrix. Returns (snapped_count, err|None)."""
+    from mathutils.bvhtree import BVHTree
+    tgt = bpy.data.objects.get(target_name)
+    if tgt is None:
+        return 0, f"snap_target '{target_name}' not found"
+    if getattr(tgt, "type", None) != 'MESH':
+        return 0, f"snap_target '{target_name}' is not a mesh"
+    import bmesh
+    dg = bpy.context.evaluated_depsgraph_get()
+    tbm = bmesh.new()
+    tbm.from_object(tgt, dg)
+    tbm.transform(tgt.matrix_world)
+    tree = BVHTree.FromBMesh(tbm)
+    m = moving_obj.matrix_world
+    minv = m.inverted()
+    n = 0
+    for v in moved_verts:
+        loc, _nrm, _idx, _dist = tree.find_nearest(m @ v.co)
+        if loc is not None:
+            v.co = minv @ loc
+            n += 1
+    tbm.free()
+    return n, None
+
+
 def move_vertices(params):
     import bmesh
     obj = bpy.context.active_object
@@ -1243,6 +1272,17 @@ def move_vertices(params):
 
     for v in selected:
         v.co += local
+    # SPEC-22 Phase 4: native Snapping (Face + Project) as a flag — after the grab, drop
+    # the moved verts onto a target surface (drape verts onto another mesh's face).
+    snap_to = (params.get("snap_to") or "").lower()
+    snapped = None
+    if snap_to == "face_project":
+        target_name = params.get("snap_target") or ""
+        if not target_name:
+            return {"error": "snap_to='face_project' needs snap_target=<mesh to project onto>"}
+        snapped, err = _face_project_snap(obj, selected, target_name)
+        if err:
+            return {"error": err}
     # G87: re-derive edge/face selection from the vert flags before the editmesh→mesh
     # sync, so the live selection survives the OBJECT↔EDIT round-trip a following edit
     # op triggers (without this flush, moved verts could re-enter with a stale/empty
@@ -1253,6 +1293,8 @@ def move_vertices(params):
     result = {"success": True, "verts_moved": len(selected), "delta_world": world_delta}
     if frame:
         result["frame"] = frame
+    if snapped is not None:
+        result["snapped_to_face"] = snapped
     return result
 
 
@@ -2009,42 +2051,35 @@ def jitter_vertices(params):
 
 
 def inflate_selection(params):
-    """Push selected verts along their normals by a fixed amount — the sculpt 'Inflate' brush as a one-shot.
+    """Alt+S · Mesh ▸ Transform ▸ Shrink/Fatten — push the selected verts along their
+    OWN per-vert normals by `amount` (positive = fatten/out, negative = shrink/in).
 
-    amount: meters to move along each vert's normal. Positive = outward (puff up),
-            negative = inward (deflate). Default 0.003 (3mm).
-
-    Use case: bulbous drip tips. After pulling drip-tip verts down with
-    proportional_move, select just the tip verts and inflate_selection(amount=0.003)
-    to bulge them outward into proper teardrop bulbs instead of pointy tongues.
+    SPEC-22 Phase 4: this now wraps the native `transform.shrink_fatten` operator
+    directly (drivable headless in 5.1.2), so it inherits native semantics — including
+    Offset Even (`even`, native "Offset Even": correct the offset by the vertex-normal
+    angle so a non-planar patch keeps even wall thickness). The prior hand-rolled push
+    (fixed normal × inverse object scale, no Offset Even) diverged from native on curved
+    regions; native defaults win.
     """
     import bmesh
     obj = bpy.context.active_object
     if obj is None or obj.mode != 'EDIT':
         return {"error": "Must be in edit mode"}
     amount = float(params.get("amount", 0.003))
-
-    scale = obj.scale
-    sx = abs(scale.x) or 1.0
-    sy = abs(scale.y) or 1.0
-    sz = abs(scale.z) or 1.0
+    even = bool(params.get("even", False))  # native "Offset Even" default is OFF
 
     bm = bmesh.from_edit_mesh(obj.data)
     selected = [v for v in bm.verts if v.select]
     if not selected:
         return {"error": "No vertices selected"}
-    moved = 0
-    for v in selected:
-        n = v.normal
-        if n.length == 0:
-            continue
-        v.co.x += n.x * amount / sx
-        v.co.y += n.y * amount / sy
-        v.co.z += n.z * amount / sz
-        moved += 1
+    try:
+        bpy.ops.transform.shrink_fatten(value=amount, use_even_offset=even)
+    except RuntimeError as e:
+        return {"error": f"shrink_fatten failed: {e}"}
     bmesh.update_edit_mesh(obj.data)
-    push_undo(f"inflate_selection {amount}")
-    return {"success": True, "verts_inflated": moved, "amount": amount}
+    push_undo(f"shrink_fatten {amount} even={even}")
+    return {"success": True, "verts_inflated": len(selected), "amount": amount,
+            "even": even}
 
 
 def spin(params):
@@ -2964,6 +2999,529 @@ def grid_fill(params):
     return {"success": True, "faces_added": added, "faces_total": len(bm.faces)}
 
 
+# ───────────────────────── SPEC-22 Phase 4: native-basis completion ──────────
+# Every handler below resolves to a single native Blender operator (or, where that
+# operator is modal/context-dependent headless, a faithful bmesh equivalent of that
+# ONE operator — house precedent, SPEC-22 §5 rule 3). Native name, native defaults.
+
+def duplicate_selection(params):
+    """Shift+D · Mesh ▸ Duplicate — copy the selected geometry IN-MESH. The copy is
+    left selected and (native default) unmoved; pass direction words to grab it away
+    in the same call (Shift+D then move). bmesh.ops.duplicate = the Duplicate operator."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    geom = ([v for v in bm.verts if v.select] + [e for e in bm.edges if e.select]
+            + [f for f in bm.faces if f.select])
+    if not any(isinstance(g, bmesh.types.BMVert) for g in geom):
+        return {"error": "No geometry selected to duplicate"}
+    verts_before = len(bm.verts)
+    # Resolve the grab delta from the ORIGINAL selection (its 'out' normal) before we
+    # reselect onto the copy.
+    local = None
+    frame = None
+    world_delta = [0.0, 0.0, 0.0]
+    if _has_dir_words(params):
+        wv, frame, err = _resolve_world_delta(bm, obj, params)
+        if err:
+            return err
+        local = obj.matrix_world.inverted().to_3x3() @ wv
+        world_delta = [round(c, 5) for c in wv]
+    elif any(abs(float(params.get(k, 0.0) or 0.0)) > 0 for k in ("x", "y", "z")):
+        wv = Vector((params.get("x", 0.0), params.get("y", 0.0), params.get("z", 0.0)))
+        local = obj.matrix_world.inverted().to_3x3() @ wv
+        world_delta = [round(c, 5) for c in wv]
+    res = bmesh.ops.duplicate(bm, geom=geom)
+    new_geom = res.get("geom", [])
+    new_verts = [g for g in new_geom if isinstance(g, bmesh.types.BMVert)]
+    if local is not None:
+        for v in new_verts:
+            v.co += local
+    for v in bm.verts:
+        v.select = False
+    for e in bm.edges:
+        e.select = False
+    for f in bm.faces:
+        f.select = False
+    for g in new_geom:
+        g.select = True
+    bm.select_flush(True)
+    bmesh.update_edit_mesh(obj.data)
+    push_undo("duplicate_selection")
+    out = {"success": True, "verts_duplicated": len(new_verts),
+           "verts_before": verts_before, "verts_after": len(bm.verts),
+           "delta_world": world_delta}
+    if frame:
+        out["frame"] = frame
+    return out
+
+
+def rotate_selection(params):
+    """R · Mesh ▸ Transform ▸ Rotate — rotate the selection about its own median
+    (native pivot default) around a world axis. transform.rotate, drivable headless."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    axis = (params.get("axis") or "Z").upper()
+    if axis not in ("X", "Y", "Z"):
+        return {"error": f"axis must be X, Y or Z (got '{axis}')"}
+    angle = float(params.get("angle") or 0.0)
+    bm = bmesh.from_edit_mesh(obj.data)
+    sel = [v for v in bm.verts if v.select]
+    if not sel:
+        return {"error": "No vertices selected"}
+    cen_local = sum((v.co for v in sel), Vector()) / len(sel)
+    cen_world = obj.matrix_world @ cen_local
+    bpy.ops.transform.rotate(value=math.radians(angle), orient_axis=axis,
+                             orient_type='GLOBAL', center_override=cen_world)
+    bmesh.update_edit_mesh(obj.data)
+    push_undo(f"rotate_selection {axis} {angle}°")
+    return {"success": True, "axis": axis, "angle": angle, "verts_rotated": len(sel)}
+
+
+_MERGE_AT = {"CENTER", "CURSOR", "COLLAPSE", "FIRST", "LAST"}
+
+
+def merge_at(params):
+    """M · Mesh ▸ Merge — weld the selected verts to one point: CENTER (their median),
+    CURSOR (the 3D cursor), FIRST / LAST (the first/last selected), or COLLAPSE (each
+    connected island to its own centre). mesh.merge — the M-menu targets (By Distance
+    is the separate remove_doubles path)."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    at = (params.get("at") or "CENTER").upper()
+    if at not in _MERGE_AT:
+        return {"error": f"at must be one of {sorted(_MERGE_AT)} (or DISTANCE for "
+                         f"merge-by-distance), got '{at}'"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    before = len(bm.verts)
+    if sum(1 for v in bm.verts if v.select) < 2:
+        return {"error": "Select at least 2 vertices to merge"}
+    try:
+        bpy.ops.mesh.merge(type=at)
+    except RuntimeError as e:
+        return {"error": f"merge at {at} failed: {e}"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    after = len(bm.verts)
+    push_undo(f"merge_at {at}")
+    return {"success": True, "at": at, "verts_before": before, "verts_after": after,
+            "merged": before - after}
+
+
+def make_edge_face(params):
+    """F · Vertex ▸ New Edge/Face from Vertices — the "F closes it" reflex:
+    2 selected verts → a new edge, 3–4 (or a boundary chain) → a new face.
+    mesh.edge_face_add."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    n_sel = sum(1 for v in bm.verts if v.select)
+    if n_sel < 2:
+        return {"error": "Select 2 verts (→ edge) or 3+ verts / a boundary loop (→ face)"}
+    e_before, f_before = len(bm.edges), len(bm.faces)
+    try:
+        bpy.ops.mesh.edge_face_add()
+    except RuntimeError as e:
+        return {"error": f"edge_face_add failed: {e}"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    push_undo("make_edge_face")
+    return {"success": True, "edges_added": len(bm.edges) - e_before,
+            "faces_added": len(bm.faces) - f_before}
+
+
+_DISSOLVE = {"VERT": "dissolve_verts", "EDGE": "dissolve_edges", "FACE": "dissolve_faces"}
+
+
+def dissolve(params):
+    """Ctrl+X · Mesh ▸ Dissolve — remove the selected elements but KEEP the surrounding
+    surface (merges the neighbours into a larger face), distinct from Delete which makes
+    a hole. mode VERT|EDGE|FACE → mesh.dissolve_verts/edges/faces."""
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    mode = (params.get("mode") or "VERT").upper()
+    op_name = _DISSOLVE.get(mode)
+    if op_name is None:
+        return {"error": f"mode must be VERT|EDGE|FACE, got '{mode}'"}
+    import bmesh
+    bm = bmesh.from_edit_mesh(obj.data)
+    vb, fb = len(bm.verts), len(bm.faces)
+    if not any(v.select for v in bm.verts):
+        return {"error": "Nothing selected to dissolve"}
+    try:
+        getattr(bpy.ops.mesh, op_name)()
+    except RuntimeError as e:
+        return {"error": f"{op_name} failed: {e}"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    push_undo(f"dissolve {mode}")
+    return {"success": True, "mode": mode, "verts_before": vb, "verts_after": len(bm.verts),
+            "faces_before": fb, "faces_after": len(bm.faces)}
+
+
+def hide_geometry(params):
+    """H (Shift+H = unselected) · Mesh ▸ Show/Hide ▸ Hide — hide the selected elements
+    in edit mode so they're out of the way of the next op. mesh.hide."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    unselected = bool(params.get("unselected", False))
+    try:
+        bpy.ops.mesh.hide(unselected=unselected)
+    except RuntimeError as e:
+        return {"error": f"hide failed: {e}"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    hidden = sum(1 for v in bm.verts if v.hide)
+    push_undo(f"hide_geometry unselected={unselected}")
+    return {"success": True, "unselected": unselected, "hidden_verts": hidden}
+
+
+def reveal_geometry(params):
+    """Alt+H · Mesh ▸ Show/Hide ▸ Reveal — unhide everything hidden in edit mode.
+    mesh.reveal (select=True re-selects what it reveals, the native default)."""
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    select = bool(params.get("select", True))
+    try:
+        bpy.ops.mesh.reveal(select=select)
+    except RuntimeError as e:
+        return {"error": f"reveal failed: {e}"}
+    push_undo("reveal_geometry")
+    return {"success": True, "select": select}
+
+
+def rip_selection(params):
+    """V · Vertex ▸ Rip — tear the mesh open along the selected edge(s)/vert chain,
+    splitting the shared verts so the two sides part; pass direction words to pull the
+    torn side away in the same call. transform.rip_move is modal (crashes headless), so
+    this reproduces its ONE operator with bmesh.ops.split_edges + the grab tail."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    sel_edges = [e for e in bm.edges if e.select]
+    if not sel_edges:
+        selv = set(v for v in bm.verts if v.select)
+        sel_edges = [e for e in bm.edges if e.verts[0] in selv and e.verts[1] in selv]
+    if not sel_edges:
+        return {"error": "Select an edge, an edge chain, or two adjacent verts to rip"}
+    before_set = set(bm.verts)
+    verts_before = len(bm.verts)
+    bmesh.ops.split_edges(bm, edges=sel_edges)
+    bm.verts.ensure_lookup_table()
+    new_verts = [v for v in bm.verts if v not in before_set]
+    world_delta = [0.0, 0.0, 0.0]
+    frame = None
+    if _has_dir_words(params):
+        wv, frame, err = _resolve_world_delta(bm, obj, params)
+        if err:
+            return err
+        local = obj.matrix_world.inverted().to_3x3() @ wv
+        world_delta = [round(c, 5) for c in wv]
+        for v in new_verts:
+            v.co += local
+    elif any(abs(float(params.get(k, 0.0) or 0.0)) > 0 for k in ("x", "y", "z")):
+        wv = Vector((params.get("x", 0.0), params.get("y", 0.0), params.get("z", 0.0)))
+        local = obj.matrix_world.inverted().to_3x3() @ wv
+        world_delta = [round(c, 5) for c in wv]
+        for v in new_verts:
+            v.co += local
+    for v in bm.verts:
+        v.select = False
+    for v in new_verts:
+        v.select = True
+    bm.select_flush(True)
+    bmesh.update_edit_mesh(obj.data)
+    push_undo("rip_selection")
+    out = {"success": True, "verts_ripped": len(new_verts),
+           "verts_before": verts_before, "verts_after": len(bm.verts),
+           "delta_world": world_delta}
+    if frame:
+        out["frame"] = frame
+    return out
+
+
+def split_selection(params):
+    """Y · Mesh ▸ Split ▸ Selection — disconnect the selected geometry from the rest of
+    the mesh (it stays in the same object as a loose island). mesh.split."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    if not any(v.select for v in bm.verts):
+        return {"error": "Nothing selected to split"}
+    vb = len(bm.verts)
+    try:
+        bpy.ops.mesh.split()
+    except RuntimeError as e:
+        return {"error": f"split failed: {e}"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    push_undo("split_selection")
+    return {"success": True, "verts_before": vb, "verts_after": len(bm.verts)}
+
+
+def smooth_vertices(params):
+    """Vertex ▸ Smooth Vertices — relax the selected verts toward the average of their
+    neighbours (native Laplacian-free smooth). mesh.vertices_smooth (factor, repeat)."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    factor = float(params.get("factor", 0.5))
+    repeat = max(1, int(params.get("repeat", 1)))
+    bm = bmesh.from_edit_mesh(obj.data)
+    n_sel = sum(1 for v in bm.verts if v.select)
+    if n_sel == 0:
+        return {"error": "No vertices selected to smooth"}
+    try:
+        bpy.ops.mesh.vertices_smooth(factor=factor, repeat=repeat)
+    except RuntimeError as e:
+        return {"error": f"vertices_smooth failed: {e}"}
+    bmesh.update_edit_mesh(obj.data)
+    push_undo(f"smooth_vertices ×{repeat}")
+    return {"success": True, "verts_smoothed": n_sel, "factor": factor, "repeat": repeat}
+
+
+def bisect(params):
+    """Mesh ▸ Bisect — cut the selected geometry with an infinite plane through
+    `axis`=offset; optionally fill the cut and/or clear one side. mesh.bisect."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    axis = (params.get("axis") or "Z").upper()
+    if axis not in ("X", "Y", "Z"):
+        return {"error": f"axis must be X, Y or Z (got '{axis}')"}
+    offset = float(params.get("offset", 0.0))
+    use_fill = bool(params.get("use_fill", False))
+    clear_inner = bool(params.get("clear_inner", False))
+    clear_outer = bool(params.get("clear_outer", False))
+    bm = bmesh.from_edit_mesh(obj.data)
+    if not any(v.select for v in bm.verts):
+        bpy.ops.mesh.select_all(action='SELECT')
+    plane_no = Vector((0.0, 0.0, 0.0))
+    setattr(plane_no, axis.lower(), 1.0)
+    plane_co = plane_no * offset
+    vb = len(bmesh.from_edit_mesh(obj.data).verts)
+    try:
+        bpy.ops.mesh.bisect(plane_co=plane_co, plane_no=plane_no, use_fill=use_fill,
+                            clear_inner=clear_inner, clear_outer=clear_outer)
+    except RuntimeError as e:
+        return {"error": f"bisect failed: {e}"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    push_undo(f"bisect {axis}={offset}")
+    return {"success": True, "axis": axis, "offset": offset, "use_fill": use_fill,
+            "clear_inner": clear_inner, "clear_outer": clear_outer,
+            "verts_before": vb, "verts_after": len(bm.verts)}
+
+
+def shear_selection(params):
+    """Shift+Ctrl+Alt+S · Mesh ▸ Transform ▸ Shear — slant the selection: displace each
+    vert along `axis` in proportion to its coordinate along `along`, about the selection
+    median. transform.shear fails poll headless, so this is its ONE operator as a bmesh
+    shear matrix (native semantics: a pure shear in the axis/along plane)."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    axis = (params.get("axis") or "X").upper()
+    along = (params.get("along") or "Z").upper()
+    if axis not in ("X", "Y", "Z") or along not in ("X", "Y", "Z"):
+        return {"error": "axis and along must each be X, Y or Z"}
+    if axis == along:
+        return {"error": "axis (shear direction) and along (gradient) must differ"}
+    amount = float(params.get("amount", 0.0))
+    ai = {"X": 0, "Y": 1, "Z": 2}[axis]
+    gi = {"X": 0, "Y": 1, "Z": 2}[along]
+    bm = bmesh.from_edit_mesh(obj.data)
+    sel = [v for v in bm.verts if v.select]
+    if not sel:
+        return {"error": "No vertices selected"}
+    cen = sum((v.co for v in sel), Vector()) / len(sel)
+    for v in sel:
+        v.co[ai] += amount * (v.co[gi] - cen[gi])
+    bm.select_flush_mode()
+    bmesh.update_edit_mesh(obj.data)
+    push_undo(f"shear_selection {axis} along {along} {amount}")
+    return {"success": True, "axis": axis, "along": along, "amount": amount,
+            "verts_sheared": len(sel)}
+
+
+def to_sphere(params):
+    """Shift+Alt+S · Mesh ▸ Transform ▸ To Sphere — blend the selection toward a sphere
+    about its median. factor 0..1 (1 = fully spherical). transform.tosphere."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    factor = max(0.0, min(1.0, float(params.get("factor", 1.0))))
+    bm = bmesh.from_edit_mesh(obj.data)
+    if not any(v.select for v in bm.verts):
+        return {"error": "No vertices selected"}
+    try:
+        bpy.ops.transform.tosphere(value=factor)
+    except RuntimeError as e:
+        return {"error": f"to_sphere failed: {e}"}
+    bmesh.update_edit_mesh(obj.data)
+    push_undo(f"to_sphere {factor}")
+    return {"success": True, "factor": factor}
+
+
+def triangulate(params):
+    """Ctrl+T · Face ▸ Triangulate Faces — convert the selected faces to triangles.
+    mesh.quads_convert_to_tris."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    if not any(f.select for f in bm.faces):
+        bpy.ops.mesh.select_all(action='SELECT')
+    fb = len(bmesh.from_edit_mesh(obj.data).faces)
+    try:
+        bpy.ops.mesh.quads_convert_to_tris()
+    except RuntimeError as e:
+        return {"error": f"triangulate failed: {e}"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    push_undo("triangulate")
+    return {"success": True, "faces_before": fb, "faces_after": len(bm.faces)}
+
+
+def tris_to_quads(params):
+    """Alt+J · Face ▸ Tris to Quads — merge adjacent triangles back into quads where the
+    shared edge is below the angle limits. mesh.tris_convert_to_quads (face_threshold,
+    shape_threshold in degrees)."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    face_thr = math.radians(float(params.get("face_threshold", 40.0)))
+    shape_thr = math.radians(float(params.get("shape_threshold", 40.0)))
+    bm = bmesh.from_edit_mesh(obj.data)
+    if not any(f.select for f in bm.faces):
+        bpy.ops.mesh.select_all(action='SELECT')
+    fb = len(bmesh.from_edit_mesh(obj.data).faces)
+    try:
+        bpy.ops.mesh.tris_convert_to_quads(face_threshold=face_thr, shape_threshold=shape_thr)
+    except RuntimeError as e:
+        return {"error": f"tris_to_quads failed: {e}"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    push_undo("tris_to_quads")
+    return {"success": True, "faces_before": fb, "faces_after": len(bm.faces)}
+
+
+def fill(params):
+    """Alt+F · Face ▸ Fill — fill the selected edge boundary with triangles (an n-gon
+    region gets a triangle fan). mesh.fill (use_beauty on by default = native)."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    use_beauty = bool(params.get("use_beauty", True))
+    bm = bmesh.from_edit_mesh(obj.data)
+    fb = len(bm.faces)
+    try:
+        bpy.ops.mesh.fill(use_beauty=use_beauty)
+    except RuntimeError as e:
+        return {"error": f"fill failed: {e}. Select a closed edge boundary to fill."}
+    bm = bmesh.from_edit_mesh(obj.data)
+    added = len(bm.faces) - fb
+    if added <= 0:
+        return {"error": "fill added nothing — select a closed edge boundary (an open "
+                         "loop of edges around a hole)."}
+    push_undo("fill")
+    return {"success": True, "faces_added": added, "faces_total": len(bm.faces)}
+
+
+def beautify(params):
+    """Shift+Alt+F · Face ▸ Beautify Faces — re-flip the shared edges of the selected
+    triangles toward a more balanced (Delaunay-ish) triangulation. mesh.beautify_fill."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    angle = math.radians(float(params.get("angle_limit", 180.0)))
+    bm = bmesh.from_edit_mesh(obj.data)
+    if not any(f.select for f in bm.faces):
+        return {"error": "No faces selected to beautify"}
+    try:
+        bpy.ops.mesh.beautify_fill(angle_limit=angle)
+    except RuntimeError as e:
+        return {"error": f"beautify failed: {e}. Select triangles to rebalance."}
+    bmesh.update_edit_mesh(obj.data)
+    push_undo("beautify")
+    return {"success": True}
+
+
+def connect_verts(params):
+    """J · Vertex ▸ Connect Vertices — cut a new edge between the selected verts across
+    the faces they share (splits a quad in two). mesh.vert_connect."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    if sum(1 for v in bm.verts if v.select) < 2:
+        return {"error": "Select at least 2 verts on a shared face to connect"}
+    eb = len(bm.edges)
+    try:
+        bpy.ops.mesh.vert_connect()
+    except RuntimeError as e:
+        return {"error": f"connect failed: {e}"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    added = len(bm.edges) - eb
+    if added <= 0:
+        return {"error": "connect made no cut — the selected verts must share a face "
+                         "(and not already be joined by an edge)."}
+    push_undo("connect_verts")
+    return {"success": True, "edges_added": added}
+
+
+def slide(params):
+    """Vertex Slide (Shift+V) / Edge Slide (GG) · Vertex/Edge ▸ Slide — move the
+    selected verts ALONG their neighbouring edges by `factor` (-1..1; sign picks which
+    rail), staying on the existing topology (no reprojection). transform.vert_slide /
+    edge_slide are modal (crash headless), so this reproduces that ONE operator's core:
+    a topological along-edge slide. mode VERT|EDGE selects which selection it reads."""
+    import bmesh
+    obj = bpy.context.active_object
+    if obj is None or obj.mode != 'EDIT':
+        return {"error": "Must be in edit mode"}
+    factor = float(params.get("factor", 0.5))
+    if not -1.0 <= factor <= 1.0:
+        return {"error": "factor must be in -1..1 (fraction of the rail edge)"}
+    bm = bmesh.from_edit_mesh(obj.data)
+    sel_verts = set(v for v in bm.verts if v.select)
+    if not sel_verts:
+        return {"error": "Nothing selected to slide"}
+    moved = 0
+    for v in sel_verts:
+        rails = [e for e in v.link_edges if e.other_vert(v) not in sel_verts]
+        if not rails:
+            continue
+        rails.sort(key=lambda e: (e.other_vert(v).co - v.co).x, reverse=(factor >= 0))
+        other = rails[0].other_vert(v)
+        v.co += (other.co - v.co) * abs(factor)
+        moved += 1
+    if moved == 0:
+        return {"error": "no rail to slide along — the selection has no adjacent "
+                         "unselected vert to slide toward (select fewer / an interior loop)."}
+    bm.select_flush_mode()
+    bmesh.update_edit_mesh(obj.data)
+    push_undo(f"slide {factor}")
+    return {"success": True, "verts_slid": moved, "factor": factor}
+
+
 TOOLS = {
     "poke_faces":         poke_faces,
     "inset_faces":        inset_faces,
@@ -3008,4 +3566,24 @@ TOOLS = {
     "assign_weight":      assign_weight,
     "select_boundary":    select_boundary,
     "bridge_handles":     bridge_handles,
+    # SPEC-22 Phase 4 — native-basis completion
+    "duplicate_selection": duplicate_selection,
+    "rotate_selection":   rotate_selection,
+    "merge_at":           merge_at,
+    "make_edge_face":     make_edge_face,
+    "dissolve":           dissolve,
+    "hide_geometry":      hide_geometry,
+    "reveal_geometry":    reveal_geometry,
+    "rip_selection":      rip_selection,
+    "split_selection":    split_selection,
+    "smooth_vertices":    smooth_vertices,
+    "bisect":             bisect,
+    "shear_selection":    shear_selection,
+    "to_sphere":          to_sphere,
+    "triangulate":        triangulate,
+    "tris_to_quads":      tris_to_quads,
+    "fill":               fill,
+    "beautify":           beautify,
+    "connect_verts":      connect_verts,
+    "slide":              slide,
 }

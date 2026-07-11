@@ -189,7 +189,8 @@ def move_vertices(out: float = 0.0, inward: float = 0.0,
                   up: float = 0.0, down: float = 0.0, left: float = 0.0, right: float = 0.0,
                   forward: float = 0.0, back: float = 0.0,
                   x: float = 0.0, y: float = 0.0, z: float = 0.0,
-                  label: str = "", target: str = "") -> str:
+                  label: str = "", target: str = "",
+                  snap_to: str = "", snap_target: str = "") -> str:
     """
     Translate the selected vertices in edit mode. Distances are in METERS.
 
@@ -210,10 +211,13 @@ def move_vertices(out: float = 0.0, inward: float = 0.0,
     result = call_blender("move_vertices", {
         "out": out, "inward": inward, "up": up, "down": down, "left": left,
         "right": right, "forward": forward, "back": back,
-        "x": x, "y": y, "z": z, "target": target}, label=label)
+        "x": x, "y": y, "z": z, "target": target,
+        "snap_to": snap_to, "snap_target": snap_target}, label=label)
     if result.get("success"):
         frame = f" ({result['frame']})" if result.get("frame") else ""
-        main = (f"Moved {result['verts_moved']} verts by {result['delta_world']}{frame} "
+        snap = (f" snapped {result['snapped_to_face']} onto {snap_target}"
+                if result.get("snapped_to_face") is not None else "")
+        main = (f"Moved {result['verts_moved']} verts by {result['delta_world']}{frame}{snap} "
                 f"[{result.get('op_id','')}]")
     else:
         main = result.get("error", "failed")
@@ -461,19 +465,21 @@ def jitter_vertices(amount: float = 0.005, axis: str = "NORMAL", seed: int = 0,
 
 
 @mcp.tool()
-def inflate_selection(amount: float = 0.003, label: str = "", target: str = "") -> str:
+def inflate_selection(amount: float = 0.003, even: bool = False,
+                      label: str = "", target: str = "") -> str:
     """
-    Push selected verts outward along their normals by a fixed amount (sculpt 'Inflate' brush, one-shot).
-    amount: meters to move along normal. Positive = outward, negative = inward (deflate). Default 3mm.
-
-    For bulbous drip tips: after pulling tips down with proportional_move,
-    select just the tip verts and inflate_selection(amount=0.003) to swell them into teardrop bulbs.
+    Alt+S · Shrink/Fatten — push selected verts along their per-vert normals by `amount`
+    (native transform.shrink_fatten). Positive = fatten/out, negative = shrink/in. Default 3mm.
+    even: native "Offset Even" — correct the push by vertex-normal angle so a non-planar
+          patch keeps even wall thickness (native default off).
     target: optional object name — enters edit mode on it first (acts on its live
             selection), exits after. Empty = the active mesh.
     """
-    result = call_blender("inflate_selection", {"amount": amount, "target": target}, label=label)
+    result = call_blender("inflate_selection", {"amount": amount, "even": even,
+                                                "target": target}, label=label)
     if result.get("success"):
-        main = f"inflated {result['verts_inflated']} verts by {result['amount']}m along normals"
+        even_note = " (offset even)" if result.get("even") else ""
+        main = f"shrink/fatten {result['verts_inflated']} verts by {result['amount']}m along normals{even_note}"
     else:
         main = result.get("error", "failed")
     return main + _status(result)
@@ -1305,6 +1311,219 @@ def symmetrize(axis: str = "X", keep: str = "+", threshold: float = 1e-4,
         main = (f"symmetrized across {result['axis']} (kept {result['kept']} half) — "
                 f"{result.get('verts_before')}→{result.get('verts_after')} verts "
                 f"[{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+# ───────────────────────── SPEC-22 Phase 4: native-basis adapters ─────────────
+
+def duplicate_selection(out=0.0, inward=0.0, up=0.0, down=0.0, left=0.0, right=0.0,
+                        forward=0.0, back=0.0, x=0.0, y=0.0, z=0.0,
+                        label="", target="") -> str:
+    result = call_blender("duplicate_selection", {
+        "out": out, "inward": inward, "up": up, "down": down, "left": left,
+        "right": right, "forward": forward, "back": back, "x": x, "y": y, "z": z,
+        "target": target}, label=label)
+    if result.get("success"):
+        frame = f" ({result['frame']})" if result.get("frame") else ""
+        main = (f"duplicated {result['verts_duplicated']} verts "
+                f"({result['verts_before']}→{result['verts_after']}), copy selected"
+                f"{frame} [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def rotate_selection(angle=0.0, axis="Z", label="", target="") -> str:
+    result = call_blender("rotate_selection",
+                          {"angle": angle, "axis": axis, "target": target}, label=label)
+    if result.get("success"):
+        main = (f"rotated {result['verts_rotated']} verts {result['angle']}° about "
+                f"{result['axis']} (selection median) [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def merge(at="CENTER", threshold=0.001, selected_only=False, label="", target="") -> str:
+    """Route Merge (M): the by-distance weld (remove_doubles) vs the M-menu targets."""
+    if str(at).upper() == "DISTANCE":
+        return merge_by_distance(threshold, selected_only, label, target)
+    result = call_blender("merge_at", {"at": at, "target": target}, label=label)
+    if result.get("success"):
+        main = (f"merged {result['verts_before']}→{result['verts_after']} verts at "
+                f"{result['at']} [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def make_edge_face(label="", target="") -> str:
+    result = call_blender("make_edge_face", {"target": target}, label=label)
+    if result.get("success"):
+        made = ("face" if result.get("faces_added") else "edge")
+        main = (f"added {result.get('edges_added',0)} edge(s) / "
+                f"{result.get('faces_added',0)} face(s) — new {made} "
+                f"[{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def dissolve(mode="VERT", label="", target="") -> str:
+    result = call_blender("dissolve", {"mode": mode, "target": target}, label=label)
+    if result.get("success"):
+        main = (f"dissolved ({result['mode']}) — {result['verts_before']}→"
+                f"{result['verts_after']} verts, surface kept [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def hide_geometry(unselected=False, label="", target="") -> str:
+    result = call_blender("hide_geometry", {"unselected": unselected, "target": target},
+                          label=label)
+    if result.get("success"):
+        which = "unselected" if result.get("unselected") else "selected"
+        main = f"hid {which} geometry ({result.get('hidden_verts',0)} verts hidden)"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def reveal_geometry(label="", target="") -> str:
+    result = call_blender("reveal_geometry", {"target": target}, label=label)
+    main = "revealed hidden geometry" if result.get("success") else result.get("error", "failed")
+    return main + _status(result)
+
+
+def rip_selection(out=0.0, inward=0.0, up=0.0, down=0.0, left=0.0, right=0.0,
+                  forward=0.0, back=0.0, x=0.0, y=0.0, z=0.0, label="", target="") -> str:
+    result = call_blender("rip_selection", {
+        "out": out, "inward": inward, "up": up, "down": down, "left": left,
+        "right": right, "forward": forward, "back": back, "x": x, "y": y, "z": z,
+        "target": target}, label=label)
+    if result.get("success"):
+        frame = f" ({result['frame']})" if result.get("frame") else ""
+        main = (f"ripped {result['verts_ripped']} verts open "
+                f"({result['verts_before']}→{result['verts_after']}){frame} "
+                f"[{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def split_selection(label="", target="") -> str:
+    result = call_blender("split_selection", {"target": target}, label=label)
+    if result.get("success"):
+        main = (f"split the selection off ({result['verts_before']}→"
+                f"{result['verts_after']} verts) [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def smooth_vertices(factor=0.5, repeat=1, label="", target="") -> str:
+    result = call_blender("smooth_vertices",
+                          {"factor": factor, "repeat": repeat, "target": target}, label=label)
+    if result.get("success"):
+        main = (f"smoothed {result['verts_smoothed']} verts (factor={result['factor']}, "
+                f"×{result['repeat']}) [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def bisect(axis="Z", offset=0.0, use_fill=False, clear_inner=False, clear_outer=False,
+           label="", target="") -> str:
+    result = call_blender("bisect", {
+        "axis": axis, "offset": offset, "use_fill": use_fill,
+        "clear_inner": clear_inner, "clear_outer": clear_outer, "target": target},
+        label=label)
+    if result.get("success"):
+        main = (f"bisected along {result['axis']}={result['offset']} "
+                f"({result['verts_before']}→{result['verts_after']} verts) "
+                f"[{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def shear_selection(amount=0.0, axis="X", along="Z", label="", target="") -> str:
+    result = call_blender("shear_selection",
+                          {"amount": amount, "axis": axis, "along": along, "target": target},
+                          label=label)
+    if result.get("success"):
+        main = (f"sheared {result['verts_sheared']} verts {result['amount']} along "
+                f"{result['axis']} (gradient {result['along']}) [{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def to_sphere(factor=1.0, label="", target="") -> str:
+    result = call_blender("to_sphere", {"factor": factor, "target": target}, label=label)
+    if result.get("success"):
+        main = f"spherized selection (factor={result['factor']}) [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def triangulate(label="", target="") -> str:
+    result = call_blender("triangulate", {"target": target}, label=label)
+    if result.get("success"):
+        main = (f"triangulated faces ({result['faces_before']}→{result['faces_after']}) "
+                f"[{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def tris_to_quads(face_threshold=40.0, shape_threshold=40.0, label="", target="") -> str:
+    result = call_blender("tris_to_quads",
+                          {"face_threshold": face_threshold,
+                           "shape_threshold": shape_threshold, "target": target}, label=label)
+    if result.get("success"):
+        main = (f"tris→quads ({result['faces_before']}→{result['faces_after']} faces) "
+                f"[{result.get('op_id','')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def fill(use_beauty=True, label="", target="") -> str:
+    result = call_blender("fill", {"use_beauty": use_beauty, "target": target}, label=label)
+    if result.get("success"):
+        main = f"filled boundary (+{result['faces_added']} faces) [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def beautify(angle_limit=180.0, label="", target="") -> str:
+    result = call_blender("beautify", {"angle_limit": angle_limit, "target": target},
+                          label=label)
+    main = "beautified triangles" if result.get("success") else result.get("error", "failed")
+    return main + _status(result)
+
+
+def connect_verts(label="", target="") -> str:
+    result = call_blender("connect_verts", {"target": target}, label=label)
+    if result.get("success"):
+        main = f"connected verts (+{result['edges_added']} edge) [{result.get('op_id','')}]"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def slide(factor=0.5, mode="EDGE", label="", target="") -> str:
+    result = call_blender("slide", {"factor": factor, "mode": mode, "target": target},
+                          label=label)
+    if result.get("success"):
+        main = (f"slid {result['verts_slid']} verts along their rails "
+                f"(factor={result['factor']}) [{result.get('op_id','')}]")
     else:
         main = result.get("error", "failed")
     return main + _status(result)

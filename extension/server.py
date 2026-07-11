@@ -142,6 +142,11 @@ EDIT_MODE_TOOLS = {
     "select_by_vgroup", "select_by_material", "assign_material",
     "poke_faces", "inset_faces", "grid_fill",
     "recalc_normals",
+    # SPEC-22 Phase 4 — native-basis completion
+    "duplicate_selection", "rotate_selection", "merge_at", "make_edge_face", "dissolve",
+    "hide_geometry", "reveal_geometry", "rip_selection", "split_selection",
+    "smooth_vertices", "bisect", "shear_selection", "to_sphere", "triangulate",
+    "tris_to_quads", "fill", "beautify", "connect_verts", "slide",
 }
 
 # Y1: verbs that write VERTEX POSITIONS, so on a keyed mesh they land on the active
@@ -156,7 +161,10 @@ SHAPE_KEY_SHADOW_TOOLS = {
     "subdivide_selection", "poke_faces", "inset_faces", "grid_fill",
     "taper_end", "taper_section", "flute",
     "sculpt_grab", "sculpt_inflate", "sculpt_draw", "sculpt_smooth", "sculpt_crease",
-    "sculpt_pinch", "sculpt_flatten", }
+    "sculpt_pinch", "sculpt_flatten",
+    # SPEC-22 Phase 4 — ops that write vert POSITIONS (land on the active shape key)
+    "rotate_selection", "smooth_vertices", "shear_selection", "to_sphere", "slide",
+    "duplicate_selection", "rip_selection", }
 
 
 # G56: every op that's SUPPOSED to change an object's geometry or its transform. A
@@ -177,6 +185,11 @@ NOOP_CHECK_TOOLS = {
     "grid_fill", "taper_end", "taper_section", "flute",
     "loop_cut", "merge_by_distance", "symmetrize",
     "delete_geometry", "separate_selection", "bridge_handles",
+    # SPEC-22 Phase 4 — geometry/position writers (a byte-identical result = no-op)
+    "rotate_selection", "merge_at", "make_edge_face", "dissolve", "rip_selection",
+    "split_selection", "smooth_vertices", "bisect", "shear_selection", "to_sphere",
+    "triangulate", "tris_to_quads", "fill", "beautify", "connect_verts", "slide",
+    "duplicate_selection",
     # object transforms (caught via the TRS component of the signature)
     "nudge", "place", "aim_axis", "rest_on", "move_to", "rotate_to",
     "resize", "scale_group", "rotate_object", "apply_transform",
@@ -236,6 +249,11 @@ TOPO_CHECK_TOOLS = {
     "separate_selection", "bridge_handles", "boolean", "apply_modifiers", "remesh",
     "join_objects", "bevel",
     "graft", "stitch",                       # SPEC-19 Phase 3 (create/weld geometry)
+    # SPEC-22 Phase 4 — connectivity changers where a topology DEGRADE is a real signal.
+    # rip/split/duplicate are excluded on purpose: they OPEN seams / add islands by design,
+    # so a "new boundary loop" note would cry wolf on every intended tear (cf. creation ops).
+    "merge_at", "make_edge_face", "dissolve", "bisect", "triangulate", "tris_to_quads",
+    "fill", "beautify", "connect_verts",
 }
 
 # SPEC-16 (feedback P1.4): the ambient `feel` delta only earns its keep on ops that
