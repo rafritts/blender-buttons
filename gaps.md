@@ -18,28 +18,6 @@ task-specific shortcut.
 
 ---
 
-_G203–G216 (the bead-of-icing donut-dogfood autopsy) were fixed and verified against
-headless scenes — see `git log -- gaps.md` and `tests/e2e_g203_g216_deform.py`,
-`e2e_g204_g207_scatter.py`, `e2e_g209_g212_handles.py`. Live re-verify on the motivating
-donut scene (2026-07-10): G208/G212/G213/G215 hold up._
-
-_G217 (bud's failure mode is "success") closed by SPEC-21 §4: `bud` and the macro verbs
-are DELETED; the missing primitive was native Bridge Edge Loops (`edit op=bridge`, long
-shipped) and the drip is a technique (`guidance://techniques/drip`). G218 (declared
-intents are scene facts) closed in SPEC-21 phase 5: the registry already persisted into
-the .blend (G125) but an addon reinstall reset the module without a scene load — grounding
-is now lazy, so the first registry access after a reload re-reads `scene["bb_intents"]`
-and the tripwires re-arm. G219–G221 (the VRoid semantic-selection autopsy) shipped in
-SPEC-21 phase 1. Live re-verify (2026-07-10, VRoid scene + fresh goblet): look→descend→claim
-narrates and mints on real imported geometry (vgroup candidates included, coverage honest);
-`edit op=spin` revolves live (the seam safety-weld caught a 32-way on-axis apex collapse the
-headless test never exercised); trace-vs-authored-profile round-trips; `validate op=expect
-check=open_boundary` declares and quiets; history undo restored a destroyed form byte-true.
-G222–G224 (found in the same sweep + a left-pinky look drill) fixed and live-verified
-2026-07-10 — see `git log -- gaps.md`._
-
----
-
 ## G226 — Collection-instancing scatter: per-point variety is invisible until you know the magic input
 
 **Verb:** `modifier op=add_asset asset="Scatter on Surface"` (and any GN instancer) fed a multi-prototype collection.
