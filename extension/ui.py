@@ -1,5 +1,5 @@
 """Blender UI: start/stop operators, the Properties-panel UI, and the SPEC-12
-shared-state Collab panel (phase + sign-off queue + handles)."""
+shared-state Collab panel (phase + action recording + handles)."""
 
 import threading
 
@@ -113,36 +113,31 @@ class BB_PT_Panel(bpy.types.Panel):
 
 # ── SPEC-12: shared-state collaboration panel ─────────────────────────────────
 
-class BB_OT_CollabAccept(bpy.types.Operator):
-    """Keep the applied edit; report it accepted on the agent's next status read."""
-    bl_idname = "bb.collab_accept"
-    bl_label = "Accept"
-    op_id: bpy.props.StringProperty()
+class BB_OT_CollabRecordToggle(bpy.types.Operator):
+    """Start or stop recording UI/mesh operators into a session the agent can pull."""
+    bl_idname = "bb.collab_record_toggle"
+    bl_label = "Toggle action recording"
+    bl_options = {'INTERNAL'}
 
     def execute(self, context):
-        res = collab.accept(self.op_id)
-        if res.get("error"):
-            self.report({'ERROR'}, res["error"])
-            return {'CANCELLED'}
-        self.report({'INFO'}, "Accepted")
+        if collab.is_recording():
+            res = collab.stop_recording()
+            self.report({'INFO'}, f"Recording stopped — {res.get('steps', 0)} step(s)")
+        else:
+            res = collab.start_recording()
+            self.report({'INFO'}, "Recording started — model, then Stop")
         return {'FINISHED'}
 
 
-class BB_OT_CollabReject(bpy.types.Operator):
-    """Undo the applied edit (back to before it) and report it rejected. Rejecting a
-    non-tail op also rewinds every op after it — the agent is told what to rebuild."""
-    bl_idname = "bb.collab_reject"
-    bl_label = "Reject"
-    op_id: bpy.props.StringProperty()
+class BB_OT_CollabRecordClear(bpy.types.Operator):
+    """Clear the recorded action session."""
+    bl_idname = "bb.collab_record_clear"
+    bl_label = "Clear recording"
+    bl_options = {'INTERNAL'}
 
     def execute(self, context):
-        res = collab.reject(self.op_id)
-        if res.get("error"):
-            self.report({'ERROR'}, res["error"])
-            return {'CANCELLED'}
-        n = res.get("rewound", 0)
-        self.report({'INFO'}, "Rejected (undone)"
-                              + (f", +{n} later op(s) rewound" if n else ""))
+        collab.clear_recording()
+        self.report({'INFO'}, "Recording cleared")
         return {'FINISHED'}
 
 
@@ -254,7 +249,7 @@ def _wrap(text, width):
 
 
 class BB_PT_CollabPanel(bpy.types.Panel):
-    """SPEC-12 V1: the shared-state surface — phase, sign-off queue, handles.
+    """Collab panel: action recording, validate floor, handles.
     Sidebar (N-panel) → 'Blender Buttons' tab."""
     bl_label = "Collab"
     bl_idname = "BB_PT_collab"
@@ -271,27 +266,34 @@ class BB_PT_CollabPanel(bpy.types.Panel):
         row.operator("bb.start_server", icon='PLAY', text="Start")
         row.operator("bb.stop_server", icon='PAUSE', text="Stop")
 
-        # ── Phase (human-owned signal) ──
+        # ── Action recording (teach-by-doing journal for the agent) ──
         box = layout.box()
-        box.label(text="Phase", icon='SEQUENCE')
-        box.prop(wm, "bb_phase", text="")
-
-        # ── Sign-off queue (apply, then review) ──
-        box = layout.box()
-        box.label(text="Sign-off queue", icon='CHECKMARK')
-        pending = collab._pending
-        if not pending:
-            box.label(text="(nothing awaiting review)")
+        box.label(text="Action recording", icon='REC')
+        rec = collab.is_recording()
+        n = len(collab.session_steps())
+        row = box.row(align=True)
+        if rec:
+            row.alert = True
+            row.operator("bb.collab_record_toggle", text="Stop recording",
+                         icon='PAUSE')
         else:
-            for e in pending:
-                col = box.column(align=True)
-                for i, line in enumerate(_wrap(e["label"], 30)):
-                    col.label(text=line if i else f"• {line}")
-                row = col.row(align=True)
-                row.operator("bb.collab_accept", text="Accept",
-                             icon='CHECKMARK').op_id = e["op_id"]
-                row.operator("bb.collab_reject", text="Reject",
-                             icon='X').op_id = e["op_id"]
+            row.operator("bb.collab_record_toggle", text="Start recording",
+                         icon='REC')
+        row.operator("bb.collab_record_clear", text="", icon='TRASH')
+        if rec:
+            box.label(text=f"● REC — {n} step(s)", icon='SORTTIME')
+        elif n:
+            box.label(text=f"{n} step(s) ready for agent", icon='CHECKMARK')
+        else:
+            box.label(text="Click Start, model, then Stop")
+        # Tail of the journal so you can see it's working.
+        tail = collab.session_steps()[-6:]
+        if tail:
+            sub = box.column(align=True)
+            for s in tail:
+                label = s.get("name") or s.get("op") or "?"
+                for i, line in enumerate(_wrap(f"{s.get('i', '?')}. {label}", 32)):
+                    sub.label(text=line)
 
         # ── Validate floor (SPEC-16: the human's governance) ──
         box = layout.box()
@@ -365,7 +367,7 @@ class BB_AddonPreferences(bpy.types.AddonPreferences):
 
 CLASSES = (BB_AddonPreferences,
            BB_OT_StartServer, BB_OT_StopServer, BB_OT_SaveAsHandle,
-           BB_OT_CollabAccept, BB_OT_CollabReject,
+           BB_OT_CollabRecordToggle, BB_OT_CollabRecordClear,
            BB_OT_CollabHandleSelect, BB_OT_CollabHandleDelete,
            BB_OT_ValidateRevoke, BB_OT_ValidateAddIntent, BB_OT_ValidateExcludeMesh,
            BB_PT_Panel, BB_PT_CollabPanel)

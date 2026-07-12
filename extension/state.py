@@ -357,11 +357,8 @@ NO_LOG_TOOLS = {
     # G12 checkpoints: mark is pure metadata; restore delegates to undo_to (which is
     # itself unlogged), so neither should consume a log slot / undo step.
     "mark_checkpoint", "restore_checkpoint",
-    # SPEC-12 collab panel: shared-state read — reads phase / the sign-off queue /
-    # the human's decisions; touches no mesh, so it must not consume a history slot
-    # or an undo step. (The queue fills automatically from the dispatch; Reject undoes
-    # via the history path.)
-    "collab_status",
+    # Collab action-recording journal reads/controls — no geometry mutation.
+    "collab_status", "collab_session", "collab_record",
     # SPEC-15: acknowledging the external-mutation lock is pure state bookkeeping —
     # it clears a flag and re-baselines the scene hash, moves no geometry.
     "acknowledge_mutation",
@@ -441,9 +438,8 @@ NO_STATUS_TOOLS = {
     # handle GC (G15) — registry tidying; deleting an Empty doesn't move geometry, so
     # the status block would be noise (matches list/accept). Still mutating/undoable.
     "prune_handles", "forget_handle",
-    # SPEC-12 collab panel: shared-state read — the status block would be pure noise
-    # on a status round-trip (the agent reads geometry from the geometry verbs).
-    "collab_status",
+    # SPEC-12 collab: status/session/record — status block would be pure noise.
+    "collab_status", "collab_session", "collab_record",
     # SPEC-15: change-detail read — its own per-object breakdown IS the payload; the
     # status block would be noise.
     "inspect_changes",

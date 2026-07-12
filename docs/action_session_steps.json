@@ -1,0 +1,1470 @@
+[
+  {
+    "i": 1,
+    "t": 0.35,
+    "op": "OBJECT_OT_delete",
+    "name": "Delete",
+    "props": {},
+    "context": {
+      "selection": "none"
+    }
+  },
+  {
+    "i": 2,
+    "t": 3.17,
+    "op": "MESH_OT_primitive_cylinder_add",
+    "name": "Add Cylinder",
+    "props": {
+      "depth": 2.0,
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "OBJECT",
+      "selection": "1 object(s) selected"
+    }
+  },
+  {
+    "i": 3,
+    "t": 7.45,
+    "op": "TRANSFORM_OT_translate",
+    "name": "Move",
+    "props": {
+      "value": [
+        0.0,
+        0.0,
+        0.927494
+      ],
+      "constraint_axis": [
+        false,
+        false,
+        true
+      ],
+      "orient_type": "GLOBAL",
+      "orient_matrix_type": "GLOBAL",
+      "proportional_edit_falloff": "SMOOTH",
+      "proportional_size": 1.0
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "OBJECT",
+      "selection": "1 object(s) selected"
+    }
+  },
+  {
+    "i": 4,
+    "t": 10.31,
+    "op": "OBJECT_OT_editmode_toggle",
+    "name": "Edit Mode",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 5,
+    "t": 11.01,
+    "op": "MESH_OT_select_mode",
+    "name": "Select Mode",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 6,
+    "t": 12.42,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "deselect_all": true,
+      "location": [
+        1018,
+        844
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 7,
+    "t": 13.84,
+    "op": "MESH_OT_delete",
+    "name": "Delete",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 8,
+    "t": 14.55,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "deselect_all": true,
+      "location": [
+        1534,
+        711
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 9,
+    "t": 15.61,
+    "op": "OBJECT_OT_editmode_toggle",
+    "name": "Edit Mode",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "OBJECT",
+      "selection": "1 object(s) selected"
+    }
+  },
+  {
+    "i": 10,
+    "t": 15.96,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "deselect_all": true,
+      "location": [
+        977,
+        623
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "OBJECT",
+      "selection": "1 object(s) selected"
+    }
+  },
+  {
+    "i": 11,
+    "t": 19.48,
+    "op": "OBJECT_OT_modifier_add",
+    "name": "Add Modifier",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "OBJECT",
+      "selection": "1 object(s) selected"
+    }
+  },
+  {
+    "i": 12,
+    "t": 26.53,
+    "op": "OBJECT_OT_modifier_set_active",
+    "name": "Set Active Modifier",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "OBJECT",
+      "selection": "1 object(s) selected"
+    }
+  },
+  {
+    "i": 13,
+    "t": 28.3,
+    "op": "OBJECT_OT_modifier_apply",
+    "name": "Apply Modifier",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "OBJECT",
+      "selection": "1 object(s) selected"
+    }
+  },
+  {
+    "i": 14,
+    "t": 29.37,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "deselect_all": true,
+      "location": [
+        1536,
+        476
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "OBJECT",
+      "selection": "0 object(s) selected"
+    }
+  },
+  {
+    "i": 15,
+    "t": 30.43,
+    "op": "OBJECT_OT_editmode_toggle",
+    "name": "Edit Mode",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 16,
+    "t": 35.03,
+    "op": "MESH_OT_loopcut_slide",
+    "name": "Loop Cut and Slide",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 17,
+    "t": 54.21,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 857,
+      "xmax": 883,
+      "ymin": 866,
+      "ymax": 887,
+      "mode": "SET"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 18,
+    "t": 55.26,
+    "op": "MESH_OT_select_mode",
+    "name": "Select Mode",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 19,
+    "t": 55.97,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "deselect_all": true,
+      "location": [
+        858,
+        880
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 20,
+    "t": 56.33,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 855,
+      "xmax": 899,
+      "ymin": 854,
+      "ymax": 898,
+      "mode": "SET"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 21,
+    "t": 56.68,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 981,
+      "xmax": 1033,
+      "ymin": 843,
+      "ymax": 907,
+      "mode": "ADD"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 22,
+    "t": 57.03,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 1079,
+      "xmax": 1110,
+      "ymin": 883,
+      "ymax": 925,
+      "mode": "ADD"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 23,
+    "t": 57.76,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 1092,
+      "xmax": 1115,
+      "ymin": 763,
+      "ymax": 801,
+      "mode": "ADD"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 24,
+    "t": 58.12,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 961,
+      "xmax": 1033,
+      "ymin": 708,
+      "ymax": 755,
+      "mode": "ADD"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 25,
+    "t": 59.19,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 850,
+      "xmax": 928,
+      "ymin": 697,
+      "ymax": 751,
+      "mode": "ADD"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 26,
+    "t": 60.59,
+    "op": "MESH_OT_delete",
+    "name": "Delete",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 27,
+    "t": 63.79,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 722,
+      "xmax": 751,
+      "ymin": 529,
+      "ymax": 560,
+      "mode": "SET"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 28,
+    "t": 64.5,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 803,
+      "xmax": 868,
+      "ymin": 524,
+      "ymax": 575,
+      "mode": "ADD"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 29,
+    "t": 64.85,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 905,
+      "xmax": 951,
+      "ymin": 545,
+      "ymax": 583,
+      "mode": "ADD"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 30,
+    "t": 65.92,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 739,
+      "xmax": 769,
+      "ymin": 403,
+      "ymax": 425,
+      "mode": "ADD"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 31,
+    "t": 66.27,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 840,
+      "xmax": 868,
+      "ymin": 427,
+      "ymax": 450,
+      "mode": "ADD"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 32,
+    "t": 66.98,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 918,
+      "xmax": 931,
+      "ymin": 442,
+      "ymax": 468,
+      "mode": "ADD"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 33,
+    "t": 77.28,
+    "op": "MESH_OT_extrude_region_move",
+    "name": "Extrude Region and Move",
+    "props": {
+      "TRANSFORM_OT_translate": "<bpy_struct, TRANSFORM_OT_translate at 0x7d8048eabd18>",
+      "MESH_OT_extrude_region": "<bpy_struct, MESH_OT_extrude_region at 0x7d8048ea9e58>"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 34,
+    "t": 88.65,
+    "op": "TRANSFORM_OT_translate",
+    "name": "Move",
+    "props": {
+      "value": [
+        0.044762,
+        -0.0,
+        0.166842
+      ],
+      "constraint_axis": [
+        false,
+        false,
+        false
+      ],
+      "orient_type": "GLOBAL",
+      "orient_matrix_type": "GLOBAL",
+      "mirror": true,
+      "proportional_edit_falloff": "SMOOTH",
+      "proportional_size": 1.0
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 35,
+    "t": 95.41,
+    "op": "TRANSFORM_OT_rotate",
+    "name": "Rotate",
+    "props": {
+      "value": -0.524072,
+      "constraint_axis": [
+        false,
+        true,
+        false
+      ],
+      "orient_type": "GLOBAL",
+      "orient_matrix_type": "GLOBAL",
+      "mirror": true,
+      "proportional_edit_falloff": "SMOOTH",
+      "proportional_size": 1.0
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 36,
+    "t": 97.54,
+    "op": "MESH_OT_extrude_region_move",
+    "name": "Extrude Region and Move",
+    "props": {
+      "TRANSFORM_OT_translate": "<bpy_struct, TRANSFORM_OT_translate at 0x7d803ad65618>",
+      "MESH_OT_extrude_region": "<bpy_struct, MESH_OT_extrude_region at 0x7d803ad66758>"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 37,
+    "t": 101.44,
+    "op": "MESH_OT_dupli_extrude_cursor",
+    "name": "Extrude to Cursor or Add",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 38,
+    "t": 119.19,
+    "op": "MESH_OT_delete",
+    "name": "Delete",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 39,
+    "t": 121.67,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 1089,
+      "xmax": 1142,
+      "ymin": 819,
+      "ymax": 893,
+      "mode": "SET"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 40,
+    "t": 122.37,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 1138,
+      "xmax": 1163,
+      "ymin": 792,
+      "ymax": 815,
+      "mode": "SET"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 41,
+    "t": 123.44,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 1102,
+      "xmax": 1150,
+      "ymin": 811,
+      "ymax": 878,
+      "mode": "ADD"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 42,
+    "t": 124.51,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 1116,
+      "xmax": 1141,
+      "ymin": 645,
+      "ymax": 677,
+      "mode": "ADD"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 43,
+    "t": 125.22,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 1141,
+      "xmax": 1169,
+      "ymin": 586,
+      "ymax": 609,
+      "mode": "ADD"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 44,
+    "t": 127.36,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 743,
+      "xmax": 754,
+      "ymin": 670,
+      "ymax": 687,
+      "mode": "ADD"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 45,
+    "t": 130.92,
+    "op": "VIEW3D_OT_select_box",
+    "name": "Box Select",
+    "props": {
+      "xmin": 488,
+      "xmax": 509,
+      "ymin": 744,
+      "ymax": 765,
+      "mode": "ADD"
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 46,
+    "t": 134.46,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        740,
+        895
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 47,
+    "t": 135.16,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        795,
+        862
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 48,
+    "t": 135.52,
+    "op": "MESH_OT_f2",
+    "name": "Make Edge/Face",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 49,
+    "t": 140.12,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "deselect_all": true,
+      "location": [
+        1001,
+        579
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 50,
+    "t": 142.95,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "deselect_all": true,
+      "location": [
+        795,
+        667
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 51,
+    "t": 144.0,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "deselect_all": true,
+      "location": [
+        746,
+        749
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 52,
+    "t": 144.71,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        811,
+        848
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 53,
+    "t": 145.77,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        928,
+        648
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 54,
+    "t": 146.47,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        1005,
+        803
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 55,
+    "t": 147.17,
+    "op": "MESH_OT_f2",
+    "name": "Make Edge/Face",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 56,
+    "t": 148.58,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "deselect_all": true,
+      "location": [
+        945,
+        548
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 57,
+    "t": 149.29,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        926,
+        647
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 58,
+    "t": 149.99,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        1010,
+        798
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 59,
+    "t": 150.7,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        1015,
+        694
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 60,
+    "t": 151.41,
+    "op": "MESH_OT_f2",
+    "name": "Make Edge/Face",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 61,
+    "t": 152.82,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "deselect_all": true,
+      "location": [
+        549,
+        804
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 62,
+    "t": 153.88,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        646,
+        941
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 63,
+    "t": 154.59,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        817,
+        854
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 64,
+    "t": 155.66,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        747,
+        747
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 65,
+    "t": 156.36,
+    "op": "MESH_OT_f2",
+    "name": "Make Edge/Face",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 66,
+    "t": 158.48,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "deselect_all": true,
+      "location": [
+        810,
+        761
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 67,
+    "t": 159.19,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        834,
+        542
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 68,
+    "t": 160.6,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        1012,
+        482
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 69,
+    "t": 161.31,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        997,
+        728
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 70,
+    "t": 162.01,
+    "op": "MESH_OT_f2",
+    "name": "Make Edge/Face",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 71,
+    "t": 164.13,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "deselect_all": true,
+      "location": [
+        817,
+        936
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 72,
+    "t": 165.19,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        951,
+        1000
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 73,
+    "t": 165.9,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        1049,
+        877
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 74,
+    "t": 166.95,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        947,
+        838
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 75,
+    "t": 167.3,
+    "op": "MESH_OT_f2",
+    "name": "Make Edge/Face",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 76,
+    "t": 169.06,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "deselect_all": true,
+      "location": [
+        1030,
+        752
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 77,
+    "t": 169.77,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        945,
+        842
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 78,
+    "t": 170.47,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        1046,
+        881
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 79,
+    "t": 171.53,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "location": [
+        1157,
+        796
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 80,
+    "t": 171.88,
+    "op": "MESH_OT_f2",
+    "name": "Make Edge/Face",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 81,
+    "t": 172.24,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "deselect_all": true,
+      "location": [
+        1218,
+        704
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "EDIT",
+      "selection": "EDIT mode"
+    }
+  },
+  {
+    "i": 82,
+    "t": 174.02,
+    "op": "OBJECT_OT_editmode_toggle",
+    "name": "Edit Mode",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "OBJECT",
+      "selection": "0 object(s) selected"
+    }
+  },
+  {
+    "i": 83,
+    "t": 178.63,
+    "op": "OBJECT_OT_select_all",
+    "name": "(De)select All",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "OBJECT",
+      "selection": "1 object(s) selected"
+    }
+  },
+  {
+    "i": 84,
+    "t": 179.68,
+    "op": "OBJECT_OT_shade_smooth",
+    "name": "Shade Smooth",
+    "props": {},
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "OBJECT",
+      "selection": "1 object(s) selected"
+    }
+  },
+  {
+    "i": 85,
+    "t": 180.39,
+    "op": "VIEW3D_OT_select",
+    "name": "Select",
+    "props": {
+      "deselect_all": true,
+      "location": [
+        702,
+        935
+      ]
+    },
+    "context": {
+      "active": "Cylinder",
+      "type": "MESH",
+      "mode": "OBJECT",
+      "selection": "0 object(s) selected"
+    }
+  }
+]

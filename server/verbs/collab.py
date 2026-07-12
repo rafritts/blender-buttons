@@ -1,17 +1,7 @@
-"""collab — shared-state collaboration surface (SPEC-12).
+"""collab — action recording journal (Collab N-panel).
 
-Read the shared collab state (phase + sign-off queue + decisions) and surface an
-applied edit for the human's Accept/Reject. The in-Blender Collab panel is the
-human half; this verb is the agent half, over the same socket every other verb
-uses. See docs/SPEC-12-collab-panel.md.
-
-Decisions flow back ON DEMAND — call `op=status` whenever you want to check in.
-There is no long-poll loop (the SPEC-11 chat had one; this deliberately doesn't).
-
-You do NOT submit edits for sign-off: the queue is AUTOMATIC. Every mutating op you
-run auto-enqueues, so the queue is the whole diff since the human last reviewed (like
-a PR showing every changed line) — you can't curate what they sign off on. You only
-read verdicts here.
+The human Start/Stop Recording button lives in the Blender Collab panel; this
+verb is the agent half over the same socket.
 """
 
 from typing import Literal
@@ -19,29 +9,28 @@ from typing import Literal
 from server._core import mcp, call_blender
 from ._common import tag, unknown
 
-_OPS = ["status"]
+_OPS = ["status", "session", "record"]
 
 
 @mcp.tool(name="collab")
 def collab(
-    op: Literal["status"] = "status",
+    op: Literal["status", "session", "record"] = "status",
+    action: tag(str, "[record] start|stop|clear|status — mirror the panel button") = "",
+    clear: tag(bool, "[session] True = drop the journal after reading is done") = False,
 ) -> str:
     """
-    Shared-state collaboration with the human, through the in-Blender Collab panel
-    (SPEC-12). `op` selects:
+    Action recording via the in-Blender Collab panel. `op` selects:
 
-      status — read the shared state: the current PHASE the human set (blockout →
-               secondary → detail → retopo → uv → bake — a signal, not a lock), the
-               sign-off queue (every edit you've made awaiting Accept/Reject — it
-               fills AUTOMATICALLY; you don't submit), and any DECISIONS the human
-               made since your last read (each reported once — this call DRAINS
-               them). A rejected edit was undone in the viewport; if it wasn't the
-               most recent op, later ops were rewound too (listed in `rewound`) —
-               rebuild the ones you still want. Call this to check in; no loop, no
-               waiting.
+      status  — whether recording is on + step count + a short tail of the journal
+                (last ~12 steps). Call after the human models to see if a session
+                is ready.
+      session — full action journal as a markdown transcript (and structured steps).
+                clear=True drops the journal after you pull it.
+      record  — start|stop|clear the recorder from the agent side (same as the
+                panel button). action=start|stop|clear|status.
 
-    The flow: make edits (each auto-enqueues) → later `collab op=status` to learn
-    the human's verdicts. It is all one conversation; you decide when to check in.
+    Workflow for teach-by-doing: human clicks Start Recording → models (e.g. a
+    mug handle with Extrude) → Stop → you `collab op=session` and match the steps.
     """
     o = op.lower().strip()
 
@@ -51,35 +40,38 @@ def collab(
             return result["error"]
         return _format_status(result)
 
+    if o == "session":
+        result = call_blender("collab_session", {"clear": bool(clear)})
+        if result.get("error"):
+            return result["error"]
+        return result.get("transcript") or f"steps: {result.get('steps', 0)}"
+
+    if o == "record":
+        act = (action or "status").lower().strip()
+        result = call_blender("collab_record", {"action": act})
+        if result.get("error"):
+            return result["error"]
+        rec = "ON" if result.get("recording") else "OFF"
+        return f"recording: {rec} · steps: {result.get('steps', 0)}"
+
     return unknown("collab", "op", op, _OPS)
 
 
 def _format_status(r):
-    lines = [f"phase: {r.get('phase', '?')}"]
-
-    pending = r.get("pending") or []
-    if pending:
-        lines.append(f"awaiting sign-off ({len(pending)}):")
-        for e in pending:
-            lines.append(f'  • "{e["label"]}" [{e["op_id"]}]')
-    else:
-        lines.append("awaiting sign-off: (none)")
-
-    decided = r.get("decided") or []
-    if decided:
-        lines.append(f"decided since last read ({len(decided)}):")
-        for e in decided:
-            mark = "✓ accepted" if e["verdict"] == "accepted" else "✗ rejected"
-            line = f'  {mark}: "{e["label"]}" [{e["op_id"]}]'
-            rewound = e.get("rewound") or []
-            if rewound:
-                line += (f" — also rewound {len(rewound)} later op(s): "
-                         + ", ".join(f'"{l}"' for l in rewound)
-                         + " (rebuild if still wanted)")
-            if e.get("verified") is False:
-                line += " ⚠ POST-UNDO MISMATCH — verify the scene before trusting it"
-            lines.append(line)
-    else:
-        lines.append("decided since last read: (none)")
-
+    rec = "ON" if r.get("recording") else "OFF"
+    n = r.get("session_steps", 0)
+    lines = [f"action recording: {rec} · {n} step(s)"]
+    tail = r.get("session_tail") or []
+    if tail:
+        lines.append(f"session tail (last {len(tail)}):")
+        for s in tail:
+            props = s.get("props") or {}
+            prop_s = ", ".join(f"{k}={v!r}" for k, v in list(props.items())[:6])
+            ctx = s.get("context") or {}
+            lines.append(
+                f"  {s.get('i', '?')}. {s.get('name') or s.get('op')} "
+                f"({prop_s or '—'}) · {ctx.get('selection', '?')}"
+            )
+    elif n == 0:
+        lines.append("session: empty — human uses Collab ▸ Start recording")
     return "\n".join(lines)

@@ -625,9 +625,6 @@ def execute_command(command):
     if is_mutating and isinstance(result, dict) and result.get("success"):
         result["op_id"] = state.log_operation(tool, params, label)
         state.push_undo_step(result["op_id"])
-        # SPEC-12: every mutating op auto-enqueues for sign-off — the queue stays 1:1
-        # with the undo stack (the whole diff), never an agent-curated subset.
-        collab.enqueue(result["op_id"], label or tool)
 
     # SPEC-16: the two forced senses. After a geometry/placement op, run the always-on
     # correctness floor (`validate`, scoped to the touched delta + its relations) and

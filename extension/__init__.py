@@ -72,21 +72,6 @@ def register():
 
     for cls in ui.CLASSES:
         bpy.utils.register_class(cls)
-    # SPEC-12: the Collab panel's phase selector — a human-owned shared signal the
-    # agent reads via `collab op=status`. No op-gating; just a marker of where we are.
-    bpy.types.WindowManager.bb_phase = bpy.props.EnumProperty(
-        name="Phase",
-        description="The art-pipeline phase — a shared signal the agent reads",
-        items=[
-            ('blockout',  "Blockout",  "Rough forms and proportions"),
-            ('secondary', "Secondary", "Secondary forms"),
-            ('detail',    "Detail",    "Surface detail"),
-            ('retopo',    "Retopo",    "Clean topology"),
-            ('uv',        "UV",        "UV unwrap"),
-            ('bake',      "Bake",      "Bake maps"),
-        ],
-        default='blockout',
-    )
     # SPEC-16: the human's GLOBAL validation override — the sledgehammer the agent is
     # denied. Session-scoped (a WindowManager bool); while True the floor is down and
     # every status block announces `validate: OFF` so blind-flow can never be silent.
@@ -144,8 +129,17 @@ def unregister():
         bpy.app.handlers.load_post.remove(_on_load_post)
     if bpy.app.timers.is_registered(server.process_queue):
         bpy.app.timers.unregister(server.process_queue)
+    # Stop action recording timer if the panel left it running.
+    try:
+        from . import collab as _collab
+        if _collab.is_recording():
+            _collab.stop_recording()
+        elif bpy.app.timers.is_registered(_collab._poll_operators):
+            bpy.app.timers.unregister(_collab._poll_operators)
+    except Exception:
+        pass
     if hasattr(bpy.types.WindowManager, "bb_phase"):
-        del bpy.types.WindowManager.bb_phase
+        del bpy.types.WindowManager.bb_phase  # legacy; removed from panel
     if hasattr(bpy.types.WindowManager, "bb_validate_off"):
         del bpy.types.WindowManager.bb_validate_off
     if hasattr(bpy.types.WindowManager, "bb_label"):
