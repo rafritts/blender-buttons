@@ -96,9 +96,13 @@ Diagnostics field notes that stay true:
 - `feel op=verify` certifies **capture** (the selection cohered on one feature), never
   **identity** (that it's the *right* feature). When verify passes but identity is
   uncertain, ask the human to eyeball the handle — cheaper than a misplaced edit.
-- Do **not** render to hunt for features or to check your work. LLM vision
-  self-confirms — a render launders a mistake instead of catching it. The human
-  watches the live viewport in real time; locate and verify by ground-truth reads.
+- **Experimental agent sight** (vision.md ban suspended for a try): you MAY
+  `render op=image` and open the returned PNG for *appearance* — product
+  identity, composition, material look, presentation defects a still would show.
+  Still locate and verify *geometry* by ground-truth reads (`look` / `feel` /
+  status / validate). Vision is recognition-biased: you will tend to see what you
+  expected. Prefer listing what is wrong before what is right; never treat a
+  render as proof an edit landed. Don't spam renders mid-edit — checkpoints only.
 
 ## The status block is your instrument panel
 

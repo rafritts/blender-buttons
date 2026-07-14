@@ -116,6 +116,20 @@ So sight is demoted, not deleted. It keeps exactly two jobs:
 Comparison against a reference is deterministicized where possible: extract and compare
 silhouettes/profiles numerically, rather than eyeballing two images.
 
+### Temporary experiment — agent may open scene-camera renders (2026-07)
+
+The hard ban on the *agent* reading renders is **suspended for a try**, not erased.
+Mechanism: existing `render op=image` (scene camera F12) → open the returned path.
+Protocol while the experiment is on:
+
+- Sight = appearance / presentation / product identity only.
+- Geometry / placement / "did the edit work" = still `feel` + status + validate.
+- Prefer honest defects over confirmation; never treat pixels as ground truth.
+
+If the gaslighting failure mode returns (confident false success from self-reads),
+reinstate the ban. The historical case for demotion above still stands as the default
+design.
+
 ## The Core Iteration Loop
 
 ```

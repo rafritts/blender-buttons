@@ -74,9 +74,8 @@ def _cycles_preflight():
 def render_to_file(params):
     """Render the active scene camera to an image file.
 
-    FOR THE HUMAN USER, NOT THE AGENT — produces a picture for a person to look at.
-    The agent never sees these images; to understand the model it uses the
-    introspection/topology tools (get_topology, describe, check_mesh, etc.).
+    Experimental agent sight: the agent may open the returned path for appearance /
+    presentation. Geometry still comes from feel/status (vision is recognition-biased).
 
     filepath:   output path (required). ~ is expanded. Extension is set to match
                 the format if missing.

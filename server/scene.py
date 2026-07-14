@@ -407,18 +407,11 @@ def render_to_file(filepath: str,
     """
     Render the scene camera to an image file on disk. Requires a camera — add_camera first.
 
-    ⚠ THIS IS FOR THE HUMAN USER, NOT THE AGENT. It produces a picture for a person
-    to look at. The agent does NOT see these images and must NOT read them back —
-    doing so burns tokens and has repeatedly led to wrong conclusions. LLM vision is
-    unreliable at this precision and SELF-CONFIRMS: you will see what you expected and
-    report success whether or not it's true, so the render launders your mistakes
-    instead of catching them (an image is a lossy, ambiguous view of hidden state).
-    Call this ONLY when the user explicitly asks for a rendered image, then hand them
-    the path.
-
-    To understand the model yourself, use the introspection/topology tools instead —
-    they are precise and cheap: get_topology, describe, get_object_info, check_mesh,
-    list_modifiers, get_scene_tree, diff_since. Those are almost always what you want.
+    EXPERIMENTAL AGENT SIGHT (vision.md ban suspended for a try): you MAY open the
+    returned filepath and look at the image. Sight is for appearance / presentation /
+    product identity. Geometry, placement, and "did the edit work" still come from
+    `feel`, the status block, and validate — pixels are not ground truth, and vision
+    self-confirms what you expected. Prefer honest defects over "looks good."
 
     filepath:     the render NAME (e.g. "donut_hero" or "donut_hero.png"). Any directory
                   you put here is dropped on purpose — renders ALWAYS land in the
@@ -430,7 +423,7 @@ def render_to_file(filepath: str,
                   render_dir. Only set this when the user asked for a specific location.
     resolution_x/y: pixel dimensions (default: keep the scene's current).
     samples:      render sample count (higher = cleaner + slower).
-    engine:       'BLENDER_EEVEE_NEXT' | 'CYCLES' (default: keep current).
+    engine:       'BLENDER_EEVEE' | 'CYCLES' (default: keep current; use build ids).
     format:       PNG (default) | JPEG | OPEN_EXR | TIFF | WEBP.
     transparent:  True → transparent background (alpha in PNG/EXR).
     timeout:      seconds to allow the render to run before giving up (default 300).
@@ -455,8 +448,14 @@ def render_to_file(filepath: str,
     result = call_blender("render_to_file", params, label=label, timeout=timeout)
     if result.get("success"):
         kb = result["bytes"] / 1024.0
-        main = (f"rendered {result['resolution']} [{result['engine']}, {result['format']}] "
-                f"→ {result['filepath']} ({kb:.0f} KB) [{result.get('op_id','')}]")
+        path = result["filepath"]
+        main = (
+            f"rendered {result['resolution']} [{result['engine']}, {result['format']}] "
+            f"→ {path} ({kb:.0f} KB) [{result.get('op_id','')}]\n"
+            f"OPEN_IMAGE: {path}\n"
+            f"sight: appearance only — geometry/placement still from feel + status "
+            f"(vision is recognition-biased; prefer defects over confirmation)"
+        )
     else:
         main = result.get("error", "failed")
     return main + _status(result)

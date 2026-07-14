@@ -105,10 +105,13 @@ revolved vessels, ring welds, drips, smooth unions, blockout, NPR). Techniques a
 approaches you adapt with reads between steps; recipes (repo `recipes/`) are verified
 end-to-end results.
 
-Do not render to hunt for a feature — vision self-confirms and launders the mistake.
-The human is ALWAYS watching the live viewport and sees the mesh in real time, so
-rendering to SHOW your work or to CHECK it is redundant and wasteful — render ONLY when
-they explicitly ask for a saved image file.
+EXPERIMENTAL AGENT SIGHT (vision.md ban suspended for a try): `render op=image` writes
+a scene-camera still; you MAY open the returned path and look. Use sight for appearance
+/ presentation / product identity only. Geometry, placement, dimensions, and "did the
+edit work" still come from `feel`, the status block, and validate — never from pixels.
+Vision is recognition-biased (you will tend to see what you expected); prefer honest
+defects and uncertainty over "looks good / done." Don't spam renders mid-edit; use them
+at presentation checkpoints.
 
 A human is likely in the loop with you (HITL). Unless told otherwise, surface concerns,
 questions, matters of taste, and anywhere you need guidance or clarification — on a

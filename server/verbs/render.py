@@ -56,23 +56,24 @@ def render(
                 (engine: the build's id, NOT a hardcoded name — Blender 5.x Eevee is
                 `BLENDER_EEVEE`, not `_NEXT`; `render op=settings` lists what's real.)
 
-                ⚠ THE HUMAN IS ALWAYS WATCHING THE LIVE VIEWPORT. They see the mesh
-                in real time as you build it, so rendering to SHOW them — "here's how
-                it looks" — is redundant and wastes tokens. Do NOT render proactively;
-                render ONLY when the human explicitly asks for a saved image file.
+                EXPERIMENTAL AGENT SIGHT (ban suspended — try carefully):
+                You MAY open the returned PNG path and look at it. Use sight for
+                *appearance* only: product identity, composition, materials look,
+                presentation issues the human would notice in a still. After the
+                render succeeds, open the filepath (multimodal read) when you need
+                to see the frame yourself; also hand the path to the human.
 
-                ⚠ THE IMAGE IS FOR THE HUMAN, NOT THE AGENT. Do NOT read it back.
-                Why this is a hard rule, not a style note:
-                  • LLM vision is unreliable at this level of precision, and it
-                    *self-confirms* — you will look at the render, see what you
-                    expected to see, and report success whether or not it's true.
-                    The render cannot catch your own mistake; it launders it.
-                  • A render is a lossy, ambiguous 2D view of hidden 3D state.
-                  • Reading it back lights tokens on fire for that false comfort.
-                Verify with GROUND TRUTH instead — `feel` (topology/measurements),
-                `object info`, modifier lists, the status block. Those are
-                depsgraph-exact and can't be gaslit. Render only when the user asks
-                for a picture, then hand them the path.
+                Still true and still load-bearing:
+                  • Geometry / placement / dimensions / "did the edit work" →
+                    `feel`, status block, validate. NEVER settle those from pixels.
+                  • Vision is recognition-biased: you will tend to see what you
+                    expected. Prefer honest negatives and uncertainty over
+                    "looks good / done." Describe what is wrong before what is right.
+                  • A render is a lossy 2D view of hidden 3D state — not ground truth.
+                  • Don't spam renders mid-edit; use them at presentation checkpoints
+                    or when the human wants a still. Prefer modest samples/Eevee for
+                    interactive loops.
+
                 (engine: builds vary — CYCLES may be absent, Eevee's id shifts by
                 version. `render op=settings` reports this build's real list.)
       engine  — SET the active render engine as state, no frame rendered (name=CYCLES
