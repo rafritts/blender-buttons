@@ -6,10 +6,11 @@ primer, extension-health API breaks, bucket assignments) and the **II.7 checklis
 of A–F shipped) + **II.8 refinements**. Decisions in §1–§7 are the agreed framing; Part II
 is the grounded result as built.
 
-**Target build:** Blender **5.1** (released 2026-03-17; confirmed from the flatpak
-`org.blender.Blender 5.1` and the `BLENDER_EEVEE` render id). Blender 5.0 shipped
-2025-11-18. All native claims in Part II are sourced from the 5.0/5.1 release notes and
-the 5.1 (`latest`) manual — derived from the build, not model memory (R3).
+**Target build:** Blender **5.2 LTS** (released 2026-07-14; `SERVER_VERIFIED_BLENDER`
+bumped from 5.1 after live re-verify). Part II native claims were originally sourced
+from the 5.0/5.1 release notes and 5.1 manual (R3); 5.2 deltas that bite this server
+(notably Geometry Nodes modifier inputs → RNA properties) are handled in
+`extension/finishes.py` and stamped in `server/_instructions.py`.
 
 ---
 

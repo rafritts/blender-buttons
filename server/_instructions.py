@@ -25,17 +25,23 @@ them, op=attach port=<N> to bind one, op=launch to open a fresh instance). `conn
 reports the ATTACHED Blender version and the version this server was verified against, and
 warns on drift — heed that warning, it means the notes below may be stale.
 
-BUILD — this server targets **Blender 5.x** (verified against 5.1; 5.0 shipped 2025-11-18).
-Your training is densest on ≤4.x, so recalibrate any "is this native?" reflex against the
-build, never memory. The 5.x deltas most likely to bite (sourced from the release notes):
+BUILD — this server targets **Blender 5.x** (verified against **5.2 LTS**, released
+2026-07-14; 5.1 = 2026-03-17; 5.0 shipped 2025-11-18). Your training is densest on ≤4.x,
+so recalibrate any "is this native?" reflex against the build, never memory. The 5.x
+deltas most likely to bite (sourced from the release notes):
   • EEVEE's engine id is **BLENDER_EEVEE** (was BLENDER_EEVEE_NEXT). Boolean solver "FAST"
     is now **"FLOAT"**. Materials/Worlds always use nodes (`use_nodes` is a no-op).
   • Six **GN-based modifiers** now ship natively — Array (with a **Circular** mode), Scatter
     on Surface, Instance on Elements, Randomize Instances, Curve to Tube, Geometry Input —
     reachable via `modifier op=add_asset asset="…"`. This is the native scatter/radial-array
     path; the old bespoke `scatter`/`array_radial` verbs were retired as cousins (SPEC-20).
+  • **5.2:** Geometry Nodes modifier inputs are RNA properties
+    (`mod.properties.inputs.<id>.value`), not IDProperties (`mod["id"]`). Menu sockets store
+    **string enums**, not ints. The extension already uses this path — do not invent the
+    old `mod["Socket_N"]` form in scripts.
   • Geometry Nodes gained an **SDF + volume-grid** family (Mesh→SDF Grid, SDF Grid Boolean,
-    SDF filters) — a native cousin for smooth-union/blend work.
+    SDF filters) — a native cousin for smooth-union/blend work. 5.2 also adds Mesh Bevel,
+    lists, geometry bundles, and experimental node-based cloth/hair physics.
   • Files compress on save by default; data-block names up to 255 bytes; default FBX importer
     is the C++ `wm.fbx_import`; Collada is gone. Cycles SSS is multi-bounce random-walk.
 

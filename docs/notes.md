@@ -32,7 +32,7 @@ server/main.py  (FastMCP, stdio)
   ↓ JSON over TCP socket (localhost:8765)
 addon/blender_buttons.py  (runs inside Blender)
   ↓ bpy
-Blender 5.1.2
+Blender 5.2.0 LTS
 ```
 
 ## MCP Configuration
@@ -66,7 +66,7 @@ After moving the repo, update the absolute paths in `.mcp.json` to match the new
 - `render.opengl` for screenshots requires a 3D viewport to be open and active — won't work if Blender is minimized or only showing non-3D areas
 - Transform operators (scale, move, rotate) need an active selected object — always call `select_object` first
 - The add-on's `process_queue` timer runs every 50ms — introduces slight latency on each operation
-- Context overrides (`temp_override`) require Blender 4.0+; we're on 5.1.2 so this is fine
+- Context overrides (`temp_override`) require Blender 4.0+; we're on 5.2 LTS so this is fine
 
 ## User Context
 

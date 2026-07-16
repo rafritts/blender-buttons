@@ -863,7 +863,7 @@ def apply_modifiers(params):
                            if nm.strip().lower() == "realize instances"), None)
                 if ri is not None:
                     try:
-                        m[ri] = True
+                        _gn_set(m, ri, True)
                         m.id_data.update_tag()
                         bpy.context.view_layer.update()
                         realized.append({"modifier": mod_name, "instances": n_inst})
@@ -1224,12 +1224,41 @@ def _gn_input_sockets(ng):
     return out
 
 
+def _gn_input_prop(mod, ident):
+    """Blender 5.2+: Geometry Nodes modifier inputs are RNA under
+    `mod.properties.inputs.<identifier>` (release notes 1561c1ea4a). Pre-5.2 used
+    IDProperties (`mod[ident]`). Returns the RNA input wrapper or None on older builds /
+    missing sockets."""
+    props = getattr(mod, "properties", None)
+    inputs = getattr(props, "inputs", None) if props is not None else None
+    if inputs is None:
+        return None
+    return getattr(inputs, ident, None)
+
+
+def _gn_get(mod, ident):
+    """Read a NODES-modifier input value (5.2 RNA `.value`, else IDProperty)."""
+    prop = _gn_input_prop(mod, ident)
+    if prop is not None and hasattr(prop, "value"):
+        return prop.value
+    return mod[ident]
+
+
+def _gn_set(mod, ident, val):
+    """Write a NODES-modifier input value (5.2 RNA `.value`, else IDProperty)."""
+    prop = _gn_input_prop(mod, ident)
+    if prop is not None and hasattr(prop, "value"):
+        prop.value = val
+        return
+    mod[ident] = val
+
+
 def _menu_options(ng):
     """G204 — {menu_socket_identifier: [item_name, ...]} for every NodeSocketMenu input,
     read by walking each menu socket from the Group Input node to the Menu Switch node it
-    drives (whose enum_definition holds the item NAMES). The int stored in the modifier's
-    IDProperty is the INDEX into this list — the mapping nothing else on the surface
-    exposes, so the agent can set/read menu sockets by the same name a human sees."""
+    drives (whose enum_definition holds the item NAMES). On pre-5.2 builds the int stored
+    in the modifier's IDProperty is an INDEX into this list (see B7 / `_menu_value_map`);
+    on 5.2+ menus are RNA string enums and this walk is only a fallback."""
     opts = {}
     for node in ng.nodes:
         if node.type != 'GROUP_INPUT':
@@ -1248,14 +1277,28 @@ def _menu_options(ng):
 
 
 def _menu_value_map(mod, ident):
-    """B7 — AUTHORITATIVE {option_name: int_value} for a NODES-modifier menu socket, read
-    from the socket IDProperty's UI enum items. The int a menu socket stores is Blender's
-    per-item VALUE, which is NOT the node-graph declaration order: Scatter on Surface stores
-    Instance Type Object=1/Collection=0 and Density Method Density=1/Amount=0 — both REVERSED
-    from the order `_menu_options` walks. Writing the walk index therefore selects the wrong
-    option (the live donut bug: collection= wrote index 1 = Object → empty source → 0
-    instances). This map is what the N-panel itself writes, so it round-trips with the GUI.
-    Empty {} if the UI items are unreadable (older build → caller falls back to walk order)."""
+    """B7 — AUTHORITATIVE {option_display_name: stored_value} for a NODES-modifier menu
+    socket.
+
+    Blender 5.2+: RNA enum on `mod.properties.inputs.<id>.value` — stored value is the
+    enum *identifier* (a string). Read enum_items from the property RNA.
+
+    Pre-5.2: IDProperty int whose VALUE is NOT the node-graph declaration order (Scatter
+    on Surface stores Instance Type Object=1/Collection=0, Density Method Density=1/
+    Amount=0 — both REVERSED). Writing the walk index selected the wrong option (live
+    donut bug). Prefer `id_properties_ui` items so writes match the N-panel.
+
+    Empty {} if neither path is readable (caller falls back to walk order)."""
+    prop = _gn_input_prop(mod, ident)
+    if prop is not None:
+        try:
+            rna = prop.bl_rna.properties.get("value")
+            if rna is not None and getattr(rna, "enum_items", None):
+                # display name → enum identifier (usually identical; identifier is what
+                # prop.value stores / accepts).
+                return {it.name: it.identifier for it in rna.enum_items}
+        except Exception:
+            pass
     try:
         items = mod.id_properties_ui(ident).as_dict().get("items") or []
         # each item tuple is (identifier, name, description, icon, value)
@@ -1265,8 +1308,8 @@ def _menu_value_map(mod, ident):
 
 
 def _menu_maps(mod, sockets):
-    """{menu_socket_identifier: {option_name: int_value}} for every menu socket on `mod`,
-    preferring the authoritative id_properties_ui values (_menu_value_map) and falling back
+    """{menu_socket_identifier: {option_name: stored_value}} for every menu socket on
+    `mod`. Prefer `_menu_value_map` (5.2 RNA enums / pre-5.2 id_properties_ui); fall back
     to node-graph declaration order (name→index) only when those are unreadable."""
     walk = _menu_options(mod.node_group)
     out = {}
@@ -1289,14 +1332,17 @@ def _describe_inputs(mod, sockets, menu_maps):
     for name, (ident, stype) in sockets.items():
         short = stype.replace("NodeSocket", "") or "?"
         try:
-            cur = mod[ident]
+            cur = _gn_get(mod, ident)
         except Exception:
             cur = None
         if stype == 'NodeSocketMenu':
             vm = menu_maps.get(ident, {})
-            # B7: resolve the stored int back to a name via the AUTHORITATIVE value map,
-            # not by list index — so a menu reads out the option the modifier truly evaluates.
+            # B7 / 5.2: resolve stored value back to a display name via the value map
+            # (int on pre-5.2; string enum identifier on 5.2 — often equals the name).
             curname = next((nm for nm, v in vm.items() if v == cur), cur)
+            if curname is None or (isinstance(curname, str) is False and cur is not None):
+                # 5.2 already stores the identifier string; prefer that over a raw int.
+                curname = cur if isinstance(cur, str) else curname
             opts = "|".join(vm.keys()) if vm else "?"
             out.append(f"{name} (menu: {opts} = {curname})")
         elif stype in ('NodeSocketObject', 'NodeSocketCollection'):
@@ -1328,8 +1374,9 @@ def _evaluated_instance_count(obj):
 def _set_gn_inputs(mod, sockets, inputs, menu_maps=None):
     """Set {socket-name: value} on a NODES modifier by socket IDENTIFIER, matching names
     case-insensitively. Collection/Object-typed sockets take a datablock NAME; MENU sockets
-    (G204) take the option NAME (resolved to its stored int VALUE via menu_maps — B7). Shared
-    by add_asset (create-time) and modify (live-edit, G191).
+    (G204) take the option NAME, resolved to the stored value via menu_maps (B7): an int
+    on pre-5.2 IDProperties, a string enum identifier on 5.2+ RNA. Shared by add_asset
+    (create-time) and modify (live-edit, G191).
 
     B7: `set_inputs` reports the EFFECTIVE value read back from the modifier, not the value we
     asked for — a write that silently fails to latch (e.g. a bad menu mapping) surfaces as a
@@ -1350,24 +1397,26 @@ def _set_gn_inputs(mod, sockets, inputs, menu_maps=None):
         elif stype == 'NodeSocketObject':
             val = bpy.data.objects.get(val)
         elif stype == 'NodeSocketMenu' and isinstance(val, str):
-            # B7: resolve the display NAME → the stored int VALUE (id_properties_ui), NOT the
-            # node-graph list index — the two disagree on reversed menus and the index silently
-            # selects the wrong option.
+            # Resolve display NAME → stored value (int pre-5.2 / string enum id on 5.2).
+            # Also accept a direct match on the stored identifier itself.
             vm = menu_maps.get(ident, {})
-            hit = next((v for nm, v in vm.items() if nm.lower() == val.strip().lower()), None)
+            want_l = val.strip().lower()
+            hit = next((v for nm, v in vm.items() if nm.lower() == want_l), None)
+            if hit is None:
+                hit = next((v for _nm, v in vm.items() if str(v).lower() == want_l), None)
             if hit is None:
                 unknown.append(f"{key} (menu value '{val}' not one of {list(vm) or '?'})")
                 continue
             val = hit
         try:
-            mod[ident] = val
+            _gn_set(mod, ident, val)
         except Exception as e:
             unknown.append(f"{key} (set failed: {e})")
             continue
         # B7: verify the write landed by reading the modifier's effective state back, and
         # report THAT (not the requested value). A silent no-op becomes visible.
         try:
-            eff = mod[ident]
+            eff = _gn_get(mod, ident)
         except Exception:
             eff = None
         if stype == 'NodeSocketMenu':
@@ -1381,9 +1430,9 @@ def _set_gn_inputs(mod, sockets, inputs, menu_maps=None):
             if eff is None and want:
                 unknown.append(f"{key} (datablock '{want}' not found / not set)")
         else:
-            # Vector/Color sockets read back as an IDPropertyArray (not JSON-serializable);
+            # Vector/Color sockets read back as bpy arrays (not JSON-serializable);
             # coerce to a plain rounded list. Scalars pass through. Force float() so bpy
-            # subtypes / IDPropertyArray elements never leak into the tool result.
+            # subtypes never leak into the tool result.
             if hasattr(eff, "__len__") and not isinstance(eff, (str, bytes)):
                 try:
                     eff = [round(float(c), 4) for c in eff]
@@ -1440,15 +1489,16 @@ def add_asset_modifier(params):
             obj.modifiers.remove(mod)
             return {"error": f"'{asset}' has no Collection input to assign collection='{coll_name}'",
                     "inputs_available": _describe_inputs(mod, sockets, menu_maps)}
-        mod[sockets[coll_socket][0]] = coll
+        _gn_set(mod, sockets[coll_socket][0], coll)
         set_inputs[coll_socket] = coll_name
         # G205: the Collection socket is GATED by an instance-source menu (Scatter on
         # Surface's "Instance Type" defaults to 'Object' → the Collection input is
         # ignored, a silent no-op). Flip the menu whose options include 'Collection' to
         # 'Collection', so collection= actually instances from it — unless the caller set
         # that menu explicitly in inputs=.
-        # B7: write the option's stored VALUE from menu_maps, not its walk index — Instance
-        # Type stores Collection=0, so the old index-1 write selected Object (the live no-op).
+        # B7: write the option's stored VALUE from menu_maps (int pre-5.2 / string enum on
+        # 5.2+), not a walk index — pre-5.2 Instance Type stores Collection=0, so the old
+        # index-1 write selected Object (the live no-op).
         explicit = {str(k).strip().lower() for k in (params.get("inputs") or {})}
         for mname, (mident, mtype) in sockets.items():
             if mtype != 'NodeSocketMenu' or mname.lower() in explicit:
@@ -1456,9 +1506,9 @@ def add_asset_modifier(params):
             vm = menu_maps.get(mident, {})
             gate = next((v for nm, v in vm.items() if nm.lower() == "collection"), None)
             if gate is not None:
-                mod[mident] = gate
+                _gn_set(mod, mident, gate)
                 # report the EFFECTIVE option name read back, not a hardcoded label
-                eff = mod[mident]
+                eff = _gn_get(mod, mident)
                 set_inputs[mname] = next((nm for nm, v in vm.items() if v == eff), eff)
                 break
 

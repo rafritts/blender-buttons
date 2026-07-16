@@ -17,7 +17,7 @@ modify, with `feel` as the measuring instrument) so the agent reads the scene in
 of imagining it, and an always-on `validate` floor so it can't build on broken
 geometry without noticing.
 
-Targets **Blender 5.x** (verified against 5.1). MIT.
+Targets **Blender 5.x** (verified against 5.2 LTS). MIT.
 
 > **New here?** [`GUIDANCE_FOR_LLMS.md`](GUIDANCE_FOR_LLMS.md) is the field manual
 > (served to agents as the `guidance://llms` MCP resource), and

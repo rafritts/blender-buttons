@@ -18,7 +18,7 @@ from server import _core
 # build's release notes + manual. If an attached instance's (major, minor) diverges — a
 # future 6.x on this 5.x-era server — the provenance claims may be stale, so `connect`
 # raises a tripwire the instant you attach. Bump this (and re-derive the primer) on upgrade.
-SERVER_VERIFIED_BLENDER = "5.1"
+SERVER_VERIFIED_BLENDER = "5.2"
 
 
 def _ver_pair(version_str: str):
