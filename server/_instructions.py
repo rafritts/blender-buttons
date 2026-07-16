@@ -11,10 +11,12 @@ server/resources.py); do not restate its full contents here.
 
 INSTRUCTIONS = """\
 blender-buttons turns Blender into a mesh-modelling surface you drive by INTENT, not
-coordinates. It perceives (`look`, `feel`), measures, and mutates through ~21 verbs
+coordinates. It perceives (`look`, `feel`), measures, and mutates through ~22 verbs
 (look, add, edit, feel, select, transform, object, modifier, material, pose, sculpt,
-render, view, scene, file, history, …). Each verb takes an `op=` that selects the
+render, view, scene, file, history, script, …). Each verb takes an `op=` that selects the
 operation; the verb's schema enumerates every op and the args each one uses.
+`script` (batch|exec|dry_run) is the multi-step transport — hard cap 25, one receipt
+per phase; prefer progressive batches over megascripts (SPEC-23).
 
 Several Blender instances can run at once, each on its own port; this session attaches
 to ONE. With a single Blender open it's automatic — the first command attaches. If the

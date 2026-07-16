@@ -37,6 +37,7 @@ from . import (
     relational,
     render,
     rings,
+    script_api,
     sculpt,
     shaders,
     shading,
@@ -90,6 +91,7 @@ _TOOL_MODULES = (
     validation,  # SPEC-16: validate_* ops (expect / intended / stats / run)
     addons,      # generic addon/operator bridge (addon_list / addon_inspect / addon_run)
     windows,     # SPEC-21 §6: landmark LOD windows (the look verb's engine)
+    script_api,  # SPEC-23: script batch/exec/dry_run (transport over execute_command)
 )
 
 TOOLS = {}

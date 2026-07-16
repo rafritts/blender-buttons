@@ -36,6 +36,7 @@ from . import (  # noqa: F401
     addon,
     connect,
     uv,
+    script,
 )
 # SPEC-21 §4 retired the SPEC-20 buttons-<purpose>-macro verbs: a macro compiles the
 # adaptation between steps into code, where it can't happen (G217 — a macro whose
@@ -50,6 +51,7 @@ VERB_NAMES = {
     "add", "object", "edit", "look", "select", "transform", "modifier", "material",
     "sculpt", "pose", "scene", "view", "render", "history", "file", "feel",
     "validate", "collab", "addon", "connect", "uv",
+    "script",  # SPEC-23 transport
 }
 
 

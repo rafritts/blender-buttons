@@ -129,6 +129,16 @@ them. For object placement that's harmless; for `edit` ops that build on each ot
 first and silently no-op. Issue chained edit ops one per message; edits on *different*
 meshes batch fine.
 
+**Three gears for multi-step work (SPEC-23 `script` — experimental).** The REPL (one
+verb call) stays the eyes: localization, taste, look→claim→edit. For a *known* linear
+phase, prefer `script op=batch` (ordered steps, hard cap **25**, one receipt) over N
+round-trips or a raw `tmp/*.py` bpy dump. Use `script op=exec` only when a phase needs
+loops/branches — still short, still ≤25 DSL steps. Progressive bulk: batch → read the
+receipt (first failure, journal bounds, final validate) → next phase. Do **not**
+megascript a whole scene in one exec. On abort the scene restores transactionally.
+`tool=<name>` on a batch step reaches the full extension surface when a verb alias is
+missing. See `docs/SPEC-23-script-runner.md`.
+
 ## You build with two senses, and you don't get to close your eyes
 
 After every edit you get two things you did not ask for, because building blind is the

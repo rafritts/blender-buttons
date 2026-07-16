@@ -371,6 +371,9 @@ NO_LOG_TOOLS = {
     # generic addon bridge: listing addons + introspecting an operator are pure reads.
     # addon_run is a mutator (logged + undoable) and is deliberately NOT here.
     "addon_list", "addon_inspect",
+    # SPEC-23: script runner is transport — nested execute_command logs/pushes each
+    # step; the outer script_* call must not add a phantom history/undo unit.
+    "script_batch", "script_exec", "script_dry_run",
 }
 
 # Tools that neither log to history NOR consume an undo step: pure queries,
@@ -447,6 +450,9 @@ NO_STATUS_TOOLS = {
     # status block would be noise on a registry/stats round-trip.
     "validate_run", "validate_expect", "validate_forget", "validate_intended", "validate_stats",
     "feel_telemetry",
+    # SPEC-23: script receipt IS the payload; nested execute_command already attached
+    # per-step status. Outer status would double-print and push a phantom undo unit.
+    "script_batch", "script_exec", "script_dry_run",
     # generic addon bridge reads — their own payload IS the answer; status would be noise.
     "addon_list", "addon_inspect",
     # SPEC-21 §6: the look verb's window reply IS the perception payload.
