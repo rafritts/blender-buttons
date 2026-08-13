@@ -153,6 +153,34 @@ def set_material(target: str = "",
     return main + _status(result)
 
 
+def bind_image(target: str = "", image: str = "", bind: str = "base",
+               space: str = "box", emission_strength: float = None,
+               material_name: str = "", material: str = "", slot: int = None,
+               label: str = "") -> str:
+    """G230 — bind a packed image to a mesh. Thin: one Image Texture into
+    Principled Base Color and/or Emission Color. space=uv needs an existing UV
+    layer (`uv op=unwrap`); space=box uses object projection."""
+    params = {"target": target, "image": image, "bind": bind or "base",
+              "space": space or "box"}
+    if emission_strength is not None:
+        params["emission_strength"] = emission_strength
+    if material_name:
+        params["material_name"] = material_name
+    if material:
+        params["material"] = material
+    if slot is not None:
+        params["slot"] = slot
+    result = call_blender("bind_image", params, label=label)
+    if result.get("success"):
+        packed = "packed" if result.get("packed") else "unpacked"
+        main = (f"image '{result.get('image')}' ({packed}) → {result.get('bind')} "
+                f"on '{result.get('material')}' [{result.get('space')}] "
+                f"[{result.get('op_id', '')}]")
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
 def assign_material(target: str = "", material: str = "", base_color: list = None,
                     hex: str = "", metallic: float = None, roughness: float = None,
                     material_name: str = "", label: str = "") -> str:

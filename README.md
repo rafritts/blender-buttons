@@ -93,7 +93,8 @@ Two rules keep the loop honest. Every fix must be a **general primitive** that
 composes across any task — if a proposed tool can't be described without naming a body
 part or a domain object, it's too specific. And the dogfood is kept **blind**: the
 modeling agent gets no cheat-sheet beyond what the server itself teaches on connect
-(its `instructions` + the `guidance://llms` resource). A server that only works
+(its `instructions` + the `guidance://llms` resource, or `look op=guide` when the
+client has no resource reader). A server that only works
 because the operator memorized it is not a finished server — *the server must teach
 itself, and that is the thing under test.*
 
@@ -123,7 +124,7 @@ returns 22 schemas, not hundreds of flat tools.
 | `select` | Select menu — claim offered candidates, pick, by axis/between/radius, boundary, rings, grow/shrink, INTERSECT |
 | `transform` | place / nudge / rotate / scale / resize / snap / rest_on / seat / distribute |
 | `modifier` | Modifier Properties — add/apply, incl. `op=add_asset` for the native GN modifiers (Scatter on Surface, Array-Circular, …) |
-| `material` | Material Properties / shading — Principled scalars, shade smooth/flat, texture/HDRI *search* (no image-on-mesh bind yet) |
+| `material` | Material Properties / shading — Principled scalars, `op=image` (packed image → base/emission, space=uv\|box), shade smooth/flat, texture/HDRI search |
 | `sculpt` | Sculpt Mode brushes |
 | `pose` | Pose Mode / armature — rigging, weights, binding, shape keys |
 | `scene` | Outliner + scene-level Properties |
@@ -147,8 +148,8 @@ technique leaves it to the agent, live, with perception reads between steps (SPE
 
 The depth — the loop, the reads, the failure modes — lives in
 [`GUIDANCE_FOR_LLMS.md`](GUIDANCE_FOR_LLMS.md), served verbatim as the
-`guidance://llms` MCP resource. Agents are told to read it before improvising any
-multi-step task.
+`guidance://llms` MCP resource and as `look op=guide` (G228 — clients without a
+resource reader). Agents are told to read it before improvising any multi-step task.
 
 ## Auto-status
 

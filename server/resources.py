@@ -9,12 +9,8 @@ Imported by server.main so the @mcp.resource registration runs. Resources are a
 separate registry from tools, so the SPEC-05 verb-pruning leaves them untouched.
 """
 
-from pathlib import Path
-
 from server._core import mcp
-
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-_GUIDANCE = _REPO_ROOT / "GUIDANCE_FOR_LLMS.md"
+from server.guidance import TECHNIQUES, serve_guide, techniques_index, _TECHNIQUES_DIR
 
 
 @mcp.resource(
@@ -31,7 +27,7 @@ _GUIDANCE = _REPO_ROOT / "GUIDANCE_FOR_LLMS.md"
 def guidance_for_llms() -> str:
     """Serve GUIDANCE_FOR_LLMS.md verbatim, read fresh on each request so edits to the
     doc take effect without restarting the server."""
-    return _GUIDANCE.read_text(encoding="utf-8")
+    return serve_guide("")
 
 
 # ── the techniques shelf (SPEC-21 §5) ─────────────────────────────────────────────
@@ -40,22 +36,6 @@ def guidance_for_llms() -> str:
 # code was the retired macros' defect). Indexed and served ON DEMAND, never preloaded:
 # classify the form first, then pull the one matching technique. A technique promises
 # an APPROACH; a recipe (recipes/) promises a RESULT.
-
-_TECHNIQUES_DIR = _REPO_ROOT / "techniques"
-
-# slug → the WHEN, phrased as the form condition that should trigger the pull.
-_TECHNIQUES = {
-    "form-blockout": "Starting ANY new asset: classify the form BEFORE choosing a tool, "
-                     "then block proportioned masses relationally. Read this one first.",
-    "revolved-vessel": "The form's silhouette sweeps around an axis (goblet, vase, plate, "
-                       "wheel): trace a profile and spin it.",
-    "shell": "A surface that follows another at a distance (clothing, armor, icing, a "
-             "case), or a solid to carve into a walled vessel (cup, bowl).",
-    "smooth-union": "Two closed masses must read as ONE body (handle→mug, limb→torso): "
-                    "hard union, filleted seam, or continuous flesh.",
-    "ring-weld": "Two open rims must join into one continuous skin (neck→head, "
-                 "spout→body, tubes between openings).",
-}
 
 
 @mcp.resource(
@@ -66,16 +46,8 @@ _TECHNIQUES = {
                 "technique whose condition matches. Approach docs, not recipes.",
     mime_type="text/markdown",
 )
-def techniques_index() -> str:
-    lines = ["# Techniques — pull the one whose condition matches the form",
-             "",
-             "Classify the form FIRST (see guidance://llms), then read exactly the",
-             "matching technique via its resource URI. Each is an approach you adapt",
-             "with perception reads between steps — not a fixed script.",
-             ""]
-    for slug, when in _TECHNIQUES.items():
-        lines.append(f"- `guidance://techniques/{slug}` — {when}")
-    return "\n".join(lines)
+def techniques_index_resource() -> str:
+    return techniques_index()
 
 
 def _register_technique(slug: str, when: str):
@@ -91,5 +63,5 @@ def _register_technique(slug: str, when: str):
         return path.read_text(encoding="utf-8")
 
 
-for _slug, _when in _TECHNIQUES.items():
+for _slug, _when in TECHNIQUES.items():
     _register_technique(_slug, _when)

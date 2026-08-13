@@ -5,8 +5,9 @@ libraries. `op` selects the operation.
 
 SPEC-22: `set`/`assign` use the stock Principled BSDF (native single operations —
 input writes + slot assign). The multi-node shader-graph builders (textured/pbr/toon)
-and the inverted-hull outline composite were stripped. Author node graphs natively via
-the modifier/material stack if needed; texture/HDRI SEARCH stays (it's a read).
+and the inverted-hull outline composite were stripped. `op=image` (G230) is the
+thin exception: one packed Image Texture into Base Color and/or Emission, not
+the retired PBR graph. Texture/HDRI SEARCH stays (it's a read).
 """
 
 from typing import Literal
@@ -15,13 +16,13 @@ from server._core import mcp
 from server import finishes, shaders, textures, scene
 from ._common import tag, unknown
 
-_OPS = ["set", "assign", "remove_slot", "remove_unused_slots",
+_OPS = ["set", "assign", "image", "remove_slot", "remove_unused_slots",
         "shade_smooth", "shade_flat", "search_textures", "search_hdris"]
 
 
 @mcp.tool(name="material")
 def material(
-    op: Literal["set", "assign", "remove_slot", "remove_unused_slots",
+    op: Literal["set", "assign", "image", "remove_slot", "remove_unused_slots",
                 "shade_smooth", "shade_flat", "search_textures", "search_hdris"],
     target: tag(str, "object(s) to shade: 'name', group, or 'a,b,c'") = "",
     # PBR (set)
@@ -43,6 +44,10 @@ def material(
     query: tag(str, "[search_textures/search_hdris] search keywords") = "",
     limit: tag(int, "[search_textures/search_hdris] max results") = 10,
     source: tag(str, "[search_textures] library: 'polyhaven' (default, CC0) | 'poliigon'") = "polyhaven",
+    # image (G230)
+    image: tag(str, "[image] filesystem path or packed image name") = "",
+    bind: tag(str, "[image] which Principled input: 'base' | 'emission' | 'both'") = "base",
+    space: tag(str, "[image] 'uv' (needs uv op=unwrap) or 'box' (object projection)") = "box",
     label: str = "",
 ) -> str:
     """
@@ -51,6 +56,10 @@ def material(
       set       — PBR material on a whole object/slot (target, base_color|hex, metallic,
                   roughness, ior, alpha, transmission, emission_color/strength,
                   material_name|material, slot)
+      image     — bind a packed image to Principled Base Color and/or Emission
+                  (target, image=<path or packed name>, bind=base|emission|both,
+                  space=uv|box, emission_strength, material_name). Thin bind, not
+                  the retired PBR graph. space=uv needs `uv op=unwrap` first.
       assign    — paint a material onto the LIVE edit-mode FACE SELECTION only — rim
                   bands, label patches, wainscot (select faces first, then: target,
                   material=<existing> | base_color|hex [+metallic/roughness/material_name])
@@ -71,6 +80,9 @@ def material(
         return finishes.set_material(target, base_color, hex, metallic, roughness,
                                      ior, alpha, transmission, emission_color,
                                      emission_strength, material_name, material, slot, label)
+    if o == "image":
+        return finishes.bind_image(target, image, bind, space, emission_strength,
+                                   material_name, material, slot, label)
     if o == "assign":
         return finishes.assign_material(target, material, base_color, hex, metallic,
                                         roughness, material_name, label)

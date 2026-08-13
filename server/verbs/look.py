@@ -8,7 +8,10 @@ never semantics: the server names protrusions/islands/densities/rims; the agent
 names the finger.
 """
 
+from typing import Literal
+
 from server._core import mcp, call_blender
+from server.guidance import serve_guide
 from ._common import tag
 
 
@@ -103,6 +106,7 @@ def _fmt_window(res: dict) -> str:
 
 @mcp.tool(name="look")
 def look(
+    op: Literal["window", "guide"] = "window",
     target: tag(str, "open the ROOT window on this mesh (replaces the stack)") = "",
     at: tag(str, "DESCEND within the current window: a landmark id (L2), its "
                  "position token (top-right), 'tail' (the grouped minor landmarks), "
@@ -110,9 +114,19 @@ def look(
                  "face id (f12) from the ring enumeration — the single-face vert "
                  "view") = "",
     up: tag(bool, "pop back to the parent window") = False,
+    topic: tag(str, "[op=guide] which document: omit / 'llms' = field manual; "
+                    "'techniques' = the index; a slug (shell, form-blockout, …) "
+                    "= that technique. Same text as guidance://, for clients "
+                    "with no resource reader (G228).") = "",
 ) -> str:
     """
     **The loop's eyes** — look → descend → claim → modify is how you work here.
+
+    `op=guide` is the teaching channel for clients that have tools but no MCP
+    resource reader (G228). `look op=guide` returns GUIDANCE_FOR_LLMS.md;
+    `topic=techniques` is the index; `topic=<slug>` is one technique. The
+    `guidance://llms` / `guidance://techniques/*` resources stay as the
+    secondary route. Guide mutates nothing.
 
     `look target=<mesh>` opens the root window: one orientation line plus 5–9
     salience-ranked landmarks (protrusions, islands, dense patches, poles, open
@@ -143,6 +157,8 @@ def look(
     your fault). For precise measurement, relational forensics, or when a window
     contradicts your expectation, drop to `feel` — the diagnostic instrument.
     """
+    if (op or "window").lower().strip() == "guide":
+        return serve_guide(topic)
     p = {}
     if target:
         p["target"] = target

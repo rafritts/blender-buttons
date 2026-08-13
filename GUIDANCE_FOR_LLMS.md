@@ -63,7 +63,9 @@ matching technique:
 
 - `guidance://techniques` — the index, one line per technique with its trigger
   condition. Pull the ONE that matches; they're short. Start any new asset with
-  `guidance://techniques/form-blockout`.
+  `guidance://techniques/form-blockout`. If your client has no resource reader,
+  `look op=guide` (topic empty = this file; topic=techniques; topic=<slug>) is
+  the same text.
 - A **technique** promises an approach (the drip, the ring weld, the revolved
   vessel…) that you adapt with perception reads between steps. A **recipe**
   (`recipes/`) promises a result — a verified end-to-end transcript.
@@ -150,9 +152,11 @@ most expensive failure here:
   non-manifold edges, flipped normals, degenerate faces are **never OK and cannot be
   silenced** — fix them before building on top. Clipping is different: sometimes
   *intended* — then **declare it** (`validate op=expect` naming the pair and *why*).
-  There is no "ignore" — only "I intend this." The declaration stays visible to the
-  human and becomes a tripwire that fires if the intended overlap ever *disappears*.
-  Declarations are scene facts: they live in the .blend and survive addon restarts.
+  Realized scatter seated into a substrate is the same move with
+  `check=self_intersection` on the realized mesh. There is no "ignore" — only
+  "I intend this." The declaration stays visible to the human and becomes a
+  tripwire that fires if the intended overlap ever *disappears*. Declarations
+  are scene facts: they live in the .blend and survive addon restarts.
 
 If you ever see `validate: OFF (human override)`, the floor is down by the human's
 choice — you are genuinely blind, so slow down, `feel` deliberately, and ask.

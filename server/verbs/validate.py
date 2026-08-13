@@ -14,8 +14,9 @@ make for you:
 
 The intent-free defects — z-fighting, non-manifold edges, flipped normals, degenerate
 faces — are NEVER OK and have no suppression path at all. If you see one, fix it before
-you build on top of it. Clipping/penetration is the ONLY suppressible check, and only by
-declaring intent. See docs/SPEC-16-agent-feedback.md.
+you build on top of it. Clipping/penetration, open boundaries, and self-intersection
+(realized scatter nested into a substrate) are suppressible only by declaring intent.
+See docs/SPEC-16-agent-feedback.md.
 """
 
 from typing import Literal
@@ -36,9 +37,11 @@ def validate(
                      "claim ('hair roots seat under the scalp'). Required; an assertion "
                      "you can't justify is a bug you're hiding.") = "",
     check: tag(str, "[expect/intend/forget] which check to declare for: 'clipping' "
-                    "(default, a penetration pair) or 'open_boundary' (G129 — declare a "
-                    "single part/collection a INTENTIONALLY open: a tabletop plane, a cup "
-                    "mouth, cloth; arms a seal-tripwire if it later closes)") = "clipping",
+                    "(default, a penetration pair), 'open_boundary' (G129 — a single "
+                    "part/collection INTENTIONALLY open: tabletop, cup mouth, cloth; "
+                    "arms a seal-tripwire if it later closes), or 'self_intersection' "
+                    "(G227 — a single part/collection whose crossings are intended "
+                    "contact, e.g. realized scatter seated into a substrate)") = "clipping",
     max_depth: tag(float, "[expect/intend] DEPTH ENVELOPE (mm) for a clipping declaration — "
                           "bless the overlap only up to this depth; a deeper clip is STILL a "
                           "finding (so 'coffee↔mug intended' can't also hide an 11mm base "
@@ -72,7 +75,8 @@ def validate(
                  plus which perceptual ops `feel` callers exclude most.
 
     Intent-free defects (z-fight / non-manifold / flipped normals / degenerate) have NO
-    suppression path — they are never wanted. Only clipping is governed by declared intent.
+    suppression path — they are never wanted. Clipping, open boundaries, and
+    self-intersection are governed by declared intent.
     """
     o = op.lower().strip()
 
@@ -91,6 +95,9 @@ def validate(
         if e["check"] == "open_boundary":
             return (f'declared intended: open boundary on {e["a"]} — "{e["reason"]}". '
                     f"It's quiet now, and will fire if the part ever closes (seals).")
+        if e["check"] == "self_intersection":
+            return (f'declared intended: self_intersection on {e["a"]} — "{e["reason"]}". '
+                    f"It's quiet now, and will fire if the crossings ever vanish.")
         return (f'declared intended: {e["check"]} {e["a"]}↔{e["b"]} — "{e["reason"]}". '
                 f"It now collapses to a count, and will fire if it ever vanishes.")
 

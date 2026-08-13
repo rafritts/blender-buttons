@@ -32,7 +32,10 @@ import bpy
 _EPS = 1e-4        # coplanar / below-floor (0.1 mm)
 _CLIP_FLOOR_MM = 0.3   # ignore sub-0.3mm grazes (matches auto_proximity_note)
 
-# Intent-free defect checks — there is NO suppression path for any of these.
+# Intent-free defect checks — there is NO suppression path for any of these
+# EXCEPT self_intersection, which is also listed here so undeclared crossings
+# still fail the floor, but is declarable via expect (G227 — realized scatter
+# nested into a substrate is one mesh with intended self-intersections).
 # `non_manifold` now means 3+/0-face edges ONLY (open 1-face rims are NOT here — G129);
 # `inconsistent_topology` is the χ-vs-boundary-loop invariant break (G118).
 _INTENT_FREE = ("z_fight", "below_floor", "degenerate", "inverted_normals",
@@ -43,6 +46,10 @@ _CLIPPING = "clipping"
 # Declarable via expect — which arms a SEAL tripwire (a declared-open part that later
 # closes is a finding). Undeclared boundaries are a quiet count, never a hard defect.
 _OPEN_BOUNDARY = "open_boundary"
+# G227: per-object (or collection) self-intersection — intended contact after a
+# realize, parts pressed into parts. Undeclared still fails the floor.
+_SELF_INTERSECTION = "self_intersection"
+_DECLARABLE = frozenset((_CLIPPING, _OPEN_BOUNDARY, _SELF_INTERSECTION))
 _ALL_CHECKS = _INTENT_FREE + (_CLIPPING, _OPEN_BOUNDARY)
 
 
@@ -126,6 +133,16 @@ def _boundary_intent(objname):
     return None
 
 
+def _self_x_intent(objname):
+    """A declared SELF-INTERSECTION intent covering objname (G227) — exact name
+    or a collection token. Stored with a==b==the part/collection."""
+    _ensure_grounded()
+    for e in _intents:
+        if e["check"] == _SELF_INTERSECTION and _token_matches(e["a"], objname):
+            return e
+    return None
+
+
 def _prune_dead_intents():
     """Auto-GC declarations whose object (or collection) no longer exists, so deleting a
     declared part never leaves a permanent un-clearable VANISHED tripwire (feedback P1.5)."""
@@ -146,9 +163,16 @@ def add_intent(a, b, reason, check=_CLIPPING, source="agent", max_depth=None):
     its reason verbatim. Re-declaring a pair updates its reason. Returns the entry.
 
     For check=open_boundary (G129) it's a SINGLE part/collection — b defaults to a — and
-    declaring it intended arms a SEAL tripwire (if the part later closes, that's a finding)."""
+    declaring it intended arms a SEAL tripwire (if the part later closes, that's a finding).
+    For check=self_intersection (G227) it's the same single-part shape: the crossings
+    on that object (or every member of a collection token) are intended contact."""
     _ensure_grounded()
-    if check == _OPEN_BOUNDARY and not b:
+    if check not in _DECLARABLE:
+        return {"error": f"check={check!r} is not declarable. Intent-free defects "
+                         f"(z-fight / non-manifold / flipped normals / degenerate) "
+                         f"have no expect path. Declarable: "
+                         f"{', '.join(sorted(_DECLARABLE))}."}
+    if check in (_OPEN_BOUNDARY, _SELF_INTERSECTION) and not b:
         b = a
     if not a or not b:
         return {"error": "expect needs both objects (a, b) of the intended pair"}
@@ -339,11 +363,14 @@ def run_validate(touched_names=None, scene_wide=False, verbose=False):
         return {"off": False, "passed": True, "excluded": excluded,
                 "intent_free": [], "clipping": _empty_clip(),
                 "open_boundary": {"declared": 0, "undeclared": [], "intended": 0, "sealed": []},
+                "self_intersection": {"declared": 0, "intended": 0, "vanished": []},
                 "line": line}
 
     intent_free = []
+    self_x_intended = 0
+    self_x_vanished = []
 
-    # z-fight — scoped: pairs between a touched object and ANY live mesh (so a new part
+    # z-fight — scoped: pairs between a touched object and ANY live mesh (so a new part)
     # coplanar with an existing neighbour is caught, not just touched-vs-touched).
     for pair in lint._coplanar_pairs(live, _EPS):
         if pair["a"] in scope_names or pair["b"] in scope_names:
@@ -384,10 +411,16 @@ def run_validate(touched_names=None, scene_wide=False, verbose=False):
             intent_free.append({"check": "non_manifold",
                                 "message": f"{o.name} has {nm} non-manifold edge(s)"})
         sx = r.get("self_intersections", 0)
-        _bump("self_intersection", bool(sx))
-        if sx:
-            intent_free.append({"check": "self_intersection",
-                                "message": f"{o.name} has {sx} self-intersection(s)"})
+        decl_sx = _self_x_intent(o.name)
+        if sx and decl_sx is not None:
+            decl_sx["status"] = "holding"
+            self_x_intended += 1
+            _bump("self_intersection", False)
+        else:
+            _bump("self_intersection", bool(sx))
+            if sx:
+                intent_free.append({"check": "self_intersection",
+                                    "message": f"{o.name} has {sx} self-intersection(s)"})
         # G118: an impossible Euler characteristic (χ vs boundary-loop count) — the cheap,
         # decisive tell of a hollow built inside-out / a boolean gone wrong. Always a defect.
         euler_ok = r.get("euler_ok", True)
@@ -399,17 +432,35 @@ def run_validate(touched_names=None, scene_wide=False, verbose=False):
                                             f"{r.get('boundary_loops')} boundary loop(s)) — a "
                                             f"hollow/boolean likely did the opposite of intent")})
 
+    # G227: vanished tripwire — a declared self-intersection that this op touched
+    # and that no longer crosses. Collection tokens vanish only when no live
+    # member still intersects.
+    for e in _intents:
+        if e["check"] != _SELF_INTERSECTION:
+            continue
+        token = e["a"]
+        members = [o.name for o in scope if _token_matches(token, o.name)]
+        if not members:
+            continue
+        if all(reports.get(n, {}).get("self_intersections", 0) == 0 for n in members):
+            e["status"] = "vanished"
+            self_x_vanished.append({"object": token, "reason": e.get("reason", "")})
+
     # clipping / penetration — intent-laden, DELTA-SCOPED to what this op touched.
     clip = _clipping_findings(introspect, scope, scope_names, live_names)
     # open boundaries — G129: legit for planes/rims/cloth (quiet count), declarable, with
     # a SEAL tripwire on declared-open parts.
     ob = _open_boundary_findings(scope, reports)
 
+    sx = {"intended": self_x_intended, "vanished": self_x_vanished,
+          "declared": len([e for e in _intents if e["check"] == _SELF_INTERSECTION])}
     passed = (not intent_free and not clip["new"] and not clip["vanished"]
-              and not clip.get("deeper") and not ob["sealed"])
-    line = _render_line(intent_free, clip, ob, excluded, verbose)
+              and not clip.get("deeper") and not ob["sealed"]
+              and not self_x_vanished)
+    line = _render_line(intent_free, clip, ob, excluded, verbose, sx=sx)
     return {"off": False, "passed": passed, "excluded": excluded,
-            "intent_free": intent_free, "clipping": clip, "open_boundary": ob, "line": line}
+            "intent_free": intent_free, "clipping": clip, "open_boundary": ob,
+            "self_intersection": sx, "line": line}
 
 
 def _open_boundary_findings(scope, reports):
@@ -605,7 +656,7 @@ def _clipping_findings(introspect, scope, scope_names, live_names):
             "intended_in_scope": intended_in_scope, "hint": hint}
 
 
-def _render_line(intent_free, clip, ob, excluded, verbose=False):
+def _render_line(intent_free, clip, ob, excluded, verbose=False, sx=None):
     """Compact, report-by-exception status line. Clean ⇒ a short reassurance (so
     silence-because-clean is explicit, never absent). Clips collapse to a COUNT by
     default; only the NEW delta is listed. verbose lists everything (op=run)."""
@@ -652,6 +703,13 @@ def _render_line(intent_free, clip, ob, excluded, verbose=False):
             segs.append(note)
         if ob.get("declared"):
             segs.append(f"{ob['declared']} boundary intended")
+    # G227: declared self-intersection collapses to a count; VANISHED is the tripwire.
+    if sx:
+        for v in (sx.get("vanished") or [])[:cap]:
+            segs.append(f"VANISHED self_intersection {v['object']} "
+                        f"(declared intended — confirm or clear)")
+        if sx.get("intended"):
+            segs.append(f"{sx['intended']} self_intersection intended")
     excl = f"  [{len(excluded)} excluded]" if excluded else ""
     if not segs:
         return f"validate: clean{excl}"
@@ -792,8 +850,9 @@ def validate_run(params):
 
 
 def validate_expect(params):
-    """op=expect / intend — declare a clip intended (a or b may name a COLLECTION), OR an
-    open boundary intended (check=open_boundary, a single part/collection — G129)."""
+    """op=expect / intend — declare a clip intended (a or b may name a COLLECTION), an
+    open boundary intended (check=open_boundary, a single part/collection — G129), or
+    a self-intersection intended (check=self_intersection, a single part/collection — G227)."""
     check = (params.get("check") or _CLIPPING).strip()
     md = params.get("max_depth")
     return add_intent(params.get("a", ""), params.get("b", ""),

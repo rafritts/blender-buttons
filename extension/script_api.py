@@ -27,7 +27,16 @@ HARD_STEP_CAP = 25
 MAX_CODE_BYTES = 64 * 1024
 
 # Intent-free defects abort by default; undeclared clips warn (strict promotes).
+# G231: abort only on findings INTRODUCED by a step, not pre-existing leftovers.
 _INTENT_FREE_CHECKS = frozenset(validation._INTENT_FREE)
+
+
+def _intent_free_keys(vres):
+    """Stable (check, message) keys for a validate result's intent-free list."""
+    if not isinstance(vres, dict):
+        return set()
+    return {(f.get("check"), f.get("message") or f.get("check"))
+            for f in (vres.get("intent_free") or [])}
 
 # Tools that must not nest (the runner itself).
 _SCRIPT_TOOLS = frozenset({"script_batch", "script_exec", "script_dry_run"})
@@ -120,6 +129,7 @@ _TRANSFORM_OP_TO_TOOL = {
 _MATERIAL_OP_TO_TOOL = {
     "set": "set_material",
     "assign": "assign_material",
+    "image": "bind_image",
     "shade_smooth": "shade_smooth",
     "shade_flat": "shade_flat",
 }
@@ -373,12 +383,17 @@ def _absolute_placement(params):
     return "at" in on
 
 
-def _classify_step(tool, result, strict=False):
+def _classify_step(tool, result, strict=False, baseline_if=None):
     """Return (flag, findings_list, should_abort, abort_reason).
 
     flag: ok | warn | fail
+
+    G231 / SPEC-23 §5.6: abort on intent-free defects INTRODUCED by the step.
+    Pre-existing scene leftovers (same check+message as the pre-script baseline)
+    stay visible on the final validate line, not fatal to an unrelated batch.
     """
     findings = []
+    baseline_if = baseline_if or set()
     if not isinstance(result, dict):
         return "fail", [{"kind": "error", "message": str(result)}], True, str(result)
 
@@ -389,6 +404,9 @@ def _classify_step(tool, result, strict=False):
     v = result.get("validate")
     if isinstance(v, dict) and not v.get("off"):
         for f in (v.get("intent_free") or []):
+            key = (f.get("check"), f.get("message") or f.get("check"))
+            if key in baseline_if:
+                continue
             findings.append({
                 "kind": "intent_free",
                 "check": f.get("check"),
@@ -493,6 +511,13 @@ class _Runner:
         self._names_before = _scene_names()
         self._hist_before = len(state._history)
         self._t0 = time.monotonic()
+        # G231: snapshot intent-free findings already in the scene so a leftover
+        # degenerate / z-fight cannot abort an unrelated later phase.
+        try:
+            self._baseline_if = _intent_free_keys(
+                validation.run_validate(None, scene_wide=True))
+        except Exception:
+            self._baseline_if = set()
 
     def check_budget(self, upcoming=1):
         if self.step_count + upcoming > HARD_STEP_CAP:
@@ -529,7 +554,7 @@ class _Runner:
             result = {"error": str(result), "success": False}
 
         flag, findings, should_abort, abort_reason = _classify_step(
-            tool, result, strict=self.strict
+            tool, result, strict=self.strict, baseline_if=self._baseline_if
         )
         focus = _focus_from_result(result)
         names = _names_from_result(result)
@@ -647,10 +672,10 @@ class _Runner:
         }
 
     def final_validate(self):
-        if self.validate_scope == "scene":
-            return validation.run_validate(None, scene_wide=True)
-        names = list(self.touched) if self.touched else None
-        return validation.run_validate(names)
+        # G231: the phase recap is scene-wide so pre-existing leftovers stay
+        # visible on the receipt even when per-step abort was touched-scoped.
+        # `validate=touched` still scopes the per-step floor / abort decision.
+        return validation.run_validate(None, scene_wide=True)
 
     def final_status(self, focus=None):
         from . import status as status_mod

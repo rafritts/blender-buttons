@@ -211,16 +211,11 @@ def add_text(params):
     # boundaries and trips the watertight floor. Weld cap rims to wall rims right here so
     # the primitive hands over a closed mesh instead of one that always needs the same
     # one-line repair next.
-    import bmesh
+    # G229: at keycap/dial scale (~2 mm) font counters collapse into zero-area
+    # faces. Dissolve those at convert time — never emit a mesh the floor will
+    # reject, and do not add an expect path for degenerates.
     me = obj.data
-    bm = bmesh.new()
-    bm.from_mesh(me)
-    _before = len(bm.verts)
-    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
-    bm.to_mesh(me)
-    bm.free()
-    me.update()
-    welded = _before - len(me.vertices)
+    welded, dissolved = _repair_text_mesh(me, size)
 
     # Origin → geometry bounds centre, so obj.location IS the bbox centre (placement exact).
     bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
@@ -237,7 +232,7 @@ def add_text(params):
     bpy.context.view_layer.update()
 
     xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
-    return {
+    out = {
         "success": True,
         "object_name": obj.name,
         "welded_verts": welded,
@@ -248,6 +243,46 @@ def add_text(params):
             "z": [round(zmin, 4), round(zmax, 4)],
         },
     }
+    if dissolved:
+        out["dissolved_degenerates"] = dissolved
+    return out
+
+
+def _repair_text_mesh(me, size):
+    """G198 weld + G229 degenerate dissolve. Returns (welded_vert_count, dissolved_face_count)."""
+    import bmesh
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    before = len(bm.verts)
+    # Size-relative weld: 0.5% of cap height, floored so large type doesn't
+    # collapse counters and capped so tiny type still merges cap/wall rims.
+    dist = max(1e-6, min(float(size) * 0.005, 5e-5))
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=dist)
+    try:
+        bmesh.ops.dissolve_degenerate(bm, dist=dist)
+    except Exception:
+        pass
+    deg = [f for f in list(bm.faces) if f.calc_area() < 1e-9]
+    dissolved = len(deg)
+    if deg:
+        try:
+            bmesh.ops.dissolve_faces(bm, faces=deg, use_verts=True)
+        except Exception:
+            bmesh.ops.delete(bm, geom=deg, context='FACES')
+        leftover = [f for f in list(bm.faces) if f.calc_area() < 1e-9]
+        if leftover:
+            dissolved += len(leftover)
+            bmesh.ops.delete(bm, geom=leftover, context='FACES')
+    if bm.faces:
+        try:
+            bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        except Exception:
+            pass
+    bm.to_mesh(me)
+    bm.free()
+    me.update()
+    welded = before - len(me.vertices)
+    return welded, dissolved
 
 
 def add_box(params):

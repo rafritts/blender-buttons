@@ -38,6 +38,7 @@ SUITES = [
     # bead-of-icing gap batch (G203-G216) — the donut-dogfood autopsy fixes
     "e2e_g203_g216_deform.py",
     "e2e_g204_g207_scatter.py",
+    "e2e_g226_g231_gapfixes.py",
     "e2e_g209_g212_handles.py",
     "e2e_g214_bud.py",
     # SPEC-22 Phase 4 — native-basis completion (19 new edit ops + shrink_fatten fix)

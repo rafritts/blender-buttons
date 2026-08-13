@@ -85,9 +85,12 @@ bbox; cast, then confirm with `feel`) — never as a fact you build on. Therefor
     `feel` deliberately and ask.
 
 BEFORE you improvise any multi-step task — locating geometry, constructing a form,
-assembling parts — READ THE `guidance://llms` RESOURCE. It is battle-tested loops
-distilled from real builds. Inventing your own path to the goal is the known, expensive
-failure mode here; the loops exist precisely because winging it fails silently.
+assembling parts — READ THE FIELD MANUAL. Prefer the `guidance://llms` resource; if
+your client has no resource reader, `look op=guide` is the same text (topic empty =
+the manual; topic=techniques for the index; topic=<slug> for one technique). It is
+battle-tested loops distilled from real builds. Inventing your own path to the goal
+is the known, expensive failure mode here; the loops exist precisely because winging
+it fails silently.
 
 The core loop, by name: look -> descend -> claim -> modify. This is the NORMAL mode of
 operation at all times, not an advanced feature:
@@ -108,10 +111,10 @@ offer, a misleading narration), that is a SERVER DEFECT, never your error — sa
 use the escape hatches, and do not grind back into coordinate space.
 
 BEFORE choosing tools for a new form, classify the form and pull the ONE matching
-technique from the `guidance://techniques` index (short, on-demand method docs: shells,
-revolved vessels, ring welds, drips, smooth unions, blockout, NPR). Techniques are
-approaches you adapt with reads between steps; recipes (repo `recipes/`) are verified
-end-to-end results.
+technique from the techniques index (`guidance://techniques`, or `look op=guide
+topic=techniques`). Short, on-demand method docs: shells, revolved vessels, ring
+welds, drips, smooth unions, blockout. Techniques are approaches you adapt with
+reads between steps; recipes (repo `recipes/`) are verified end-to-end results.
 
 EXPERIMENTAL AGENT SIGHT (vision.md ban suspended for a try): `render op=image` writes
 a scene-camera still; you MAY open the returned path and look. Use sight for appearance

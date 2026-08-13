@@ -1356,6 +1356,51 @@ def _describe_inputs(mod, sockets, menu_maps):
     return out
 
 
+def _pick_instance_advisory(mod, sockets):
+    """G226 — if a GN instancer's source is a multi-prototype collection and
+    Pick Instance is off, all K prototypes stack on every point. Returns a
+    teaching note or None. Never auto-flips the socket (the density-floor
+    warning doesn't either)."""
+    assigned = []
+    for name, (ident, stype) in sockets.items():
+        if stype != 'NodeSocketCollection':
+            continue
+        try:
+            val = _gn_get(mod, ident)
+        except Exception:
+            continue
+        if val is None:
+            continue
+        coll = val if hasattr(val, "all_objects") else bpy.data.collections.get(
+            getattr(val, "name", None) or str(val))
+        if coll is None:
+            continue
+        n = len(list(coll.all_objects))
+        if n > 1:
+            assigned.append((coll.name, n))
+    if not assigned:
+        return None
+    pick_on = None
+    for name, (ident, stype) in sockets.items():
+        if stype != 'NodeSocketBool':
+            continue
+        if name.strip().lower().replace("_", " ") != "pick instance":
+            continue
+        try:
+            pick_on = bool(_gn_get(mod, ident))
+        except Exception:
+            pick_on = None
+        break
+    if pick_on is True:
+        return None
+    if pick_on is None:
+        return None
+    coll_name, k = assigned[0]
+    return (f"⚠ collection '{coll_name}' has {k} prototypes and Pick Instance is off "
+            f"— all {k} will stack on every point. Set Pick Instance=True to draw "
+            f"one at random.")
+
+
 def _evaluated_instance_count(obj):
     """G206 — number of instances `obj`'s modifier stack currently emits, read from the
     evaluated depsgraph (the ground truth a Scatter/Instance modifier otherwise hides).
@@ -1543,6 +1588,12 @@ def add_asset_modifier(params):
                 "⚠ this modifier currently emits 0 instances — nothing will show. Common "
                 "causes: Density (1/m² default) floors to 0 at tutorial scale (raise it); "
                 "the instance-source gate/collection is unset; or Viewport Visibility is 0.")
+    # G226: a Collection source with Pick Instance off stacks every prototype on
+    # every point — visually wrong, numerically plausible. Same class as the
+    # density-floor note: the input dump already knows; say so.
+    pick_note = _pick_instance_advisory(mod, sockets)
+    if pick_note:
+        result.setdefault("notes", []).append(pick_note)
     # G207: instances are realized by op=apply ONLY when the group has a Realize
     # Instances control (Scatter on Surface does) — apply now sets it. State it honestly.
     result.setdefault("notes", []).append(

@@ -470,11 +470,176 @@ def remove_unused_material_slots(params):
             "slot_count": len(after), "slots": after}
 
 
+def _resolve_image(spec):
+    """A packed image name or a filesystem path. Packs on load so the bind
+    survives .blend save (G230)."""
+    import os
+    spec = (spec or "").strip()
+    if not spec:
+        return None, "image= is required — a filesystem path or a packed image name"
+    img = bpy.data.images.get(spec)
+    if img is not None:
+        _try_pack(img)
+        return img, None
+    path = os.path.abspath(os.path.expanduser(spec))
+    if not os.path.isfile(path):
+        packed = [i.name for i in bpy.data.images]
+        hint = f" Packed images: {packed}." if packed else ""
+        return None, (f"image '{spec}' not found as a packed image or file.{hint}")
+    img = bpy.data.images.load(path, check_existing=True)
+    if not _try_pack(img):
+        return None, f"loaded '{path}' but pack failed — the image is not in the .blend"
+    return img, None
+
+
+def _try_pack(img):
+    """Embed file-backed images. Generated images already live in the .blend."""
+    if img.packed_file or getattr(img, "source", None) == 'GENERATED':
+        return True
+    try:
+        img.pack()
+    except Exception:
+        return bool(img.packed_file)
+    return bool(img.packed_file) or getattr(img, "source", None) == 'GENERATED'
+
+
+def _image_in_blend(img):
+    return bool(img.packed_file) or getattr(img, "source", None) == 'GENERATED'
+
+
+def _wire_image(nt, bsdf, img, space, bind):
+    """One Image Texture → Principled Base Color and/or Emission Color.
+    Thin bind, not the retired PBR graph."""
+    tex = None
+    for n in nt.nodes:
+        if n.type == 'TEX_IMAGE' and n.image == img:
+            tex = n
+            break
+    if tex is None:
+        tex = nt.nodes.new('ShaderNodeTexImage')
+        tex.image = img
+        tex.label = "bb_image"
+        tex.location = (bsdf.location.x - 360, bsdf.location.y)
+    else:
+        tex.image = img
+    tex.projection = 'BOX' if space == 'box' else 'FLAT'
+    for link in list(tex.inputs['Vector'].links):
+        nt.links.remove(link)
+    coord = next((n for n in nt.nodes if n.type == 'TEX_COORD'), None)
+    if coord is None:
+        coord = nt.nodes.new('ShaderNodeTexCoord')
+        coord.location = (tex.location.x - 280, tex.location.y)
+    if space == 'box':
+        mapping = next((n for n in nt.nodes
+                        if n.type == 'MAPPING' and n.label == 'bb_box'), None)
+        if mapping is None:
+            mapping = nt.nodes.new('ShaderNodeMapping')
+            mapping.label = 'bb_box'
+            mapping.location = (tex.location.x - 160, tex.location.y)
+        for link in list(mapping.inputs['Vector'].links):
+            nt.links.remove(link)
+        nt.links.new(coord.outputs['Object'], mapping.inputs['Vector'])
+        nt.links.new(mapping.outputs['Vector'], tex.inputs['Vector'])
+    else:
+        nt.links.new(coord.outputs['UV'], tex.inputs['Vector'])
+
+    color_out = tex.outputs['Color']
+    if bind in ('base', 'both') and 'Base Color' in bsdf.inputs:
+        for link in list(bsdf.inputs['Base Color'].links):
+            nt.links.remove(link)
+        nt.links.new(color_out, bsdf.inputs['Base Color'])
+    for em_name in ('Emission Color', 'Emission'):
+        if bind in ('emission', 'both') and em_name in bsdf.inputs:
+            for link in list(bsdf.inputs[em_name].links):
+                nt.links.remove(link)
+            nt.links.new(color_out, bsdf.inputs[em_name])
+            break
+    return tex
+
+
+def bind_image(params):
+    """G230 — bind a packed image to a mesh's Principled (base and/or emission).
+    space=uv needs an existing UV layer (pair with `uv op=unwrap`); space=box
+    uses object projection. Not the retired textured/pbr node-graph sugar."""
+    from .common import resolve_targets, has_material_slots, linked_guard_any
+    target = params.get("target")
+    if not target:
+        return {"error": "bind_image needs target=<mesh>"}
+    img, err = _resolve_image(params.get("image"))
+    if err:
+        return {"error": err}
+    bind = (params.get("bind") or "base").strip().lower()
+    if bind not in ("base", "emission", "both"):
+        return {"error": f"bind={bind!r} unknown — use base | emission | both"}
+    space = (params.get("space") or "box").strip().lower()
+    if space not in ("uv", "box"):
+        return {"error": f"space={space!r} unknown — use uv | box"}
+
+    objs, err = resolve_targets(target)
+    if err:
+        return {"error": err}
+    meshes = [o for o in objs if has_material_slots(o)]
+    if not meshes:
+        return {"error": f"'{target}' contains nothing that can hold a material"}
+    blocked = linked_guard_any(meshes)
+    if blocked:
+        return {"error": blocked}
+
+    if space == 'uv':
+        missing = [o.name for o in meshes
+                   if o.type == 'MESH' and o.data and not o.data.uv_layers]
+        if missing:
+            return {"error": (
+                f"{', '.join(missing)} ha{'s' if len(missing) == 1 else 've'} no UV "
+                f"map — `uv op=unwrap` first, or pass space=box")}
+
+    tgt_label = target if isinstance(target, str) else (target[0] if target else "material")
+    mat_name = params.get("material_name") or params.get("material") or f"{tgt_label}_mat"
+    mat = bpy.data.materials.get(mat_name) or bpy.data.materials.new(mat_name)
+    bsdf = _ensure_principled(mat)
+    _wire_image(mat.node_tree, bsdf, img, space, bind)
+
+    es = params.get("emission_strength")
+    applied = [f"image={img.name}", f"bind={bind}", f"space={space}"]
+    if bind in ('emission', 'both'):
+        if es is None:
+            es = 1.0
+        if _set_input(bsdf, "Emission Strength", float(es)):
+            applied.append(f"emission_strength={es}")
+    elif es is not None and _set_input(bsdf, "Emission Strength", float(es)):
+        applied.append(f"emission_strength={es}")
+
+    slot_idx = int(params["slot"]) if params.get("slot") is not None else 0
+    assigned = []
+    for obj in meshes:
+        me = obj.data
+        if me is None:
+            continue
+        while len(me.materials) <= slot_idx:
+            me.materials.append(None)
+        me.materials[slot_idx] = mat
+        assigned.append(obj.name)
+
+    return {
+        "success": True,
+        "target": target,
+        "assigned_to": assigned,
+        "material": mat.name,
+        "image": img.name,
+        "packed": _image_in_blend(img),
+        "bind": bind,
+        "space": space,
+        "applied": applied,
+        "status_focus": assigned[0] if assigned else None,
+    }
+
+
 TOOLS = {
     "shade_smooth":    shade_smooth,
     "shade_flat":      shade_flat,
     "set_material":    set_material,
     "assign_material": assign_material,
+    "bind_image":      bind_image,
     "remove_material_slot":         remove_material_slot,
     "remove_unused_material_slots": remove_unused_material_slots,
 }
