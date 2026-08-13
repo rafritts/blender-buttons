@@ -4,18 +4,27 @@
 
 <!-- hero demo GIF goes here — see bugs.md B5 -->
 
-LLMs are bad at 3D coordinates. Not slightly bad — structurally bad. Ask one to carry
-`(x, y, z)` across fifty tool calls and compute offsets in working memory, and a
-16-part chair hides the problem while a hundred-part character exposes it: drift,
-guesswork, parts floating a centimeter off their mates.
+Blender is uniquely hostile to an LLM. It is modal, state-driven, UI-driven, mouse-
+and keyboard-driven, highly iterative, heavy on 3D spatial reasoning — design
+software whose core atom, an XYZ vert, is poison to a language model. If literally
+any of those is even slightly wrong, the mesh dies.
 
-blender-buttons' answer is to stop asking. The agent speaks **dimensions**
-(`width=0.04`) and **relationships** (`on={"between": ["a","b"]}`, `snap`, a named
-handle) — the server holds the coordinates so the model can hold **names and
-relationships**. Around that core: a perception loop (`look` → descend → claim →
-modify, with `feel` as the measuring instrument) so the agent reads the scene instead
-of imagining it, and an always-on `validate` floor so it can't build on broken
-geometry without noticing.
+That is why this project exists. Blender's native loop assumes a human with a wrist:
+the right mode (Object / Edit / Face), the right active object, a cursor, an orbit,
+a grab, undo, look again. An LLM has none of that. It cannot see the viewport the
+way a rigger does, cannot keep modal state honest across fifty calls, and will
+invent a plausible coordinate if you let it type one. A bpy-through-MCP session
+hands it the murder weapon — one inverted axis, one stale mode, one fabricated
+`(x, y, z)` — and the next fifty lines bake the death in.
+
+blender-buttons refuses that currency. The agent speaks **dimensions** (`width=0.04`)
+and **relationships** (`on={"between": ["a","b"]}`, `snap`, a named handle). The
+server holds the coordinates so the model can hold **names and relationships**. It
+reads the scene (`look` → descend → claim → modify, with `feel` as the measuring
+instrument) instead of imagining it, and an always-on `validate` floor so it cannot
+build on broken geometry without noticing. Ask a model to carry `(x, y, z)` across
+fifty tool calls and a 16-part chair hides the drift; a hundred-part character
+exposes it. The answer is to stop asking.
 
 Targets **Blender 5.x** (verified against 5.2 LTS). MIT.
 
@@ -74,7 +83,7 @@ tripwire if the overlap later drifts.
 ## How it's developed: the gap engine
 
 This repo is built by the agent that uses it, against real modeling sessions — a
-donut, a hand, a pocketwatch, a character blockout. The process:
+donut, a hand, a pocketwatch, a character blockout, a 14" MacBook Pro. The process:
 
 1. The agent models something real and hits a wall — an intent it can't express, a
    read it can't take, a silent failure.
@@ -82,7 +91,7 @@ donut, a hand, a pocketwatch, a character blockout. The process:
    *general* primitive — never "add a bangs builder," always "what's the general
    operation underneath?"
 3. The fix ships, gets verified live against a scene, and the entry is **deleted**.
-   Numbers are never reused; the counter recently passed **G221**.
+   Numbers are never reused; the counter recently passed **G231**.
 
 Two rules keep the loop honest. Every fix must be a **general primitive** that
 composes across any task — if a proposed tool can't be described without naming a body
@@ -107,18 +116,18 @@ destination.
 
 Every verb is one MCP tool taking an `op=` discriminator; **each verb's schema
 enumerates every op and its args**, so the surface is self-describing. `tools/list`
-returns 21 schemas, not hundreds of flat tools.
+returns 22 schemas, not hundreds of flat tools.
 
 | Verb | The menu it is |
 |------|----------------|
 | `look` | **The loop's eyes** — landmark LOD windows: `look target=` opens a salience window, `at=` descends, windows offer claimable selections |
-| `add` | Add menu — box / cylinder / sphere / torus / curve / light / camera / … with dimensions + relational `on=` placement |
-| `object` | Object Mode — select, rename, duplicate, join, group, delete |
+| `add` | Add menu — box / cylinder / sphere / torus / curve / text / light / camera / … with dimensions + relational `on=` placement |
+| `object` | Object Mode — rename, duplicate, join, group, delete, convert, visibility, remesh |
 | `edit` | Edit Mode / Mesh menu — loop-cut, extrude, bevel, spin, bridge, boolean, grab/scale (with proportional editing), shrink_fatten, randomize, lattice |
 | `select` | Select menu — claim offered candidates, pick, by axis/between/radius, boundary, rings, grow/shrink, INTERSECT |
-| `transform` | move / rotate / scale / resize / snap / distribute (relational placement) |
+| `transform` | place / nudge / rotate / scale / resize / snap / rest_on / seat / distribute |
 | `modifier` | Modifier Properties — add/apply, incl. `op=add_asset` for the native GN modifiers (Scatter on Surface, Array-Circular, …) |
-| `material` | Material Properties / shading — solid colors, Principled values, texture/HDRI search |
+| `material` | Material Properties / shading — Principled scalars, shade smooth/flat, texture/HDRI *search* (no image-on-mesh bind yet) |
 | `sculpt` | Sculpt Mode brushes |
 | `pose` | Pose Mode / armature — rigging, weights, binding, shape keys |
 | `scene` | Outliner + scene-level Properties |
@@ -128,6 +137,7 @@ returns 21 schemas, not hundreds of flat tools.
 | `file` | File menu — `.blend` persistence |
 | `feel` | **The measuring instrument** — profile / section / anchor / verify / overlaps / contacts / facing / resting / aim; diagnostics beside the `look` loop |
 | `validate` | **The always-on correctness floor** — and `op=expect` to declare an intended overlap |
+| `script` | SPEC-23 transport — `batch` / `exec` / `dry_run`, hard cap 25, one receipt per phase; progressive bulk, not a bpy megascript |
 | `connect` | Choose which Blender instance this session drives (list / attach / launch) |
 | `collab` | Shared-state collaboration surface |
 | `addon` | Drive any installed Blender addon/extension by name |
@@ -157,7 +167,7 @@ ambiguous. Read-only reads (`feel`, `history`, scene trees) don't append it.
 
 ```
 Agent / LLM harness
-      │  MCP over stdio (JSON-RPC)  —  21 verbs, each dispatched by op=
+      │  MCP over stdio (JSON-RPC)  —  22 verbs, each dispatched by op=
       ▼
 server/main.py          ← FastMCP server; the verb layer (server/verbs/)
       │  TCP socket, localhost:8765+, newline-delimited JSON
@@ -214,11 +224,13 @@ MCP-compatible harness. Set up the venv once with [`uv`](https://docs.astral.sh/
 
 [`recipes/donut/donut.md`](recipes/donut/donut.md) is a verified transcript-recipe —
 every number ran — that builds the classic Blender-tutorial donut end to end in these
-verbs: a torus dough body, an offset **icing shell** (now the
-[shell technique](techniques/shell.md)) with a draped organic drip rim, multi-color **sprinkles** via the native *Scatter on
-Surface* GN modifier, PBR materials, a relationally-rigged light and camera, and a
-final render tuned by reads (`view op=check_framing` / `check_exposure`) rather than
-trial renders. It doubles as the best worked example of the whole verb surface.
+verbs: a torus dough body, an offset **icing shell** (the
+[shell technique](techniques/shell.md); the old `buttons-shell-macro op=clad` is
+retired) with a draped organic drip rim, multi-color **sprinkles** via the native
+*Scatter on Surface* GN modifier, PBR materials, a relationally-rigged light and
+camera, and a final render tuned by reads (`view op=check_framing` /
+`check_exposure`) rather than trial renders. It doubles as the best worked example
+of the whole verb surface.
 
 ## Repo layout
 
