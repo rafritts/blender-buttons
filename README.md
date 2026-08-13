@@ -4,27 +4,23 @@
 
 <!-- hero demo GIF goes here — see bugs.md B5 -->
 
-Blender is uniquely hostile to an LLM. It is modal, state-driven, UI-driven, mouse-
-and keyboard-driven, highly iterative, heavy on 3D spatial reasoning — design
-software whose core atom, an XYZ vert, is poison to a language model. If literally
-any of those is even slightly wrong, the mesh dies.
+Blender is uniquely hostile to an LLM. It is a modal, state-heavy design tool built
+for a human with a mouse: the right mode, the right selection, an orbit, a grab,
+undo, look again. The work is spatial and iterative. The atom it edits is an XYZ
+vert — and a language model will invent a plausible one if you let it type
+coordinates. Get any of that slightly wrong (stale mode, inverted axis, a guessed
+offset) and the mesh is already dead; the next fifty lines just bury it.
 
-That is why this project exists. Blender's native loop assumes a human with a wrist:
-the right mode (Object / Edit / Face), the right active object, a cursor, an orbit,
-a grab, undo, look again. An LLM has none of that. It cannot see the viewport the
-way a rigger does, cannot keep modal state honest across fifty calls, and will
-invent a plausible coordinate if you let it type one. A bpy-through-MCP session
-hands it the murder weapon — one inverted axis, one stale mode, one fabricated
-`(x, y, z)` — and the next fifty lines bake the death in.
-
-blender-buttons refuses that currency. The agent speaks **dimensions** (`width=0.04`)
-and **relationships** (`on={"between": ["a","b"]}`, `snap`, a named handle). The
-server holds the coordinates so the model can hold **names and relationships**. It
-reads the scene (`look` → descend → claim → modify, with `feel` as the measuring
-instrument) instead of imagining it, and an always-on `validate` floor so it cannot
-build on broken geometry without noticing. Ask a model to carry `(x, y, z)` across
-fifty tool calls and a 16-part chair hides the drift; a hundred-part character
-exposes it. The answer is to stop asking.
+That is why this project exists. A bpy-through-MCP session hands the model the
+thing it is worst at and calls it a driver. blender-buttons refuses that currency.
+The agent speaks **dimensions** (`width=0.04`) and **relationships**
+(`on={"between": ["a","b"]}`, `snap`, a named handle). The server holds the
+coordinates so the model can hold **names and relationships**. It reads the scene
+(`look` → descend → claim → modify, with `feel` as the measuring instrument)
+instead of imagining it, and an always-on `validate` floor so it cannot build on
+broken geometry without noticing. Ask a model to carry `(x, y, z)` across fifty
+tool calls and a 16-part chair hides the drift; a hundred-part character exposes
+it. The answer is to stop asking.
 
 Targets **Blender 5.x** (verified against 5.2 LTS). MIT.
 
