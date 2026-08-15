@@ -436,6 +436,16 @@ def add_modifier(params):
     return out
 
 
+# Bind-flag / bind-op / driver-attr per deform type. Used by rebind_deform and
+# move_modifier (W1/W3). Restored after SPEC-22 Phase 2 deleted the dict and
+# left every use behind (bugs.md B8).
+_BIND_TYPES = {
+    'MESH_DEFORM':       ("is_bound", "meshdeform_bind",       "object"),
+    'SURFACE_DEFORM':    ("is_bound", "surfacedeform_bind",    "target"),
+    'CORRECTIVE_SMOOTH': ("is_bind",  "correctivesmooth_bind", None),
+}
+
+
 def rebind_deform(params):
     """Rebind stale deform binds after a topology edit or a stack-order move (gaps.md W3).
 

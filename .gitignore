@@ -10,5 +10,6 @@ __pycache__/
 *.png
 *.jpeg
 *.jpg
+!recipes/donut/donut_hero.png
 prompts.md
 tests/_run_all.log

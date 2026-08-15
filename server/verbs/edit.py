@@ -70,7 +70,7 @@ def edit(
     segments: tag(int, "[bevel] bevel segments") = 1,
     affect: tag(str, "[bevel] EDGES | VERTICES") = "EDGES",
     # loop_cut / axis-based
-    axis: tag(str, "[loop_cut/trace/bend/spin/randomize/rotate/bisect/shear] axis X|Y|Z "
+    axis: tag(str, "[loop_cut/trace/bend/spin/rotate/bisect/shear] axis X|Y|Z "
                    "(bend: the axis to bend AROUND — refused if it's the object's own long "
                    "axis, pick a perpendicular one; spin: the axis to REVOLVE around, through "
                    "the object's origin; rotate: rotation axis; bisect: cut-plane normal; "
@@ -99,13 +99,16 @@ def edit(
     weight: tag(float, "[crease] crease weight 0..1") = 1.0,
     # shrink_fatten / randomize
     amount: tag(float, "[shrink_fatten/randomize] displacement amount (m); [shear] shear "
-                       "factor (unitless slant, e.g. 0.5)") = 0.003,
+                       "factor (unitless slant, e.g. 0.5). [randomize] maps to native "
+                       "`offset`.") = 0.003,
+    uniform: tag(float, "[randomize] 0=fully random … 1=more even (native default 0)") = 0.0,
+    normal: tag(float, "[randomize] 0=world 3D offset … 1=align along each vert normal "
+                       "(native default 0 — no axis restriction)") = 0.0,
     even: tag(bool, "[shrink_fatten] native 'Offset Even' — correct the push by vertex-normal "
                     "angle so a non-planar patch keeps even wall thickness (native default off)") = False,
     along: tag(str, "[shear] the gradient axis: verts displace along `axis` in proportion to "
                     "their coordinate along this one (X|Y|Z, must differ from axis)") = "Z",
     seed: tag(int, "[randomize] random seed") = 0,
-    only_positive: tag(bool, "[randomize] jitter outward only") = False,
     # grab / scale — proportional-edit option (O) + rigid vert scale
     proportional: tag(bool, "[grab/scale] enable proportional editing (O): a soft falloff drags "
                             "nearby verts along (radius, falloff, connected, freeze). Default "
@@ -212,8 +215,9 @@ def edit(
       shrink_fatten — Alt+S · Mesh ▸ Transform ▸ Shrink/Fatten · push the selected verts
                     along their OWN per-vert normals (puffs/spreads a patch); amount in
                     meters, negative = inward. even=native Offset Even.
-      randomize   — Mesh ▸ Transform ▸ Randomize · per-vertex WHITE noise → spiky
-                    (amount, axis, seed, only_positive)
+      randomize   — Mesh ▸ Transform ▸ Randomize · native transform.vertex_random —
+                    3D per-vertex offset (amount, uniform=0..1, normal=0..1, seed).
+                    No axis restriction.
       grab        — G · Mesh ▸ Transform ▸ Move · MOVE the selection
                     (out/inward/up/down/left/right/forward/back meters, or x/y/z).
                     proportional=True turns on proportional editing (O): a soft falloff drags
@@ -334,7 +338,7 @@ def edit(
     if o == "shrink_fatten":
         return editmode.inflate_selection(amount, even, label, target)
     if o == "randomize":
-        return editmode.jitter_vertices(amount, axis, seed, only_positive, label, target)
+        return editmode.randomize_vertices(amount, uniform, normal, seed, label, target)
     if o == "grab":
         if proportional:
             return editmode.proportional_move(out, inward, up, down, left, right,

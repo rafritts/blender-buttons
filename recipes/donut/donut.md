@@ -72,8 +72,9 @@ how you drip.
 (keeps the **outer** rim, 32 v) → `edit op=grab target=Icing z=-0.004` (drape it down
 past the equator so it hangs over the edge).
 
-**8 · Make the drip edge organic.** With the rim still selected, jitter it into a wavy,
-dribbling edge: `edit op=randomize target=Icing amount=0.003 axis=Z`.
+**8 · Make the drip edge organic.** With the rim still selected, randomize it into a
+wavy, dribbling edge: `edit op=randomize target=Icing amount=0.003` (native 3D
+Randomize — no axis restriction).
 
 **9 · Declare the contact + smooth.** The drips now rest on the dough:
 `validate op=expect a=Icing b=Donut max_depth=2 reason="glaze rests/melts onto the dough; shallow drip contact intended"`

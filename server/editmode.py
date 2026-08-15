@@ -437,28 +437,28 @@ def claim(candidate: str = "", name: str = "", add: str = "", subtract: str = ""
 
 
 @mcp.tool()
-def jitter_vertices(amount: float = 0.005, axis: str = "NORMAL", seed: int = 0,
-                    only_positive: bool = False, label: str = "", target: str = "") -> str:
+def randomize_vertices(amount: float = 0.005, uniform: float = 0.0,
+                       normal: float = 0.0, seed: int = 0,
+                       label: str = "", target: str = "") -> str:
     """
-    Randomly displace vertices in edit mode — organic lumpy geometry in one call.
-    amount: max displacement in meters (default 5mm).
-    axis: NORMAL (puffs along each vert's normal — best for organic dough) | X | Y | Z | XYZ.
-    seed: RNG seed for reproducibility.
-    only_positive: if true, only displace outward (default both directions).
-    target: mesh to jitter (empty=active). Like loop_cut, passing target auto-enters
-            edit mode and exits after; with no narrowed selection it jitters the WHOLE
-            mesh, so a one-call "lump up the donut" needs no manual mode/select (G28).
-
-    Tutorial uses: jitter donut with axis=NORMAL for lumpy dough; jitter icing's bottom ring
-    with axis=Z + only_positive (negative amount) for drippy edges.
+    Mesh ▸ Transform ▸ Randomize — native transform.vertex_random.
+    amount: max offset in meters (native `offset`; default 5mm).
+    uniform: 0 = fully random, 1 = more even (native default 0).
+    normal: 0 = world 3D, 1 = align offset along each vert normal (native default 0).
+    seed: RNG seed.
+    target: mesh to randomize (empty=active). Passing target auto-enters edit mode
+            and exits after; with no narrowed selection it randomizes the WHOLE
+            mesh (G28).
     """
     result = call_blender("jitter_vertices", {
-        "amount": amount, "axis": axis, "seed": seed, "only_positive": only_positive,
+        "amount": amount, "uniform": uniform, "normal": normal, "seed": seed,
         "target": target,
     }, label=label)
     if result.get("success"):
-        main = (f"Jittered {result['verts_jittered']} verts along {result['axis']} "
-                f"±{result['amount']}m (seed={result['seed']}) [{result.get('op_id','')}]")
+        n = result.get("verts_randomized", result.get("verts_jittered"))
+        main = (f"Randomized {n} verts offset={result['amount']}m "
+                f"uniform={result['uniform']} normal={result['normal']} "
+                f"seed={result['seed']} [{result.get('op_id','')}]")
     else:
         main = result.get("error", "failed")
     return main + _status(result)

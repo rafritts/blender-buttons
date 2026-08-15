@@ -73,8 +73,9 @@ def object_verb(
                     (name, new_name, linked=True for a mesh-sharing instance)
       join        — Ctrl+J · Object ▸ Join · weld several into one  (names=[...], merge_threshold)
       separate    — P ▸ By Loose Parts · split active into objects by LOOSE PARTS  (—)
-      group       — gather parts into a named collection; move/rotate the whole
-                    group as one by passing its name to a transform's targets=
+      group       — M · Object ▸ Move to Collection · MOVE parts into a named
+                    collection (unlinks them from previous collections). Pass the
+                    group name to a transform's targets= to move the whole set.
                     (name, parts=[...])
       ungroup     — dissolve the group                             (name)
       add_to_group— add parts to an existing group (name, parts=[...])

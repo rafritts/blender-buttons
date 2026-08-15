@@ -132,7 +132,7 @@ run("add_box", name="donut", width=1.0, depth=1.0, height=1.0)
 run("subdivide_selection", target="donut", cuts=3)                 # give it verts to lump
 # From OBJECT mode, jitter with target= must NOT error 'Must be in edit mode'.
 before = [tuple(v.co) for v in bpy.data.objects["donut"].data.vertices]
-r = run("jitter_vertices", target="donut", amount=0.02, axis="NORMAL", seed=1)
+r = run("jitter_vertices", target="donut", amount=0.02, seed=1)
 check("jitter with target= succeeds from OBJECT mode", r.get("success") is True, str(r))
 check("returned to OBJECT mode after jitter", bpy.context.active_object.mode == "OBJECT",
       bpy.context.active_object.mode)
@@ -146,11 +146,12 @@ _bm = bmesh.from_edit_mesh(bpy.data.objects["donut"].data)
 for _v in _bm.verts:
     _v.select = False
 bmesh.update_edit_mesh(bpy.data.objects["donut"].data)
-r2 = run("jitter_vertices", amount=0.01, axis="NORMAL", seed=2)
+r2 = run("jitter_vertices", amount=0.01, seed=2)
 check("jitter with no selection jitters whole mesh (no error)", r2.get("success") is True, str(r2))
+n_touched = r2.get("verts_randomized", r2.get("verts_jittered"))
 check("whole-mesh jitter touched all verts",
-      r2.get("verts_jittered") == len(bpy.data.objects["donut"].data.vertices),
-      f"{r2.get('verts_jittered')} of {len(bpy.data.objects['donut'].data.vertices)}")
+      n_touched == len(bpy.data.objects["donut"].data.vertices),
+      f"{n_touched} of {len(bpy.data.objects['donut'].data.vertices)}")
 run("set_mode", mode="OBJECT", target="donut")
 
 print()

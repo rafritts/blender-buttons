@@ -350,6 +350,68 @@ moved = sum(1 for i in before if (before[i] - after[i]).length > 1e-4)
 check("slide success", r.get("success"), r)
 check("slide moved the loop verts", moved > 0, moved)
 
+# ── B8: move_modifier reorders without NameError (_BIND_TYPES restored) ──
+print("== B8 move_modifier ==")
+clean()
+run("add_box", name="block", width=1, depth=1, height=1)
+run("select_object", name="block")
+run("add_modifier", type="SUBSURF", name="Subsurf")
+run("add_modifier", type="BEVEL", name="Bevel")
+run("add_modifier", type="SOLIDIFY", name="Solidify")
+r = run("move_modifier", target="block", modifier="Solidify", index=0)
+check("B8 move by index success", r.get("success") is True, str(r))
+names = [m.name for m in bpy.data.objects["block"].modifiers]
+check("B8 Solidify now on top", names == ["Solidify", "Subsurf", "Bevel"], names)
+r = run("move_modifier", target="block", modifier="Solidify", after="Subsurf")
+check("B8 move after= success", r.get("success") is True, str(r))
+names = [m.name for m in bpy.data.objects["block"].modifiers]
+check("B8 Solidify directly below Subsurf", names == ["Subsurf", "Solidify", "Bevel"], names)
+r = run("move_modifier", target="block", modifier="Bevel", before="Subsurf")
+check("B8 move before= success", r.get("success") is True, str(r))
+
+# ── B9: randomize is native vertex_random (3D, no axis lock) ──
+print("== B9 randomize (native vertex_random) ==")
+o = new_grid("rnd", n=6)
+enter_edit(o)
+bpy.ops.mesh.select_all(action='SELECT')
+before = [v.co.copy() for v in bm(o).verts]
+r = run("jitter_vertices", amount=0.25, seed=7)
+check("B9 randomize success", r.get("success") is True, str(r))
+after = [v.co.copy() for v in bm(o).verts]
+dx = sum(1 for a, b in zip(before, after) if abs(a.x - b.x) > 1e-8)
+dy = sum(1 for a, b in zip(before, after) if abs(a.y - b.y) > 1e-8)
+dz = sum(1 for a, b in zip(before, after) if abs(a.z - b.z) > 1e-8)
+check("B9 displaced in X and Y, not Z-only", dx > 0 and dy > 0,
+      f"dx={dx} dy={dy} dz={dz}")
+# same seed reproduces
+bpy.ops.mesh.select_all(action='SELECT')
+for v, c in zip(bm(o).verts, before):
+    v.co = c
+bmesh.update_edit_mesh(o.data)
+r = run("jitter_vertices", amount=0.25, seed=7)
+again = [v.co.copy() for v in bm(o).verts]
+check("B9 same seed reproduces",
+      all((a - b).length < 1e-8 for a, b in zip(after, again)))
+
+# ── B10: group MOVES into the new collection (native Move to Collection) ──
+print("== B10 group unlinks previous collection ==")
+clean()
+run("add_box", name="Proto", width=0.1, depth=0.1, height=0.1)
+proto = bpy.data.objects["Proto"]
+prev = [c.name for c in proto.users_collection]
+check("B10 proto starts in some collection", len(prev) >= 1, prev)
+g = run("group", name="SprinkleProto", parts=["Proto"])
+check("B10 group succeeds", g.get("success") is True, str(g.get("error")))
+users = [c.name for c in proto.users_collection]
+check("B10 proto is only in SprinkleProto", users == ["SprinkleProto"], users)
+run("add_box", name="Other", width=0.1, depth=0.1, height=0.1)
+other = bpy.data.objects["Other"]
+r = run("add_to_group", name="SprinkleProto", parts=["Other"])
+check("B10 add_to_group succeeds", r.get("success") is True, str(r.get("error")))
+other_users = [c.name for c in other.users_collection]
+check("B10 add_to_group unlinked Other from its previous collection",
+      other_users == ["SprinkleProto"], other_users)
+
 # ── grab snap_to=face_project ──
 print("== grab snap_to=face_project ==")
 clean()

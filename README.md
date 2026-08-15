@@ -2,7 +2,7 @@
 
 **An MCP server that lets an AI agent drive Blender by intent, not coordinates.**
 
-<!-- hero demo GIF goes here — see bugs.md B5 -->
+![Finished donut from recipes/donut/donut.md](recipes/donut/donut_hero.png)
 
 Blender is uniquely hostile to an LLM. It is a modal, state-heavy design tool built
 for a human with a mouse: the right mode, the right selection, an orbit, a grab,
