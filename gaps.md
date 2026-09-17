@@ -32,7 +32,7 @@ task-specific shortcut.
 
 **Verb:** `edit op=boolean` (baked). `hide_cutter=True` by default.
 
-**Friction (Strat live session, 2026-09-17):** every UNION/DIFFERENCE baked (`apply` on the edit verb defaults True — the param is shared with `bend`) and hid the cutter. Hidden objects stay in the name namespace: `scene op=tree` lists them, `rename` to the cutter's old name mints `.001`, a later `object op=delete` without `name=` hits the viewport-active host. Delete-by-name works (T7 — `objects.remove` ignores hide), but the agent has to know the ghosts exist and sweep them.
+**Friction (Strat live session, 2026-09-17):** every UNION/DIFFERENCE baked (`apply` on the edit verb defaults True — the param is tagged `[bend]` and shared) and hid the cutter. Hidden objects stay in the name namespace: `scene op=tree` lists them, `rename` to the cutter's old name mints `.001`. Delete-by-name already works (T7 — `objects.remove` ignores hide), but the agent has to know the ghosts exist and sweep them.
 
 **Why it's a gap:** a *live* boolean modifier needs the cutter. A *baked* boolean has consumed it. Hide is Blender's modifier convention; for an agent, hidden ≠ gone — it is a claimed name that validate/tree/`parts_only` still have to reason about. The agent drops into outliner hygiene instead of the next part.
 
@@ -42,18 +42,8 @@ task-specific shortcut.
 
 **Verb:** `feel op=silhouette`.
 
-**Friction (Strat live session, 2026-09-17):** a closed 45 mm slab (two unioned cylinders) rasterized as a hollow outline with interior `.` cells. The agent read cavities and spent the next cuts trying to "fix" holes that were never volumes. The docstring says edges are walked onto a grid of `'#' (filled) / '.' (empty)` — "filled" here means "an edge hit this cell," not "the projection covers this cell."
+**Friction (Strat live session, 2026-09-17):** a closed 45 mm slab (two unioned cylinders) rasterized as a hollow outline with interior `.` cells. The agent read cavities and spent the next cuts trying to "fix" holes that were never volumes. The extension docstring walks edges onto a grid of `'#' (filled) / '.' (empty)` — "filled" here means "an edge hit this cell," not "the projection covers this cell." The formatter then reports `N filled`.
 
 **Why it's a gap:** silhouette is the 2D shape read. A thin closed solid's *shape* is a disc; an edge-only raster is a ring. The map uses the same `#`/`.` alphabet as a filled occupancy, so the agent cannot tell "outline of a solid" from "there is a hole." Forced out of intent-space into a render to see the real silhouette.
 
 **Fix direction:** flood-fill the projected outline (or rasterize faces, not just edges) so a closed slab reads as a filled disc; or label the map honestly as edge occupancy and keep a filled mode. The legend must not say "filled" for an edge hit.
-
-## G235 — script exec has no `object` verb (`object` is the Python builtin)
-
-**Verb:** `script op=exec` / the `buttons` DSL.
-
-**Friction (Strat live session, 2026-09-17):** a 6-string duplicate loop called `object(op="duplicate", …)` and died `TypeError: object() takes no arguments` — Python's builtin, not the verb. The `Buttons` class binds `add`/`transform`/`edit`/`material`/`validate`/`feel`/`call`; it does not bind the object verb. Workaround: `call("duplicate_object", name=…, new_name=…)`. SPEC-23 says the runner speaks the same verb surface.
-
-**Why it's a gap:** loops over duplicate/join/delete/rename are exactly the exec gear (frets, strings, pole copies). Forcing `call("duplicate_object")` is a second grammar the field manual said the runner would not invent. The agent either memorizes tool names or writes the loop in REPL.
-
-**Fix direction:** inject the object verb under a name that isn't the builtin (`obj`, or a `Buttons.object` method). `object()` in exec should never mean `builtins.object`.
