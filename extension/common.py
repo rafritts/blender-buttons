@@ -133,10 +133,29 @@ def nearby_objects(world_pos, exclude_names=(), max_count=3):
     ]
 
 
+def split_target_names(targets):
+    """Flatten a target/targets spec into names, splitting comma-lists.
+
+    Same rule as server._core._targets so script batch/exec and the MCP verbs
+    agree: "a,b,c" is three names, not one name containing commas (B12).
+    None stays None. A list is flattened (each item may itself be comma-separated).
+    """
+    if targets is None:
+        return None
+    items = targets if isinstance(targets, (list, tuple)) else [targets]
+    out = []
+    for item in items:
+        if not isinstance(item, str):
+            continue
+        out.extend(s.strip() for s in item.split(",") if s.strip())
+    return out
+
+
 def resolve_targets(targets, include_non_mesh=False):
     """Resolve a target spec into a list of bpy mesh objects.
 
-    targets: str (single object or collection name), list[str], or None (-> active object).
+    targets: str (single object or collection name, or comma-list "a,b,c"),
+        list[str], or None (-> active object).
     Collection names expand to all mesh objects inside (recursively).
     include_non_mesh: when True, collection expansion keeps non-mesh members too
         (curves, empties, armatures). Explicitly-named objects are always kept
@@ -151,8 +170,10 @@ def resolve_targets(targets, include_non_mesh=False):
             return None, "No active object and no targets specified"
         return [obj], None
 
-    if isinstance(targets, str):
-        targets = [targets]
+    names = split_target_names(targets)
+    if not names:
+        return None, "'targets' must be a non-empty string or list of strings"
+    targets = names
 
     if not isinstance(targets, list) or not targets:
         return None, "'targets' must be a non-empty string or list of strings"

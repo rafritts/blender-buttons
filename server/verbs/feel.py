@@ -175,10 +175,11 @@ def feel(
       profile  — cross-section width sweep along an axis: by default AGGREGATED into
                  bands with the narrowest/widest flagged; full=True dumps every ring
                  (axis, min, max, bands, full)
-      silhouette — orthographic projected OUTLINE along a view axis as a coarse '#'/'.'
+      silhouette — orthographic projected coverage along a view axis as a coarse '#'/'.'
                  occupancy grid — the 2D shape read directly (teardrop vs cone), not
-                 reconstructed from two 1D profiles. Pure geometry, not a render.
-                 (axis = look-along axis, res, selection)
+                 reconstructed from two 1D profiles. '#' is face coverage (a closed
+                 slab reads as a filled disc); a through-hole stays '.'. Pure geometry,
+                 not a render. (axis = look-along axis, res, selection)
       section  — TRUE cross-section perimeter + enclosed area per slice (real contour
                  edge-length & shoelace, not bbox width) — circumference / girth /
                  cross-sectional area as first-class numbers.   (axis, sections, min, max)

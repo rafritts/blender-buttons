@@ -148,7 +148,7 @@ def edit(
     cutter: tag(str, "[boolean] cutter object") = "",
     bool_op: tag(str, "[boolean] DIFFERENCE|UNION|INTERSECT") = "DIFFERENCE",
     solver: tag(str, "[boolean] EXACT|FLOAT (5.0 renamed 'Fast'->'Float'; legacy FAST ok)") = "EXACT",
-    hide_cutter: tag(bool, "[boolean] hide the cutter afterward") = True,
+    hide_cutter: tag(bool, "[boolean] hide (live) or consume (baked) the cutter") = True,
     # poke / inset / grid_fill (G50) — face authoring
     offset: tag(float, "[poke] push the new centre vert along the face normal (m); "
                        "[bisect] the cut plane's position along `axis` (world m)") = 0.0,
@@ -274,7 +274,8 @@ def edit(
                     end for a one-way crescent. apply=True forces OBJECT mode.
       trace       — trace a cross-section profile  (target, axis, sections)
       boolean     — boolean with a cutter  (cutter, bool_op=DIFFERENCE|UNION|
-                    INTERSECT, solver, apply, hide_cutter)
+                    INTERSECT, solver, apply, hide_cutter — hide on live,
+                    consume on successful bake)
       bridge      — weld two open boundary loops into a continuous surface (the
                     bridge-edge-loops primitive). a/b are two boundary handles (mint
                     with feel op=assembly); their rims get bridged. SAME-OBJECT only —

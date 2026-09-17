@@ -77,7 +77,7 @@ def delete_object(params):
             return {"error": "No active object to delete"}
     deleted = obj.name
     # Delete via the data API, NOT bpy.ops.object.delete(): the operator only acts
-    # on SELECTED objects, and a hidden object (e.g. a boolean cutter hidden by
+    # on SELECTED objects, and a hidden object (e.g. a live-boolean cutter hidden by
     # hide_cutter=True) can't be selected — so the operator silently deletes nothing
     # while the tool reports success, leaving the name claimed (gaps.md T7).
     # objects.remove() ignores visibility/selection entirely.
@@ -585,14 +585,14 @@ def _profile_core(bm, params):
 
 
 def get_silhouette(params):
-    """Orthographic projected outline along a view axis (gaps.md G37) — the 2D shape,
+    """Orthographic projected coverage along a view axis (gaps.md G37) — the 2D shape,
     read directly instead of cross-multiplying two 1D profile sweeps.
 
-    Pure geometry, NOT a render: rasterize the mesh's EDGES onto the plane
-    perpendicular to `axis` into a coarse occupancy grid, returned as a text map of
-    '#' (filled) / '.' (empty). Shows drape-vs-projection (teardrop vs cone) in one
-    read. Edges (not just verts) are walked so the outline is gap-free — a vert-only
-    raster aliases to empty bands where vert-rings are spaced wider than a cell.
+    Pure geometry, NOT a render: project faces onto the plane perpendicular to
+    `axis` into a coarse occupancy grid, returned as a text map of '#' (covered) /
+    '.' (empty). A closed slab/cylinder reads as a filled disc, not a hollow edge
+    ring; a real through-hole stays empty. Edges are still walked so wires and
+    grazing faces remain visible — occupancy is coverage, not an edge hit.
 
     axis:      view axis to look ALONG (X|Y|Z). Default X = the side view (Y-depth ×
                Z-height plane). The silhouette is the other two axes.
@@ -638,8 +638,56 @@ def _silhouette_core(bm, params):
         ri = min(rows - 1, max(0, int((w - vmin) / vext * rows)))
         grid[ri][ci] = True
 
-    # Walk every (qualifying) edge in cell-sized steps so the projected outline is
-    # connected — no empty bands between vert-rings.
+    def _in_tri(p, a, b, c):
+        """Barycentric inclusion in a 2D triangle. Degenerate (edge-on) → False."""
+        ax, ay = a; bx, by = b; cx, cy = c; px, py = p
+        den = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
+        if abs(den) < 1e-18:
+            return False
+        w1 = ((by - cy) * (px - cx) + (cx - bx) * (py - cy)) / den
+        w2 = ((cy - ay) * (px - cx) + (ax - cx) * (py - cy)) / den
+        w3 = 1.0 - w1 - w2
+        eps = 1e-9
+        return w1 >= -eps and w2 >= -eps and w3 >= -eps
+
+    def _fill_tri(a, b, c):
+        us = (a[0], b[0], c[0])
+        vs = (a[1], b[1], c[1])
+        ci0 = min(cols - 1, max(0, int((min(us) - umin) / uext * cols)))
+        ci1 = min(cols - 1, max(0, int((max(us) - umin) / uext * cols)))
+        ri0 = min(rows - 1, max(0, int((min(vs) - vmin) / vext * rows)))
+        ri1 = min(rows - 1, max(0, int((max(vs) - vmin) / vext * rows)))
+        for ri in range(ri0, ri1 + 1):
+            for ci in range(ci0, ci1 + 1):
+                if grid[ri][ci]:
+                    continue
+                uc = umin + (ci + 0.5) * uext / cols
+                vc = vmin + (ri + 0.5) * vext / rows
+                if _in_tri((uc, vc), a, b, c):
+                    grid[ri][ci] = True
+
+    # Faces first: projected coverage. Do NOT flood-fill the outline — that would
+    # paint real through-holes. Fan-triangulating an n-gon with a hole would also
+    # paint the hole, so triangulate first (bmesh splits around inner loops).
+    # An edge-on face is degenerate in 2D; the edge walk below still marks its line.
+    import bmesh as _bmesh
+    try:
+        _bmesh.ops.triangulate(bm, faces=bm.faces[:])
+    except Exception:
+        pass
+    for f in bm.faces:
+        fverts = list(f.verts)
+        if sel_only and not all(v.select for v in fverts):
+            continue
+        if len(fverts) < 3:
+            continue
+        pts2 = [(v.co[ui], v.co[vi]) for v in fverts]
+        origin = pts2[0]
+        for i in range(1, len(pts2) - 1):
+            _fill_tri(origin, pts2[i], pts2[i + 1])
+
+    # Walk every (qualifying) edge in cell-sized steps so wires and grazing faces
+    # stay visible — no empty bands between vert-rings.
     for e in bm.edges:
         a, b = e.verts
         if sel_only and not (a.select and b.select):
@@ -659,6 +707,7 @@ def _silhouette_core(bm, params):
             "u_range": [round(umin, 4), round(umax, 4)],
             "v_range": [round(vmin, 4), round(vmax, 4)],
             "filled_cells": filled,
+            "occupancy": "coverage",
             "grid": ["".join("#" if c else "." for c in grid[r]) for r in range(rows - 1, -1, -1)]}
 
 

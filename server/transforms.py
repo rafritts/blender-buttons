@@ -283,17 +283,19 @@ def rotate_object(angle: float, axis: str = "Z", targets: str = "",
 
 @mcp.tool()
 def snap_to(target: str, side: str = "Z_MAX", source_side: str = "AUTO",
-            offset: float = 0.0, label: str = "") -> str:
+            offset: float = 0.0, targets: str = "", label: str = "") -> str:
     """
-    Translate the active object so one of its bbox faces aligns with a face of `target`.
+    Translate `targets` (or the active object) so one of its bbox faces aligns
+    with a face of `target`.
 
+    targets:     object(s) to move. Empty = viewport-active.
     side:        which face of TARGET to snap to.  X_MIN | X_MAX | Y_MIN | Y_MAX | Z_MIN | Z_MAX
-    source_side: which face of ACTIVE to align there.
+    source_side: which face of the moved object to align there.
                  AUTO (default) = the opposite face on the same axis (so they touch flush).
-                 CENTER = align active's center to target's chosen face.
+                 CENTER = align the moved object's center to target's chosen face.
                  explicit X_MIN..Z_MAX must be on the same axis as `side`.
     offset:      world-units along the side axis, applied AFTER alignment.
-                 +ve = move active further in the +axis direction (more overlap when snapping to MAX-side).
+                 +ve = move further in the +axis direction (more overlap when snapping to MAX-side).
 
     Examples:
       snap_to(target="Crossguard", side="Z_MAX")                          # grip bottom flush with crossguard top
@@ -301,6 +303,9 @@ def snap_to(target: str, side: str = "Z_MAX", source_side: str = "AUTO",
       snap_to(target="Wall", side="X_MAX", source_side="X_MAX")           # both right-faces align (flush, not next-to)
     """
     params = {"target": target, "side": side, "source_side": source_side, "offset": offset}
+    parsed = _targets(targets)
+    if parsed is not None:
+        params["targets"] = parsed
     result = call_blender("snap_to", params, label=label)
     if result.get("success"):
         main = (f"snap_to {target}.{side}: delta={result['delta']} "
@@ -311,10 +316,12 @@ def snap_to(target: str, side: str = "Z_MAX", source_side: str = "AUTO",
 
 
 @mcp.tool()
-def snap_to_grid(size: float = 0.1, axes: str = "XYZ", label: str = "") -> str:
+def snap_to_grid(size: float = 0.1, axes: str = "XYZ", targets: str = "",
+                 label: str = "") -> str:
     """
-    Round the active object's location to multiples of `size` on the chosen axes.
+    Round `targets` (or the active object) location to multiples of `size` on the chosen axes.
 
+    targets: object(s) to snap. Empty = viewport-active.
     size: grid spacing in world units (e.g., 0.05, 0.1, 0.25, 1.0)
     axes: any of "X", "Y", "Z", or combinations like "XZ" — only these axes are snapped.
 
@@ -322,6 +329,9 @@ def snap_to_grid(size: float = 0.1, axes: str = "XYZ", label: str = "") -> str:
     Pairs naturally with snap_to: free-place, snap-to-grid for alignment, snap-to for stacking.
     """
     params = {"size": size, "axes": axes}
+    parsed = _targets(targets)
+    if parsed is not None:
+        params["targets"] = parsed
     result = call_blender("snap_to_grid", params, label=label)
     if result.get("success"):
         moves = result.get("snapped", [])

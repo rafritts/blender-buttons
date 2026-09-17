@@ -354,21 +354,21 @@ def rotate_object(params):
 
 
 def snap_to(params):
-    """Move the active object so one of its bbox faces aligns with a face of a target object."""
+    """Move `targets` (or the active object) so a bbox face aligns with a face of `target`."""
     target_name = params.get("target")
     side = params.get("side", "Z_MAX").upper()
     source_side = params.get("source_side", "AUTO").upper()
     offset = params.get("offset", 0.0)
 
-    obj = bpy.context.active_object
-    if obj is None:
-        return {"error": "No active object"}
+    objs, err = resolve_targets(params.get("targets"))
+    if err:
+        return {"error": err}
     if not target_name:
         return {"error": "'target' is required"}
     target = bpy.data.objects.get(target_name)
     if target is None:
         return {"error": f"Target '{target_name}' not found"}
-    if target == obj:
+    if target in objs:
         return {"error": "Cannot snap object to itself"}
 
     side_map = {
@@ -401,13 +401,19 @@ def snap_to(params):
         return 0.5 * (lo + hi)
 
     target_coord = _coord(target, axis_idx, target_which)
-    source_coord = _coord(obj, axis_idx, source_which)
-    delta = target_coord - source_coord + offset
-    obj.location[axis_idx] += delta
-
+    first = None
+    for obj in objs:
+        source_coord = _coord(obj, axis_idx, source_which)
+        delta = target_coord - source_coord + offset
+        obj.location[axis_idx] += delta
+        if first is None:
+            first = (source_coord, delta)
+    bpy.context.view_layer.update()
+    source_coord, delta = first
     return {
         "success": True,
         "target": target_name,
+        "moved": [o.name for o in objs],
         "axis": "XYZ"[axis_idx],
         "target_side": side,
         "source_side": source_which,
@@ -480,25 +486,29 @@ def set_origin(params):
 
 
 def snap_to_grid(params):
-    """Round the active object's location to multiples of `size` on the chosen axes."""
-    obj = bpy.context.active_object
-    if obj is None:
-        return {"error": "No active object"}
+    """Round `targets` (or the active object) location to multiples of `size` on the chosen axes."""
+    objs, err = resolve_targets(params.get("targets"))
+    if err:
+        return {"error": err}
     size = params.get("size", 0.1)
     axes = params.get("axes", "XYZ").upper()
     if size <= 0:
         return {"error": "size must be > 0"}
 
     snapped = []
-    for i, ax in enumerate(("X", "Y", "Z")):
-        if ax in axes:
-            old = obj.location[i]
-            new = round(old / size) * size
-            obj.location[i] = new
-            snapped.append({"axis": ax, "from": round(old, 5), "to": round(new, 5), "moved": round(new - old, 5)})
-
+    for obj in objs:
+        for i, ax in enumerate(("X", "Y", "Z")):
+            if ax in axes:
+                old = obj.location[i]
+                new = round(old / size) * size
+                obj.location[i] = new
+                snapped.append({"object": obj.name, "axis": ax,
+                                "from": round(old, 5), "to": round(new, 5),
+                                "moved": round(new - old, 5)})
+    last = objs[-1]
     return {"success": True, "grid_size": size, "axes": axes, "snapped": snapped,
-            "location_after": [round(v, 5) for v in obj.location]}
+            "moved": [o.name for o in objs],
+            "location_after": [round(v, 5) for v in last.location]}
 
 
 def aim_axis(params):

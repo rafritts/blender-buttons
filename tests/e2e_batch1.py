@@ -37,9 +37,10 @@ print("== T7: delete frees hidden-object name ==")
 clean()
 run("add_box", name="t7_target", width=2.0, depth=2.0, height=2.0)
 run("add_box", name="t7_cutter", width=0.5, depth=0.5, height=0.5)
+# G233 consumes a baked cutter, so T7 hides via a live modifier then deletes by name.
 b = run("boolean", target="t7_target", cutter="t7_cutter", op="DIFFERENCE",
-        apply=True, hide_cutter=True)
-check("cutter is hidden after boolean", bpy.data.objects["t7_cutter"].hide_get() is True)
+        apply=False, hide_cutter=True)
+check("cutter is hidden after live boolean", bpy.data.objects["t7_cutter"].hide_get() is True)
 d = run("delete_object", name="t7_cutter")
 check("delete_object reports success", d.get("success") is True, str(d))
 check("hidden cutter actually removed from bpy.data", "t7_cutter" not in bpy.data.objects)

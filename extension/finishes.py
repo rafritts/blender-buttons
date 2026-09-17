@@ -5,7 +5,7 @@ import os
 
 import bpy
 
-from .common import activate, linked_guard, resolve_targets, world_bbox
+from .common import activate, linked_guard, mesh_components, resolve_targets, world_bbox
 from .state import push_undo, ui_override
 
 
@@ -1019,7 +1019,7 @@ def boolean(params):
     """Cut, fuse, or intersect two meshes via a Boolean modifier.
 
     target:      the mesh that will be modified (kept after the op).
-    cutter:      the mesh used as the operand. Typically hidden after the op.
+    cutter:      the mesh used as the operand.
     op:          DIFFERENCE (default — subtract cutter from target),
                  UNION       (fuse them),
                  INTERSECT   (keep only the overlap).
@@ -1029,7 +1029,9 @@ def boolean(params):
     apply:       if True, apply the modifier immediately and bake into target's mesh.
                  If False, leave the modifier live so you can tweak the cutter
                  and see updates. Default False.
-    hide_cutter: hide the cutter object in viewport + render after the op (default True).
+    hide_cutter: default True. A live (unapplied) boolean hides the cutter. A
+                 successful bake consumes it (deletes the object so the name is
+                 free). False keeps the cutter in the scene.
 
     KNOWN FRAGILITY: boolean ops are sensitive to mesh quality. They fail or
     produce garbage on non-manifold meshes, overlapping coplanar faces, and
@@ -1122,12 +1124,28 @@ def boolean(params):
         _recalc_normals_outside(target)
         normals_recalced = True
 
-    if hide_cutter:
+    cutter_consumed = False
+    cutter_hidden = False
+    if applied and hide_cutter:
+        # G233: a baked boolean has consumed the operand. Hide would leave a named
+        # ghost in the part namespace (tree / rename-mints-.001). Delete it.
+        bpy.data.objects.remove(cutter, do_unlink=True)
+        cutter_consumed = True
+    elif hide_cutter:
         try:
             cutter.hide_set(True)
         except Exception:
             pass
         cutter.hide_render = True
+        cutter_hidden = True
+
+    shells = None
+    if applied:
+        import bmesh
+        bm = bmesh.new()
+        bm.from_mesh(target.data)
+        shells = mesh_components(bm)
+        bm.free()
 
     result = {
         "success": True,
@@ -1137,8 +1155,18 @@ def boolean(params):
         "solver": solver,
         "applied": applied,
         "modifier": None if applied else mod.name,
-        "cutter_hidden": hide_cutter,
+        "cutter_hidden": cutter_hidden,
+        "cutter_consumed": cutter_consumed,
     }
+    if shells is not None:
+        result["shells"] = shells
+        if op == "UNION" and shells > 1:
+            result["unfused"] = f"{shells} shells"
+            result.setdefault("notes", []).append(
+                f"unfused: {shells} shells — UNION did not fuse the operands into "
+                f"one body (volumes never intersected, or the bake left separate "
+                f"shells). This is not a one-body merge."
+            )
     if welded:
         result["welded_verts"] = welded
     if normals_recalced:

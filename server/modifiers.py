@@ -357,7 +357,7 @@ def boolean(target: str, cutter: str, op: str = "DIFFERENCE",
     — position a cutter mesh where you want the operation, then call this.
 
     target:      the mesh that is modified and kept.
-    cutter:      the mesh used as the operand (hidden afterward by default).
+    cutter:      the mesh used as the operand.
     op:          DIFFERENCE (default — subtract cutter from target) |
                  UNION (fuse) | INTERSECT (keep only the overlap).
     solver:      EXACT (default — robust) | FLOAT (fast, brittle; 5.0 renamed
@@ -365,7 +365,8 @@ def boolean(target: str, cutter: str, op: str = "DIFFERENCE",
     apply:       True bakes the result into target's mesh immediately; False
                  (default) leaves the modifier live so you can move the cutter
                  and watch it update, then apply_modifiers later.
-    hide_cutter: hide the cutter in viewport + render after the op (default True).
+    hide_cutter: default True. A live boolean hides the cutter; a successful
+                 bake consumes it (deletes the object). False keeps the cutter.
 
     To make a half-cylinder / arch (classic chest lid): add a cylinder, add a box
     spanning the lower half, then boolean(lid, box, op="DIFFERENCE").
@@ -383,6 +384,14 @@ def boolean(target: str, cutter: str, op: str = "DIFFERENCE",
         state = "applied (baked)" if result.get("applied") else f"live modifier '{result.get('modifier')}'"
         main = (f"boolean {result['op']} '{result['cutter']}' → '{result['target']}' "
                 f"[{result['solver']}]: {state} [{result.get('op_id','')}]")
+        if result.get("shells") is not None:
+            n = result["shells"]
+            main += f", {n} shell" + ("s" if n != 1 else "")
+        if result.get("cutter_consumed"):
+            main += "; cutter consumed"
+        if result.get("unfused"):
+            main += (f"\n⚠ unfused: {result['unfused']} — UNION did not fuse the "
+                     f"operands into one body")
         if result.get("apply_error"):
             main += f"\n⚠ apply failed: {result['apply_error']}\n  {result.get('hint','')}"
     else:

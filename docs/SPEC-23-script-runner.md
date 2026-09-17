@@ -166,7 +166,7 @@ journal, receipt, budgets, Handle returns).
 
 ```python
 # Injected into exec globals — not a separate installable package for v1.
-import buttons   # or: from buttons import add, transform, edit, …
+import buttons   # or: from buttons import add, transform, edit, object, …
 
 stem = add(type="cylinder", name="stem", radius=0.01, height=0.08)
 # stem is a Handle: .name, .bounds, .dims, .result (raw dict)
@@ -186,7 +186,8 @@ Design rules for the DSL:
 
 1. **Full surface, thin map.** Every MCP verb/op reachable from the agent REPL is
    reachable from `buttons` / batch steps. Call shape mirrors the verb surface
-   (`add(type=…)`, `transform(op="snap", …)`, `edit(op="bevel", …)`). Binding is a
+   (`add(type=…)`, `transform(op="snap", …)`, `edit(op="bevel", …)`,
+   `object(op="duplicate", …)`). Binding is a
    dispatch table + structured return adapter — not a second implementation of any op.
    The agent should not learn two grammars.
 2. **Returns are structured**, never the MCP pretty-print string. Every mutating call

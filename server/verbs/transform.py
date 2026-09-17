@@ -192,9 +192,9 @@ def transform(
     if o == "apply":
         return transforms.apply_transform(targets, scale, rotation, location, label)
     if o == "snap":
-        return transforms.snap_to(target, side, source_side, offset, label)
+        return transforms.snap_to(target, side, source_side, offset, targets, label)
     if o == "snap_grid":
-        return transforms.snap_to_grid(size, axes, label)
+        return transforms.snap_to_grid(size, axes, targets, label)
     if o == "match_dim":
         return relational.match_dimension(target, reference, axis, label)
     if o == "distribute":

@@ -173,12 +173,13 @@ def _fmt_profile(core: dict) -> str:
 @mcp.tool()
 def get_silhouette(axis: str = "X", res: int = 32, selection: bool = False,
                    target: str = "") -> str:
-    """Orthographic projected OUTLINE of the active mesh along a view axis — the 2D
+    """Orthographic projected coverage of the active mesh along a view axis — the 2D
     shape read directly, not cross-multiplied from two 1D profile sweeps (gaps.md G37).
 
-    Pure geometry, not a render: projects every vert onto the plane perpendicular to
-    `axis` and rasterizes a coarse '#'/'.' occupancy map. Shows drape-vs-projection
-    (teardrop vs cone) in one read — the thing a profile sweep is blind to.
+    Pure geometry, not a render: projects faces onto the plane perpendicular to
+    `axis` and rasterizes a coarse '#'/'.' occupancy map. A closed solid reads as
+    a filled disc, not a hollow edge ring; a through-hole stays empty. '#' means
+    projected coverage, not an edge hit.
 
     axis: view axis to look ALONG (X|Y|Z). Default X = side view (depth × height).
     res: grid resolution on the wider plane axis (default 32, 4..120).
@@ -199,7 +200,7 @@ def _fmt_silhouette(core: dict) -> str:
     head = (f"silhouette along {core['axis']} — {core['u_label']}(→)×{core['v_label']}(↑) "
             f"plane, {core['cols']}×{core['rows']} cells @ {core['cell_m']}m\n"
             f"  {core['u_label']} [{ur[0]}, {ur[1]}]   {core['v_label']} [{vr[0]}, {vr[1]}]   "
-            f"{core['filled_cells']} filled")
+            f"{core['filled_cells']} covered")
     return head + "\n" + "\n".join("  " + row for row in core["grid"])
 
 

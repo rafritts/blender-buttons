@@ -809,6 +809,18 @@ def _buttons_module(runner: _Runner):
                 raise Abort(err)
             return runner.run_tool(tool, p, verb=verb, op=op_r)
 
+        def object(self, op=None, **params):
+            # B13: bind the object verb under this name so exec `object(op=...)`
+            # is not builtins.object. Shadowing the builtin in script globals is
+            # the contract (SPEC-23 thin-map already includes object).
+            step = {"verb": "object", "params": params}
+            if op is not None:
+                step["op"] = op
+            tool, p, verb, op_r, err = resolve_step(step)
+            if err:
+                raise Abort(err)
+            return runner.run_tool(tool, p, verb=verb, op=op_r)
+
         def checkpoint(self, label, focus=None):
             return runner.checkpoint(label, focus=focus)
 
@@ -1002,10 +1014,14 @@ def script_exec(params):
         "Abort": Abort,
         "bpy": bpy,
     }
-    # Also expose common names at top level for ergonomics
+    # Also expose common names at top level for ergonomics.
+    # `object` shadows builtins.object inside the script — that is the contract
+    # (B13 / SPEC-23 thin-map). Use type / __builtins__['object'] if a script
+    # needs the builtin.
     for name in ("add", "transform", "edit", "material", "validate", "feel",
-                 "checkpoint", "call"):
+                 "checkpoint", "call", "object"):
         g[name] = getattr(buttons, name)
+    g["obj"] = buttons.object
 
     _in_script = True
     aborted = False
