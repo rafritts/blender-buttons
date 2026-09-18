@@ -134,7 +134,7 @@ returns 22 schemas, not hundreds of flat tools.
 | `file` | File menu — `.blend` persistence |
 | `feel` | **The measuring instrument** — profile / section / anchor / verify / overlaps / contacts / facing / resting / aim; diagnostics beside the `look` loop |
 | `validate` | **The always-on correctness floor** — and `op=expect` to declare an intended overlap |
-| `script` | SPEC-23 transport — `batch` / `exec` / `dry_run`, hard cap 25, one receipt per phase; progressive bulk, not a bpy megascript |
+| `script` | Known countable repetition only (speaker holes, frets) — `batch` / `exec` / `dry_run`, hard cap 25; **not** the default loop |
 | `connect` | Choose which Blender instance this session drives (list / attach / launch) |
 | `collab` | Shared-state collaboration surface |
 | `addon` | Drive any installed Blender addon/extension by name |

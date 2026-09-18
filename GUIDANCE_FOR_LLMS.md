@@ -131,15 +131,23 @@ them. For object placement that's harmless; for `edit` ops that build on each ot
 first and silently no-op. Issue chained edit ops one per message; edits on *different*
 meshes batch fine.
 
-**Three gears for multi-step work (SPEC-23 `script` — experimental).** The REPL (one
-verb call) stays the eyes: localization, taste, look→claim→edit. For a *known* linear
-phase, prefer `script op=batch` (ordered steps, hard cap **25**, one receipt) over N
-round-trips or a raw `tmp/*.py` bpy dump. Use `script op=exec` only when a phase needs
-loops/branches — still short, still ≤25 DSL steps. Progressive bulk: batch → read the
-receipt (first failure, journal bounds, final validate) → next phase. Do **not**
-megascript a whole scene in one exec. On abort the scene restores transactionally.
-`tool=<name>` on a batch step reaches the full extension surface when a verb alias is
-missing. See `docs/SPEC-23-script-runner.md`.
+**`script` is for known, countable repetition — not the default loop (SPEC-23).**
+The default is still one verb at a time: look → descend → claim → modify. Reach for
+`script` only when the work is **highly repetitive, already known, and obviously
+quantifiable** — the same primitive N times, with N and the pattern already in hand.
+Speaker holes in a laptop chassis. Frets. A ring of identical bolts. You could write
+`for i in range(n)` without another `look`. If the next step still needs a read, a
+taste call, or a *different* judgment, stay in the REPL — including a unique 12-step
+assembly you already planned.
+
+- `script op=exec` when the count is computed or the list would be a wall of
+  near-duplicates (the usual case for repetition).
+- `script op=batch` when you can enumerate a short list of the same (or near-same)
+  step, no Python.
+- Hard cap **25**, one receipt per phase. Read the receipt, then the next chunk. Do
+  **not** megascript a scene. On abort the scene restores transactionally.
+  `tool=<name>` on a batch step reaches the full extension surface when a verb
+  alias is missing. See `docs/SPEC-23-script-runner.md`.
 
 ## You build with two senses, and you don't get to close your eyes
 

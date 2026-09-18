@@ -15,8 +15,9 @@ coordinates. It perceives (`look`, `feel`), measures, and mutates through ~22 ve
 (look, add, edit, feel, select, transform, object, modifier, material, pose, sculpt,
 render, view, scene, file, history, script, …). Each verb takes an `op=` that selects the
 operation; the verb's schema enumerates every op and the args each one uses.
-`script` (batch|exec|dry_run) is the multi-step transport — hard cap 25, one receipt
-per phase; prefer progressive batches over megascripts (SPEC-23).
+`script` (batch|exec|dry_run) is NOT the default loop — it is for known, highly
+repetitive, obviously quantifiable work (speaker holes, frets, a bolt ring); hard
+cap 25, one receipt per phase. Everything else is one verb at a time (SPEC-23).
 
 Several Blender instances can run at once, each on its own port; this session attaches
 to ONE. With a single Blender open it's automatic — the first command attaches. If the

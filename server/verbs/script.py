@@ -1,8 +1,9 @@
-"""script — SPEC-23 transport: batch / exec / dry_run with a validation receipt.
+"""script — SPEC-23 transport for known, countable repetition.
 
-Multi-step constructions over the same execute_command path as the REPL.
-Hard step cap 25. Batch is the default bulk gear; exec is for control flow.
-See docs/SPEC-23-script-runner.md.
+NOT the default modeling loop (that's one verb at a time). Use for the same
+primitive N times, N already known (speaker holes, frets, a bolt ring).
+Hard step cap 25. Exec is the usual form (a short loop); batch is a short
+enumerated list. See docs/SPEC-23-script-runner.md.
 """
 
 from typing import Literal
@@ -219,17 +220,22 @@ def script(
     mode: tag(str, "[dry_run] batch (default) | exec") = "batch",
 ) -> str:
     """
-    SPEC-23 script runner — multi-step construction with one validation **receipt**.
+    SPEC-23 script runner — known, countable repetition with one validation **receipt**.
 
-    Transport over the existing verb surface (same execute_command path as the REPL).
-    Hard step cap **25**. Prefer progressive batches; read the receipt between phases.
+    NOT the default way to drive the server. Default is one verb at a time
+    (look → claim → modify). Use script only when the work is highly repetitive,
+    already known, and obviously quantifiable — the same primitive N times, N and
+    the pattern already in hand (speaker holes, frets, a bolt ring). If the next
+    step still needs a look, a taste call, or a different judgment, stay in the REPL.
+
+    Hard step cap **25**. Read the receipt between phases. Do not megascript a scene.
 
     op selects:
-      batch   — ordered list of steps, no Python. **Default bulk gear.**
-                steps=[{verb:"add", params:{type:"box", name:"a", width:0.1, …}}, …]
-                or {tool:"add_box", params:{…}} for full surface.
-      exec    — short Python body with `buttons` DSL (add/transform/edit/… + call).
-                Use for loops / branches only — still one phase, not a megascript.
+      batch   — short enumerated list of the same (or near-same) step, no Python.
+                steps=[{verb:"add", params:{type:"cylinder", name:"hole_1", …}}, …]
+                or {tool:"add_cylinder", params:{…}} for full surface.
+      exec    — short Python loop/branch over that repetition (the usual case).
+                Still one phase, not a megascript.
       dry_run — resolve/bind/budget only; no mutation.
 
     Receipt always has: result, created/touched, journal (dims/bounds on create/place),

@@ -1,11 +1,13 @@
 # SPEC-23 — Script Runner: DSL scripts with a validation receipt
 
-_Status: Experimental v0 shipped 2026-07-15 (rev 3 design). Transport primitive —
-`script` verb (`batch` | `exec` | `dry_run`), hard cap 25, compact receipt, transactional
-abort restore via history undo. Nested `execute_command` (placement DSL, auto-`feel`,
-auto-`validate`). Verb thin-map covers add/transform/edit/material/validate/feel/object;
-full surface via `tool=<name>`. Known v0 gaps: undo is N Blender steps (not one collapsed
-unit on success); some transform ops need `tool=`; not every feel/edit op is aliased.
+_Status: Experimental v0 shipped 2026-07-15 (rev 4 — usage centered on known
+countable repetition, not the default loop; transport unchanged from rev 3).
+Transport primitive — `script` verb (`batch` | `exec` | `dry_run`), hard cap 25,
+compact receipt, transactional abort restore via history undo. Nested
+`execute_command` (placement DSL, auto-`feel`, auto-`validate`). Verb thin-map
+covers add/transform/edit/material/validate/feel/object; full surface via
+`tool=<name>`. Known v0 gaps: undo is N Blender steps (not one collapsed unit on
+success); some transform ops need `tool=`; not every feel/edit op is aliased.
 See `extension/script_api.py`, `server/verbs/script.py`, `tests/e2e_spec23_script_runner.py`._
 
 **Depends on:** SPEC-05 (verb surface / `op=` grammar), SPEC-15 (external-mutation
@@ -19,22 +21,25 @@ required here).
 
 ## 1. The problem
 
-The MCP verb REPL is the right tool when the next move depends on a read the agent has
-not taken yet: localize a feature, claim a region, measure a gap, then act once. That
-loop is the product.
+The MCP verb REPL is the product: the next move depends on a read the agent has not
+taken yet — localize a feature, claim a region, measure a gap, then act once. That
+loop is the **default**. A unique 12-step assembly, even one the agent has already
+planned, still belongs there.
 
-It is the wrong tool for a **known multi-step construction** — bulk primitives, a
-parametric assembly, a recipe the agent has already planned end-to-end. There the pain
-is transport, not judgment:
+The REPL is the wrong tool for **known, highly repetitive, obviously quantifiable
+work** — the same primitive N times, where N and the pattern are already in hand.
+Speaker holes in a MacBook chassis. Frets on a neck. A ring of identical bolts. You
+could write `for i in range(n)` without another `look`. There the pain is transport,
+not judgment:
 
-1. **Round-trips.** One MCP call per verb. Latency and context cost scale with step
-   count, not with difficulty.
+1. **Round-trips.** One MCP call per verb. Latency and context cost scale with
+   repetition count, not with difficulty.
 2. **Ordering.** Tool calls batched in one message can arrive out of order
    (`GUIDANCE_FOR_LLMS.md`: dependent `edit` ops must be one-per-message). Scripts are
    sequential by definition.
-3. **Status flood.** Every mutating call returns a full status block. Twenty
-   legitimate steps dump twenty near-identical panels; the agent either drowns or
-   stops reading them — which is how the floor fails.
+3. **Status flood.** Every mutating call returns a full status block. Twenty identical
+   holes dump twenty near-identical panels; the agent either drowns or stops reading
+   them — which is how the floor fails.
 4. **The raw-`bpy` escape.** Agents already write one-shot scripts (`tmp/*.py`) and
    run them outside the verb surface. That buys speed and loses everything that makes
    blender-buttons trustworthy: relational placement, named handles, auto-`feel`,
@@ -43,9 +48,9 @@ is transport, not judgment:
 So the gap is not "can the agent execute Python in Blender?" (it can, badly). The gap
 is:
 
-> **Run a multi-step construction that speaks the blender-buttons language, in order,
-> as one turn, and return a receipt the agent can trust the same way it trusts a
-> single-op status block.**
+> **Run a known, countable repetition that speaks the blender-buttons language, in
+> order, as one turn, and return a receipt the agent can trust the same way it trusts
+> a single-op status block.**
 
 ---
 
@@ -54,10 +59,11 @@ is:
 | This is | This is not |
 |---------|-------------|
 | **Transports** over the existing verb/tool surface (`batch` + `exec`) | A new modeling domain or macro library |
-| Ordered multi-step runs that call the **same** `execute_command` path as MCP | A parallel mutation path that bypasses validate/status |
+| The same primitive, **N times**, N and the pattern already known | The default modeling loop; a dump of a unique 12-step plan |
+| Ordered runs that call the **same** `execute_command` path as MCP | A parallel mutation path that bypasses validate/status |
 | One MCP turn → many ordered ops → one **receipt** | A replacement for the REPL's perception loop |
 | A way to keep THE ONE RULE via measured returns (exec) or prior-receipt bounds (batch) | Permission to dump free `(x,y,z)` and call it progress |
-| A **progressive** bulk path (chunk → receipt → next chunk) | A license to author a 2000-line program and hope |
+| A **progressive** repetition path (chunk → receipt → next chunk) | A license to author a 2000-line program and hope |
 
 Techniques (`guidance://techniques/…`) stay **method docs**. Recipes stay **verified
 transcripts**. The runner is **execution**. Macros (`buttons-*-macro`) stay **named
@@ -69,47 +75,51 @@ composites with fixed semantics**. Session-local programs are not shipped primit
 
 The failure mode this section exists to kill:
 
-> Agent authors a triumphant 2000-line Python script, fires it once, receives a receipt
-> with hundreds of findings (or aborts at step 4 of 400 with a ruined partial scene),
-> and has no cheap way to localize *which* assumption was wrong.
+> Agent treats `script` as the default multi-step path — either a unique 12-step
+> assembly dumped as a batch, or a triumphant 2000-line Python scene, fired once,
+> receipt unreadable, no cheap way to localize *which* assumption was wrong.
 
-Bulk is useful. **Unverified bulk is how you lose an hour.** So bulk is progressive by
-default, and the server enforces budgets that make the mega-dump awkward.
+Repetition is useful. **Unverified bulk is how you lose an hour.** So even countable
+repetition is progressive, and the server enforces budgets that make the mega-dump
+awkward.
 
 | Gear | What it is | Use when | Between turns |
 |------|------------|----------|---------------|
-| **REPL** | One MCP verb call | Shape unknown; localization; taste; mid-mesh surgery; anything that needs a fresh still or a decision the agent can't pre-encode | Agent judgment on each status / look / feel |
-| **Batch** | Ordered list of ~N verb steps, **no Python** — the default bulk gear | Known linear sequence: create/place/material stacks, recipe segments, "these 15 adds then snap" | Read the receipt; fix or continue with the next batch of ~N |
-| **Exec** | Python + `buttons` DSL | Need loops, measured branches, computed counts, parametric repetition the batch list can't express cleanly | Same progressive discipline — **short** exec bodies, not novels |
+| **REPL** | One MCP verb call — **the default** | Shape unknown; localization; taste; unique steps (even if planned); anything that needs a fresh still or a decision the agent can't pre-encode | Agent judgment on each status / look / feel |
+| **Exec** | Python + `buttons` DSL — **the usual repetition form** | Same primitive, count already known: `for i in range(n_holes)`, computed names, a mid-phase `feel` branch | Short body, one phase; read the receipt; next chunk or back to REPL |
+| **Batch** | Ordered list of ~N verb steps, **no Python** | Short enumerated repetition you can name without a loop (six identical feet, a named bolt set) | Read the receipt; fix or continue with the next chunk of the same repetition |
 
 **Litmus:**
 
-- Next number needs a `look` / human render → **REPL**
-- Next 5–25 steps are already known and linear → **batch**
-- Next steps need `for` / `if bounds.z_max > …` / computed names → **exec**, still in a
-  **small** body (one phase), not the whole build
+- Next step needs a `look` / human render / a *different* judgment → **REPL**
+- Same primitive, `for i in range(n)` / computed names, n already known → **exec**,
+  still a **small** body (one phase), not the whole build
+- Same primitive, short list you can enumerate without a loop → **batch**
+- "I planned 15 different ops" → still **REPL**
 
 **Composition (the house style):**
 
 ```
-batch (phase A, ≤ budget) → read receipt → fix if dirty
-  → batch (phase B) → receipt
-  → exec only when a phase truly needs control flow
-  → REPL when perception or taste gates the next move
+REPL until the pattern is known and counted
+  → exec (or a short batch) for one repetition phase, ≤25
+  → read receipt → fix if dirty
+  → next chunk of the same repetition, or back to REPL
 ```
 
-Batch is not a lesser sibling of exec. **Batch is the primary bulk gear.** Exec is the
-power tool for control flow. REPL remains the eyes.
+REPL remains the eyes. Exec is the power tool for quantified repetition. Batch is the
+no-Python form of a short enumerated list — not a lesser sibling of exec, and not a
+dumping ground for a unique assembly.
 
-### 3.1 Why batch is the default bulk gear
+### 3.1 Why even repetition is phased (and why a short batch beats a novel exec)
 
-1. **Bounded blast radius.** A 25-step batch that fails is a 25-step problem. A 400-step
-   exec that fails is an archaeology problem — even with a good journal.
+1. **Bounded blast radius.** A 25-step hole grid that fails is a 25-step problem. A
+   400-step exec that fails is an archaeology problem — even with a good journal.
 2. **Forced re-ground.** Returning to the agent between chunks re-attaches THE ONE RULE
    to *measured* receipt bounds before the next chunk is authored. Mega-scripts author
    far ahead of any ground truth the server has returned *in this turn*.
-3. **No control-flow fantasy.** Linear steps are honest about what the agent actually
-   knows. Python invites writing the whole cathedral before the foundation validates.
+3. **No control-flow fantasy.** A counted loop is honest about what the agent actually
+   knows. Python still invites writing the whole cathedral before the foundation
+   validates — don't.
 4. **Same receipt.** Batch and exec share one receipt shape — progressive chunks stay
    legible the same way.
 
@@ -117,11 +127,13 @@ power tool for control flow. REPL remains the eyes.
 
 **Rejected as the working style:** one `exec` that builds an entire multi-object scene
 from a blank mental model, with validation only at the end (or as a wall of per-step
-findings the agent cannot act on).
+findings the agent cannot act on). Also rejected: using `batch`/`exec` because the
+agent has more than one step.
 
-**Required style:** phases. Each phase is one batch (preferred) or one short exec,
-sized so a human or agent can read the receipt and answer "is this phase good?" before
-the next phase depends on it.
+**Required style:** REPL until the repetition is known and counted; then phases. Each
+phase is one short exec (usual) or one short batch (enumerated list), sized so a human
+or agent can read the receipt and answer "is this phase good?" before the next phase
+depends on it.
 
 Server-side step cap (§6.4) makes the rejected style impossible past 25 steps; guidance
 makes mega-phases wrong even under the cap; first-failure receipt focus (§5.9) makes
@@ -137,8 +149,8 @@ One new MCP verb: **`script`**.
 
 | `op` | Role |
 |------|------|
-| `batch` | Run an ordered list of verb/tool steps (no Python). **Default bulk path.** |
-| `exec` | Run a Python body with the `buttons` DSL in scope. Control-flow / parametric path. |
+| `exec` | Run a Python body with the `buttons` DSL in scope. **Usual repetition path** (a short counted loop). |
+| `batch` | Run an ordered list of verb/tool steps (no Python). Short enumerated repetition. |
 | `dry_run` | Parse / bind only: syntax, unknown tools, missing required params, budget check — no mutation |
 
 Parameters (sketch):
@@ -205,7 +217,7 @@ Design rules for the DSL:
    underlying tools may still accept measured points), but the receipt **tags** steps
    that used absolute placement so the agent and human can see drift toward divination.
 
-### 4.3 Batch form (primary bulk API)
+### 4.3 Batch form (short enumerated repetition)
 
 ```json
 {
@@ -219,27 +231,28 @@ Design rules for the DSL:
 ```
 
 Same receipt shape as `exec`. No loops, no branches — and that is a feature. Ideal for
-tests, deterministic recipe segments, and the normal "queue ~25 known calls" workflow.
+a short enumerated repetition (six identical feet, a named bolt set) and for tests
+that prove transport. Not a dump of a unique assembly.
 
 **Authoring from a prior receipt:** the agent copies measured bounds / names from the
 last receipt's journal into the next batch's params (relational `on=` preferred). That
 is progressive THE ONE RULE without Python.
 
-**Chunk size habit:** aim for one *phase* per batch — e.g. "all four legs + seat," not
-"entire chair + materials + UVs + render setup." Hard step cap is **25** — you cannot
-author past that in one run (§6.4).
+**Chunk size habit:** aim for one *repetition phase* per run — e.g. "≤25 speaker
+holes," not "entire laptop + materials + UVs + render setup." Hard step cap is **25**
+— you cannot author past that in one run (§6.4).
 
-### 4.4 Exec form (control flow only)
+### 4.4 Exec form (usual repetition path)
 
-Use `exec` when a phase needs:
+Use `exec` when the repetition is quantified:
 
-- repetition with a computed count (`for i in range(n_spokes)`),
+- a computed count (`for i in range(n_holes)` — speaker grille, frets, spokes),
 - branch on a mid-phase measure (`if feel(...): …`),
 - name generation or math that is uglier as 25 nearly-duplicate JSON steps.
 
-Do **not** use `exec` to smuggle a whole-build novel past the batch habit. An exec body
-should still be one phase: short enough that the journal is skimmable and a single
-undo unit is emotionally cheap to throw away.
+Do **not** use `exec` to smuggle a whole-build novel, or a unique assembly, past the
+REPL. An exec body should still be one repetition phase: short enough that the journal
+is skimmable and a single undo unit is emotionally cheap to throw away.
 
 ---
 
@@ -577,9 +590,9 @@ what we are building the product *against*.
 | **SPEC-15 interlock** | One client turn per batch/exec; in-run ops are not "external" |
 | **History / undo** | One labeled undo unit per batch/exec run (`script:<label>`). **No history-UI expansion** for v1 — label only if anything shows; full journal lives on the MCP receipt |
 | **Collab panel** | Not required for v1 |
-| **Techniques / recipes** | Prefer showing **batch chunks** as the executable form of a recipe phase; techniques stay prose-first |
+| **Techniques / recipes** | Techniques stay prose-first (REPL between steps). A recipe may emit a repetition phase as exec/batch; unique steps stay in the REPL |
 | **Macros** | Unrelated — macros are named composites; batches/scripts are session-local |
-| **Guidance** | Three gears; progressive bulk; hard cap 25; first-failure reading; anti-megascript |
+| **Guidance** | REPL is the default; script is known countable repetition; hard cap 25; first-failure reading; anti-megascript |
 | **ue-buttons** | Out of scope |
 
 ---
@@ -594,10 +607,12 @@ what we are building the product *against*.
 6. **Silent absolute coordinates as the house style.** Tag them; prefer relational `on=`.
 7. **Auto-checkpoint every N steps.** Wallpaper; checkpoints must be intentional.
 8. **Using batch/exec for look→claim→edit localization loops.** That's the REPL's job.
-9. **The triumphant megascript.** One exec/batch that is "the whole build," validated
-   only by a terminal findings wall. Server budgets + guidance reject this.
-10. **`on_error=continue` as a build strategy.** Diagnostic only; not how phases ship.
-11. **`path=` / loops to bypass the step cap.** Hard cap 25 counts dynamic steps; no
+9. **Using script because you have more than one step.** Unique steps stay in the REPL
+   even when already planned. Script is for the same primitive, N times, N known.
+10. **The triumphant megascript.** One exec/batch that is "the whole build," validated
+    only by a terminal findings wall. Server budgets + guidance reject this.
+11. **`on_error=continue` as a build strategy.** Diagnostic only; not how phases ship.
+12. **`path=` / loops to bypass the step cap.** Hard cap 25 counts dynamic steps; no
     raise-the-cap escape hatch.
 
 ---
@@ -629,7 +644,8 @@ what we are building the product *against*.
 12. **e2e** covers: batch happy path, progressive two-batch, abort on non-manifold +
     transactional restore, first-failure formatting, 26-step reject, exec loop budget,
     undo unit.
-13. **Guidance** teaches three gears + progressive bulk + hard cap 25 + "do not megascript."
+13. **Guidance** teaches REPL as the default, script as known countable repetition,
+    hard cap 25, and "do not megascript."
 
 ---
 
@@ -643,13 +659,13 @@ what we are building the product *against*.
 3. `server/verbs/script.py` — MCP verb + receipt pretty-printer (first-failure lead;
    do not dump `_status` N times or findings walls).
 4. Tests: `tests/e2e_spec23_script_runner.py`.
-5. `GUIDANCE_FOR_LLMs.md` + `server/_instructions.py`: three gears, hard cap 25,
-   progressive habit.
+5. `GUIDANCE_FOR_LLMS.md` + `server/_instructions.py`: REPL is the default; script is
+   known countable repetition; hard cap 25; progressive habit.
 6. Optional follow-on: recipe segments emitted as batch JSON (not v1).
 
 ---
 
-## 11. Closed questions (rev 3)
+## 11. Closed questions (rev 4)
 
 | # | Question | Decision |
 |---|----------|----------|
@@ -660,6 +676,7 @@ what we are building the product *against*.
 | 5 | Oversize / `max_steps` | **None.** No raise-the-cap param; >25 → `rejected_budget`, no mutation |
 | 6 | History UI | **None for v1.** One labeled undo unit only; journal lives on the MCP receipt |
 | 7 | ue-buttons | **Out of scope.** Separate project |
+| 8 | When is script the right tool | **Known, highly repetitive, obviously quantifiable work** — the same primitive N times, N already known (speaker holes, frets, a bolt ring). REPL is the default. Unique planned sequences stay in the REPL. (rev 4) |
 
 ---
 
@@ -667,9 +684,9 @@ what we are building the product *against*.
 
 | Decision | Choice |
 |----------|--------|
-| Gears | **REPL** · **batch** (default bulk) · **exec** (control flow) |
+| Gears | **REPL** (default) · **exec** (counted repetition) · **batch** (short enumerated list) |
 | Transport verb | `script`: `batch` + `exec` + `dry_run` |
-| Progressive bulk | Phase-sized chunks; receipt between chunks; no whole-build novels |
+| Progressive bulk | Repetition in phase-sized chunks; receipt between chunks; no whole-build novels |
 | Budgets | **Hard cap 25** (reject above); loops count; no soft oversize / no `max_steps` raise |
 | Mutation path | Nested `execute_command` (DSL); **full surface**, thin map; bpy allowed but tagged |
 | In-exec truth | Structured returns with bounds/validate every step |

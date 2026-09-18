@@ -1,14 +1,16 @@
 """SPEC-23 — Script runner (experimental v0).
 
-Transport over the existing verb/tool surface: ordered multi-step runs that call
-the same `execute_command` path as MCP (placement DSL, auto-feel, auto-validate).
+Transport over the existing verb/tool surface for **known, countable repetition**
+(the same primitive N times, N already known). Not the default modeling loop —
+that's one MCP verb at a time. Nested `execute_command` (placement DSL, auto-feel,
+auto-validate).
 
 Gears:
-  • batch  — ordered list of verb/tool steps (primary bulk path)
-  • exec   — short Python body with a `buttons` DSL in scope
+  • exec    — short Python loop over a quantified count (usual repetition path)
+  • batch   — short enumerated list of the same (or near-same) step, no Python
   • dry_run — resolve/bind/budget only, no mutation
 
-Hard step cap: 25. Progressive bulk is the point — see docs/SPEC-23-script-runner.md.
+Hard step cap: 25. Progressive chunks, not megascripts — see docs/SPEC-23-script-runner.md.
 """
 
 from __future__ import annotations
