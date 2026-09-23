@@ -259,6 +259,13 @@ def get_blender_status(params):
             "FACE"
         )
 
+    # B15: the focal plane is a distance snapshot. Say so, and say when the
+    # named target is no longer at that distance (a rig recomputes it).
+    from .lighting import dof_status
+    dof = dof_status(bpy.context.scene)
+    if dof:
+        status["dof"] = dof
+
     if obj and obj.mode == 'EDIT' and obj.type == 'MESH':
         bm = _bmesh.from_edit_mesh(obj.data)
         sel_verts  = [v for v in bm.verts if v.select]

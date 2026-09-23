@@ -286,6 +286,31 @@ def _status(result: dict) -> str:
         )
     if s.get("viewport"):
         lines.append(f"  viewport:    {s['viewport']}  (user's live shading mode)")
+    dof = s.get("dof")
+    if dof:
+        if dof.get("missing_target"):
+            lines.append(
+                f"  dof:         {dof['camera']} focused on {dof.get('focus_target')} "
+                f"at {dof['focus_distance']} m — STALE, that object is gone"
+            )
+        elif dof.get("stale"):
+            lines.append(
+                f"  dof:         {dof['camera']} focused on {dof['focus_target']} "
+                f"at {dof['focus_distance']} m — STALE, that object is at "
+                f"{dof['current_m']} m along the lens now. "
+                f"view op=rig recomputes it; "
+                f"view op=camera_dof focus_object={dof['focus_target']} refreshes it"
+            )
+        elif dof.get("focus_target"):
+            lines.append(
+                f"  dof:         {dof['camera']} focused on {dof['focus_target']} "
+                f"at {dof['focus_distance']} m at this camera; not tracking"
+            )
+        else:
+            lines.append(
+                f"  dof:         {dof['camera']} focus_distance={dof['focus_distance']} m "
+                f"(no focus target)"
+            )
     if "edit" in s:
         e = s["edit"]
         lines += [

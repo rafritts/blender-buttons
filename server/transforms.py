@@ -93,9 +93,14 @@ def rest_on(targets: str = "", target: str = "", axis: str = "Z",
     if result.get("success"):
         # G108: a negative dropped_mm means the part STRADDLED/sat below the target and
         # was LIFTED to rest, not dropped — show the direction so it reads true.
-        def _mv(d):
-            return f"↑{abs(d)}mm (lifted to rest)" if d < 0 else f"↓{d}mm"
-        drops = ", ".join(f"{r['name']}{_mv(r['dropped_mm'])}" for r in result["rested"]) or "nothing"
+        def _mv(r):
+            d = r["dropped_mm"]
+            text = f"↑{abs(d)}mm (lifted to rest)" if d < 0 else f"↓{d}mm"
+            hang = r.get("cage_hang_mm")
+            if hang:
+                text += f" (evaluated surface; cage hangs {hang}mm past it)"
+            return text
+        drops = ", ".join(f"{r['name']}{_mv(r)}" for r in result["rested"]) or "nothing"
         main = f"rested on {target} ({result['axis']}): {drops} [{result.get('op_id','')}]"
     else:
         main = result.get("error", "failed")

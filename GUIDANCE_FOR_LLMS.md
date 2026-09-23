@@ -204,7 +204,9 @@ bulge on a dense, irregular mesh.** The normals disagree, so a uniform push lump
   (resolution, scale) — diffuse, roughness, and normal, box projection.
 - One soft AREA key light angled across the subject adds sparkle the HDRI alone
   doesn't give. Aim with `target=`.
-- DOF: `view op=camera_dof focus_object=...`; f/4 keeps a tabletop scene readable, f/2.8
+- DOF: `view op=camera_dof focus_object=...` stores that object's evaluated center as a
+  focus distance at this camera. `view op=rig` recomputes it. The status `dof:` line names
+  the distance and says when it has gone stale. f/4 keeps a tabletop scene readable, f/2.8
   for macro drama.
 - AgX (default) for PBR realism; `render op=color view_transform=Standard` for
   saturated emission.

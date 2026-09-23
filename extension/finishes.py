@@ -230,9 +230,12 @@ def add_modifier(params):
             mod.relative_offset_displace = (1.0, 0.0, 0.0)
         _configure_array(mod, params)
     if hasattr(mod, 'levels'):
-        mod.levels = params.get("levels", 2)
+        # B14: SubsurfModifier.levels is an int. A JSON 2.0 must not be assigned raw.
+        lv = params.get("levels", 2)
+        mod.levels = int(2 if lv is None else lv)
     if hasattr(mod, 'render_levels'):
-        mod.render_levels = params.get("render_levels", params.get("levels", 2))
+        rv = params.get("render_levels", params.get("levels", 2))
+        mod.render_levels = int(2 if rv is None else rv)
     if hasattr(mod, 'width'):
         mod.width = params.get("width", 0.1)
     if hasattr(mod, 'segments'):
@@ -544,7 +547,7 @@ def rebind_deform(params):
 
 
 _MODIFIER_PROPS = {
-    "levels":        ("levels",       float),  # SUBSURF
+    "levels":        ("levels",       int),    # SUBSURF / MULTIRES (B14: int, not float)
     "render_levels": ("render_levels", int),
     "width":         ("width",        float),  # BEVEL / SOLIDIFY
     "segments":      ("segments",     int),

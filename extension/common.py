@@ -75,6 +75,19 @@ def evaluated_differs(obj):
     return any(m.show_viewport for m in obj.modifiers)
 
 
+def surface_zmin(obj):
+    """World Z of the surface the floor judges (B17).
+
+    rest_on seats the evaluated shell. A live Subsurf or Solidify cage hangs
+    outside that shell, so a plate whose visible foot is on z=0 still has cage
+    verts below the plane. Judge the evaluated shell when a modifier is
+    viewport-enabled; otherwise the cage is the mesh.
+    """
+    if evaluated_differs(obj):
+        return eval_world_bbox(obj)[2]
+    return world_bbox(obj)[2]
+
+
 def measurement_provenance(objs, basis="evaluated"):
     """A provenance tag for a spatial read: which mesh was measured + any live modifiers
     on the objects involved. Every distance / gap / clearance / contact number carries

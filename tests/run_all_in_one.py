@@ -41,6 +41,7 @@ SUITES = [
     "e2e_g226_g231_gapfixes.py",
     "e2e_g232_b13_gapfixes.py",
     "e2e_g236_g239_gapfixes.py",
+    "e2e_b14_b17_bugfixes.py",
     "e2e_g209_g212_handles.py",
     "e2e_g214_bud.py",
     # SPEC-22 Phase 4 — native-basis completion (19 new edit ops + shrink_fatten fix)

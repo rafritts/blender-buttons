@@ -270,6 +270,9 @@ perception. What survived: the reactor-not-inspector framing, report-by-exceptio
   resolve to a single read; context-dependent ops auto-skip (tallied as *context-unavailable*).
 - `validate` runs after every op; intent-free defects (z-fight / non-manifold / normals / degenerate)
   have **no** suppression path. `below_floor` and `self_intersection` are declarable; undeclared, they still fail.
+  `below_floor` measures the evaluated shell when a modifier is viewport-enabled (B17): a Subsurf
+  cage hangs outside the surface `rest_on` seats, and judging the cage reports a seated plate as
+  dipped through the floor.
 - `intend` is scoped to `(check, counterpart)`: declaring Hair↔Body intended collapses that finding
   to a count but a later Hair↔Hat clip still fires.
 - Bidirectional enforcement: a *declared-intended* clip that disappears raises a confirm/clear

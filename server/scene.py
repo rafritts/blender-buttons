@@ -59,7 +59,8 @@ def aim_object(name: str = "", subject: str = "", label: str = "") -> str:
         return "aim needs subject=<object to look at>"
     result = call_blender("aim_at", {"name": name, "subject": subject}, label=label)
     if result.get("success"):
-        main = f"aimed {result['aimed']} at {result['subject']} [{result.get('op_id','')}]"
+        focus = f" — {result['focus_note']}" if result.get("focus_note") else ""
+        main = f"aimed {result['aimed']} at {result['subject']}{focus} [{result.get('op_id','')}]"
     else:
         main = result.get("error", "failed")
     return main + _status(result)
@@ -84,9 +85,10 @@ def rig_object(name: str = "", subject: str = "", azimuth: float = 45.0,
         label=label)
     if result.get("success"):
         fit_str = f" — {result['fit']}" if result.get("fit") else ""
+        focus = f" — {result['focus_note']}" if result.get("focus_note") else ""
         main = (f"rigged {result['rigged']} around {result['subject']} "
                 f"(az {result['azimuth']}° el {result['elevation']}° d {result['distance']}m)"
-                f"{fit_str} [{result.get('op_id','')}]")
+                f"{fit_str}{focus} [{result.get('op_id','')}]")
     else:
         main = result.get("error", "failed")
     return main + _status(result)
@@ -586,7 +588,8 @@ def set_camera_dof(focus_distance: float = None, aperture: float = None,
     Enable depth of field on the scene camera (the blurry-background look).
 
     focus_distance: meters from camera to focal plane. Ignored if focus_object is set.
-    focus_object:   object to focus on (auto-tracks its distance).
+    focus_object:   object to snapshot. Stores its evaluated center along the lens
+                    at this camera; view op=rig recomputes that distance. Not a live binding.
     aperture:       f-stop. Lower = shallower DoF. 1.4 (very shallow) | 2.8 (portrait) | 8 (deep).
     camera:         camera object name. Empty = scene camera.
 
@@ -599,10 +602,13 @@ def set_camera_dof(focus_distance: float = None, aperture: float = None,
     if camera:                     params["camera"] = camera
     result = call_blender("set_camera_dof", params, label=label)
     if result.get("success"):
-        main = (f"DoF on '{result['camera']}': "
-                f"focus_object={result['focus_object']} "
-                f"focus_distance={result['focus_distance']} "
-                f"f/{result['aperture_fstop']} [{result.get('op_id','')}]")
+        if result.get("note"):
+            main = (f"DoF on '{result['camera']}': {result['note']} "
+                    f"f/{result['aperture_fstop']} [{result.get('op_id','')}]")
+        else:
+            main = (f"DoF on '{result['camera']}': "
+                    f"focus_distance={result['focus_distance']} "
+                    f"f/{result['aperture_fstop']} [{result.get('op_id','')}]")
     else:
         main = result.get("error", "failed")
     return main + _status(result)

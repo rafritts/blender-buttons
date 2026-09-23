@@ -613,17 +613,20 @@ def rest_on(params):
         # G108: start each ray ABOVE the target's top (not at the vert), so a vert that
         # already sits at/below the target still finds the surface beneath it and yields
         # a NEGATIVE clearance — the part is lifted to rest, not dropped deeper.
+        # B17: that minimum is the first contact. On a flat table it IS the lowest
+        # hitting vert (every ray hits the same plane). The donut plate's "1.2 mm
+        # through the table" was the Subsurf cage, which hangs outside the evaluated
+        # shell this loop seats. The floor judges that shell (surface_zmin).
         ray_top = tgt["bbox"][axis_idx + 3] + 1.0   # 1 m above the target's highest point
-        min_clear = None
-        for v in src_verts:
+        hit_rows = []   # (vert index, axis, hit axis) — index matches eval vert order
+        for i, v in enumerate(src_verts):
             origin = v.copy()
             origin[axis_idx] = ray_top
             loc, normal, idx, dist = tgt["bvh"].ray_cast(origin, down)
             if loc is None:
                 continue
-            clear = v[axis_idx] - loc[axis_idx]   # signed: + above surface, − below it
-            if min_clear is None or clear < min_clear:
-                min_clear = clear
+            hit_rows.append((i, v[axis_idx], loc[axis_idx]))
+        min_clear = None if not hit_rows else min(a - h for _, a, h in hit_rows)
         if min_clear is None:
             # Diagnostic, not divinatory (G31): say WHY nothing was beneath it —
             # planar overlap/clearance with the target per in-plane axis, the nearest
@@ -653,8 +656,36 @@ def rest_on(params):
             return {"error": (f"'{o.name}' has no '{target_name}' surface beneath it along "
                               f"{axis_key} to rest on. Planar fit: {diag}{near_txt}{hint}.")}
         drop = min_clear - offset   # translate by −drop along axis to seat (then add clearance)
+        loc_before = o.location[axis_idx]
         o.location[axis_idx] -= drop
-        rested.append({"name": o.name, "dropped_mm": round(drop * 1000, 2)})
+        bpy.context.view_layer.update()
+        # B17: re-read the evaluated shell. A vert that had a hit and now sits
+        # below that hit finished through the surface — fail the seat, don't
+        # report success and leave the floor to mention it.
+        from .common import eval_world_bmesh, eval_world_bbox, evaluated_differs, world_bbox
+        sbm2 = eval_world_bmesh(o)
+        penetrated = False
+        if sbm2 is not None and len(sbm2.verts) == len(src_verts):
+            for i, _axis_before, hit_axis in hit_rows:
+                if sbm2.verts[i].co[axis_idx] < hit_axis + offset - 1e-4:
+                    penetrated = True
+                    break
+        if sbm2 is not None:
+            sbm2.free()
+        if penetrated:
+            o.location[axis_idx] = loc_before
+            bpy.context.view_layer.update()
+            return {"error": (
+                f"'{o.name}' would finish below the surface of '{target_name}' "
+                f"along {axis_key}. rest_on refused the seat."
+            )}
+        entry = {"name": o.name, "dropped_mm": round(drop * 1000, 2)}
+        if evaluated_differs(o):
+            cage_min = world_bbox(o)[axis_idx]
+            eval_min = eval_world_bbox(o)[axis_idx]
+            if cage_min < eval_min - 1e-4:
+                entry["cage_hang_mm"] = round((eval_min - cage_min) * 1000, 2)
+        rested.append(entry)
     bpy.context.view_layer.update()
     return {"success": True, "target": target_name, "axis": axis_key,
             "offset": offset, "rested": rested}

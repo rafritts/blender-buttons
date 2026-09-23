@@ -117,7 +117,12 @@ def aim_at(params):
         return {"error": f"'{obj.name}' sits at the subject's centre — move it out first"}
     obj.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()
     bpy.context.view_layer.update()
-    return {"success": True, "aimed": [obj.name], "subject": tgt.name}
+    out = {"success": True, "aimed": [obj.name], "subject": tgt.name}
+    note = refocus_named_target(obj)
+    if note:
+        out["focus_note"] = note
+        out["focus_distance"] = round(obj.data.dof.focus_distance, 4)
+    return out
 
 
 def rig_around(params):
@@ -203,6 +208,10 @@ def rig_around(params):
            "distance": round(dist, 4), "location": [round(v, 4) for v in pos]}
     if fit_note:
         out["fit"] = fit_note
+    note = refocus_named_target(obj)
+    if note:
+        out["focus_note"] = note
+        out["focus_distance"] = round(obj.data.dof.focus_distance, 4)
     return out
 
 
@@ -408,15 +417,86 @@ def set_world_volume(params):
     }
 
 
+# B15: a named focus is a distance snapshot, not Blender's dof.focus_object
+# (that tracker follows the rest origin — gaps.md T2). The name lives here so
+# rig/aim can recompute it, and so the receipt cannot claim a live binding.
+_FOCUS_KEY = "bb_focus_target"
+
+
+def _lens_forward(cam):
+    return (cam.matrix_world.to_3x3() @ mathutils.Vector((0.0, 0.0, -1.0))).normalized()
+
+
+def projected_focus_distance(cam, target):
+    """Meters along the camera's lens axis to target's evaluated center.
+    Negative when the target is behind the camera."""
+    from .common import eval_world_center
+    center = mathutils.Vector(eval_world_center(target))
+    return float((center - cam.matrix_world.translation).dot(_lens_forward(cam)))
+
+
+def refocus_named_target(cam):
+    """Recompute dof.focus_distance from the named snapshot. None when this
+    object has no snapshot. The distance stays put when the target is gone
+    or behind the lens — the returned sentence says so."""
+    if cam is None or cam.type != 'CAMERA':
+        return None
+    name = cam.get(_FOCUS_KEY)
+    if not name:
+        return None
+    dof = cam.data.dof
+    tgt = bpy.data.objects.get(name)
+    if tgt is None:
+        return (f"focus target '{name}' is gone; distance left at "
+                f"{round(dof.focus_distance, 4)} m")
+    dist = projected_focus_distance(cam, tgt)
+    if dist <= 1e-4:
+        return (f"focus target '{name}' is behind the camera; distance left at "
+                f"{round(dof.focus_distance, 4)} m")
+    dof.focus_object = None
+    dof.focus_distance = dist
+    return f"focused on {name} at {round(dist, 4)} m at this camera; not tracking"
+
+
+def dof_status(scene):
+    """Status-block DOF fact. Read-only: a named snapshot whose lens distance
+    has drifted more than 1 mm is marked stale instead of being rewritten."""
+    cam = scene.camera
+    if cam is None or cam.type != 'CAMERA' or not getattr(cam.data, "dof", None):
+        return None
+    dof = cam.data.dof
+    if not dof.use_dof:
+        return None
+    info = {
+        "camera": cam.name,
+        "focus_distance": round(float(dof.focus_distance), 4),
+        "tracking": False,
+    }
+    name = cam.get(_FOCUS_KEY)
+    if not name:
+        return info
+    info["focus_target"] = name
+    tgt = bpy.data.objects.get(name)
+    if tgt is None:
+        info["stale"] = True
+        info["missing_target"] = True
+        return info
+    dist = projected_focus_distance(cam, tgt)
+    if dist > 1e-4 and abs(dist - float(dof.focus_distance)) > 0.001:
+        info["stale"] = True
+        info["current_m"] = round(dist, 4)
+    return info
+
+
 def set_camera_dof(params):
     """Enable depth of field on the scene camera.
 
     camera:         camera object name. If omitted, uses the scene camera.
     focus_distance: meters from camera to focal plane. Ignored if focus_object is set.
-    focus_object:   object name to focus on. Focuses on the object's EVALUATED
-                    (posed/deformed) geometry center at call time — not Blender's
-                    focus-object tracking, which follows the rest origin and so
-                    misses a boulder riding a cocked arm by ~1m (gaps.md T2).
+    focus_object:   object name to focus on. Stores the object's EVALUATED center
+                    projected onto the lens axis at this camera (B15). Not Blender's
+                    focus-object tracker, which follows the rest origin and misses a
+                    posed mesh (gaps.md T2). view op=rig recomputes the distance.
     aperture:       f-stop value. Lower = shallower DoF (more blur).
                     Typical: 1.4 (very shallow), 2.8 (portrait), 8 (everything in focus).
     """
@@ -432,31 +512,32 @@ def set_camera_dof(params):
             return {"error": "No camera in scene"}
 
     dof = cam.data.dof
-    dof.use_dof = True
-
     focus_object_name = params.get("focus_object")
     focus_target = None
+    note = None
+    dist = None
     if focus_object_name:
-        import mathutils
-        from .common import eval_world_center
         tgt = bpy.data.objects.get(focus_object_name)
         if tgt is None:
             return {"error": f"focus_object '{focus_object_name}' not found"}
-        # Project the evaluated-geometry center onto the camera's view axis to get
-        # the focal-plane distance (focus_distance is measured along the lens axis,
-        # not euclidean to the point). Setting a computed distance — not
-        # dof.focus_object — focuses on the POSED geometry, not the rest origin.
-        center = mathutils.Vector(eval_world_center(tgt))
-        cam_mat = cam.matrix_world
-        forward = (cam_mat.to_3x3() @ mathutils.Vector((0.0, 0.0, -1.0))).normalized()
-        dof.focus_object = None
-        dof.focus_distance = float((center - cam_mat.translation).dot(forward))
+        dist = projected_focus_distance(cam, tgt)
+        if dist <= 1e-4:
+            return {"error": f"'{tgt.name}' is behind camera '{cam.name}' — move the camera first"}
         focus_target = tgt.name
+        note = (f"focused on {focus_target} at {round(dist, 4)} m at this camera; "
+                f"not tracking (recomputed when this camera is rigged)")
+
+    dof.use_dof = True
+    dof.focus_object = None
+    if focus_target is not None:
+        dof.focus_distance = dist
+        cam[_FOCUS_KEY] = focus_target
     else:
-        dof.focus_object = None
         fd = params.get("focus_distance")
         if fd is not None:
             dof.focus_distance = float(fd)
+            if _FOCUS_KEY in cam.keys():
+                del cam[_FOCUS_KEY]
 
     aperture = params.get("aperture")
     if aperture is not None:
@@ -467,8 +548,10 @@ def set_camera_dof(params):
         "success": True,
         "camera": cam.name,
         "use_dof": True,
-        "focus_object": focus_target,
+        "focus_target": focus_target,
         "focus_distance": round(dof.focus_distance, 4),
+        "tracking": False,
+        "note": note,
         "aperture_fstop": round(dof.aperture_fstop, 4),
     }
 

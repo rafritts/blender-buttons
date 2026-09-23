@@ -19,7 +19,7 @@ from .common import (
     object_bvh,
     resolve_targets,
     scene_mesh_objects,
-    world_bbox,
+    surface_zmin,
 )
 
 _AXES = "XYZ"
@@ -160,7 +160,7 @@ def validate_scene(params):
         })
 
     for o in objs:
-        xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(o)
+        zmin = surface_zmin(o)
         if zmin < -eps:
             findings.append({
                 "kind": "below_floor",

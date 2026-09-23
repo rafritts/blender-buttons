@@ -362,7 +362,7 @@ def run_validate(touched_names=None, scene_wide=False, verbose=False):
     _prune_dead_intents()
 
     from . import lint, introspect
-    from .common import scene_mesh_objects, world_bbox, eval_world_bmesh
+    from .common import scene_mesh_objects, surface_zmin, eval_world_bmesh
 
     scene = [o for o in scene_mesh_objects()]
     excluded = [o.name for o in scene if mesh_excluded(o.name)]
@@ -408,7 +408,7 @@ def run_validate(touched_names=None, scene_wide=False, verbose=False):
     cm = lint.check_mesh({"targets": list(scope_names)})
     reports = {r["object"]: r for r in cm.get("reports", [])} if cm.get("success") else {}
     for o in scope:
-        xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(o)
+        zmin = surface_zmin(o)
         below = zmin < -_EPS
         decl_bf = _below_intent(o.name) if below else None
         if below and decl_bf is not None:
@@ -487,7 +487,7 @@ def run_validate(touched_names=None, scene_wide=False, verbose=False):
         members = [o for o in scope if _token_matches(token, o.name)]
         if not members:
             continue
-        if all(world_bbox(o)[2] >= -_EPS for o in members):
+        if all(surface_zmin(o) >= -_EPS for o in members):
             e["status"] = "vanished"
             bf_vanished.append({"object": token, "reason": e.get("reason", "")})
 

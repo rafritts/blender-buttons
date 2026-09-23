@@ -51,7 +51,7 @@ def view(
     # camera_dof
     focus_distance: tag(float, "[camera_dof] focus distance (m)") = None,
     aperture: tag(float, "[camera_dof] f-stop (lower = shallower)") = None,
-    focus_object: tag(str, "[camera_dof/check_focus] object to focus on") = "",
+    focus_object: tag(str, "[camera_dof] object whose evaluated center is snapshotted along the lens (rig recomputes it); [check_focus] object to test") = "",
     resolve_for: tag(str, "[check_focus] object to solve the sharp-keeping aperture for; "
                           "[check_exposure] light to solve the ~0-stop energy for") = "",
     # camera_lens
@@ -93,8 +93,10 @@ def view(
                   call). resolve_for=<light> solves the ~0-stop energy. (targets, resolve_for)
       check_lighting — the lighting roll-up: exposure + focus in one read, no render.
                   (targets, camera)
-      camera_dof — depth of field on the camera (focus_distance OR focus_object,
-                  aperture f-stop, camera)
+      camera_dof — depth of field. focus_object= snapshots that object's evaluated
+                  center along the lens at this camera (view op=rig recomputes it;
+                  the status dof line says when the distance is stale). Or pass
+                  focus_distance directly. aperture is the f-stop. camera names which.
       camera_lens — retune the focal length of an existing camera (lens mm, camera) —
                   the wide-vs-compressed dial, no longer write-once at add
       active_camera — make an existing camera the active scene/render camera (camera)

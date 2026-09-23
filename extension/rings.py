@@ -7,6 +7,41 @@ from .common import nearby_objects
 from .state import push_undo
 
 
+def _commit_vert_selection(bm, obj):
+    """B16 — store a vert selection so the next verb still sees it.
+
+    Every edit verb exits to Object mode. In FACE or EDGE component mode,
+    `select_flush_mode` leaves the previous faces and edges selected, and the
+    next verb's edit entry restores those. A ring select then a grab moves
+    every vertex. A ring is verts: switch to VERT and flush the higher
+    domains from those verts.
+    """
+    import bmesh
+    from .editmode import _flush_vert_selection
+    bpy.context.tool_settings.mesh_select_mode = (True, False, False)
+    _flush_vert_selection(bm)
+    bmesh.update_edit_mesh(obj.data)
+    return sum(1 for v in bm.verts if v.select)
+
+
+def _reject_whole_mesh(bm, obj, intended, selected, what):
+    """Fail closed when a partial vert request comes back as the whole mesh."""
+    import bmesh
+    from .editmode import _flush_vert_selection
+    n = len(bm.verts)
+    if intended < n and selected == n:
+        for v in bm.verts:
+            v.select = False
+        _flush_vert_selection(bm)
+        bmesh.update_edit_mesh(obj.data)
+        return {"error": (
+            f"{what} on '{obj.name}' would leave all {n} verts selected "
+            f"(the request was {intended}). Refused so the next grab cannot "
+            f"translate the whole mesh."
+        )}
+    return None
+
+
 def _compute_rings(obj, axis_idx, decimals=4, selected_only=False):
     """Group mesh vertices into rings by world-space coordinate on the given axis.
     Returns (bmesh, [(position_world, [vert_indices]), ...]) sorted by position ascending.
@@ -46,7 +81,6 @@ def get_rings(params):
 
 
 def select_ring(params):
-    import bmesh
     obj = bpy.context.active_object
     if obj is None or obj.mode != 'EDIT':
         return {"error": "Must be in edit mode"}
@@ -74,21 +108,27 @@ def select_ring(params):
                 v.select = True
         else:
             v.select = match
-    bm.select_flush_mode()
-    bmesh.update_edit_mesh(obj.data)
+    intended = sum(1 for v in bm.verts if v.select)
+    selected = _commit_vert_selection(bm, obj)
+    rejected = _reject_whole_mesh(
+        bm, obj, intended, selected,
+        f"select_ring index {index} ({len(vert_indices)} verts in the ring)")
+    if rejected:
+        return rejected
     return {
         "success": True,
         "ring_index": index,
         "ring_count": n,
         "position_world": round(pos, 4),
         "verts_in_ring": len(vert_indices),
+        "verts_selected": selected,
+        "component_mode": "VERT",
     }
 
 
 def select_rings(params):
     """Select the union of vertices belonging to multiple rings along an axis. One call
     replaces the verbose select_ring + ADD + ADD + ... pattern when shaping repeated detail."""
-    import bmesh
     obj = bpy.context.active_object
     if obj is None or obj.mode != 'EDIT':
         return {"error": "Must be in edit mode"}
@@ -124,14 +164,21 @@ def select_rings(params):
         else:
             v.select = match
 
-    bm.select_flush_mode()
-    bmesh.update_edit_mesh(obj.data)
+    intended = sum(1 for v in bm.verts if v.select)
+    selected = _commit_vert_selection(bm, obj)
+    rejected = _reject_whole_mesh(
+        bm, obj, intended, selected,
+        f"select_rings {resolved} ({len(target_verts)} verts)")
+    if rejected:
+        return rejected
     return {
         "success": True,
         "axis": axis,
         "rings_selected": resolved,
         "ring_count": n,
         "verts_total": len(target_verts),
+        "verts_selected": selected,
+        "component_mode": "VERT",
     }
 
 
