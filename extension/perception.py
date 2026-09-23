@@ -22,6 +22,9 @@ from .common import region_words
 # Above this vert count the whole-mesh shell scan is skipped (identity omitted)
 # so narration can never become the slow path; counts/extent stay O(V) single-pass.
 _SHELL_SCAN_CAP = 400_000
+# Object-mode status repeats the live component selection (G237). Building a
+# bmesh of a huge mesh on every status call is not worth the line.
+_OBJECT_SEL_CAP = 100_000
 
 
 def shells(bm):
@@ -113,12 +116,33 @@ def _shell_identity(bm, sel_set, total):
 
 def describe_selection(obj):
     """The G220 narration: one line of legible ground truth about the live
-    edit-mode selection. Returns a dict with `line` (the sentence) plus the
-    structured fields, or None when obj isn't an edit-mode mesh."""
+    component selection. Returns a dict with `line` (the sentence) plus the
+    structured fields, or None when obj isn't a mesh (or, in object mode, the
+    mesh is too large to narrate on the status path).
+
+    Edit mode reads the edit bmesh. Object mode reads the selection stored on
+    the mesh — select ops exit edit mode before the status block is built, and
+    that selection is still what the next grab will move (G237)."""
     import bmesh
-    if obj is None or getattr(obj, "type", None) != 'MESH' or obj.mode != 'EDIT':
+    if obj is None or getattr(obj, "type", None) != 'MESH' or obj.data is None:
         return None
-    bm = bmesh.from_edit_mesh(obj.data)
+    owned = False
+    if obj.mode == 'EDIT':
+        bm = bmesh.from_edit_mesh(obj.data)
+    else:
+        if len(obj.data.vertices) > _OBJECT_SEL_CAP:
+            return None
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        owned = True
+    try:
+        return _narrate_selection(obj, bm)
+    finally:
+        if owned:
+            bm.free()
+
+
+def _narrate_selection(obj, bm):
     bm.verts.ensure_lookup_table()
     mw = obj.matrix_world
     total = len(bm.verts)

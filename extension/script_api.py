@@ -132,6 +132,7 @@ _MATERIAL_OP_TO_TOOL = {
     "set": "set_material",
     "assign": "assign_material",
     "image": "bind_image",
+    "texture": "apply_texture",
     "shade_smooth": "shade_smooth",
     "shade_flat": "shade_flat",
 }
@@ -385,7 +386,7 @@ def _absolute_placement(params):
     return "at" in on
 
 
-def _classify_step(tool, result, strict=False, baseline_if=None):
+def _classify_step(tool, result, strict=False, baseline_if=None, defer_below_for=None):
     """Return (flag, findings_list, should_abort, abort_reason).
 
     flag: ok | warn | fail
@@ -393,9 +394,15 @@ def _classify_step(tool, result, strict=False, baseline_if=None):
     G231 / SPEC-23 §5.6: abort on intent-free defects INTRODUCED by the step.
     Pre-existing scene leftovers (same check+message as the pre-script baseline)
     stay visible on the final validate line, not fatal to an unrelated batch.
+
+    G236: below_floor on a mesh THIS script created does not abort the step. A centered
+    primitive is born straddling z=0; the next line may seat it or declare it
+    (`expect check=below_floor`). The end of the script still aborts if that mesh
+    is undeclared-below. A dip on any other mesh aborts immediately.
     """
     findings = []
     baseline_if = baseline_if or set()
+    defer_below_for = defer_below_for or set()
     if not isinstance(result, dict):
         return "fail", [{"kind": "error", "message": str(result)}], True, str(result)
 
@@ -412,6 +419,7 @@ def _classify_step(tool, result, strict=False, baseline_if=None):
             findings.append({
                 "kind": "intent_free",
                 "check": f.get("check"),
+                "object": f.get("object"),
                 "message": f.get("message") or f.get("check"),
             })
         clip = v.get("clipping") or {}
@@ -430,8 +438,13 @@ def _classify_step(tool, result, strict=False, baseline_if=None):
     intent_free = [f for f in findings if f["kind"] == "intent_free"]
     clips = [f for f in findings if f["kind"] == "undeclared_clip"]
 
-    if intent_free:
-        msg = intent_free[0]["message"]
+    def _deferred_below(f):
+        return (f.get("check") == "below_floor"
+                and f.get("object") in defer_below_for)
+
+    hard = [f for f in intent_free if not _deferred_below(f)]
+    if hard:
+        msg = hard[0]["message"]
         return "fail", findings, True, f"intent-free defect: {msg}"
 
     if clips and strict:
@@ -485,6 +498,23 @@ def _journal_line(entry):
 
 def _scene_names():
     return set(o.name for o in bpy.context.scene.objects)
+
+
+def _created_still_below(runner):
+    """G236 — abort message if a mesh this script created is still undeclared
+    below z=0, else None. Declared ground/scrap and seated meshes are clean."""
+    try:
+        v = validation.run_validate(None, scene_wide=True)
+    except Exception as e:
+        return f"validate error: {e}"
+    created = set(runner.created)
+    for f in (v.get("intent_free") or []):
+        if f.get("check") != "below_floor":
+            continue
+        if f.get("object") not in created:
+            continue
+        return f"intent-free defect: {f.get('message') or 'below_floor'}"
+    return None
 
 
 class _Runner:
@@ -555,8 +585,16 @@ class _Runner:
         if not isinstance(result, dict):
             result = {"error": str(result), "success": False}
 
+        # Names created by THIS step, before the journal records them, so a
+        # centered add's below_floor can be deferred (G236) and a later step
+        # in the same script can still see that name as script-created.
+        names_now = _scene_names()
+        new = sorted(names_now - self._names_before - set(self.created))
+        gone = sorted((self._names_before | set(self.created)) - names_now)
+
         flag, findings, should_abort, abort_reason = _classify_step(
-            tool, result, strict=self.strict, baseline_if=self._baseline_if
+            tool, result, strict=self.strict, baseline_if=self._baseline_if,
+            defer_below_for=set(self.created) | set(new),
         )
         focus = _focus_from_result(result)
         names = _names_from_result(result)
@@ -566,9 +604,6 @@ class _Runner:
         placement = _placement_echo(params)
 
         # Track created/touched/deleted by scene delta + result names
-        names_now = _scene_names()
-        new = sorted(names_now - self._names_before - set(self.created))
-        gone = sorted((self._names_before | set(self.created)) - names_now)
         for n in new:
             if n not in self.created:
                 self.created.append(n)
@@ -661,16 +696,52 @@ class _Runner:
         return cp
 
     def transactional_restore(self):
-        """Undo every history step pushed during this run."""
+        """Undo every history step pushed during this run.
+
+        A background file whose first undo step is this script can reject
+        `ed.undo` (`poll() failed, context is incorrect`). The history log and
+        the scene then disagree, and a mesh the script created is still there.
+        If the undo did not take those meshes back out, unlink them — they were
+        not in the scene when the script started.
+        """
         n = len(state._history) - self._hist_before
         if n <= 0:
-            return {"restored": False, "steps": 0, "note": "nothing to undo"}
-        r = history_mod.undo_steps({"steps": n})
+            r = {"success": False}
+            warning = "nothing to undo"
+        else:
+            try:
+                r = history_mod.undo_steps({"steps": n})
+                warning = r.get("warning") or r.get("error")
+            except Exception as e:
+                r = {"success": False}
+                warning = f"{type(e).__name__}: {e}"
+        lingering = [
+            name for name in self.created
+            if name not in self._names_before and bpy.data.objects.get(name) is not None
+        ]
+        if lingering and not r.get("verified"):
+            for name in lingering:
+                obj = bpy.data.objects.get(name)
+                if obj is not None:
+                    bpy.data.objects.remove(obj, do_unlink=True)
+            # The failed undo already popped the history log. Re-baseline to the
+            # scene we just put back, or the next mutating call latches the
+            # dirty-world lock on a removal the server itself made.
+            head = state._history[-1] if state._history else None
+            state.set_clean_baseline(ref={
+                "op": head["id"] if head else None,
+                "label": "script restore",
+            })
+            warning = (warning + "; " if warning else "") + (
+                "undo left created meshes; removed " + ", ".join(lingering))
         return {
-            "restored": bool(r.get("success")),
+            "restored": bool(r.get("success")) or not any(
+                name not in self._names_before and bpy.data.objects.get(name) is not None
+                for name in self.created
+            ),
             "steps": n,
             "verified": r.get("verified"),
-            "warning": r.get("warning") or r.get("error"),
+            "warning": warning,
         }
 
     def final_validate(self):
@@ -948,6 +1019,18 @@ def script_batch(params):
     finally:
         _in_script = False
 
+    if not aborted and on_error == "abort":
+        leftover = _created_still_below(runner)
+        if leftover:
+            aborted = True
+            abort_msg = leftover
+            if runner.first_failure is None:
+                runner.first_failure = {
+                    "i": runner.step_count,
+                    "error": leftover,
+                    "verb_op": "(final validate)",
+                }
+
     restored = None
     if aborted and on_error == "abort":
         restored = runner.transactional_restore()
@@ -1051,6 +1134,18 @@ def script_exec(params):
             }
     finally:
         _in_script = False
+
+    if not aborted and on_error == "abort":
+        leftover = _created_still_below(runner)
+        if leftover:
+            aborted = True
+            abort_msg = leftover
+            if runner.first_failure is None:
+                runner.first_failure = {
+                    "i": runner.step_count,
+                    "error": leftover,
+                    "verb_op": "(final validate)",
+                }
 
     # Detect raw bpy use heuristically if code mentions bpy.ops / data writes
     if "bpy." in code:

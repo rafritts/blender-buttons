@@ -84,6 +84,43 @@ def _set_input(node, key, value):
     return False
 
 
+def _as_radius(value):
+    """subsurface_radius is a Principled vector. A single number is uniform RGB."""
+    if isinstance(value, (int, float)):
+        v = float(value)
+        return (v, v, v)
+    if isinstance(value, (list, tuple)):
+        if len(value) == 1:
+            v = float(value[0])
+            return (v, v, v)
+        if len(value) >= 3:
+            return (float(value[0]), float(value[1]), float(value[2]))
+    raise ValueError(f"subsurface_radius must be a number or [r, g, b], got {value!r}")
+
+
+def _write_aliased(bsdf, names, value, applied, skipped, written, label):
+    """Write `value` to the first Principled socket in `names` that exists.
+    A missing socket is a reported skip — never a success that didn't set it (G238)."""
+    for name in names:
+        sock = bsdf.inputs.get(name)
+        if sock is None:
+            continue
+        try:
+            sock.default_value = value
+        except (TypeError, ValueError):
+            if not (isinstance(value, tuple) and len(value) == 3):
+                continue
+            try:
+                sock.default_value = (*value, 1.0)
+            except (TypeError, ValueError):
+                continue
+        applied.append(f"{label}={list(value) if isinstance(value, tuple) else value}")
+        written.append(name)
+        return name
+    skipped.append(f"{label} (no Principled socket)")
+    return None
+
+
 def _srgb_to_linear(c):
     """Standard sRGB transfer function, per channel (0..1 in, 0..1 out)."""
     return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
@@ -129,6 +166,11 @@ def set_material(params):
     alpha:         0..1 (also enables BLEND transparency on the material).
     emission_color: [r, g, b] glow color.
     emission_strength: glow intensity (watts/m²-ish).
+    subsurface_weight / subsurface_radius / subsurface_scale: Principled subsurface
+        (dough, wax, skin). radius is [r, g, b] or one number. Written to whichever
+        socket name this Blender has (Subsurface Weight or Subsurface, …).
+    coat_weight / coat_roughness: clearcoat. A socket this build doesn't have is
+        reported in `skipped`, not treated as set.
     """
     from .common import resolve_targets, has_material_slots, linked_guard_any
     target = params.get("target")
@@ -173,6 +215,15 @@ def set_material(params):
     bsdf = _ensure_principled(mat)
 
     applied = []
+    skipped = []
+    written = []
+    raw_radius = params.get("subsurface_radius")
+    radius_val = None
+    if raw_radius is not None:
+        try:
+            radius_val = _as_radius(raw_radius)
+        except ValueError as e:
+            return {"error": str(e)}
 
     # hex (sRGB) takes precedence over base_color floats and is converted to
     # scene-linear so the rendered color matches the reference it was picked from.
@@ -234,6 +285,28 @@ def set_material(params):
     if es is not None and _set_input(bsdf, "Emission Strength", float(es)):
         applied.append(f"emission_strength={es}")
 
+    # G238 — subsurface and coat. Socket names moved between Blender 3 and 4;
+    # write the one this build has, and report a skip when neither exists.
+    sw = params.get("subsurface_weight")
+    if sw is not None:
+        _write_aliased(bsdf, ("Subsurface Weight", "Subsurface"), float(sw),
+                       applied, skipped, written, "subsurface_weight")
+    if radius_val is not None:
+        _write_aliased(bsdf, ("Subsurface Radius",), radius_val,
+                       applied, skipped, written, "subsurface_radius")
+    ss = params.get("subsurface_scale")
+    if ss is not None:
+        _write_aliased(bsdf, ("Subsurface Scale",), float(ss),
+                       applied, skipped, written, "subsurface_scale")
+    cw = params.get("coat_weight")
+    if cw is not None:
+        _write_aliased(bsdf, ("Coat Weight", "Coat", "Clearcoat"), float(cw),
+                       applied, skipped, written, "coat_weight")
+    cr = params.get("coat_roughness")
+    if cr is not None:
+        _write_aliased(bsdf, ("Coat Roughness", "Clearcoat Roughness"), float(cr),
+                       applied, skipped, written, "coat_roughness")
+
     # G113: a scattered instance shares ONE mesh datablock, so writing the mesh's material
     # slot recolors EVERY instance (last colour wins). When an object's mesh is shared with
     # objects OUTSIDE this assignment set, override the material on a per-object OBJECT-LINKED
@@ -279,6 +352,7 @@ def set_material(params):
                        ("ior", "IOR"), ("alpha", "Alpha")):
         if params.get(key) is not None:
             _attempted.append(label)
+    _attempted.extend(written)
     shadowed = [lab for lab in _attempted
                 if bsdf.inputs.get(lab) is not None and bsdf.inputs[lab].is_linked]
 
@@ -291,6 +365,11 @@ def set_material(params):
         "edited_in_place": not meshes,
         "applied": applied,
     }
+    if skipped:
+        out["skipped"] = skipped
+        out.setdefault("notes", []).append(
+            "skipped (this Blender's Principled has no such socket): "
+            + ", ".join(skipped))
     if shadowed:
         out["shadowed_inputs"] = shadowed
         out.setdefault("notes", []).append(
@@ -634,12 +713,190 @@ def bind_image(params):
     }
 
 
+def _labeled_node(nt, bl_idname, label, loc):
+    """Reuse a node by label so re-applying a texture replaces the graph.
+    `nodes.new` takes the bl_idname (ShaderNodeTexCoord), not the type enum."""
+    found = next((n for n in nt.nodes if n.label == label), None)
+    if found is not None and found.bl_idname != bl_idname:
+        nt.nodes.remove(found)
+        found = None
+    if found is None:
+        found = nt.nodes.new(bl_idname)
+        found.label = label
+        found.location = loc
+    return found
+
+
+def _relink(nt, src, dst):
+    for link in list(dst.links):
+        nt.links.remove(link)
+    if src is not None:
+        nt.links.new(src, dst)
+
+
+def _set_colorspace(img, non_color):
+    """Name the data vs color role. Blender 5's OCIO config renamed some roles;
+    try the historical name, then the newer ones. Returns the name that stuck."""
+    names = (("Non-Color", "Non-Colour", "Utility - Raw", "Raw") if non_color
+             else ("sRGB", "Utility - sRGB - Texture"))
+    for name in names:
+        try:
+            img.colorspace_settings.name = name
+            return name
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _maps_for_texture(params):
+    """Local map paths. The material verb downloads a Poly Haven id and passes
+    `maps`; a script running inside Blender may still pass `id` when
+    server.polyhaven imports."""
+    maps = params.get("maps")
+    if isinstance(maps, dict) and maps.get("diffuse"):
+        return maps, None
+    asset_id = (params.get("id") or "").strip()
+    if not asset_id:
+        return None, ("apply_texture needs id=<polyhaven texture id> "
+                      "or maps={diffuse, roughness, normal}")
+    try:
+        from server.polyhaven import PolyHavenError, ensure_texture_maps
+    except ImportError:
+        return None, (
+            f"texture id {asset_id!r} is not downloaded. material op=texture "
+            f"resolves the id before this call; pass maps= or call that verb.")
+    try:
+        return ensure_texture_maps(asset_id, params.get("resolution") or "1k"), None
+    except PolyHavenError as e:
+        return None, f"could not fetch texture {asset_id!r}: {e}"
+
+
+def apply_texture(params):
+    """G239 — one Poly Haven (or local) texture onto one material.
+
+    Wires diffuse, roughness, and normal through object-space box projection.
+    A metal map is wired too when the asset has one. `scale` is the uniform
+    mapping scale. Not the retired multi-node PBR builder: three maps, one dial.
+    """
+    from .common import resolve_targets, has_material_slots, linked_guard_any
+    maps, err = _maps_for_texture(params)
+    if err:
+        return {"error": err}
+    try:
+        scale = float(params.get("scale", 1.0))
+    except (TypeError, ValueError):
+        return {"error": f"scale must be a number, got {params.get('scale')!r}"}
+
+    target = params.get("target")
+    if not target:
+        return {"error": "apply_texture needs target=<mesh>"}
+    objs, err = resolve_targets(target)
+    if err:
+        return {"error": err}
+    meshes = [o for o in objs if has_material_slots(o)]
+    if not meshes:
+        return {"error": f"'{target}' contains nothing that can hold a material"}
+    blocked = linked_guard_any(meshes)
+    if blocked:
+        return {"error": blocked}
+
+    loaded = {}
+    skipped_maps = []
+    colorspaces = {}
+    for key in ("diffuse", "roughness", "normal", "metal"):
+        path = maps.get(key)
+        if not path:
+            if key != "diffuse":
+                skipped_maps.append(key)
+            continue
+        img, ierr = _resolve_image(path)
+        if ierr:
+            return {"error": f"{key}: {ierr}"}
+        colorspaces[key] = _set_colorspace(img, non_color=(key != "diffuse"))
+        loaded[key] = img
+
+    tgt_label = target if isinstance(target, str) else (target[0] if target else "material")
+    mat_name = params.get("material_name") or params.get("material") or f"{tgt_label}_mat"
+    mat = bpy.data.materials.get(mat_name) or bpy.data.materials.new(mat_name)
+    bsdf = _ensure_principled(mat)
+    nt = mat.node_tree
+    origin = bsdf.location
+
+    coord = _labeled_node(nt, 'ShaderNodeTexCoord', 'bb_tex_coord', (origin.x - 980, origin.y))
+    mapping = _labeled_node(nt, 'ShaderNodeMapping', 'bb_tex_map', (origin.x - 740, origin.y))
+    _relink(nt, coord.outputs['Object'], mapping.inputs['Vector'])
+    mapping.inputs['Scale'].default_value = (scale, scale, scale)
+
+    def tex_node(key, y):
+        tex = _labeled_node(nt, 'ShaderNodeTexImage', f"bb_tex_{key}",
+                            (origin.x - 420, origin.y + y))
+        tex.image = loaded[key]
+        tex.projection = 'BOX'
+        if hasattr(tex, "projection_blend"):
+            tex.projection_blend = 0.25
+        _relink(nt, mapping.outputs['Vector'], tex.inputs['Vector'])
+        return tex
+
+    wired = []
+    if "diffuse" in loaded and 'Base Color' in bsdf.inputs:
+        _relink(nt, tex_node("diffuse", 200).outputs['Color'], bsdf.inputs['Base Color'])
+        wired.append("diffuse")
+    if "roughness" in loaded and 'Roughness' in bsdf.inputs:
+        _relink(nt, tex_node("roughness", 20).outputs['Color'], bsdf.inputs['Roughness'])
+        wired.append("roughness")
+    elif "roughness" in loaded:
+        skipped_maps.append("roughness (no Roughness socket)")
+    if "metal" in loaded and 'Metallic' in bsdf.inputs:
+        _relink(nt, tex_node("metal", -160).outputs['Color'], bsdf.inputs['Metallic'])
+        wired.append("metal")
+    elif "metal" in loaded:
+        skipped_maps.append("metal (no Metallic socket)")
+    if "normal" in loaded and 'Normal' in bsdf.inputs:
+        tex = tex_node("normal", -340)
+        normal_map = _labeled_node(nt, 'ShaderNodeNormalMap', 'bb_tex_normalmap',
+                                   (origin.x - 160, origin.y - 340))
+        _relink(nt, tex.outputs['Color'], normal_map.inputs['Color'])
+        _relink(nt, normal_map.outputs['Normal'], bsdf.inputs['Normal'])
+        wired.append("normal")
+    elif "normal" in loaded:
+        skipped_maps.append("normal (no Normal socket)")
+
+    slot_idx = int(params["slot"]) if params.get("slot") is not None else 0
+    assigned = []
+    for obj in meshes:
+        me = obj.data
+        if me is None:
+            continue
+        while len(me.materials) <= slot_idx:
+            me.materials.append(None)
+        me.materials[slot_idx] = mat
+        assigned.append(obj.name)
+
+    out = {
+        "success": True,
+        "target": target,
+        "assigned_to": assigned,
+        "material": mat.name,
+        "id": params.get("id") or "",
+        "wired": wired,
+        "scale": scale,
+        "projection": "box",
+        "projection_blend": 0.25,
+        "colorspaces": colorspaces,
+        "status_focus": assigned[0] if assigned else None,
+    }
+    if skipped_maps:
+        out["skipped_maps"] = skipped_maps
+    return out
+
+
 TOOLS = {
     "shade_smooth":    shade_smooth,
     "shade_flat":      shade_flat,
     "set_material":    set_material,
     "assign_material": assign_material,
     "bind_image":      bind_image,
+    "apply_texture":   apply_texture,
     "remove_material_slot":         remove_material_slot,
     "remove_unused_material_slots": remove_unused_material_slots,
 }

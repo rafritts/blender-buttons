@@ -33,11 +33,12 @@ _EPS = 1e-4        # coplanar / below-floor (0.1 mm)
 _CLIP_FLOOR_MM = 0.3   # ignore sub-0.3mm grazes (matches auto_proximity_note)
 
 # Intent-free defect checks — there is NO suppression path for any of these
-# EXCEPT self_intersection, which is also listed here so undeclared crossings
-# still fail the floor, but is declarable via expect (G227 — realized scatter
-# nested into a substrate is one mesh with intended self-intersections).
-# `non_manifold` now means 3+/0-face edges ONLY (open 1-face rims are NOT here — G129);
-# `inconsistent_topology` is the χ-vs-boundary-loop invariant break (G118).
+# EXCEPT the two that are also declarable:
+#   self_intersection (G227 — realized scatter nested into a substrate)
+#   below_floor (G236 — a ground body or parked scrap occupies z<0 on purpose)
+# Undeclared, both still fail the floor. `non_manifold` means 3+/0-face edges
+# ONLY (open 1-face rims are NOT here — G129); `inconsistent_topology` is the
+# χ-vs-boundary-loop invariant break (G118).
 _INTENT_FREE = ("z_fight", "below_floor", "degenerate", "inverted_normals",
                 "non_manifold", "self_intersection", "inconsistent_topology")
 # Intent-laden checks — suppressible only by a DECLARED intent (expect).
@@ -49,7 +50,11 @@ _OPEN_BOUNDARY = "open_boundary"
 # G227: per-object (or collection) self-intersection — intended contact after a
 # realize, parts pressed into parts. Undeclared still fails the floor.
 _SELF_INTERSECTION = "self_intersection"
-_DECLARABLE = frozenset((_CLIPPING, _OPEN_BOUNDARY, _SELF_INTERSECTION))
+# G236: a named ground body or parked scrap may occupy z<0. Undeclared still fails.
+_BELOW_FLOOR = "below_floor"
+_DECLARABLE = frozenset((_CLIPPING, _OPEN_BOUNDARY, _SELF_INTERSECTION, _BELOW_FLOOR))
+# Single-part declarations (b defaults to a). A collection token covers its members.
+_SINGLE_PART_CHECKS = frozenset((_OPEN_BOUNDARY, _SELF_INTERSECTION, _BELOW_FLOOR))
 _ALL_CHECKS = _INTENT_FREE + (_CLIPPING, _OPEN_BOUNDARY)
 
 
@@ -143,6 +148,17 @@ def _self_x_intent(objname):
     return None
 
 
+def _below_intent(objname):
+    """A declared BELOW-FLOOR intent covering objname (G236) — exact name or a
+    collection token. Stored with a==b==the part/collection. A ground slab whose
+    top is the floor, or scrap parked under it, is intent; an undeclared dip is not."""
+    _ensure_grounded()
+    for e in _intents:
+        if e["check"] == _BELOW_FLOOR and _token_matches(e["a"], objname):
+            return e
+    return None
+
+
 def _prune_dead_intents():
     """Auto-GC declarations whose object (or collection) no longer exists, so deleting a
     declared part never leaves a permanent un-clearable VANISHED tripwire (feedback P1.5)."""
@@ -165,14 +181,17 @@ def add_intent(a, b, reason, check=_CLIPPING, source="agent", max_depth=None):
     For check=open_boundary (G129) it's a SINGLE part/collection — b defaults to a — and
     declaring it intended arms a SEAL tripwire (if the part later closes, that's a finding).
     For check=self_intersection (G227) it's the same single-part shape: the crossings
-    on that object (or every member of a collection token) are intended contact."""
+    on that object (or every member of a collection token) are intended contact.
+    For check=below_floor (G236) it's the same shape: this part (or collection) is
+    meant to occupy z<0 — a ground body, or scrap parked out of frame. Arms a
+    tripwire if it later sits on or above the floor."""
     _ensure_grounded()
     if check not in _DECLARABLE:
         return {"error": f"check={check!r} is not declarable. Intent-free defects "
                          f"(z-fight / non-manifold / flipped normals / degenerate) "
                          f"have no expect path. Declarable: "
                          f"{', '.join(sorted(_DECLARABLE))}."}
-    if check in (_OPEN_BOUNDARY, _SELF_INTERSECTION) and not b:
+    if check in _SINGLE_PART_CHECKS and not b:
         b = a
     if not a or not b:
         return {"error": "expect needs both objects (a, b) of the intended pair"}
@@ -207,6 +226,8 @@ def revoke_intent(a, b, check=_CLIPPING):
     """Drop a declared intent — re-arming the finding (the human overruling: 'that clip
     is a bug, fix it'). Honest no-op error if it wasn't declared."""
     _ensure_grounded()
+    if check in _SINGLE_PART_CHECKS and not b:
+        b = a
     e = _find_intent(check, a, b)
     if e is None:
         return {"error": f"no declared {check} intent for {a}↔{b}"}
@@ -369,6 +390,8 @@ def run_validate(touched_names=None, scene_wide=False, verbose=False):
     intent_free = []
     self_x_intended = 0
     self_x_vanished = []
+    bf_intended = 0
+    bf_vanished = []
 
     # z-fight — scoped: pairs between a touched object and ANY live mesh (so a new part)
     # coplanar with an existing neighbour is caught, not just touched-vs-touched).
@@ -387,10 +410,19 @@ def run_validate(touched_names=None, scene_wide=False, verbose=False):
     for o in scope:
         xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(o)
         below = zmin < -_EPS
-        _bump("below_floor", below)
-        if below:
-            intent_free.append({"check": "below_floor",
-                                "message": f"{o.name} dips {round(-zmin * 1000, 1)}mm below z=0"})
+        decl_bf = _below_intent(o.name) if below else None
+        if below and decl_bf is not None:
+            decl_bf["status"] = "holding"
+            bf_intended += 1
+            _bump("below_floor", False)
+        else:
+            _bump("below_floor", below)
+            if below:
+                intent_free.append({
+                    "check": "below_floor",
+                    "object": o.name,
+                    "message": f"{o.name} dips {round(-zmin * 1000, 1)}mm below z=0",
+                })
         bm = eval_world_bmesh(o)
         inv = bm is not None and len(bm.faces) >= 8 and lint._normals_inward_fraction(bm) > 0.7
         if bm is not None:
@@ -446,6 +478,19 @@ def run_validate(touched_names=None, scene_wide=False, verbose=False):
             e["status"] = "vanished"
             self_x_vanished.append({"object": token, "reason": e.get("reason", "")})
 
+    # G236: a declared below-floor part this op touched that now sits on or above z=0.
+    # Collection tokens vanish only when no live member is still under the plane.
+    for e in _intents:
+        if e["check"] != _BELOW_FLOOR:
+            continue
+        token = e["a"]
+        members = [o for o in scope if _token_matches(token, o.name)]
+        if not members:
+            continue
+        if all(world_bbox(o)[2] >= -_EPS for o in members):
+            e["status"] = "vanished"
+            bf_vanished.append({"object": token, "reason": e.get("reason", "")})
+
     # clipping / penetration — intent-laden, DELTA-SCOPED to what this op touched.
     clip = _clipping_findings(introspect, scope, scope_names, live_names)
     # open boundaries — G129: legit for planes/rims/cloth (quiet count), declarable, with
@@ -454,13 +499,15 @@ def run_validate(touched_names=None, scene_wide=False, verbose=False):
 
     sx = {"intended": self_x_intended, "vanished": self_x_vanished,
           "declared": len([e for e in _intents if e["check"] == _SELF_INTERSECTION])}
+    bf = {"intended": bf_intended, "vanished": bf_vanished,
+          "declared": len([e for e in _intents if e["check"] == _BELOW_FLOOR])}
     passed = (not intent_free and not clip["new"] and not clip["vanished"]
               and not clip.get("deeper") and not ob["sealed"]
-              and not self_x_vanished)
-    line = _render_line(intent_free, clip, ob, excluded, verbose, sx=sx)
+              and not self_x_vanished and not bf_vanished)
+    line = _render_line(intent_free, clip, ob, excluded, verbose, sx=sx, bf=bf)
     return {"off": False, "passed": passed, "excluded": excluded,
             "intent_free": intent_free, "clipping": clip, "open_boundary": ob,
-            "self_intersection": sx, "line": line}
+            "self_intersection": sx, "below_floor": bf, "line": line}
 
 
 def _open_boundary_findings(scope, reports):
@@ -656,7 +703,7 @@ def _clipping_findings(introspect, scope, scope_names, live_names):
             "intended_in_scope": intended_in_scope, "hint": hint}
 
 
-def _render_line(intent_free, clip, ob, excluded, verbose=False, sx=None):
+def _render_line(intent_free, clip, ob, excluded, verbose=False, sx=None, bf=None):
     """Compact, report-by-exception status line. Clean ⇒ a short reassurance (so
     silence-because-clean is explicit, never absent). Clips collapse to a COUNT by
     default; only the NEW delta is listed. verbose lists everything (op=run)."""
@@ -710,6 +757,14 @@ def _render_line(intent_free, clip, ob, excluded, verbose=False, sx=None):
                         f"(declared intended — confirm or clear)")
         if sx.get("intended"):
             segs.append(f"{sx['intended']} self_intersection intended")
+    # G236: declared below-floor collapses to a count. VANISHED fires when a
+    # ground/scrap declaration no longer occupies z<0.
+    if bf:
+        for v in (bf.get("vanished") or [])[:cap]:
+            segs.append(f"VANISHED below_floor {v['object']} "
+                        f"(declared intended — confirm or clear)")
+        if bf.get("intended"):
+            segs.append(f"{bf['intended']} below_floor intended")
     excl = f"  [{len(excluded)} excluded]" if excluded else ""
     if not segs:
         return f"validate: clean{excl}"
@@ -851,8 +906,9 @@ def validate_run(params):
 
 def validate_expect(params):
     """op=expect / intend — declare a clip intended (a or b may name a COLLECTION), an
-    open boundary intended (check=open_boundary, a single part/collection — G129), or
-    a self-intersection intended (check=self_intersection, a single part/collection — G227)."""
+    open boundary intended (check=open_boundary, a single part/collection — G129), a
+    self-intersection intended (check=self_intersection — G227), or a below-floor
+    body intended (check=below_floor, a single part/collection — G236)."""
     check = (params.get("check") or _CLIPPING).strip()
     md = params.get("max_depth")
     return add_intent(params.get("a", ""), params.get("b", ""),

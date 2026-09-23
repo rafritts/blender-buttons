@@ -172,7 +172,7 @@ scanner cries wolf. The agent resolves this not by *inferring* intent (impossibl
     stops buying quiet and starts buying a thicket. (A *structural* anti-plaster force, not a
     guidance one — which is the kind that holds.)
 
-Suppression exists **only for the intent-laden checks.** The intent-free defects have no tag at all.
+Suppression exists **only for the intent-laden checks** plus the two intent-free checks that are also declarable: self-intersection (realized contact) and below-floor (a ground body or parked scrap). The rest of the intent-free defects have no tag at all.
 
 ### Human governance (human-side, blunt) — via the panel
 
@@ -269,7 +269,7 @@ perception. What survived: the reactor-not-inspector framing, report-by-exceptio
 - `feel op=all` (and bare `feel`) runs the full perceptual sweep; `exclude=` trims; targeted ops
   resolve to a single read; context-dependent ops auto-skip (tallied as *context-unavailable*).
 - `validate` runs after every op; intent-free defects (z-fight / non-manifold / normals / degenerate)
-  have **no** suppression path.
+  have **no** suppression path. `below_floor` and `self_intersection` are declarable; undeclared, they still fail.
 - `intend` is scoped to `(check, counterpart)`: declaring Hair↔Body intended collapses that finding
   to a count but a later Hair↔Hat clip still fires.
 - Bidirectional enforcement: a *declared-intended* clip that disappears raises a confirm/clear

@@ -87,7 +87,12 @@ def set_material(target: str = "",
                  material_name: str = "",
                  material: str = "",
                  slot: int = None,
-                 label: str = "") -> str:
+                 label: str = "",
+                 subsurface_weight: float = None,
+                 subsurface_radius: list = None,
+                 subsurface_scale: float = None,
+                 coat_weight: float = None,
+                 coat_roughness: float = None) -> str:
     """
     Create or update a Principled BSDF material and assign it. Covers ~80% of real
     materials: color, metallic, roughness, IOR, alpha, emission.
@@ -115,6 +120,9 @@ def set_material(target: str = "",
                    (frosted glass). >0 auto-enables the material's refraction flags;
                    the engine still needs raytracing on to show it in the render.
     emission_color / emission_strength: glow color and intensity.
+    subsurface_weight / subsurface_radius / subsurface_scale: Principled subsurface.
+        radius is [r, g, b] or a single number. coat_weight / coat_roughness: clearcoat.
+        A socket this Blender doesn't have comes back as skipped, not as set.
     material_name: name for the material; defaults to "<target>_mat". Reused if exists.
 
     Examples:
@@ -139,6 +147,11 @@ def set_material(target: str = "",
     if transmission is not None:      params["transmission"] = transmission
     if emission_color is not None:    params["emission_color"] = emission_color
     if emission_strength is not None: params["emission_strength"] = emission_strength
+    if subsurface_weight is not None: params["subsurface_weight"] = subsurface_weight
+    if subsurface_radius is not None: params["subsurface_radius"] = subsurface_radius
+    if subsurface_scale is not None:  params["subsurface_scale"] = subsurface_scale
+    if coat_weight is not None:       params["coat_weight"] = coat_weight
+    if coat_roughness is not None:    params["coat_roughness"] = coat_roughness
     result = call_blender("set_material", params, label=label)
     if result.get("success"):
         if result.get("edited_in_place"):
@@ -148,6 +161,51 @@ def set_material(target: str = "",
             where = f"on '{result.get('target')}'{slot_str}"
         main = (f"material '{result['material']}' {where}: "
                 f"{result['applied']} [{result.get('op_id','')}]")
+        if result.get("skipped"):
+            main += f"\nskipped: {', '.join(result['skipped'])}"
+    else:
+        main = result.get("error", "failed")
+    return main + _status(result)
+
+
+def apply_texture(target: str = "", texture_id: str = "", resolution: str = "1k",
+                  scale: float = 1.0, material_name: str = "", material: str = "",
+                  slot: int = None, label: str = "") -> str:
+    """G239 — download a Poly Haven texture id and wire diffuse, roughness, and
+    normal (metal too, when the asset has it) with object-space box projection.
+    The download happens here; Blender only receives local paths."""
+    from server import polyhaven
+    if not (texture_id or "").strip():
+        return "material op=texture needs id=<polyhaven texture id>."
+    if not target:
+        return "material op=texture needs target=<object>."
+    try:
+        maps = polyhaven.ensure_texture_maps(texture_id.strip(), resolution or "1k")
+    except polyhaven.PolyHavenError as e:
+        return f"could not fetch texture '{texture_id}': {e}. Material unchanged."
+    params = {
+        "maps": maps,
+        "id": texture_id.strip(),
+        "resolution": resolution or "1k",
+        "scale": 1.0 if scale is None else scale,
+    }
+    tgt = _targets(target)
+    if tgt is not None:
+        params["target"] = tgt
+    if material_name:
+        params["material_name"] = material_name
+    if material:
+        params["material"] = material
+    if slot is not None:
+        params["slot"] = slot
+    result = call_blender("apply_texture", params, label=label, timeout=180)
+    if result.get("success"):
+        wired = ", ".join(result.get("wired") or [])
+        main = (f"texture '{texture_id}' → '{result.get('material')}' "
+                f"[{wired}] scale={result.get('scale')} box "
+                f"[{result.get('op_id', '')}]")
+        if result.get("skipped_maps"):
+            main += f"\nskipped maps: {', '.join(result['skipped_maps'])}"
     else:
         main = result.get("error", "failed")
     return main + _status(result)

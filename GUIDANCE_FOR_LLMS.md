@@ -161,10 +161,15 @@ most expensive failure here:
   silenced** — fix them before building on top. Clipping is different: sometimes
   *intended* — then **declare it** (`validate op=expect` naming the pair and *why*).
   Realized scatter seated into a substrate is the same move with
-  `check=self_intersection` on the realized mesh. There is no "ignore" — only
-  "I intend this." The declaration stays visible to the human and becomes a
-  tripwire that fires if the intended overlap ever *disappears*. Declarations
-  are scene facts: they live in the .blend and survive addon restarts.
+  `check=self_intersection` on the realized mesh. A ground body, or scrap parked
+  under the floor, is `check=below_floor` on that one part (or its collection) —
+  undeclared, any mesh with `zmin<0` still fails the floor. Inside a script, a
+  centered `add` may dip under z=0 so the next line can seat it or declare it; if
+  that new mesh is still undeclared-below when the script ends, the script aborts.
+  There is no "ignore" — only "I intend this." The declaration stays visible to the
+  human and becomes a tripwire that fires if the intended condition ever
+  *disappears*. Declarations are scene facts: they live in the .blend and survive
+  addon restarts.
 
 If you ever see `validate: OFF (human override)`, the floor is down by the human's
 choice — you are genuinely blind, so slow down, `feel` deliberately, and ask.
@@ -194,7 +199,9 @@ bulge on a dense, irregular mesh.** The normals disagree, so a uniform push lump
 
 - `search_textures` / `search_hdris` → Poly Haven ids (a read); `brown_photostudio_02`
   is a proven warm product-shot HDRI. Flat/solid look is `material op=set`
-  (base_color/metallic/roughness/…); a full PBR texture graph is native node work.
+  (base_color/metallic/roughness/…, plus subsurface_weight/radius/scale and
+  coat_weight/roughness). A searched texture is `material op=texture id=<id>`
+  (resolution, scale) — diffuse, roughness, and normal, box projection.
 - One soft AREA key light angled across the subject adds sparkle the HDRI alone
   doesn't give. Aim with `target=`.
 - DOF: `view op=camera_dof focus_object=...`; f/4 keeps a tabletop scene readable, f/2.8

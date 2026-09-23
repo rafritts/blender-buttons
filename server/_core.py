@@ -247,13 +247,35 @@ def _status(result: dict) -> str:
                      f"(viewport-active lags; not the acted-on object)")
     else:
         lines.append(f"  active:      {s['active_object']} ({s['active_type']})")
+    basis = s.get("dims_basis")
+    if basis == "evaluated":
+        dims_note = "(evaluated world bbox)"
+    elif basis == "cage":
+        dims_note = "(cage world bbox)"
+    else:
+        dims_note = "(world bbox, rotation-aware)"
+    lines.append(f"  selected:    {s['selected_objects']}")
+    if basis or s.get("modifiers"):
+        parts = []
+        for m in s.get("modifiers") or []:
+            off = "" if m.get("show_viewport", True) else " (viewport-off)"
+            parts.append(f"{m.get('type')} '{m.get('name')}'{off}")
+        if basis == "evaluated":
+            head = "evaluated"
+        elif parts:
+            head = "cage"
+        else:
+            head = "cage (= evaluated)"
+        stack = " · ".join(parts)
+        lines.append(f"  mesh:        {head}" + (f" · {stack}" if stack else ""))
     lines += [
-        f"  selected:    {s['selected_objects']}",
-        f"  dims:        {s.get('dimensions')}     (world bbox, rotation-aware)",
+        f"  dims:        {s.get('dimensions')}     {dims_note}",
         f"  bounds:      x={wb.get('x')}  y={wb.get('y')}  z={wb.get('z')}",
         f"  rot_deg:     {s.get('rotation_deg')}",
         f"  last_action: {s.get('last_action')}",
     ]
+    if s.get("selection_line"):
+        lines.append(f"  {s['selection_line']}")
     r = s.get("render")
     if r:
         rt = f"  raytracing={r['raytracing']}" if "raytracing" in r else ""

@@ -420,6 +420,12 @@ This is how multi-phase builds stay legible without default verbosity.
 `strict=true` promotes undeclared clipping to abort — for recipe CI and any run where
 "warn and finish the phase" is the wrong contract. Default stays warn-and-continue.
 
+`below_floor` on a mesh **this script created** does not abort the step. A centered
+primitive is born straddling z=0; the next line may seat it or
+`validate op=expect check=below_floor`. If that mesh is still undeclared-below when
+the script ends, the run aborts and restores. A dip on any mesh the script did not
+create still aborts on that step.
+
 Intent declarations inside the script (`validate op=expect`) work exactly as in the
 REPL and affect subsequent auto-validate on later steps.
 

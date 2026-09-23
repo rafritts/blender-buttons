@@ -14,8 +14,9 @@ make for you:
 
 The intent-free defects — z-fighting, non-manifold edges, flipped normals, degenerate
 faces — are NEVER OK and have no suppression path at all. If you see one, fix it before
-you build on top of it. Clipping/penetration, open boundaries, and self-intersection
-(realized scatter nested into a substrate) are suppressible only by declaring intent.
+you build on top of it. Clipping/penetration, open boundaries, self-intersection
+(realized scatter nested into a substrate), and below-floor (a ground body or scrap
+that is meant to occupy z<0) are suppressible only by declaring intent.
 See docs/SPEC-16-agent-feedback.md.
 """
 
@@ -39,9 +40,12 @@ def validate(
     check: tag(str, "[expect/intend/forget] which check to declare for: 'clipping' "
                     "(default, a penetration pair), 'open_boundary' (G129 — a single "
                     "part/collection INTENTIONALLY open: tabletop, cup mouth, cloth; "
-                    "arms a seal-tripwire if it later closes), or 'self_intersection' "
+                    "arms a seal-tripwire if it later closes), 'self_intersection' "
                     "(G227 — a single part/collection whose crossings are intended "
-                    "contact, e.g. realized scatter seated into a substrate)") = "clipping",
+                    "contact, e.g. realized scatter seated into a substrate), or "
+                    "'below_floor' (G236 — a single part/collection meant to occupy "
+                    "z<0: the ground body, or scrap parked out of frame; arms a "
+                    "tripwire if it later sits on or above the floor)") = "clipping",
     max_depth: tag(float, "[expect/intend] DEPTH ENVELOPE (mm) for a clipping declaration — "
                           "bless the overlap only up to this depth; a deeper clip is STILL a "
                           "finding (so 'coffee↔mug intended' can't also hide an 11mm base "
@@ -75,8 +79,11 @@ def validate(
                  plus which perceptual ops `feel` callers exclude most.
 
     Intent-free defects (z-fight / non-manifold / flipped normals / degenerate) have NO
-    suppression path — they are never wanted. Clipping, open boundaries, and
-    self-intersection are governed by declared intent.
+    suppression path — they are never wanted. Clipping, open boundaries,
+    self-intersection, and below-floor are governed by declared intent. A centered
+    primitive created inside a script may dip under z=0 until a later line in that
+    same script seats it or declares it; if it is still undeclared-below when the
+    script ends, the script aborts and restores.
     """
     o = op.lower().strip()
 
@@ -98,6 +105,9 @@ def validate(
         if e["check"] == "self_intersection":
             return (f'declared intended: self_intersection on {e["a"]} — "{e["reason"]}". '
                     f"It's quiet now, and will fire if the crossings ever vanish.")
+        if e["check"] == "below_floor":
+            return (f'declared intended: below_floor on {e["a"]} — "{e["reason"]}". '
+                    f"It's quiet now, and will fire if the part ever sits on or above z=0.")
         return (f'declared intended: {e["check"]} {e["a"]}↔{e["b"]} — "{e["reason"]}". '
                 f"It now collapses to a count, and will fire if it ever vanishes.")
 

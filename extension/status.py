@@ -5,7 +5,7 @@ import math
 import bpy
 
 from . import state
-from .common import world_bbox
+from .common import eval_world_bbox, modifier_stack, world_bbox
 
 
 def get_scene_tree(params=None):
@@ -212,7 +212,30 @@ def get_blender_status(params):
         status["rotation_deg"] = [round(math.degrees(v), 2) for v in obj.rotation_euler]
         # World-space bbox dims (rotation-aware). obj.dimensions is local-bbox × scale and
         # ignores rotation — wrong for any rotated object.
-        xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
+        # G237: a live modifier stack changes the mesh the numbers describe. Measure
+        # the evaluated result when one is on, and say so — cage vs evaluated is the
+        # fact that makes the next placement lie.
+        if obj.type == 'MESH':
+            mods = modifier_stack(obj)
+            live = [m for m in mods if m.get("show_viewport")]
+            if live:
+                xmin, ymin, zmin, xmax, ymax, zmax = eval_world_bbox(obj)
+                status["dims_basis"] = "evaluated"
+            else:
+                xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
+                status["dims_basis"] = "cage"
+            if mods:
+                status["modifiers"] = mods
+            if obj.mode != 'EDIT' and obj.data is not None:
+                try:
+                    from . import perception
+                    rep = perception.describe_selection(obj)
+                except Exception:
+                    rep = None
+                if rep and rep.get("selected"):
+                    status["selection_line"] = rep["line"]
+        else:
+            xmin, ymin, zmin, xmax, ymax, zmax = world_bbox(obj)
         status["dimensions"] = [round(xmax - xmin, 4), round(ymax - ymin, 4), round(zmax - zmin, 4)]
         status["world_bounds"] = {
             "x": [round(xmin, 4), round(xmax, 4)],
