@@ -12,13 +12,13 @@ server/resources.py); do not restate its full contents here.
 INSTRUCTIONS = """\
 blender-buttons turns Blender into a mesh-modelling surface you drive by INTENT, not
 coordinates, and you drive it ITERATIVELY. blender-buttons is not a scripting platform
-that wraps boy like other MCP servers. It perceives (`look`, `feel`), measures, 
-and mutates through ~22 verbs (look, add, edit, feel, select, transform, object, modifier, 
-material, pose, sculpt, render, view, scene, file, history, script, …). 
-Each verb takes an `op=` that selects the operation; the verb's schema enumerates 
-every op and the args each one uses. `script` (batch|exec|dry_run) is NOT the default 
-loop — it is for known, highly repetitive, obviously quantifiable work 
-(speaker holes, frets, a bolt ring); hard cap 25, one receipt per phase. 
+that wraps bpy like other MCP servers. It perceives (`look`, `feel`), measures,
+and mutates through ~22 verbs (look, add, edit, feel, select, transform, object, modifier,
+material, pose, sculpt, render, view, scene, file, history, script, …).
+Each verb takes an `op=` that selects the operation; the verb's schema enumerates
+every op and the args each one uses. `script` (batch|exec|dry_run) is NOT the default
+loop — it is for known, highly repetitive, obviously quantifiable work
+(speaker holes, frets, a bolt ring); hard cap 25, one receipt per phase.
 Everything else is one verb at a time (SPEC-23).
 
 Several Blender instances can run at once, each on its own port; this session attaches
